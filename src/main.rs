@@ -1,0 +1,52 @@
+mod jobs;
+mod routes;
+
+use axum::{Router, extract::DefaultBodyLimit};
+use sqlx::{PgPool, postgres::PgPoolOptions};
+use std::sync::Arc;
+
+#[derive(Clone)]
+pub struct AppState {
+	pub db: PgPool,
+}
+
+#[tokio::main]
+async fn main() {
+	dotenv::dotenv().ok();
+
+	let db_host = std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string());
+	let db_port = std::env::var("POSTGRES_PORT").unwrap_or_else(|_| "5432".to_string());
+	let db_name = std::env::var("POSTGRES_DB").expect("POSTGRES_DB must be set");
+	let db_user = std::env::var("POSTGRES_USER").expect("POSTGRES_USER must be set");
+	let db_pass = std::env::var("POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD must be set");
+
+	let database_url = format!("postgresql://{}:{}@{}:{}/{}", db_user, db_pass, db_host, db_port, db_name);
+
+	println!("[DATABASE] Connecting to PostgreSQL at {}:{}...", db_host, db_port);
+	let pool = PgPoolOptions::new()
+		.max_connections(10)
+		.connect(&database_url)
+		.await
+		.expect("Failed to connect to database. Ensure the database exists and credentials are correct.");
+	println!("[DATABASE] Connected to '{}'", db_name);
+
+	match sqlx::migrate!("./migrations").run(&pool).await {
+		Ok(_) => println!("[DATABASE] Migrations completed"),
+		Err(e) => eprintln!("[DATABASE] Migration failed: {}", e),
+	}
+
+	let app_state = Arc::new(AppState { db: pool });
+
+	tokio::spawn(jobs::start_job_scheduler(app_state.clone()));
+
+	let app = Router::new().with_state(app_state).layer(DefaultBodyLimit::max(8 * 1024 * 1024));
+	let address = format!(
+		"{}:{}",
+		std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
+		std::env::var("PORT").unwrap_or_else(|_| "8080".to_string())
+	);
+	let listener = tokio::net::TcpListener::bind(&address).await.unwrap();
+
+	println!("[SERVER] Listening on http://{}", address);
+	axum::serve(listener, app).await.expect("Server error");
+}

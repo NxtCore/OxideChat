@@ -1,0 +1,15 @@
+/target
+.vscode
+*.env
+
+.output
+.data
+.nuxt
+.nitro
+.cache
+dist
+node_modules/
+
+.env
+.env.*
+!.env.example

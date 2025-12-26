@@ -1,0 +1,55 @@
+[package]
+name = "OxideChat"
+version = "0.1.0"
+edition = "2024"
+description = "A modern, performance and on customization focused AI chat application"
+license = "MIT"
+repository = "https://github.com/yourusername/OxideChat"
+readme = "README.md"
+keywords = ["chat", "axum", "websocket", "postgres"]
+categories = ["web-programming"]
+
+[dependencies]
+axum = { version = "0.8" }
+tokio = { version = "1.48", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.8", features = [
+    "postgres",
+    "chrono",
+    "runtime-tokio-native-tls",
+    "migrate",
+] }
+once_cell = { version = "1.21" }
+dotenv = { version = "0.15" }
+argon2 = { version = "0.5" }
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+must_use_candidate = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+doc_markdown = "warn"
+explicit_iter_loop = "warn"
+explicit_into_iter_loop = "warn"
+inconsistent_struct_constructor = "warn"
+manual_let_else = "warn"
+redundant_closure_for_method_calls = "warn"
+semicolon_if_nothing_returned = "warn"
+unnested_or_patterns = "warn"
+unused_self = "warn"
+cargo = { level = "warn", priority = -1 }
+future_not_send = "warn"
+fallible_impl_from = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+multiple_crate_versions = "allow"
+
+[lints.rust]
+unsafe_code = "warn"
+missing_docs = "allow"
