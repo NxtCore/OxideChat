@@ -1,5 +1,8 @@
+mod i18n;
 mod jobs;
 mod routes;
+mod tests;
+mod types;
 
 use axum::{Router, extract::DefaultBodyLimit};
 use sqlx::{PgPool, postgres::PgPoolOptions};
@@ -35,11 +38,18 @@ async fn main() {
 		Err(e) => eprintln!("[DATABASE] Migration failed: {}", e),
 	}
 
+	// Initialize global i18n translations
+	i18n::I18n::init(&pool).await;
+	println!("[I18N] Translations loaded");
+
 	let app_state = Arc::new(AppState { db: pool });
 
 	tokio::spawn(jobs::start_job_scheduler(app_state.clone()));
 
-	let app = Router::new().with_state(app_state).layer(DefaultBodyLimit::max(8 * 1024 * 1024));
+	let app = Router::new()
+		.merge(routes::build_router())
+		.with_state(app_state)
+		.layer(DefaultBodyLimit::max(8 * 1024 * 1024));
 	let address = format!(
 		"{}:{}",
 		std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),

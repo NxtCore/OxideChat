@@ -10,8 +10,8 @@
 		"postinstall": "nuxt prepare"
 	},
 	"dependencies": {
+		"@tailwindcss/vite": "~4.1.18",
 		"@pinia/nuxt": "~0.11.1",
-		"@tailwindcss/vite": "~4.1.17",
 		"@tanstack/vue-table": "~8.21.3",
 		"@unovis/ts": "~1.6.2",
 		"@unovis/vue": "~1.6.2",

@@ -19,10 +19,12 @@ sqlx = { version = "0.8", features = [
     "chrono",
     "runtime-tokio-native-tls",
     "migrate",
+    "uuid",
 ] }
 once_cell = { version = "1.21" }
 dotenv = { version = "0.15" }
 argon2 = { version = "0.5" }
+uuid = { version = "1.0", features = ["serde"] }
 
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }
