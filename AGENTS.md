@@ -20,14 +20,43 @@
 ## Architecture
 
 - `src/main.rs` - Application entry point, sets up Axum server and database pool
+- `src/i18n.rs` - Global i18n translation service (singleton pattern)
 - `src/jobs.rs` - Background job scheduler using tokio tasks
-- `src/routes/` - HTTP route handlers
+- `src/types/` - Shared request/response DTOs and domain types
+- `src/tests/` - Unit tests organized by module (e.g., `i18n.rs`, `base.rs`)
+- `src/routes/` - HTTP route handlers (handlers only, no type definitions)
 - `migrations/` - SQLx database migrations
 - `JobState` struct contains shared application state (database pool)
 - Wrap `JobState` in `Arc<JobState>` for sharing across async tasks
 - Job scheduler spawns independent tokio tasks for each scheduled job
 - Each job is a function returning `JobFuture` (pinned boxed future)
 - Jobs share state via `Arc<JobState>` - clone the Arc when spawning, not the pool
+
+## Code Organization
+
+### Types Module (`src/types/`)
+
+- All request/response structs live in `src/types/`, not in route files
+- Organized by domain: `i18n.rs`, `base.rs`, etc.
+- `mod.rs` re-exports all types for easy importing: `use crate::types::*;`
+- Each file uses section comments for clarity:
+    - Request Types (structs with `Deserialize`)
+    - Response Types (structs with `Serialize`)
+    - Internal Types (DB row structs, helpers)
+
+### Tests Module (`src/tests/`)
+
+- Unit tests live in `src/tests/`, not inline in route files
+- One test file per module: `i18n.rs`, `base.rs`
+- Use `#[cfg(test)]` wrapper for all test code
+- Group related tests in submodules: `mod types { ... }`
+- Import types via `crate::types::*`
+
+### Route Files (`src/routes/`)
+
+- Contain only handler functions, no struct definitions
+- Import types from `crate::types::{...}`
+- Keep handlers thin: validate → delegate → respond
 
 ## Code Quality
 
@@ -40,12 +69,14 @@
 - Use `#[must_use]` for functions whose return value should not be ignored
 - Prefer explicit types over `_` in public APIs
 - Use `thiserror` or similar for custom error types
+- Do not use static strings, use the i18n system instead
 
 ## Testing
 
 - Use `#[sqlx::test]` for database tests - provides isolated test database
 - Use `#[tokio::test]` for async tests
-- Organize tests in submodules by component: `mod job_scheduler { }`, `mod database { }`
+- Tests live in `src/tests/` with one file per module
+- Group related tests in submodules: `mod types { }`, `mod handlers { }`
 - Clean up test data or use transactions that rollback
 - Test error cases, not just happy paths
 - Use `Result<(), Error>` return type in tests for cleaner error propagation
@@ -58,6 +89,7 @@
 - Database URL must be set in `.env` file as `DATABASE_URL`
 - Migrations run automatically on startup
 - Keep the code as simple as possible so beginners can also understand it
+- Frontend should always use customizable Tailwind classes like bg-primary, text-primary, etc. and not use fixed colors
 
 ## Updating This Document
 

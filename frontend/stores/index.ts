@@ -13,20 +13,44 @@ interface BreadcrumbType {
 	current?: boolean;
 }
 
+interface User {
+	id: string;
+	email: string;
+	username: string;
+	auth_method: string;
+	roles: string[];
+	created_at: string;
+}
+
+interface AuthState {
+	user: User | null;
+	isAuthenticated: boolean;
+	loading: boolean;
+}
+
 export const useMainStore = defineStore('main', {
 	state: (): {
 		breadcrumbs: BreadcrumbType[];
 		base: any;
 		initialized: boolean;
+		auth: AuthState;
 	} => {
-		const config = useRuntimeConfig();
 		return {
 			breadcrumbs: [],
 			base: null,
 			initialized: false,
+			auth: {
+				user: null,
+				isAuthenticated: false,
+				loading: true,
+			},
 		};
 	},
-	getters: {},
+	getters: {
+		isAdmin(): boolean {
+			return this.auth.user?.roles?.includes('admin') ?? false;
+		},
+	},
 	actions: {
 		getTranslation(name: string, language?: string, args: {[key: string]: any} = {}): string {
 			const lang = language ?? this.base?.language ?? 'en';
@@ -56,32 +80,81 @@ export const useMainStore = defineStore('main', {
 			if (!timestamp) return '';
 			return dayjs(timestamp).format(format);
 		},
-		async validateAuth() {
-			try {
-				const {$customFetch} = useNuxtApp();
-				const {data: user, error} = await useAsyncData(`auth_user`, async () => $customFetch('/api/v1/auth'));
-			} catch (e: any) {
-				console.log(`Error: ${e}`);
-			}
-			this.initialized = true;
-		},
 		async getBaseData() {
 			try {
 				const {$customFetch} = useNuxtApp();
-				const {data: base, error} = await useAsyncData('base', async () => $customFetch(`/api/v1/base`));
-				if (!error?.value && base?.value) {
-					this.base = base.value;
+				const base = await $customFetch(`/api/v1/base`);
+				if (base) {
+					this.base = base;
 				}
 			} catch (e: any) {
-				console.log(e.toString());
+				console.error('Failed to fetch base data:', e.toString());
 			}
+			this.initialized = true;
+		},
+		async getMe() {
+			this.auth.loading = true;
+			try {
+				const {$customFetch} = useNuxtApp();
+				const user = await $customFetch('/api/v1/users/@me');
+				if (user) {
+					this.auth.user = user as User;
+					this.auth.isAuthenticated = true;
+				}
+			} catch (e: any) {
+				this.auth.user = null;
+				this.auth.isAuthenticated = false;
+			} finally {
+				this.auth.loading = false;
+			}
+		},
+		async setup(email: string, username: string, password: string) {
+			const {$customFetch} = useNuxtApp();
+			const response = await $customFetch('/api/v1/auth/setup', {
+				method: 'POST',
+				body: {email, username, password},
+			});
+			if (response?.user) {
+				this.auth.user = response.user as User;
+				this.auth.isAuthenticated = true;
+				// Refresh base data to update needs_setup
+				await this.getBaseData();
+			}
+			return response;
+		},
+		async register(email: string, username: string, password: string) {
+			const {$customFetch} = useNuxtApp();
+			const response = await $customFetch('/api/v1/auth/register', {
+				method: 'POST',
+				body: {email, username, password},
+			});
+			if (response?.user) {
+				this.auth.user = response.user as User;
+				this.auth.isAuthenticated = true;
+			}
+			return response;
+		},
+		async login(email: string, password: string) {
+			const {$customFetch} = useNuxtApp();
+			const response = await $customFetch('/api/v1/auth/login', {
+				method: 'POST',
+				body: {email, password},
+			});
+			if (response?.user) {
+				this.auth.user = response.user as User;
+				this.auth.isAuthenticated = true;
+			}
+			return response;
 		},
 		async logout() {
 			try {
 				const {$customFetch} = useNuxtApp();
-				await useAsyncData('logout', async () => $customFetch('/api/v1/users/logout', {method: 'POST'}).catch(e => e));
+				await $customFetch('/api/v1/auth/logout', {method: 'POST'});
 			} catch (e: any) {
-				console.log(e.toString());
+				console.error('Logout error:', e.toString());
+			} finally {
+				this.auth.user = null;
+				this.auth.isAuthenticated = false;
 			}
 		},
 		copyToClipboard(text: string) {

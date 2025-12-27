@@ -13,4 +13,5 @@ use serde_json::Value;
 #[derive(Debug, Serialize)]
 pub struct BaseResponse {
 	pub i18n: Value,
+	pub needs_setup: bool,
 }

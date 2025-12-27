@@ -24,7 +24,9 @@ sqlx = { version = "0.8", features = [
 once_cell = { version = "1.21" }
 dotenv = { version = "0.15" }
 argon2 = { version = "0.5" }
-uuid = { version = "1.0", features = ["serde"] }
+uuid = { version = "1.0", features = ["serde", "v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tower-cookies = { version = "0.11" }
 
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }

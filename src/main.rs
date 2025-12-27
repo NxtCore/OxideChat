@@ -3,6 +3,7 @@ mod jobs;
 mod routes;
 mod tests;
 mod types;
+mod utils;
 
 use axum::{Router, extract::DefaultBodyLimit};
 use sqlx::{PgPool, postgres::PgPoolOptions};
