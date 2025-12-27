@@ -3,89 +3,23 @@
 //! Handles user setup, registration, login, and logout.
 
 use crate::AppState;
-use crate::types::{AuthResponse, CountRow, LoginRequest, MessageResponse, RegisterRequest, RoleNameRow, SetupRequest, User, UserResponse};
-use argon2::{
-	Argon2,
-	password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+use crate::i18n::I18n;
+use crate::types::{AuthResponse, LoginRequest, MessageResponse, RegisterRequest, SetupRequest, User};
+use crate::utils::auth::{
+	create_session, hash_password, internal_error, user_to_response, users_exist, validate_email, validate_password, validate_username, verify_password,
 };
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use chrono::{Duration, Utc};
 use sqlx::PgPool;
 use std::sync::Arc;
-use tower_cookies::{Cookie, Cookies, cookie::SameSite};
+use tower_cookies::{Cookie, Cookies};
 use uuid::Uuid;
 
-const SESSION_COOKIE_NAME: &str = "oxide_session";
-const SESSION_DURATION_DAYS: i64 = 7;
-
-/// Hash a password using Argon2id.
-fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
-	let salt = SaltString::generate(&mut OsRng);
-	let argon2 = Argon2::default();
-	let hash = argon2.hash_password(password.as_bytes(), &salt)?;
-	Ok(hash.to_string())
-}
-
-/// Verify a password against a hash.
-fn verify_password(password: &str, hash: &str) -> Result<bool, argon2::password_hash::Error> {
-	let parsed_hash = PasswordHash::new(hash)?;
-	Ok(Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok())
-}
-
-/// Check if any users exist in the database.
-async fn users_exist(pool: &PgPool) -> Result<bool, sqlx::Error> {
-	let row: CountRow = sqlx::query_as("SELECT COUNT(*) as count FROM users").fetch_one(pool).await?;
-	Ok(row.count > 0)
-}
-
-/// Get user roles by user ID.
-async fn get_user_roles(pool: &PgPool, user_id: &Uuid) -> Result<Vec<String>, sqlx::Error> {
-	let roles: Vec<RoleNameRow> = sqlx::query_as(
-		"SELECT r.name FROM roles r
-         INNER JOIN user_roles ur ON r.id = ur.role_id
-         WHERE ur.user_id = $1",
-	)
-	.bind(user_id)
-	.fetch_all(pool)
-	.await?;
-	Ok(roles.into_iter().map(|r| r.name).collect())
-}
-
-/// Create a session for a user and set the session cookie.
-async fn create_session(pool: &PgPool, cookies: &Cookies, user_id: &Uuid) -> Result<(), sqlx::Error> {
-	let session_id = Uuid::new_v4();
-	let expires_at = Utc::now() + Duration::days(SESSION_DURATION_DAYS);
-
-	sqlx::query("INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)")
-		.bind(session_id)
-		.bind(user_id)
-		.bind(expires_at)
-		.execute(pool)
-		.await?;
-
-	let mut cookie = Cookie::new(SESSION_COOKIE_NAME, session_id.to_string());
-	cookie.set_path("/");
-	cookie.set_http_only(true);
-	cookie.set_same_site(SameSite::Lax);
-	// In production, set secure to true
-	// cookie.set_secure(true);
-
-	cookies.add(cookie);
-	Ok(())
-}
-
-/// Convert a User to a UserResponse with roles.
-async fn user_to_response(pool: &PgPool, user: &User) -> Result<UserResponse, sqlx::Error> {
-	let roles = get_user_roles(pool, &user.id).await?;
-	Ok(UserResponse {
-		id: user.id,
-		email: user.email.clone(),
-		username: user.username.clone(),
-		auth_method: user.auth_method.clone(),
-		roles,
-		created_at: user.created_at,
-	})
-}
+pub const SESSION_COOKIE_NAME: &str = "oxidechat_session";
+pub const SESSION_DURATION_DAYS: i64 = 7;
+pub const MIN_PASSWORD_LENGTH: usize = 8;
+pub const MAX_PASSWORD_LENGTH: usize = 128;
+pub const MAX_USERNAME_LENGTH: usize = 32;
+pub const MIN_USERNAME_LENGTH: usize = 3;
 
 /// POST /api/v1/auth/setup
 ///
@@ -102,34 +36,57 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 			return (
 				StatusCode::BAD_REQUEST,
 				Json(MessageResponse {
-					message: "Setup has already been completed".to_string(),
+					message: I18n::get().translate("auth.errors.setup_completed", &None),
 				}),
 			)
 				.into_response();
 		}
 		Err(e) => {
-			return (
-				StatusCode::INTERNAL_SERVER_ERROR,
-				Json(MessageResponse {
-					message: format!("Database error: {e}"),
-				}),
-			)
-				.into_response();
+			eprintln!("[AUTH] Database error checking users: {e}");
+			return internal_error().into_response();
 		}
 		_ => {}
+	}
+
+	// Validate email
+	if !validate_email(&payload.email) {
+		return (
+			StatusCode::BAD_REQUEST,
+			Json(MessageResponse {
+				message: I18n::get().translate("auth.errors.invalid_email", &None),
+			}),
+		)
+			.into_response();
+	}
+
+	// Validate username
+	if let Err(key) = validate_username(&payload.username) {
+		return (
+			StatusCode::BAD_REQUEST,
+			Json(MessageResponse {
+				message: I18n::get().translate(key, &None),
+			}),
+		)
+			.into_response();
+	}
+
+	// Validate password
+	if let Err(key) = validate_password(&payload.password) {
+		return (
+			StatusCode::BAD_REQUEST,
+			Json(MessageResponse {
+				message: I18n::get().translate(key, &None),
+			}),
+		)
+			.into_response();
 	}
 
 	// Hash password
 	let password_hash = match hash_password(&payload.password) {
 		Ok(hash) => hash,
 		Err(e) => {
-			return (
-				StatusCode::INTERNAL_SERVER_ERROR,
-				Json(MessageResponse {
-					message: format!("Password hashing error: {e}"),
-				}),
-			)
-				.into_response();
+			eprintln!("[AUTH] Password hashing error: {e}");
+			return internal_error().into_response();
 		}
 	};
 
@@ -147,13 +104,8 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	{
 		Ok(user) => user,
 		Err(e) => {
-			return (
-				StatusCode::INTERNAL_SERVER_ERROR,
-				Json(MessageResponse {
-					message: format!("Failed to create user: {e}"),
-				}),
-			)
-				.into_response();
+			eprintln!("[AUTH] Failed to create user: {e}");
+			return internal_error().into_response();
 		}
 	};
 
@@ -166,36 +118,23 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	.execute(&state.db)
 	.await
 	{
-		return (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			Json(MessageResponse {
-				message: format!("Failed to assign admin role: {e}"),
-			}),
-		)
-			.into_response();
+		eprintln!("[AUTH] Failed to assign admin role: {e}");
+		return internal_error().into_response();
 	}
 
 	// Create session
 	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
-		return (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			Json(MessageResponse {
-				message: format!("Failed to create session: {e}"),
-			}),
-		)
-			.into_response();
+		eprintln!("[AUTH] Failed to create session: {e}");
+		return internal_error().into_response();
 	}
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
 		Ok(user_response) => (StatusCode::CREATED, Json(AuthResponse { user: user_response })).into_response(),
-		Err(e) => (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			Json(MessageResponse {
-				message: format!("Failed to fetch user roles: {e}"),
-			}),
-		)
-			.into_response(),
+		Err(e) => {
+			eprintln!("[AUTH] Failed to fetch user roles: {e}");
+			internal_error().into_response()
+		}
 	}
 }
 
@@ -214,34 +153,57 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 			return (
 				StatusCode::BAD_REQUEST,
 				Json(MessageResponse {
-					message: "Setup must be completed first".to_string(),
+					message: I18n::get().translate("auth.errors.setup_required", &None),
 				}),
 			)
 				.into_response();
 		}
 		Err(e) => {
-			return (
-				StatusCode::INTERNAL_SERVER_ERROR,
-				Json(MessageResponse {
-					message: format!("Database error: {e}"),
-				}),
-			)
-				.into_response();
+			eprintln!("[AUTH] Database error checking users: {e}");
+			return internal_error().into_response();
 		}
 		_ => {}
+	}
+
+	// Validate email
+	if !validate_email(&payload.email) {
+		return (
+			StatusCode::BAD_REQUEST,
+			Json(MessageResponse {
+				message: I18n::get().translate("auth.errors.invalid_email", &None),
+			}),
+		)
+			.into_response();
+	}
+
+	// Validate username
+	if let Err(key) = validate_username(&payload.username) {
+		return (
+			StatusCode::BAD_REQUEST,
+			Json(MessageResponse {
+				message: I18n::get().translate(key, &None),
+			}),
+		)
+			.into_response();
+	}
+
+	// Validate password
+	if let Err(key) = validate_password(&payload.password) {
+		return (
+			StatusCode::BAD_REQUEST,
+			Json(MessageResponse {
+				message: I18n::get().translate(key, &None),
+			}),
+		)
+			.into_response();
 	}
 
 	// Hash password
 	let password_hash = match hash_password(&payload.password) {
 		Ok(hash) => hash,
 		Err(e) => {
-			return (
-				StatusCode::INTERNAL_SERVER_ERROR,
-				Json(MessageResponse {
-					message: format!("Password hashing error: {e}"),
-				}),
-			)
-				.into_response();
+			eprintln!("[AUTH] Password hashing error: {e}");
+			return internal_error().into_response();
 		}
 	};
 
@@ -260,9 +222,10 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 		Ok(user) => user,
 		Err(e) => {
 			let message = if e.to_string().contains("duplicate key") {
-				"Email or username already taken".to_string()
+				I18n::get().translate("auth.errors.email_or_username_taken", &None)
 			} else {
-				format!("Failed to create user: {e}")
+				eprintln!("[AUTH] Failed to create user: {e}");
+				I18n::get().translate("auth.errors.internal_error", &None)
 			};
 			return (StatusCode::BAD_REQUEST, Json(MessageResponse { message })).into_response();
 		}
@@ -277,36 +240,23 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 	.execute(&state.db)
 	.await
 	{
-		return (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			Json(MessageResponse {
-				message: format!("Failed to assign user role: {e}"),
-			}),
-		)
-			.into_response();
+		eprintln!("[AUTH] Failed to assign user role: {e}");
+		return internal_error().into_response();
 	}
 
 	// Create session
 	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
-		return (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			Json(MessageResponse {
-				message: format!("Failed to create session: {e}"),
-			}),
-		)
-			.into_response();
+		eprintln!("[AUTH] Failed to create session: {e}");
+		return internal_error().into_response();
 	}
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
 		Ok(user_response) => (StatusCode::CREATED, Json(AuthResponse { user: user_response })).into_response(),
-		Err(e) => (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			Json(MessageResponse {
-				message: format!("Failed to fetch user roles: {e}"),
-			}),
-		)
-			.into_response(),
+		Err(e) => {
+			eprintln!("[AUTH] Failed to fetch user roles: {e}");
+			internal_error().into_response()
+		}
 	}
 }
 
@@ -330,19 +280,14 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 			return (
 				StatusCode::UNAUTHORIZED,
 				Json(MessageResponse {
-					message: "Invalid email or password".to_string(),
+					message: I18n::get().translate("auth.errors.invalid_credentials", &None),
 				}),
 			)
 				.into_response();
 		}
 		Err(e) => {
-			return (
-				StatusCode::INTERNAL_SERVER_ERROR,
-				Json(MessageResponse {
-					message: format!("Database error: {e}"),
-				}),
-			)
-				.into_response();
+			eprintln!("[AUTH] Database error during login: {e}");
+			return internal_error().into_response();
 		}
 	};
 
@@ -353,7 +298,7 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 			return (
 				StatusCode::UNAUTHORIZED,
 				Json(MessageResponse {
-					message: "This account uses external authentication".to_string(),
+					message: I18n::get().translate("auth.errors.external_auth", &None),
 				}),
 			)
 				.into_response();
@@ -367,43 +312,30 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 			return (
 				StatusCode::UNAUTHORIZED,
 				Json(MessageResponse {
-					message: "Invalid email or password".to_string(),
+					message: I18n::get().translate("auth.errors.invalid_credentials", &None),
 				}),
 			)
 				.into_response();
 		}
 		Err(e) => {
-			return (
-				StatusCode::INTERNAL_SERVER_ERROR,
-				Json(MessageResponse {
-					message: format!("Password verification error: {e}"),
-				}),
-			)
-				.into_response();
+			eprintln!("[AUTH] Password verification error: {e}");
+			return internal_error().into_response();
 		}
 	}
 
 	// Create session
 	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
-		return (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			Json(MessageResponse {
-				message: format!("Failed to create session: {e}"),
-			}),
-		)
-			.into_response();
+		eprintln!("[AUTH] Failed to create session: {e}");
+		return internal_error().into_response();
 	}
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
 		Ok(user_response) => (StatusCode::OK, Json(AuthResponse { user: user_response })).into_response(),
-		Err(e) => (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			Json(MessageResponse {
-				message: format!("Failed to fetch user roles: {e}"),
-			}),
-		)
-			.into_response(),
+		Err(e) => {
+			eprintln!("[AUTH] Failed to fetch user roles: {e}");
+			internal_error().into_response()
+		}
 	}
 }
 
@@ -413,18 +345,16 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 pub async fn logout(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
 	if let Some(session_cookie) = cookies.get(SESSION_COOKIE_NAME) {
 		if let Ok(session_id) = Uuid::parse_str(session_cookie.value()) {
-			// Delete session from database
 			let _ = sqlx::query("DELETE FROM sessions WHERE id = $1").bind(session_id).execute(&state.db).await;
 		}
 	}
 
-	// Remove cookie
 	cookies.remove(Cookie::from(SESSION_COOKIE_NAME));
 
 	(
 		StatusCode::OK,
 		Json(MessageResponse {
-			message: "Logged out successfully".to_string(),
+			message: I18n::get().translate("auth.messages.logout_success", &None),
 		}),
 	)
 }
@@ -436,7 +366,6 @@ pub async fn get_current_user(pool: &PgPool, cookies: &Cookies) -> Option<User> 
 	let session_cookie = cookies.get(SESSION_COOKIE_NAME)?;
 	let session_id = Uuid::parse_str(session_cookie.value()).ok()?;
 
-	// Find valid session
 	let user: User = sqlx::query_as(
 		"SELECT u.* FROM users u
          INNER JOIN sessions s ON u.id = s.user_id

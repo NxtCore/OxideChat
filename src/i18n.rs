@@ -6,14 +6,16 @@
 //! - Supports reloading translations at runtime
 //! - Template variable interpolation
 
-use once_cell::sync::OnceCell;
+use arc_swap::ArcSwap;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, OnceLock};
+
+use crate::config::Config;
 
 /// Global i18n instance
-static I18N: OnceCell<I18n> = OnceCell::new();
+static I18N: OnceLock<I18n> = OnceLock::new();
 
 /// Supported languages
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,7 +62,7 @@ struct TranslationRow {
 ///
 /// Initialize once at startup with `I18n::init()`, then access via `I18n::get()`.
 pub struct I18n {
-	translations: RwLock<Value>,
+	translations: ArcSwap<Value>,
 }
 
 // Manual Debug impl since RwLock<Value> doesn't derive Debug nicely
@@ -78,7 +80,7 @@ impl I18n {
 	pub async fn init(pool: &PgPool) {
 		let translations = Self::load_from_db(pool).await;
 		let instance = Self {
-			translations: RwLock::new(translations),
+			translations: ArcSwap::new(Arc::new(translations)),
 		};
 		I18N.set(instance).expect("I18n already initialized");
 	}
@@ -96,8 +98,7 @@ impl I18n {
 	/// Use this when translations have been modified via admin endpoints.
 	pub async fn reload(&self, pool: &PgPool) {
 		let translations = Self::load_from_db(pool).await;
-		let mut lock = self.translations.write().expect("RwLock poisoned");
-		*lock = translations;
+		self.translations.store(Arc::new(translations));
 	}
 
 	/// Get a translation by key path with optional variable interpolation.
@@ -110,9 +111,9 @@ impl I18n {
 	/// # Returns
 	/// The translated string, or the key if not found.
 	#[must_use]
-	pub fn translate(&self, key: &str, language: Language, args: &HashMap<String, String>) -> String {
-		let lock = self.translations.read().expect("RwLock poisoned");
-		let lang_key = language.as_str();
+	pub fn translate(&self, key: &str, args: &Option<HashMap<String, String>>) -> String {
+		let lock = self.translations.load();
+		let lang_key = Config::get().language().as_str();
 
 		let mut current: &Value = match lock.get(lang_key) {
 			Some(v) => v,
@@ -127,15 +128,18 @@ impl I18n {
 		}
 
 		match current.as_str() {
-			Some(s) => Self::interpolate(s, args),
+			Some(s) => match args {
+				Some(args) => Self::interpolate(s, args),
+				None => s.to_string(),
+			},
 			None => key.to_string(),
 		}
 	}
 
 	/// Get all translations as JSON (for the /base endpoint).
 	#[must_use]
-	pub fn all(&self) -> Value {
-		self.translations.read().expect("RwLock poisoned").clone()
+	pub fn all(&self) -> Arc<Value> {
+		self.translations.load_full()
 	}
 
 	/// Load translations from database.

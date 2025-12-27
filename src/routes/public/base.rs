@@ -20,5 +20,9 @@ pub async fn get_base(State(state): State<Arc<AppState>>) -> Json<BaseResponse> 
 		Err(_) => true, // Assume setup needed if query fails
 	};
 
-	Json(BaseResponse { i18n, needs_setup })
+	Json(BaseResponse {
+		i18n,
+		needs_setup,
+		oauth_providers: crate::config::Config::get().get_configured_oauth_providers(),
+	})
 }

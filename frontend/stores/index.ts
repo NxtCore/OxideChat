@@ -92,6 +92,9 @@ export const useMainStore = defineStore('main', {
 			}
 			this.initialized = true;
 		},
+		isOAuthEnabled(provider: string): boolean {
+			return this.base?.oauth_providers.includes(provider);
+		},
 		async getMe() {
 			this.auth.loading = true;
 			try {
