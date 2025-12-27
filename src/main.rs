@@ -1,8 +1,10 @@
+mod config;
 mod i18n;
 mod jobs;
 mod routes;
 mod tests;
 mod types;
+mod utils;
 
 use axum::{Router, extract::DefaultBodyLimit};
 use sqlx::{PgPool, postgres::PgPoolOptions};
@@ -37,6 +39,10 @@ async fn main() {
 		Ok(_) => println!("[DATABASE] Migrations completed"),
 		Err(e) => eprintln!("[DATABASE] Migration failed: {}", e),
 	}
+
+	// Initialize global configuration
+	config::Config::init(&pool).await;
+	println!("[CONFIG] Configuration loaded");
 
 	// Initialize global i18n translations
 	i18n::I18n::init(&pool).await;
