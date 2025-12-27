@@ -60,11 +60,6 @@
 							</div>
 						</div>
 
-						<!-- Error Message -->
-						<div v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-							{{ error }}
-						</div>
-
 						<!-- Submit -->
 						<div class="flex flex-col gap-4">
 							<ShadButton type="submit" class="w-full" :disabled="loading">
@@ -98,19 +93,26 @@ const form = ref({
 });
 
 const loading = ref(false);
-const error = ref('');
 
 async function handleLogin() {
-	error.value = '';
 	loading.value = true;
 
 	try {
 		await store.login(form.value.email, form.value.password);
 		router.push('/');
 	} catch (e: any) {
-		error.value = e.message || 'Invalid email or password';
+		store.toast(e.message || store.getTranslation('auth.errors.invalid_email_or_password'), {type: 'error'});
 	} finally {
 		loading.value = false;
+	}
+}
+
+async function handleOauthLogin(provider: string) {
+	try {
+		const {$customFetch} = useNuxtApp();
+		await $customFetch(`/api/v1/auth/oauth/${provider}`);
+	} catch (e: any) {
+		store.toast(e.message || store.getTranslation('auth.errors.oauth_error'), {type: 'error'});
 	}
 }
 </script>

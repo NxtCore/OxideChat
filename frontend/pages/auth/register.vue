@@ -73,11 +73,6 @@
 							</div>
 						</div>
 
-						<!-- Error Message -->
-						<div v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-							{{ error }}
-						</div>
-
 						<!-- Submit -->
 						<div class="flex flex-col gap-4">
 							<ShadButton type="submit" class="w-full" :disabled="loading">
@@ -113,20 +108,17 @@ const form = ref({
 });
 
 const loading = ref(false);
-const error = ref('');
 const passwordStrength = ref<{isValid: boolean} | null>(null);
 
 async function handleRegister() {
-	error.value = '';
-
 	if (form.value.password !== form.value.confirmPassword) {
-		error.value = store.getTranslation('auth.register.passwords_mismatch');
+		store.toast(store.getTranslation('auth.register.passwords_mismatch'), {type: 'error'});
 		return;
 	}
 
 	// Use password strength component validation
 	if (!passwordStrength.value?.isValid) {
-		error.value = store.getTranslation('auth.errors.password_requirements_not_met');
+		store.toast(store.getTranslation('auth.errors.password_requirements_not_met'), {type: 'error'});
 		return;
 	}
 
@@ -136,7 +128,7 @@ async function handleRegister() {
 		await store.register(form.value.email, form.value.username, form.value.password);
 		router.push('/');
 	} catch (e: any) {
-		error.value = e.message || store.getTranslation('auth.errors.internal_error');
+		store.toast(e.message || store.getTranslation('auth.errors.internal_error'), {type: 'error'});
 	} finally {
 		loading.value = false;
 	}
