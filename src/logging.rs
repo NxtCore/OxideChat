@@ -82,11 +82,13 @@ pub enum LogEvent {
 
 	// Security
 	PasswordChanged,
-	PasswordResetRequested,
-	AccountLocked,
-	AccountUnlocked,
-	SuspiciousActivity,
 	RateLimited,
+
+	// OAuth
+	OAuthLoginSuccess,
+	OAuthLoginFailed,
+	OAuthAccountCreated,
+	OAuthIdentityLinked,
 }
 
 impl LogEvent {
@@ -111,11 +113,11 @@ impl LogEvent {
 			Self::TranslationUpdated => "translation_updated",
 			Self::TranslationDeleted => "translation_deleted",
 			Self::PasswordChanged => "password_changed",
-			Self::PasswordResetRequested => "password_reset_requested",
-			Self::AccountLocked => "account_locked",
-			Self::AccountUnlocked => "account_unlocked",
-			Self::SuspiciousActivity => "suspicious_activity",
 			Self::RateLimited => "rate_limited",
+			Self::OAuthLoginSuccess => "oauth_login_success",
+			Self::OAuthLoginFailed => "oauth_login_failed",
+			Self::OAuthAccountCreated => "oauth_account_created",
+			Self::OAuthIdentityLinked => "oauth_identity_linked",
 		}
 	}
 
@@ -140,11 +142,11 @@ impl LogEvent {
 			"translation_updated" => Some(Self::TranslationUpdated),
 			"translation_deleted" => Some(Self::TranslationDeleted),
 			"password_changed" => Some(Self::PasswordChanged),
-			"password_reset_requested" => Some(Self::PasswordResetRequested),
-			"account_locked" => Some(Self::AccountLocked),
-			"account_unlocked" => Some(Self::AccountUnlocked),
-			"suspicious_activity" => Some(Self::SuspiciousActivity),
 			"rate_limited" => Some(Self::RateLimited),
+			"oauth_login_success" => Some(Self::OAuthLoginSuccess),
+			"oauth_login_failed" => Some(Self::OAuthLoginFailed),
+			"oauth_account_created" => Some(Self::OAuthAccountCreated),
+			"oauth_identity_linked" => Some(Self::OAuthIdentityLinked),
 			_ => None,
 		}
 	}

@@ -167,8 +167,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
 
     -- Auth: Login
     ('en', 'auth.login.title', 'Welcome back'),
-    ('en', 'auth.login.description', 'Login with your Apple or Google account'),
-    ('en', 'auth.login.apple', 'Login with Apple'),
+    ('en', 'auth.login.description', 'Login with your favorite external provider'),
     ('en', 'auth.login.google', 'Login with Google'),
     ('en', 'auth.login.discord', 'Login with Discord'),
     ('en', 'auth.login.or_continue', 'Or continue with'),
@@ -185,8 +184,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'auth.login.privacy_link', 'Privacy Policy'),
 
     ('de', 'auth.login.title', 'Willkommen zurück'),
-    ('de', 'auth.login.description', 'Melden Sie sich mit Ihrem Apple- oder Google-Konto an'),
-    ('de', 'auth.login.apple', 'Mit Apple anmelden'),
+    ('de', 'auth.login.description', 'Melden Sie sich mit einem externen Provider an'),
     ('de', 'auth.login.google', 'Mit Google anmelden'),
     ('de', 'auth.login.discord', 'Mit Discord anmelden'),
     ('de', 'auth.login.or_continue', 'Oder weiter mit'),
@@ -204,8 +202,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
 
     -- Auth: Register
     ('en', 'auth.register.title', 'Create an account'),
-    ('en', 'auth.register.description', 'Sign up with your Apple or Google account'),
-    ('en', 'auth.register.apple', 'Sign up with Apple'),
+    ('en', 'auth.register.description', 'Sign up with your favorite external provider'),
     ('en', 'auth.register.google', 'Sign up with Google'),
     ('en', 'auth.register.discord', 'Sign up with Discord'),
     ('en', 'auth.register.username', 'Username'),
@@ -218,8 +215,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'auth.register.password_requirements', 'At least 8 characters'),
 
     ('de', 'auth.register.title', 'Konto erstellen'),
-    ('de', 'auth.register.description', 'Registrieren Sie sich mit Ihrem Apple- oder Google-Konto'),
-    ('de', 'auth.register.apple', 'Mit Apple registrieren'),
+    ('de', 'auth.register.description', 'Registrieren Sie sich mit einem externen Provider'),
     ('de', 'auth.register.google', 'Mit Google registrieren'),
     ('de', 'auth.register.discord', 'Mit Discord registrieren'),
     ('de', 'auth.register.username', 'Benutzername'),

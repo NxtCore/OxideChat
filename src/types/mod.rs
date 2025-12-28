@@ -6,6 +6,7 @@ pub mod auth;
 pub mod base;
 pub mod i18n;
 pub mod logging;
+pub mod oauth;
 
 pub use auth::*;
 pub use base::*;

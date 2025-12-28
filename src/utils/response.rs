@@ -27,9 +27,7 @@ pub struct ResponseBuilder<T: Serialize> {
 
 pub enum ResponseBody<T: Serialize> {
 	Json(T),
-	Html(String),
 	Text(String),
-	Binary(Vec<u8>, String),
 	Empty,
 }
 
@@ -142,21 +140,9 @@ impl<T: Serialize> ResponseBuilder<T> {
 	pub fn build(self) -> Response {
 		let mut response = match self.body {
 			ResponseBody::Json(data) => Json(data).into_response(),
-			ResponseBody::Html(content) => {
-				let mut resp = Response::new(Body::from(content));
-				resp.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
-				resp
-			}
 			ResponseBody::Text(content) => {
 				let mut resp = Response::new(Body::from(content));
 				resp.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
-				resp
-			}
-			ResponseBody::Binary(data, content_type) => {
-				let mut resp = Response::new(Body::from(data));
-				if let Ok(ct) = HeaderValue::from_str(&content_type) {
-					resp.headers_mut().insert(header::CONTENT_TYPE, ct);
-				}
 				resp
 			}
 			ResponseBody::Empty => Response::new(Body::empty()),
@@ -197,6 +183,8 @@ pub enum ErrorCode {
 	SetupRequired,
 	SetupCompleted,
 	MalformedRequest,
+	InvalidProvider,
+	ProviderNotConfigured,
 
 	// 401 Unauthorized
 	Unauthorized,
@@ -206,6 +194,9 @@ pub enum ErrorCode {
 	TokenInvalid,
 	TokenExpired,
 	ExternalAuthRequired,
+	OAuthStateMismatch,
+	OAuthTokenError,
+	OAuthUserInfoError,
 
 	// 403 Forbidden
 	Forbidden,
@@ -257,16 +248,20 @@ impl ErrorCode {
 			| Self::PasswordNoSpecial
 			| Self::SetupRequired
 			| Self::SetupCompleted
-			| Self::MalformedRequest => StatusCode::BAD_REQUEST,
+			| Self::MalformedRequest
+			| Self::InvalidProvider
+			| Self::ProviderNotConfigured => StatusCode::BAD_REQUEST,
 
-			// 401
 			Self::Unauthorized
 			| Self::NotAuthenticated
 			| Self::InvalidCredentials
 			| Self::SessionExpired
 			| Self::TokenInvalid
 			| Self::TokenExpired
-			| Self::ExternalAuthRequired => StatusCode::UNAUTHORIZED,
+			| Self::ExternalAuthRequired
+			| Self::OAuthStateMismatch
+			| Self::OAuthTokenError
+			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
 
 			// 403
 			Self::Forbidden | Self::InsufficientPermissions | Self::AccountDisabled => StatusCode::FORBIDDEN,
@@ -308,6 +303,8 @@ impl ErrorCode {
 			Self::SetupRequired => "auth.errors.setup_required",
 			Self::SetupCompleted => "auth.errors.setup_completed",
 			Self::MalformedRequest => "errors.malformed_request",
+			Self::InvalidProvider => "auth.errors.oauth_provider_invalid",
+			Self::ProviderNotConfigured => "auth.errors.oauth_provider_disabled",
 
 			Self::Unauthorized => "auth.errors.unauthorized",
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
@@ -316,6 +313,9 @@ impl ErrorCode {
 			Self::TokenInvalid => "auth.errors.token_invalid",
 			Self::TokenExpired => "auth.errors.token_expired",
 			Self::ExternalAuthRequired => "auth.errors.external_auth",
+			Self::OAuthStateMismatch => "auth.errors.oauth_state_mismatch",
+			Self::OAuthTokenError => "auth.errors.oauth_token_error",
+			Self::OAuthUserInfoError => "auth.errors.oauth_user_info_error",
 
 			Self::Forbidden => "errors.forbidden",
 			Self::InsufficientPermissions => "errors.insufficient_permissions",
@@ -360,6 +360,8 @@ impl ErrorCode {
 			Self::SetupRequired => "setup_required",
 			Self::SetupCompleted => "setup_completed",
 			Self::MalformedRequest => "malformed_request",
+			Self::InvalidProvider => "invalid_provider",
+			Self::ProviderNotConfigured => "provider_not_configured",
 
 			Self::Unauthorized => "unauthorized",
 			Self::NotAuthenticated => "not_authenticated",
@@ -368,6 +370,9 @@ impl ErrorCode {
 			Self::TokenInvalid => "token_invalid",
 			Self::TokenExpired => "token_expired",
 			Self::ExternalAuthRequired => "external_auth_required",
+			Self::OAuthStateMismatch => "oauth_state_mismatch",
+			Self::OAuthTokenError => "oauth_token_error",
+			Self::OAuthUserInfoError => "oauth_user_info_error",
 
 			Self::Forbidden => "forbidden",
 			Self::InsufficientPermissions => "insufficient_permissions",

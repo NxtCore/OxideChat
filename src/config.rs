@@ -18,7 +18,6 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 #[serde(rename_all = "lowercase")]
 pub enum OAuthProvider {
 	Google,
-	Apple,
 	Discord,
 }
 
@@ -28,7 +27,6 @@ impl OAuthProvider {
 	pub fn from_str(s: &str) -> Option<Self> {
 		match s.to_lowercase().as_str() {
 			"google" => Some(Self::Google),
-			"apple" => Some(Self::Apple),
 			"discord" => Some(Self::Discord),
 			_ => None,
 		}
@@ -39,7 +37,6 @@ impl OAuthProvider {
 	pub const fn as_str(&self) -> &'static str {
 		match self {
 			Self::Google => "google",
-			Self::Apple => "apple",
 			Self::Discord => "discord",
 		}
 	}
@@ -47,7 +44,7 @@ impl OAuthProvider {
 	/// Get all available OAuth providers
 	#[must_use]
 	pub const fn all() -> &'static [OAuthProvider] {
-		&[Self::Google, Self::Apple, Self::Discord]
+		&[Self::Google, Self::Discord]
 	}
 }
 
@@ -69,11 +66,6 @@ pub struct ConfigValues {
 	pub oauth_google_client_secret: Option<String>,
 	pub oauth_google_redirect_uri: Option<String>,
 
-	// OAuth Apple configuration
-	pub oauth_apple_client_id: Option<String>,
-	pub oauth_apple_client_secret: Option<String>,
-	pub oauth_apple_redirect_uri: Option<String>,
-
 	// OAuth Discord configuration
 	pub oauth_discord_client_id: Option<String>,
 	pub oauth_discord_client_secret: Option<String>,
@@ -87,9 +79,6 @@ impl Default for ConfigValues {
 			oauth_google_client_id: None,
 			oauth_google_client_secret: None,
 			oauth_google_redirect_uri: None,
-			oauth_apple_client_id: None,
-			oauth_apple_client_secret: None,
-			oauth_apple_redirect_uri: None,
 			oauth_discord_client_id: None,
 			oauth_discord_client_secret: None,
 			oauth_discord_redirect_uri: None,
@@ -148,6 +137,12 @@ impl Config {
 		self.values.load().language
 	}
 
+	/// Get current configuration values.
+	#[must_use]
+	pub fn values(&self) -> std::sync::Arc<ConfigValues> {
+		self.values.load_full()
+	}
+
 	/// Check if an OAuth provider is fully configured.
 	///
 	/// Checks both database config and environment variables (as fallback).
@@ -162,13 +157,6 @@ impl Config {
 				let has_client_secret =
 					values.oauth_google_client_secret.is_some() || std::env::var("OAUTH_GOOGLE_CLIENT_SECRET").ok().filter(|s| !s.is_empty()).is_some();
 				let has_redirect_uri = values.oauth_google_redirect_uri.is_some() || std::env::var("OAUTH_GOOGLE_REDIRECT_URI").ok().filter(|s| !s.is_empty()).is_some();
-
-				has_client_id && has_client_secret && has_redirect_uri
-			}
-			OAuthProvider::Apple => {
-				let has_client_id = values.oauth_apple_client_id.is_some() || std::env::var("OAUTH_APPLE_CLIENT_ID").ok().filter(|s| !s.is_empty()).is_some();
-				let has_client_secret = values.oauth_apple_client_secret.is_some() || std::env::var("OAUTH_APPLE_CLIENT_SECRET").ok().filter(|s| !s.is_empty()).is_some();
-				let has_redirect_uri = values.oauth_apple_redirect_uri.is_some() || std::env::var("OAUTH_APPLE_REDIRECT_URI").ok().filter(|s| !s.is_empty()).is_some();
 
 				has_client_id && has_client_secret && has_redirect_uri
 			}
@@ -208,9 +196,6 @@ impl Config {
 				"oauth_google_client_id" => values.oauth_google_client_id = Some(row.value),
 				"oauth_google_client_secret" => values.oauth_google_client_secret = Some(row.value),
 				"oauth_google_redirect_uri" => values.oauth_google_redirect_uri = Some(row.value),
-				"oauth_apple_client_id" => values.oauth_apple_client_id = Some(row.value),
-				"oauth_apple_client_secret" => values.oauth_apple_client_secret = Some(row.value),
-				"oauth_apple_redirect_uri" => values.oauth_apple_redirect_uri = Some(row.value),
 				"oauth_discord_client_id" => values.oauth_discord_client_id = Some(row.value),
 				"oauth_discord_client_secret" => values.oauth_discord_client_secret = Some(row.value),
 				"oauth_discord_redirect_uri" => values.oauth_discord_redirect_uri = Some(row.value),

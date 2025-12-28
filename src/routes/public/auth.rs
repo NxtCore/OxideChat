@@ -107,7 +107,7 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
-		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
+		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).status(axum::http::StatusCode::CREATED).build(),
 		Err(e) => {
 			eprintln!("[AUTH] Failed to fetch user roles: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
@@ -207,7 +207,7 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
-		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
+		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).status(axum::http::StatusCode::CREATED).build(),
 		Err(e) => {
 			eprintln!("[AUTH] Failed to fetch user roles: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
