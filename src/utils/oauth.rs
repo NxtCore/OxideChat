@@ -57,14 +57,12 @@ fn get_provider_config(provider: OAuthProvider) -> Result<ProviderConfig, OAuthE
 	let config = Config::get();
 	let values = config.values();
 
-	// Check if provider is configured
 	if !config.is_oauth_provider_configured(provider) {
 		return Err(OAuthError::ProviderNotConfigured);
 	}
 
-	// Helper to get config value with env fallback - avoids cloning when possible
 	fn get_value(db_value: &Option<String>, env_key: &str) -> String {
-		db_value.clone().or_else(|| std::env::var(env_key).ok()).unwrap_or_default()
+		db_value.as_ref().cloned().or_else(|| std::env::var(env_key).ok()).unwrap_or_default()
 	}
 
 	match provider {
@@ -111,7 +109,6 @@ pub fn generate_auth_url(provider: OAuthProvider) -> Result<(String, OAuthState)
 
 	let mut auth_request = client.authorize_url(CsrfToken::new_random).set_pkce_challenge(pkce_challenge);
 
-	// Add scopes
 	for scope in config.scopes {
 		auth_request = auth_request.add_scope(Scope::new((*scope).to_string()));
 	}

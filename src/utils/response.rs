@@ -13,6 +13,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::i18n::I18n;
+pub use axum::http::header::InvalidHeaderValue;
 
 // ============================================================================
 // Response Builder
@@ -56,14 +57,12 @@ impl<T: Serialize> ResponseBuilder<T> {
 
 	/// Add a header from string values.
 	///
-	/// # Panics
+	/// # Errors
 	///
-	/// Panics if the key or value cannot be parsed as valid header components.
-	#[must_use]
-	pub fn header_str(mut self, key: &'static str, value: &str) -> Self {
-		self.headers
-			.insert(HeaderName::from_static(key), HeaderValue::from_str(value).expect("Invalid header value"));
-		self
+	/// Returns `InvalidHeaderValue` if the value cannot be parsed as a valid header component.
+	pub fn header_str(mut self, key: &'static str, value: &str) -> Result<Self, InvalidHeaderValue> {
+		self.headers.insert(HeaderName::from_static(key), HeaderValue::from_str(value)?);
+		Ok(self)
 	}
 
 	/// Add multiple headers from a `HeaderMap`.
@@ -74,39 +73,60 @@ impl<T: Serialize> ResponseBuilder<T> {
 	}
 
 	/// Set the `Content-Type` header.
-	#[must_use]
-	pub fn content_type(self, content_type: &str) -> Self {
-		self.header(header::CONTENT_TYPE, HeaderValue::from_str(content_type).expect("Invalid content type"))
+	///
+	/// # Errors
+	///
+	/// Returns `InvalidHeaderValue` if the content type cannot be parsed.
+	pub fn content_type(mut self, content_type: &str) -> Result<Self, InvalidHeaderValue> {
+		self.headers.insert(header::CONTENT_TYPE, HeaderValue::from_str(content_type)?);
+		Ok(self)
 	}
 
 	/// Set a `Cache-Control` directive.
-	#[must_use]
-	pub fn cache_control(self, directive: &str) -> Self {
-		self.header(header::CACHE_CONTROL, HeaderValue::from_str(directive).expect("Invalid cache directive"))
+	///
+	/// # Errors
+	///
+	/// Returns `InvalidHeaderValue` if the directive cannot be parsed.
+	pub fn cache_control(mut self, directive: &str) -> Result<Self, InvalidHeaderValue> {
+		self.headers.insert(header::CACHE_CONTROL, HeaderValue::from_str(directive)?);
+		Ok(self)
 	}
 
 	/// Set `Cache-Control: no-store, no-cache, must-revalidate`.
-	#[must_use]
-	pub fn no_cache(self) -> Self {
+	///
+	/// # Errors
+	///
+	/// Returns `InvalidHeaderValue` if the directive cannot be parsed.
+	pub fn no_cache(self) -> Result<Self, InvalidHeaderValue> {
 		self.cache_control("no-store, no-cache, must-revalidate")
 	}
 
 	/// Set `Cache-Control: max-age=<seconds>`.
-	#[must_use]
-	pub fn cache_max_age(self, seconds: u32) -> Self {
+	///
+	/// # Errors
+	///
+	/// Returns `InvalidHeaderValue` if the directive cannot be parsed.
+	pub fn cache_max_age(self, seconds: u32) -> Result<Self, InvalidHeaderValue> {
 		self.cache_control(&format!("max-age={seconds}"))
 	}
 
 	/// Set `Cache-Control: private, max-age=<seconds>`.
-	#[must_use]
-	pub fn cache_private(self, seconds: u32) -> Self {
+	///
+	/// # Errors
+	///
+	/// Returns `InvalidHeaderValue` if the directive cannot be parsed.
+	pub fn cache_private(self, seconds: u32) -> Result<Self, InvalidHeaderValue> {
 		self.cache_control(&format!("private, max-age={seconds}"))
 	}
 
 	/// Set `Access-Control-Allow-Origin` header.
-	#[must_use]
-	pub fn allow_origin(self, origin: &str) -> Self {
-		self.header(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_str(origin).expect("Invalid origin"))
+	///
+	/// # Errors
+	///
+	/// Returns `InvalidHeaderValue` if the origin cannot be parsed.
+	pub fn allow_origin(mut self, origin: &str) -> Result<Self, InvalidHeaderValue> {
+		self.headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_str(origin)?);
+		Ok(self)
 	}
 
 	/// Set permissive CORS headers (allow all origins, methods, headers).
@@ -215,6 +235,7 @@ pub enum ErrorCode {
 	UsernameTaken,
 	EmailOrUsernameTaken,
 	AlreadyExists,
+	OAuthEmailConflict,
 
 	// 422 Unprocessable Entity
 	UnprocessableEntity,
@@ -262,23 +283,11 @@ impl ErrorCode {
 			| Self::OAuthStateMismatch
 			| Self::OAuthTokenError
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
-
-			// 403
 			Self::Forbidden | Self::InsufficientPermissions | Self::AccountDisabled => StatusCode::FORBIDDEN,
-
-			// 404
 			Self::NotFound | Self::UserNotFound | Self::ResourceNotFound | Self::TranslationNotFound => StatusCode::NOT_FOUND,
-
-			// 409
-			Self::Conflict | Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists => StatusCode::CONFLICT,
-
-			// 422
+			Self::Conflict | Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::OAuthEmailConflict => StatusCode::CONFLICT,
 			Self::UnprocessableEntity => StatusCode::UNPROCESSABLE_ENTITY,
-
-			// 429
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
-
-			// 500+
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
 		}
@@ -331,6 +340,7 @@ impl ErrorCode {
 			Self::UsernameTaken => "auth.errors.username_taken",
 			Self::EmailOrUsernameTaken => "auth.errors.email_or_username_taken",
 			Self::AlreadyExists => "errors.already_exists",
+			Self::OAuthEmailConflict => "auth.errors.oauth_email_conflict",
 
 			Self::UnprocessableEntity => "errors.unprocessable_entity",
 
@@ -388,6 +398,7 @@ impl ErrorCode {
 			Self::UsernameTaken => "username_taken",
 			Self::EmailOrUsernameTaken => "email_or_username_taken",
 			Self::AlreadyExists => "already_exists",
+			Self::OAuthEmailConflict => "oauth_email_conflict",
 
 			Self::UnprocessableEntity => "unprocessable_entity",
 
@@ -399,7 +410,6 @@ impl ErrorCode {
 		}
 	}
 
-	/// Get the translated message for this error.
 	#[must_use]
 	pub fn message(&self) -> String {
 		I18n::get().translate(self.i18n_key(), &None)
@@ -410,7 +420,6 @@ impl ErrorCode {
 // Error Types
 // ============================================================================
 
-/// A single error detail in an API error response.
 #[derive(Debug, Serialize)]
 pub struct ErrorDetail {
 	pub code: &'static str,
@@ -422,7 +431,6 @@ pub struct ErrorDetail {
 	pub field: Option<String>,
 }
 
-/// Structured API error response containing one or more errors.
 #[derive(Debug, Serialize)]
 pub struct ApiError {
 	pub errors: Vec<ErrorDetail>,
@@ -565,14 +573,12 @@ impl ErrorBuilder {
 
 	/// Add a response header from string values.
 	///
-	/// # Panics
+	/// # Errors
 	///
-	/// Panics if the key or value cannot be parsed as valid header components.
-	#[must_use]
-	pub fn header_str(mut self, key: &'static str, value: &str) -> Self {
-		self.headers
-			.insert(HeaderName::from_static(key), HeaderValue::from_str(value).expect("Invalid header value"));
-		self
+	/// Returns `InvalidHeaderValue` if the value cannot be parsed as a valid header component.
+	pub fn header_str(mut self, key: &'static str, value: &str) -> Result<Self, InvalidHeaderValue> {
+		self.headers.insert(HeaderName::from_static(key), HeaderValue::from_str(value)?);
+		Ok(self)
 	}
 
 	fn finalize_current(&mut self) {

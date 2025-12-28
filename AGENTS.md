@@ -90,6 +90,8 @@
 - Migrations run automatically on startup
 - Keep the code as simple as possible so beginners can also understand it
 - Frontend should always use customizable Tailwind classes like bg-primary, text-primary, etc. and not use fixed colors
+- Do not add comments to the code itself
+- When writing axum routes, please use the response "module" to create responses
 
 ## Updating This Document
 

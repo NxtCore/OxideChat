@@ -107,7 +107,9 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
-		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).status(axum::http::StatusCode::CREATED).build(),
+		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response }))
+			.status(axum::http::StatusCode::CREATED)
+			.build(),
 		Err(e) => {
 			eprintln!("[AUTH] Failed to fetch user roles: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
@@ -174,9 +176,19 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 	{
 		Ok(user) => user,
 		Err(e) => {
-			let code = if e.to_string().contains("duplicate key") {
-				ErrorCode::EmailOrUsernameTaken
+			let error_string = e.to_string();
+			let code = if error_string.contains("duplicate key") {
+				// Parse constraint name to distinguish email vs username conflicts
+				if error_string.contains("users_email_key") {
+					ErrorCode::EmailTaken
+				} else if error_string.contains("users_username_key") {
+					ErrorCode::UsernameTaken
+				} else {
+					// Fallback if constraint name can't be determined
+					ErrorCode::EmailOrUsernameTaken
+				}
 			} else {
+				eprintln!("[AUTH] Database error during registration: {e}");
 				ErrorCode::DatabaseError
 			};
 			return ErrorBuilder::new(code).build();
@@ -207,7 +219,9 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
-		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).status(axum::http::StatusCode::CREATED).build(),
+		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response }))
+			.status(axum::http::StatusCode::CREATED)
+			.build(),
 		Err(e) => {
 			eprintln!("[AUTH] Failed to fetch user roles: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
@@ -284,6 +298,10 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 /// POST /api/v1/auth/logout
 ///
 /// Invalidate the current session.
+///
+/// # Errors
+///
+/// Returns 500 if the database query fails during session lookup.
 pub async fn logout(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
 	let mut user_id: Option<Uuid> = None;
 	let mut session_id_to_log: Option<Uuid> = None;
@@ -291,15 +309,29 @@ pub async fn logout(State(state): State<Arc<AppState>>, cookies: Cookies) -> imp
 	if let Some(session_cookie) = cookies.get(SESSION_COOKIE_NAME) {
 		if let Ok(session_id) = Uuid::parse_str(session_cookie.value()) {
 			session_id_to_log = Some(session_id);
-			// Get user_id before deleting session
-			if let Ok(Some(uid)) = sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM sessions WHERE id = $1")
+			// Get user_id before deleting session - cancel logout if this fails
+			match sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM sessions WHERE id = $1")
 				.bind(session_id)
 				.fetch_optional(&state.db)
 				.await
 			{
-				user_id = Some(uid);
+				Ok(Some(uid)) => {
+					user_id = Some(uid);
+				}
+				Ok(None) => {
+					// Session doesn't exist, just clear the cookie
+				}
+				Err(e) => {
+					eprintln!("[AUTH] Database error during logout session lookup: {e}");
+					return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+				}
 			}
-			let _ = sqlx::query("DELETE FROM sessions WHERE id = $1").bind(session_id).execute(&state.db).await;
+
+			// Only proceed to delete session and log if we got this far
+			if let Err(e) = sqlx::query("DELETE FROM sessions WHERE id = $1").bind(session_id).execute(&state.db).await {
+				eprintln!("[AUTH] Database error deleting session: {e}");
+				return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+			}
 		}
 	}
 

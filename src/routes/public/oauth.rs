@@ -17,6 +17,21 @@ use tower_cookies::{Cookie, Cookies};
 
 const OAUTH_STATE_COOKIE: &str = "oxidechat_oauth_state";
 
+/// Error type for find_or_create_user function.
+#[derive(Debug)]
+enum FindOrCreateError {
+	/// An account with this email already exists (requires manual linking)
+	EmailConflict,
+	/// Database error during user lookup/creation
+	Database(sqlx::Error),
+}
+
+impl From<sqlx::Error> for FindOrCreateError {
+	fn from(err: sqlx::Error) -> Self {
+		Self::Database(err)
+	}
+}
+
 /// GET /api/v1/auth/oauth/{provider}
 ///
 /// Initiates OAuth flow by redirecting to provider's authorization URL.
@@ -142,22 +157,23 @@ pub async fn oauth_callback(Path(provider): Path<String>, Query(params): Query<O
 	// Find or create user
 	match find_or_create_user(&state.db, &user_info, &cookies).await {
 		Ok(user) => {
-			// Log successful OAuth login
-			AuditLog::log(&state.db, LogEvent::OAuthLoginSuccess, Some(user.id), Some(EntityType::User), Some(user.id));
-
 			// Return success with redirect
 			let redirect_url = oauth_state.redirect_after.as_deref().unwrap_or("/");
 
-			// Create session
 			if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
 				eprintln!("[OAUTH] Failed to create session: {e}");
+				AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, Some(user.id), Some(EntityType::User), Some(user.id));
 				return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 			}
 
-			// For API, redirect to frontend
+			AuditLog::log(&state.db, LogEvent::OAuthLoginSuccess, Some(user.id), Some(EntityType::User), Some(user.id));
 			Redirect::temporary(redirect_url).into_response()
 		}
-		Err(e) => {
+		Err(FindOrCreateError::EmailConflict) => {
+			eprintln!("[OAUTH] OAuth email matches existing account - requires manual linking");
+			Redirect::temporary("/auth/error?code=oauth_email_conflict").into_response()
+		}
+		Err(FindOrCreateError::Database(e)) => {
 			eprintln!("[OAUTH] Failed to find/create user: {e}");
 			AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
 			ErrorBuilder::new(ErrorCode::DatabaseError).build()
@@ -165,10 +181,11 @@ pub async fn oauth_callback(Path(provider): Path<String>, Query(params): Query<O
 	}
 }
 
-/// Find existing user by OAuth identity or email, or create a new user.
-/// Links the OAuth identity to the user if not already linked.
-async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _cookies: &Cookies) -> Result<User, sqlx::Error> {
-	// Check if we have an existing identity for this provider+user_id
+/// Find existing user by OAuth identity, or create a new user.
+///
+/// Returns an error if the email matches an existing account that doesn't have
+/// this OAuth identity linked - the user must manually link their accounts.
+async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _cookies: &Cookies) -> Result<User, FindOrCreateError> {
 	let existing_identity: Option<uuid::Uuid> = sqlx::query_scalar("SELECT user_id FROM user_identities WHERE provider = $1 AND provider_user_id = $2")
 		.bind(&user_info.provider)
 		.bind(&user_info.provider_user_id)
@@ -176,38 +193,21 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 		.await?;
 
 	if let Some(user_id) = existing_identity {
-		// User exists with this OAuth identity, fetch and return
 		let user: User = sqlx::query_as("SELECT * FROM users WHERE id = $1").bind(user_id).fetch_one(pool).await?;
 		return Ok(user);
 	}
 
-	// No existing identity - check if email matches an existing user
 	let email = user_info.email.as_ref();
 
 	if let Some(email) = email {
 		let existing_user: Option<User> = sqlx::query_as("SELECT * FROM users WHERE email = $1").bind(email).fetch_optional(pool).await?;
 
-		if let Some(user) = existing_user {
-			// Link OAuth identity to existing user (auto-link strategy)
-			sqlx::query(
-				"INSERT INTO user_identities (user_id, provider, provider_user_id, provider_data) 
-				 VALUES ($1, $2, $3, $4)",
-			)
-			.bind(user.id)
-			.bind(&user_info.provider)
-			.bind(&user_info.provider_user_id)
-			.bind(&user_info.raw_data)
-			.execute(pool)
-			.await?;
-
-			AuditLog::log(pool, LogEvent::OAuthIdentityLinked, Some(user.id), Some(EntityType::User), Some(user.id));
-
-			return Ok(user);
+		if existing_user.is_some() {
+			// Email matches existing account - require manual linking
+			return Err(FindOrCreateError::EmailConflict);
 		}
 	}
 
-	// No existing user - create new one
-	// Email is guaranteed to exist because we validate it in oauth_callback
 	let email = email.expect("Email should be present after validation");
 
 	let username = user_info
@@ -216,10 +216,8 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 		.map(String::from)
 		.unwrap_or_else(|| format!("user_{}", &user_info.provider_user_id[..8.min(user_info.provider_user_id.len())]));
 
-	// Make username unique if it already exists
 	let unique_username = make_unique_username(pool, &username).await?;
 
-	// Create user
 	let user: User = sqlx::query_as(
 		"INSERT INTO users (email, username, auth_method) 
 		 VALUES ($1, $2, 'oauth') 
@@ -230,7 +228,6 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 	.fetch_one(pool)
 	.await?;
 
-	// Assign default user role
 	sqlx::query(
 		"INSERT INTO user_roles (user_id, role_id) 
 		 SELECT $1, id FROM roles WHERE name = 'user'",
@@ -239,7 +236,6 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 	.execute(pool)
 	.await?;
 
-	// Create OAuth identity link
 	sqlx::query(
 		"INSERT INTO user_identities (user_id, provider, provider_user_id, provider_data) 
 		 VALUES ($1, $2, $3, $4)",
@@ -267,8 +263,8 @@ async fn make_unique_username(pool: &sqlx::PgPool, base_username: &str) -> Resul
 		return Ok(base_username.to_string());
 	}
 
-	// Username taken, try with numbers
-	for i in 1..1000 {
+	let mut i = 1u64;
+	loop {
 		let candidate = format!("{base_username}{i}");
 		let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)")
 			.bind(&candidate)
@@ -278,8 +274,6 @@ async fn make_unique_username(pool: &sqlx::PgPool, base_username: &str) -> Resul
 		if !exists {
 			return Ok(candidate);
 		}
+		i += 1;
 	}
-
-	// Fallback to UUID suffix
-	Ok(format!("{base_username}_{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x")))
 }
