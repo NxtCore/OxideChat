@@ -5,13 +5,15 @@
 use crate::AppState;
 use crate::i18n::I18n;
 use crate::types::{BaseResponse, CountRow};
-use axum::{Json, extract::State};
+use crate::utils::response::{ResponseBody, ResponseBuilder};
+use axum::extract::State;
+use axum::response::IntoResponse;
 use std::sync::Arc;
 
 /// GET /api/v1/base
 ///
 /// Returns base application data including translations and setup status.
-pub async fn get_base(State(state): State<Arc<AppState>>) -> Json<BaseResponse> {
+pub async fn get_base(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 	let i18n = I18n::get().all();
 
 	// Check if any users exist (needs_setup = true if no users)
@@ -20,9 +22,10 @@ pub async fn get_base(State(state): State<Arc<AppState>>) -> Json<BaseResponse> 
 		Err(_) => true, // Assume setup needed if query fails
 	};
 
-	Json(BaseResponse {
+	ResponseBuilder::new(ResponseBody::Json(BaseResponse {
 		i18n,
 		needs_setup,
 		oauth_providers: crate::config::Config::get().get_configured_oauth_providers(),
-	})
+	}))
+	.build()
 }

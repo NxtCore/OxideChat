@@ -3,12 +3,10 @@
 //! Handles user setup, registration, login, and logout.
 
 use crate::AppState;
-use crate::i18n::I18n;
-use crate::types::{AuthResponse, LoginRequest, MessageResponse, RegisterRequest, SetupRequest, User};
-use crate::utils::auth::{
-	create_session, hash_password, internal_error, user_to_response, users_exist, validate_email, validate_password, validate_username, verify_password,
-};
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use crate::types::{AuthResponse, LoginRequest, RegisterRequest, SetupRequest, User};
+use crate::utils::auth::{create_session, hash_password, user_to_response, users_exist, validate_email, validate_password, validate_username, verify_password};
+use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use axum::{Json, extract::State, response::IntoResponse};
 use sqlx::PgPool;
 use std::sync::Arc;
 use tower_cookies::{Cookie, Cookies};
@@ -33,52 +31,28 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	// Check if setup already completed
 	match users_exist(&state.db).await {
 		Ok(true) => {
-			return (
-				StatusCode::BAD_REQUEST,
-				Json(MessageResponse {
-					message: I18n::get().translate("auth.errors.setup_completed", &None),
-				}),
-			)
-				.into_response();
+			return ErrorBuilder::new(ErrorCode::SetupCompleted).build();
 		}
 		Err(e) => {
 			eprintln!("[AUTH] Database error checking users: {e}");
-			return internal_error().into_response();
+			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 		}
 		_ => {}
 	}
 
 	// Validate email
 	if !validate_email(&payload.email) {
-		return (
-			StatusCode::BAD_REQUEST,
-			Json(MessageResponse {
-				message: I18n::get().translate("auth.errors.invalid_email", &None),
-			}),
-		)
-			.into_response();
+		return ErrorBuilder::new(ErrorCode::InvalidEmail).build();
 	}
 
 	// Validate username
-	if let Err(key) = validate_username(&payload.username) {
-		return (
-			StatusCode::BAD_REQUEST,
-			Json(MessageResponse {
-				message: I18n::get().translate(key, &None),
-			}),
-		)
-			.into_response();
+	if let Err(code) = validate_username(&payload.username) {
+		return ErrorBuilder::new(code).build();
 	}
 
 	// Validate password
-	if let Err(key) = validate_password(&payload.password) {
-		return (
-			StatusCode::BAD_REQUEST,
-			Json(MessageResponse {
-				message: I18n::get().translate(key, &None),
-			}),
-		)
-			.into_response();
+	if let Err(code) = validate_password(&payload.password) {
+		return ErrorBuilder::new(code).build();
 	}
 
 	// Hash password
@@ -86,7 +60,7 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 		Ok(hash) => hash,
 		Err(e) => {
 			eprintln!("[AUTH] Password hashing error: {e}");
-			return internal_error().into_response();
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	};
 
@@ -105,7 +79,7 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 		Ok(user) => user,
 		Err(e) => {
 			eprintln!("[AUTH] Failed to create user: {e}");
-			return internal_error().into_response();
+			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 		}
 	};
 
@@ -119,21 +93,21 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	.await
 	{
 		eprintln!("[AUTH] Failed to assign admin role: {e}");
-		return internal_error().into_response();
+		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
 	// Create session
 	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
 		eprintln!("[AUTH] Failed to create session: {e}");
-		return internal_error().into_response();
+		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
-		Ok(user_response) => (StatusCode::CREATED, Json(AuthResponse { user: user_response })).into_response(),
+		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
 		Err(e) => {
 			eprintln!("[AUTH] Failed to fetch user roles: {e}");
-			internal_error().into_response()
+			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}
 	}
 }
@@ -150,52 +124,28 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 	// Check if setup completed
 	match users_exist(&state.db).await {
 		Ok(false) => {
-			return (
-				StatusCode::BAD_REQUEST,
-				Json(MessageResponse {
-					message: I18n::get().translate("auth.errors.setup_required", &None),
-				}),
-			)
-				.into_response();
+			return ErrorBuilder::new(ErrorCode::SetupRequired).build();
 		}
 		Err(e) => {
 			eprintln!("[AUTH] Database error checking users: {e}");
-			return internal_error().into_response();
+			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 		}
 		_ => {}
 	}
 
 	// Validate email
 	if !validate_email(&payload.email) {
-		return (
-			StatusCode::BAD_REQUEST,
-			Json(MessageResponse {
-				message: I18n::get().translate("auth.errors.invalid_email", &None),
-			}),
-		)
-			.into_response();
+		return ErrorBuilder::new(ErrorCode::InvalidEmail).build();
 	}
 
 	// Validate username
-	if let Err(key) = validate_username(&payload.username) {
-		return (
-			StatusCode::BAD_REQUEST,
-			Json(MessageResponse {
-				message: I18n::get().translate(key, &None),
-			}),
-		)
-			.into_response();
+	if let Err(code) = validate_username(&payload.username) {
+		return ErrorBuilder::new(code).build();
 	}
 
 	// Validate password
-	if let Err(key) = validate_password(&payload.password) {
-		return (
-			StatusCode::BAD_REQUEST,
-			Json(MessageResponse {
-				message: I18n::get().translate(key, &None),
-			}),
-		)
-			.into_response();
+	if let Err(code) = validate_password(&payload.password) {
+		return ErrorBuilder::new(code).build();
 	}
 
 	// Hash password
@@ -203,7 +153,7 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 		Ok(hash) => hash,
 		Err(e) => {
 			eprintln!("[AUTH] Password hashing error: {e}");
-			return internal_error().into_response();
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	};
 
@@ -221,13 +171,12 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 	{
 		Ok(user) => user,
 		Err(e) => {
-			let message = if e.to_string().contains("duplicate key") {
-				I18n::get().translate("auth.errors.email_or_username_taken", &None)
+			let code = if e.to_string().contains("duplicate key") {
+				ErrorCode::EmailOrUsernameTaken
 			} else {
-				eprintln!("[AUTH] Failed to create user: {e}");
-				I18n::get().translate("auth.errors.internal_error", &None)
+				ErrorCode::DatabaseError
 			};
-			return (StatusCode::BAD_REQUEST, Json(MessageResponse { message })).into_response();
+			return ErrorBuilder::new(code).build();
 		}
 	};
 
@@ -241,21 +190,21 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 	.await
 	{
 		eprintln!("[AUTH] Failed to assign user role: {e}");
-		return internal_error().into_response();
+		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
 	// Create session
 	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
 		eprintln!("[AUTH] Failed to create session: {e}");
-		return internal_error().into_response();
+		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
-		Ok(user_response) => (StatusCode::CREATED, Json(AuthResponse { user: user_response })).into_response(),
+		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
 		Err(e) => {
 			eprintln!("[AUTH] Failed to fetch user roles: {e}");
-			internal_error().into_response()
+			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}
 	}
 }
@@ -277,17 +226,11 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	{
 		Ok(Some(user)) => user,
 		Ok(None) => {
-			return (
-				StatusCode::UNAUTHORIZED,
-				Json(MessageResponse {
-					message: I18n::get().translate("auth.errors.invalid_credentials", &None),
-				}),
-			)
-				.into_response();
+			return ErrorBuilder::new(ErrorCode::InvalidCredentials).build();
 		}
 		Err(e) => {
 			eprintln!("[AUTH] Database error during login: {e}");
-			return internal_error().into_response();
+			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 		}
 	};
 
@@ -295,13 +238,7 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	let password_hash = match &user.password_hash {
 		Some(hash) => hash,
 		None => {
-			return (
-				StatusCode::UNAUTHORIZED,
-				Json(MessageResponse {
-					message: I18n::get().translate("auth.errors.external_auth", &None),
-				}),
-			)
-				.into_response();
+			return ErrorBuilder::new(ErrorCode::ExternalAuthRequired).build();
 		}
 	};
 
@@ -309,32 +246,26 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	match verify_password(&payload.password, password_hash) {
 		Ok(true) => {}
 		Ok(false) => {
-			return (
-				StatusCode::UNAUTHORIZED,
-				Json(MessageResponse {
-					message: I18n::get().translate("auth.errors.invalid_credentials", &None),
-				}),
-			)
-				.into_response();
+			return ErrorBuilder::new(ErrorCode::InvalidCredentials).build();
 		}
 		Err(e) => {
 			eprintln!("[AUTH] Password verification error: {e}");
-			return internal_error().into_response();
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	}
 
 	// Create session
 	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
 		eprintln!("[AUTH] Failed to create session: {e}");
-		return internal_error().into_response();
+		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
-		Ok(user_response) => (StatusCode::OK, Json(AuthResponse { user: user_response })).into_response(),
+		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
 		Err(e) => {
 			eprintln!("[AUTH] Failed to fetch user roles: {e}");
-			internal_error().into_response()
+			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}
 	}
 }
@@ -351,12 +282,10 @@ pub async fn logout(State(state): State<Arc<AppState>>, cookies: Cookies) -> imp
 
 	cookies.remove(Cookie::from(SESSION_COOKIE_NAME));
 
-	(
-		StatusCode::OK,
-		Json(MessageResponse {
-			message: I18n::get().translate("auth.messages.logout_success", &None),
-		}),
-	)
+	ResponseBuilder::new(ResponseBody::Json(serde_json::json!({
+		"message": crate::i18n::I18n::get().translate("auth.messages.logout_success", &None)
+	})))
+	.build()
 }
 
 /// Get the current user from the session cookie.
