@@ -91,6 +91,19 @@ INSERT INTO rate_limits (endpoint_pattern, requests_per_window, window_seconds, 
     ('/api/v1/auth/setup', 3, 3600, 'ip')      -- 3 requests per hour
 ON CONFLICT (endpoint_pattern) DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event VARCHAR(50) NOT NULL,
+    actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    target_type VARCHAR(50),
+    target_id UUID,
+    resource_type VARCHAR(50),
+    resource_id UUID,
+    metadata JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
 -- Default roles
 INSERT INTO roles (name) VALUES ('admin'), ('user') ON CONFLICT DO NOTHING;
 
@@ -105,6 +118,13 @@ CREATE INDEX IF NOT EXISTS idx_user_identities_provider ON user_identities(provi
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_app_config_key ON app_config(key);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_event ON audit_logs(event);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON audit_logs(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_event_time ON audit_logs(event, created_at DESC);
+
 
 --- Translations
 INSERT INTO i18n_translations (language, key_path, value) VALUES

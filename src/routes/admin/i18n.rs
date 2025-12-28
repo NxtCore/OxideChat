@@ -4,6 +4,7 @@
 
 use crate::AppState;
 use crate::i18n::I18n;
+use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::{IdRow, Translation, TranslationsResponse, UpsertTranslationRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
@@ -48,6 +49,7 @@ pub async fn upsert_translation(State(state): State<Arc<AppState>>, Json(payload
 	match result {
 		Ok(row) => {
 			I18n::get().reload(&state.db).await;
+			AuditLog::log(&state.db, LogEvent::TranslationUpdated, None, Some(EntityType::Translation), Some(row.id));
 			ResponseBuilder::new(ResponseBody::Json(serde_json::json!({ "id": row.id, "success": true }))).build()
 		}
 		Err(e) => {
@@ -66,6 +68,7 @@ pub async fn delete_translation(State(state): State<Arc<AppState>>, Path(id): Pa
 	match result {
 		Ok(res) if res.rows_affected() > 0 => {
 			I18n::get().reload(&state.db).await;
+			AuditLog::log(&state.db, LogEvent::TranslationDeleted, None, Some(EntityType::Translation), Some(id));
 			ResponseBuilder::new(ResponseBody::Json(serde_json::json!({ "success": true }))).build()
 		}
 		Ok(_) => ErrorBuilder::new(ErrorCode::TranslationNotFound).build(),

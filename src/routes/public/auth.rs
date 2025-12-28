@@ -3,6 +3,7 @@
 //! Handles user setup, registration, login, and logout.
 
 use crate::AppState;
+use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::{AuthResponse, LoginRequest, RegisterRequest, SetupRequest, User};
 use crate::utils::auth::{create_session, hash_password, user_to_response, users_exist, validate_email, validate_password, validate_username, verify_password};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
@@ -102,6 +103,8 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
+	AuditLog::log(&state.db, LogEvent::AdminSetup, Some(user.id), Some(EntityType::User), Some(user.id));
+
 	// Return user response
 	match user_to_response(&state.db, &user).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
@@ -199,6 +202,9 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
+	// Log user registration
+	AuditLog::log(&state.db, LogEvent::UserRegistered, Some(user.id), Some(EntityType::User), Some(user.id));
+
 	// Return user response
 	match user_to_response(&state.db, &user).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
@@ -226,6 +232,7 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	{
 		Ok(Some(user)) => user,
 		Ok(None) => {
+			AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
 			return ErrorBuilder::new(ErrorCode::InvalidCredentials).build();
 		}
 		Err(e) => {
@@ -246,6 +253,7 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	match verify_password(&payload.password, password_hash) {
 		Ok(true) => {}
 		Ok(false) => {
+			AuditLog::log(&state.db, LogEvent::UserLoginFailed, Some(user.id), Some(EntityType::User), Some(user.id));
 			return ErrorBuilder::new(ErrorCode::InvalidCredentials).build();
 		}
 		Err(e) => {
@@ -259,6 +267,9 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 		eprintln!("[AUTH] Failed to create session: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
+
+	// Log successful login
+	AuditLog::log(&state.db, LogEvent::UserLogin, Some(user.id), Some(EntityType::Session), None);
 
 	// Return user response
 	match user_to_response(&state.db, &user).await {
@@ -274,13 +285,28 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 ///
 /// Invalidate the current session.
 pub async fn logout(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+	let mut user_id: Option<Uuid> = None;
+	let mut session_id_to_log: Option<Uuid> = None;
+
 	if let Some(session_cookie) = cookies.get(SESSION_COOKIE_NAME) {
 		if let Ok(session_id) = Uuid::parse_str(session_cookie.value()) {
+			session_id_to_log = Some(session_id);
+			// Get user_id before deleting session
+			if let Ok(Some(uid)) = sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM sessions WHERE id = $1")
+				.bind(session_id)
+				.fetch_optional(&state.db)
+				.await
+			{
+				user_id = Some(uid);
+			}
 			let _ = sqlx::query("DELETE FROM sessions WHERE id = $1").bind(session_id).execute(&state.db).await;
 		}
 	}
 
 	cookies.remove(Cookie::from(SESSION_COOKIE_NAME));
+
+	// Log logout event
+	AuditLog::log(&state.db, LogEvent::UserLogout, user_id, Some(EntityType::Session), session_id_to_log);
 
 	ResponseBuilder::new(ResponseBody::Json(serde_json::json!({
 		"message": crate::i18n::I18n::get().translate("auth.messages.logout_success", &None)
