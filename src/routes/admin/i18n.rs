@@ -4,11 +4,12 @@
 
 use crate::AppState;
 use crate::i18n::I18n;
+use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::{IdRow, Translation, TranslationsResponse, UpsertTranslationRequest};
+use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
 	extract::{Path, State},
-	http::StatusCode,
 	response::IntoResponse,
 };
 use std::sync::Arc;
@@ -22,7 +23,7 @@ pub async fn list_translations(State(state): State<Arc<AppState>>) -> impl IntoR
 		.await
 		.unwrap_or_default();
 
-	Json(TranslationsResponse { translations })
+	ResponseBuilder::new(ResponseBody::Json(TranslationsResponse { translations })).build()
 }
 
 /// PUT /api/v1/admin/i18n/translations
@@ -47,11 +48,14 @@ pub async fn upsert_translation(State(state): State<Arc<AppState>>, Json(payload
 
 	match result {
 		Ok(row) => {
-			// Reload translations so changes are immediately available
 			I18n::get().reload(&state.db).await;
-			(StatusCode::OK, Json(serde_json::json!({ "id": row.id, "success": true })))
+			AuditLog::log(&state.db, LogEvent::TranslationUpdated, None, Some(EntityType::Translation), Some(row.id));
+			ResponseBuilder::new(ResponseBody::Json(serde_json::json!({ "id": row.id, "success": true }))).build()
 		}
-		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))),
+		Err(e) => {
+			eprintln!("[I18N] Failed to upsert translation: {e}");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
 	}
 }
 
@@ -63,11 +67,14 @@ pub async fn delete_translation(State(state): State<Arc<AppState>>, Path(id): Pa
 
 	match result {
 		Ok(res) if res.rows_affected() > 0 => {
-			// Reload translations so changes are immediately available
 			I18n::get().reload(&state.db).await;
-			(StatusCode::OK, Json(serde_json::json!({ "success": true })))
+			AuditLog::log(&state.db, LogEvent::TranslationDeleted, None, Some(EntityType::Translation), Some(id));
+			ResponseBuilder::new(ResponseBody::Json(serde_json::json!({ "success": true }))).build()
 		}
-		Ok(_) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Translation not found" }))),
-		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))),
+		Ok(_) => ErrorBuilder::new(ErrorCode::TranslationNotFound).build(),
+		Err(e) => {
+			eprintln!("[I18N] Failed to delete translation: {e}");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
 	}
 }

@@ -11,7 +11,8 @@ use uuid::Uuid;
 use crate::{
 	i18n::I18n,
 	routes::public::auth::{MAX_PASSWORD_LENGTH, MAX_USERNAME_LENGTH, MIN_PASSWORD_LENGTH, MIN_USERNAME_LENGTH, SESSION_COOKIE_NAME, SESSION_DURATION_DAYS},
-	types::{CountRow, MessageResponse, RoleNameRow, User, UserResponse},
+	types::{CountRow, RoleNameRow, User, UserResponse},
+	utils::response::ErrorCode,
 };
 
 /// Hash a password using Argon2id.
@@ -107,16 +108,16 @@ pub fn validate_email(email: &str) -> bool {
 }
 
 /// Validate username format.
-pub fn validate_username(username: &str) -> Result<(), &'static str> {
+pub fn validate_username(username: &str) -> Result<(), ErrorCode> {
 	if username.len() < MIN_USERNAME_LENGTH {
-		return Err("auth.errors.username_too_short");
+		return Err(ErrorCode::UsernameTooShort);
 	}
 	if username.len() > MAX_USERNAME_LENGTH {
-		return Err("auth.errors.username_too_long");
+		return Err(ErrorCode::UsernameTooLong);
 	}
 	// Allow alphanumeric, underscores, and hyphens
 	if !username.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
-		return Err("auth.errors.username_invalid_chars");
+		return Err(ErrorCode::UsernameInvalid);
 	}
 	Ok(())
 }
@@ -130,34 +131,24 @@ pub fn validate_username(username: &str) -> Result<(), &'static str> {
 /// - At least one lowercase letter
 /// - At least one digit
 /// - At least one special character
-pub fn validate_password(password: &str) -> Result<(), &'static str> {
+pub fn validate_password(password: &str) -> Result<(), ErrorCode> {
 	if password.len() < MIN_PASSWORD_LENGTH {
-		return Err("auth.errors.password_too_short");
+		return Err(ErrorCode::PasswordTooShort);
 	}
 	if password.len() > MAX_PASSWORD_LENGTH {
-		return Err("auth.errors.password_too_long");
+		return Err(ErrorCode::PasswordTooLong);
 	}
 	if !password.chars().any(|c| c.is_uppercase()) {
-		return Err("auth.errors.password_no_uppercase");
+		return Err(ErrorCode::PasswordNoUppercase);
 	}
 	if !password.chars().any(|c| c.is_lowercase()) {
-		return Err("auth.errors.password_no_lowercase");
+		return Err(ErrorCode::PasswordNoLowercase);
 	}
 	if !password.chars().any(|c| c.is_ascii_digit()) {
-		return Err("auth.errors.password_no_digit");
+		return Err(ErrorCode::PasswordNoDigit);
 	}
 	if !password.chars().any(|c| !c.is_alphanumeric()) {
-		return Err("auth.errors.password_no_special");
+		return Err(ErrorCode::PasswordNoSpecial);
 	}
 	Ok(())
-}
-
-/// Error response helper that hides internal details.
-pub fn internal_error() -> (StatusCode, Json<MessageResponse>) {
-	(
-		StatusCode::INTERNAL_SERVER_ERROR,
-		Json(MessageResponse {
-			message: I18n::get().translate("auth.errors.internal_error", &None),
-		}),
-	)
 }

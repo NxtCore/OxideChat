@@ -21,6 +21,8 @@ pub fn build_router() -> Router<Arc<AppState>> {
 		.route("/api/v1/auth/register", post(public::auth::register))
 		.route("/api/v1/auth/login", post(public::auth::login))
 		.route("/api/v1/auth/logout", post(public::auth::logout))
+		.route("/api/v1/auth/oauth/{provider}", get(public::oauth::oauth_init))
+		.route("/api/v1/auth/oauth/{provider}/callback", get(public::oauth::oauth_callback))
 		.route("/api/v1/users/@me", get(public::users::get_me))
 		.layer(CookieManagerLayer::new())
 }
