@@ -19,6 +19,7 @@ interface User {
 	username: string;
 	auth_method: string;
 	roles: string[];
+	permissions: string[];
 	created_at: string;
 }
 
@@ -52,6 +53,19 @@ export const useMainStore = defineStore('main', {
 		},
 	},
 	actions: {
+		hasPermission(permission: string): boolean {
+			const userPerms = this.auth.user?.permissions ?? [];
+			if (userPerms.includes(permission)) return true;
+			const parts = permission.split('.');
+			for (let i = 1; i < parts.length; i++) {
+				const wildcard = parts.slice(0, i).join('.') + '.*';
+				if (userPerms.includes(wildcard)) return true;
+			}
+			return false;
+		},
+		hasAnyPermission(permissions: string[]): boolean {
+			return permissions.some(p => this.hasPermission(p));
+		},
 		getTranslation(name: string, language?: string, args: {[key: string]: any} = {}): string {
 			const lang = language ?? this.base?.language ?? 'en';
 			let currentTranslation: any = this.base?.i18n?.[lang];
@@ -160,8 +174,17 @@ export const useMainStore = defineStore('main', {
 				this.auth.isAuthenticated = false;
 			}
 		},
-		copyToClipboard(text: string) {
-			navigator.clipboard.writeText(text);
+		async copyToClipboard(text: string) {
+			try {
+				if (typeof navigator === 'undefined' || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+					console.error('Clipboard API is not available in this environment.');
+					return;
+				}
+				await navigator.clipboard.writeText(text);
+				this.toast(this.getTranslation('common.copy_to_clipboard'), {description: text});
+			} catch (error) {
+				console.error('Failed to copy text to clipboard:', error);
+			}
 		},
 		toast(title: string, options?: {description?: string; type?: 'success' | 'error' | 'warning' | 'info' | 'loading'; duration?: number}) {
 			const {$toast} = useNuxtApp();

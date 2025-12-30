@@ -42,6 +42,7 @@ mod tests {
 				username: "testuser".to_string(),
 				auth_method: "local".to_string(),
 				roles: vec!["admin".to_string()],
+				permissions: vec!["settings.profile.view".to_string()],
 				created_at: chrono::Utc::now(),
 			};
 
@@ -59,6 +60,7 @@ mod tests {
 					username: "testuser".to_string(),
 					auth_method: "local".to_string(),
 					roles: vec!["user".to_string()],
+					permissions: vec![],
 					created_at: chrono::Utc::now(),
 				},
 			};

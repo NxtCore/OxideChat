@@ -1,7 +1,7 @@
 -- Add OAuth error translations and new error codes
 
 -- OAuth email conflict error (when OAuth email matches existing account)
-INSERT INTO translations (language, key, value) VALUES
+INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'auth.errors.oauth_email_conflict', 'An account with this email already exists. Please log in with your original method.'),
     ('en', 'auth.errors.oauth_email_conflict_title', 'Account Already Exists'),
     ('en', 'auth.errors.oauth_email_conflict_help', 'Your OAuth provider returned an email that is already associated with an existing account. To link your OAuth identity, please log in with your existing credentials first, then link the OAuth provider from your account settings.'),
@@ -33,4 +33,4 @@ INSERT INTO translations (language, key, value) VALUES
     ('de', 'auth.errors.go_home', 'Zur Startseite'),
     ('de', 'auth.errors.email_taken', 'Diese E-Mail-Adresse ist bereits registriert'),
     ('de', 'auth.errors.username_taken', 'Dieser Benutzername ist bereits vergeben')
-ON CONFLICT (language, key) DO UPDATE SET value = EXCLUDED.value;
+ON CONFLICT (language, key_path) DO NOTHING;

@@ -128,6 +128,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_event_time ON audit_logs(event, create
 
 --- Translations
 INSERT INTO i18n_translations (language, key_path, value) VALUES
+    -- Common
+    ('en', 'common.copy_to_clipboard', 'Copied to clipboard'),
+    ('de', 'common.copy_to_clipboard', 'In die Zwischenablage kopiert'),
     -- Auth errors
     ('en', 'auth.errors.setup_completed', 'Setup has already been completed'),
     ('en', 'auth.errors.setup_required', 'Setup must be completed first'),

@@ -64,12 +64,10 @@ pub struct ConfigValues {
 	// OAuth Google configuration
 	pub oauth_google_client_id: Option<String>,
 	pub oauth_google_client_secret: Option<String>,
-	pub oauth_google_redirect_uri: Option<String>,
 
 	// OAuth Discord configuration
 	pub oauth_discord_client_id: Option<String>,
 	pub oauth_discord_client_secret: Option<String>,
-	pub oauth_discord_redirect_uri: Option<String>,
 }
 
 impl Default for ConfigValues {
@@ -78,10 +76,8 @@ impl Default for ConfigValues {
 			language: Language::En,
 			oauth_google_client_id: None,
 			oauth_google_client_secret: None,
-			oauth_google_redirect_uri: None,
 			oauth_discord_client_id: None,
 			oauth_discord_client_secret: None,
-			oauth_discord_redirect_uri: None,
 		}
 	}
 }
@@ -156,18 +152,15 @@ impl Config {
 				let has_client_id = values.oauth_google_client_id.is_some() || std::env::var("OAUTH_GOOGLE_CLIENT_ID").ok().filter(|s| !s.is_empty()).is_some();
 				let has_client_secret =
 					values.oauth_google_client_secret.is_some() || std::env::var("OAUTH_GOOGLE_CLIENT_SECRET").ok().filter(|s| !s.is_empty()).is_some();
-				let has_redirect_uri = values.oauth_google_redirect_uri.is_some() || std::env::var("OAUTH_GOOGLE_REDIRECT_URI").ok().filter(|s| !s.is_empty()).is_some();
 
-				has_client_id && has_client_secret && has_redirect_uri
+				has_client_id && has_client_secret
 			}
 			OAuthProvider::Discord => {
 				let has_client_id = values.oauth_discord_client_id.is_some() || std::env::var("OAUTH_DISCORD_CLIENT_ID").ok().filter(|s| !s.is_empty()).is_some();
 				let has_client_secret =
 					values.oauth_discord_client_secret.is_some() || std::env::var("OAUTH_DISCORD_CLIENT_SECRET").ok().filter(|s| !s.is_empty()).is_some();
-				let has_redirect_uri =
-					values.oauth_discord_redirect_uri.is_some() || std::env::var("OAUTH_DISCORD_REDIRECT_URI").ok().filter(|s| !s.is_empty()).is_some();
 
-				has_client_id && has_client_secret && has_redirect_uri
+				has_client_id && has_client_secret
 			}
 		}
 	}
@@ -195,10 +188,8 @@ impl Config {
 				"language" => values.language = Language::from_str(&row.value),
 				"oauth_google_client_id" => values.oauth_google_client_id = Some(row.value),
 				"oauth_google_client_secret" => values.oauth_google_client_secret = Some(row.value),
-				"oauth_google_redirect_uri" => values.oauth_google_redirect_uri = Some(row.value),
 				"oauth_discord_client_id" => values.oauth_discord_client_id = Some(row.value),
 				"oauth_discord_client_secret" => values.oauth_discord_client_secret = Some(row.value),
-				"oauth_discord_redirect_uri" => values.oauth_discord_redirect_uri = Some(row.value),
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}
 		}

@@ -45,6 +45,7 @@ pub struct UserResponse {
 	pub username: String,
 	pub auth_method: String,
 	pub roles: Vec<String>,
+	pub permissions: Vec<String>,
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
