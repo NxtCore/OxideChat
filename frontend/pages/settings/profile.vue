@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import {Pencil, Copy} from 'lucide-vue-next';
+import {Copy} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 const store = useMainStore();

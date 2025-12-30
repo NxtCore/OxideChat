@@ -5,7 +5,7 @@
 			<div class="mb-8">
 				<button
 					@click="goBack"
-					class="group flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors mb-8 px-3"
+					class="group flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors mb-8 px-3 py-2 rounded-lg"
 				>
 					<ArrowLeft class="h-4 w-4 transition-transform group-hover:-translate-x-1" />
 					<span>{{ store.getTranslation('settings.back') }}</span>
@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import {User, Monitor, Palette, Users, Cog, ArrowLeft, Bot, Cpu, Sliders, BarChart, Paperclip, Wrench} from 'lucide-vue-next';
+import {User, ArrowLeft, Cpu} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 definePageMeta({
@@ -60,20 +60,10 @@ const store = useMainStore();
 const route = useRoute();
 const router = useRouter();
 
-// Tabs matching the requested Screenshot exactly
 const tabs = [
-	// Existing mappable routes
 	{id: 'profile', label: 'settings.tabs.profile', icon: User, permission: 'settings.profile.view'},
 	{id: 'providers', label: 'settings.tabs.providers', icon: Cpu, permission: 'admin.config.view'},
-	{id: 'models', label: 'settings.tabs.models', icon: Bot, permission: 'admin.config.view'},
-	{id: 'ai-options', label: 'settings.tabs.ai_options', icon: Sliders, permission: 'admin.config.view'},
-	{id: 'analytics', label: 'settings.tabs.usage_analytics', icon: BarChart, permission: 'admin.stats.view'},
 ];
-
-// If the user is admin, maybe we show admin-users?
-// But the screenshot didn't have it. I will leave it out to be 1:1 with the screenshot
-// or maybe 'Customization' was 'Admin Config'.
-// For now, these links will just go to their paths. If the content doesn't exist, it will be blank.
 
 const visibleTabs = computed(() => tabs.filter(tab => store.hasPermission(tab.permission)));
 

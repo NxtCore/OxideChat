@@ -98,7 +98,7 @@ pub fn generate_auth_url(provider: OAuthProvider) -> Result<(String, OAuthState)
 	let token_url = TokenUrl::new(config.token_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 	let redirect_url = RedirectUrl::new(format!(
 		"{}/api/v1/auth/oauth/{}/callback",
-		env::var("BASE_URL").unwrap_or("http://localhost:3000".to_string()),
+		env::var("BASE_URL").expect("BASE_URL environment variable must be set for OAuth redirect URL"),
 		provider.as_str()
 	))
 	.map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
@@ -140,7 +140,7 @@ pub async fn exchange_code(provider: OAuthProvider, code: &str, state: &OAuthSta
 	let token_url = TokenUrl::new(config.token_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 	let redirect_url = RedirectUrl::new(format!(
 		"{}/api/v1/auth/oauth/{}/callback",
-		env::var("BASE_URL").unwrap_or("http://localhost:3000".to_string()),
+		env::var("BASE_URL").expect("BASE_URL environment variable must be set for OAuth redirect URL"),
 		provider.as_str()
 	))
 	.map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
