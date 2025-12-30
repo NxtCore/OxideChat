@@ -3,6 +3,8 @@
 //! Provides utilities for building OAuth clients, generating authorization URLs,
 //! exchanging codes for tokens, and fetching user information.
 
+use std::env;
+
 use crate::config::{Config, OAuthProvider};
 use crate::types::oauth::{DiscordUserInfo, GoogleUserInfo, OAuthState, OAuthUserInfo};
 use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl};
@@ -46,7 +48,6 @@ impl std::error::Error for OAuthError {}
 struct ProviderConfig {
 	client_id: String,
 	client_secret: String,
-	redirect_uri: String,
 	auth_url: &'static str,
 	token_url: &'static str,
 	scopes: &'static [&'static str],
@@ -69,7 +70,6 @@ fn get_provider_config(provider: OAuthProvider) -> Result<ProviderConfig, OAuthE
 		OAuthProvider::Google => Ok(ProviderConfig {
 			client_id: get_value(&values.oauth_google_client_id, "OAUTH_GOOGLE_CLIENT_ID"),
 			client_secret: get_value(&values.oauth_google_client_secret, "OAUTH_GOOGLE_CLIENT_SECRET"),
-			redirect_uri: get_value(&values.oauth_google_redirect_uri, "OAUTH_GOOGLE_REDIRECT_URI"),
 			auth_url: "https://accounts.google.com/o/oauth2/v2/auth",
 			token_url: "https://oauth2.googleapis.com/token",
 			scopes: &["openid", "email", "profile"],
@@ -77,7 +77,6 @@ fn get_provider_config(provider: OAuthProvider) -> Result<ProviderConfig, OAuthE
 		OAuthProvider::Discord => Ok(ProviderConfig {
 			client_id: get_value(&values.oauth_discord_client_id, "OAUTH_DISCORD_CLIENT_ID"),
 			client_secret: get_value(&values.oauth_discord_client_secret, "OAUTH_DISCORD_CLIENT_SECRET"),
-			redirect_uri: get_value(&values.oauth_discord_redirect_uri, "OAUTH_DISCORD_REDIRECT_URI"),
 			auth_url: "https://discord.com/api/oauth2/authorize",
 			token_url: "https://discord.com/api/oauth2/token",
 			scopes: &["identify", "email"],
@@ -97,7 +96,12 @@ pub fn generate_auth_url(provider: OAuthProvider) -> Result<(String, OAuthState)
 
 	let auth_url = AuthUrl::new(config.auth_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 	let token_url = TokenUrl::new(config.token_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
-	let redirect_url = RedirectUrl::new(config.redirect_uri).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
+	let redirect_url = RedirectUrl::new(format!(
+		"{}/api/v1/auth/oauth/{}/callback",
+		env::var("BASE_URL").unwrap_or("http://localhost:3000".to_string()),
+		provider.as_str()
+	))
+	.map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 
 	let client = oauth2::basic::BasicClient::new(ClientId::new(config.client_id))
 		.set_client_secret(ClientSecret::new(config.client_secret))
@@ -134,7 +138,12 @@ pub async fn exchange_code(provider: OAuthProvider, code: &str, state: &OAuthSta
 
 	let auth_url = AuthUrl::new(config.auth_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 	let token_url = TokenUrl::new(config.token_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
-	let redirect_url = RedirectUrl::new(config.redirect_uri).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
+	let redirect_url = RedirectUrl::new(format!(
+		"{}/api/v1/auth/oauth/{}/callback",
+		env::var("BASE_URL").unwrap_or("http://localhost:3000".to_string()),
+		provider.as_str()
+	))
+	.map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 
 	let client = oauth2::basic::BasicClient::new(ClientId::new(config.client_id))
 		.set_client_secret(ClientSecret::new(config.client_secret))

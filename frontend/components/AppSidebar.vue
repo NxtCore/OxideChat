@@ -50,6 +50,10 @@
 						{{ store.auth.user?.email }}
 					</ShadDropdownMenuLabel>
 					<ShadDropdownMenuSeparator class="bg-border" />
+					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="goToSettings">
+						<Settings class="mr-2 h-4 w-4" />
+						<span>{{ store.getTranslation('settings.title') }}</span>
+					</ShadDropdownMenuItem>
 					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="handleLogout">
 						<LogOut class="mr-2 h-4 w-4" />
 						<span>{{ store.getTranslation('sidebar.logout') }}</span>
@@ -61,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import {MessageSquare, Plus, ChevronUp, LogOut} from 'lucide-vue-next';
+import {MessageSquare, Plus, ChevronUp, LogOut, Settings} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 const store = useMainStore();
@@ -71,6 +75,10 @@ const userInitials = computed(() => {
 	const username = store.auth.user?.username || 'U';
 	return username.slice(0, 2).toUpperCase();
 });
+
+function goToSettings() {
+	router.push('/settings');
+}
 
 async function handleLogout() {
 	await store.logout();

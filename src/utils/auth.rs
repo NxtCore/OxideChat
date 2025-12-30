@@ -2,16 +2,14 @@ use argon2::{
 	Argon2,
 	password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
-use axum::{Json, http::StatusCode};
 use chrono::{Duration, Utc};
 use sqlx::postgres::PgPool;
 use tower_cookies::{Cookie, Cookies, cookie::SameSite};
 use uuid::Uuid;
 
 use crate::{
-	i18n::I18n,
 	routes::public::auth::{MAX_PASSWORD_LENGTH, MAX_USERNAME_LENGTH, MIN_PASSWORD_LENGTH, MIN_USERNAME_LENGTH, SESSION_COOKIE_NAME, SESSION_DURATION_DAYS},
-	types::{CountRow, RoleNameRow, User, UserResponse},
+	types::{CountRow, PermissionNameRow, RoleNameRow, User, UserResponse},
 	utils::response::ErrorCode,
 };
 
@@ -48,6 +46,20 @@ pub async fn get_user_roles(pool: &PgPool, user_id: &Uuid) -> Result<Vec<String>
 	Ok(roles.into_iter().map(|r| r.name).collect())
 }
 
+/// Get user permissions by user ID (via role_permissions junction).
+pub async fn get_user_permissions(pool: &PgPool, user_id: &Uuid) -> Result<Vec<String>, sqlx::Error> {
+	let permissions: Vec<PermissionNameRow> = sqlx::query_as(
+		"SELECT DISTINCT p.name FROM permissions p
+         INNER JOIN role_permissions rp ON p.id = rp.permission_id
+         INNER JOIN user_roles ur ON rp.role_id = ur.role_id
+         WHERE ur.user_id = $1",
+	)
+	.bind(user_id)
+	.fetch_all(pool)
+	.await?;
+	Ok(permissions.into_iter().map(|p| p.name).collect())
+}
+
 /// Create a session for a user and set the session cookie.
 ///
 /// Note: Multiple concurrent sessions per user are allowed by design.
@@ -81,15 +93,17 @@ pub async fn create_session(pool: &PgPool, cookies: &Cookies, user_id: &Uuid) ->
 	Ok(())
 }
 
-/// Convert a User to a UserResponse with roles.
+/// Convert a User to a UserResponse with roles and permissions.
 pub async fn user_to_response(pool: &PgPool, user: &User) -> Result<UserResponse, sqlx::Error> {
 	let roles = get_user_roles(pool, &user.id).await?;
+	let permissions = get_user_permissions(pool, &user.id).await?;
 	Ok(UserResponse {
 		id: user.id,
 		email: user.email.clone(),
 		username: user.username.clone(),
 		auth_method: user.auth_method.clone(),
 		roles,
+		permissions,
 		created_at: user.created_at,
 	})
 }
