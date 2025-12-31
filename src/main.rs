@@ -1,3 +1,4 @@
+mod ai;
 mod config;
 mod i18n;
 mod jobs;
@@ -48,6 +49,20 @@ async fn main() {
 	// Initialize global i18n translations
 	i18n::I18n::init(&pool).await;
 	println!("[I18N] Translations loaded");
+
+	// Initialize optional API key encryption
+	utils::encryption::init();
+	if utils::encryption::is_enabled() {
+		println!("[ENCRYPTION] API key encryption enabled");
+	} else {
+		println!("[ENCRYPTION] API key encryption disabled (set ENCRYPTION_KEY to enable)");
+	}
+
+	// Initialize AI engine with database providers
+	ai::init(&pool).await;
+
+	// Initialize provider metadata cache
+	utils::metadata::init(&pool).await;
 
 	let app_state = Arc::new(AppState { db: pool });
 

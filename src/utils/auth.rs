@@ -77,17 +77,13 @@ pub async fn create_session(pool: &PgPool, cookies: &Cookies, user_id: &Uuid) ->
 		.execute(pool)
 		.await?;
 
+	let is_secure = std::env::var("COOKIE_SECURE").map(|v| v != "false").unwrap_or(true);
 	let mut cookie = Cookie::new(SESSION_COOKIE_NAME, session_id.to_string());
 	cookie.set_path("/");
 	cookie.set_http_only(true);
-	// SameSite::Lax provides basic CSRF protection for non-GET requests from other origins.
-	// TODO: Consider using SameSite::Strict for stronger protection, or implementing
-	// CSRF tokens for state-changing operations if cross-origin POST is needed.
 	cookie.set_same_site(SameSite::Lax);
-
-	// Set secure flag based on environment (defaults to true for security)
-	let is_secure = std::env::var("COOKIE_SECURE").map(|v| v != "false").unwrap_or(true);
 	cookie.set_secure(is_secure);
+	cookie.set_max_age(tower_cookies::cookie::time::Duration::days(SESSION_DURATION_DAYS));
 
 	cookies.add(cookie);
 	Ok(())
