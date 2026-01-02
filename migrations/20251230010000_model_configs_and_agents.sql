@@ -1,91 +1,94 @@
--- Model Configuration & Agents System
--- This migration adds model user preferences, provider metadata, and agents
+-- Model Configuration System
+-- This migration adds unified model configs that serve as both capability overrides and custom personas
 
--- Model user configurations (persists across provider reinstalls)
--- Uses stable_key = "provider_kind:model_id" for persistence
+-- Model configurations (unified: base configs + custom personas/agents)
+-- Uses stable_key = "provider_kind:model_id" for persistence across provider reinstalls
+-- Also maintains optional direct FK for efficient joins
 CREATE TABLE IF NOT EXISTS model_configs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,  -- NULL = system default
-    stable_key VARCHAR(255) NOT NULL,  -- e.g., "openai:gpt-4o", "anthropic:claude-3-5-sonnet"
+    owner_id UUID REFERENCES users(id) ON DELETE CASCADE, 
     
-    -- Display customization
-    display_name VARCHAR(100),  -- Custom display name
+    model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+    stable_key VARCHAR(255) NOT NULL,
+    
+    name VARCHAR(100) NOT NULL,
     description TEXT,
-    icon_override VARCHAR(500),  -- Override the default icon
+    icon VARCHAR(500),
     
-    -- Default parameters
-    default_temperature REAL,
-    default_max_tokens INTEGER,
-    default_top_p REAL,
-    default_frequency_penalty REAL,
-    default_presence_penalty REAL,
+    capabilities JSONB,
+    input_modalities JSONB,
+    output_modalities JSONB,
+    context_length INTEGER,
+    max_output_tokens INTEGER,
     
-    -- Capabilities/restrictions
+    system_prompt TEXT,
+    parameters JSONB DEFAULT '{}',
+    
+    enabled_tools JSONB DEFAULT '[]',
+    
+    is_public BOOLEAN DEFAULT false,
+    is_featured BOOLEAN DEFAULT false,
+    is_default BOOLEAN DEFAULT false,
     is_favorite BOOLEAN DEFAULT false,
-    is_hidden BOOLEAN DEFAULT false,  -- Hide from model picker
+    is_hidden BOOLEAN DEFAULT false,
     
-    -- Extra settings as JSON
+    category VARCHAR(50),
+    tags JSONB DEFAULT '[]',
+    usage_count INTEGER DEFAULT 0,
     extra_settings JSONB DEFAULT '{}',
     
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(user_id, stable_key)
-);
-
--- Agents (reusable AI personas/configurations)
-CREATE TABLE IF NOT EXISTS agents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_id UUID REFERENCES users(id) ON DELETE CASCADE,  -- NULL = system agent
-    
-    -- Identity
-    name VARCHAR(100) NOT NULL,
-    slug VARCHAR(100),  -- URL-friendly identifier
-    description TEXT,
-    icon_url VARCHAR(500),
-    icon_emoji VARCHAR(10),  -- Alternative: use an emoji
-    
-    -- Model configuration
-    model_stable_key VARCHAR(255),  -- Preferred model (can be overridden at runtime)
-    fallback_model_keys JSONB DEFAULT '[]',  -- Fallback models if primary unavailable
-    
-    -- Behavior
-    system_prompt TEXT,
-    initial_messages JSONB DEFAULT '[]',  -- Pre-filled conversation starters
-    
-    -- Parameters
-    temperature REAL,
-    max_tokens INTEGER,
-    top_p REAL,
-    frequency_penalty REAL,
-    presence_penalty REAL,
-    
-    -- Tools & capabilities
-    enabled_tools JSONB DEFAULT '[]',  -- List of tool names this agent can use
-    web_search_enabled BOOLEAN DEFAULT false,
-    code_execution_enabled BOOLEAN DEFAULT false,
-    
-    -- Visibility
-    is_public BOOLEAN DEFAULT false,  -- Can other users use this agent?
-    is_featured BOOLEAN DEFAULT false,  -- Show in featured list
-    is_default BOOLEAN DEFAULT false,  -- Default agent for new chats
-    
-    -- Metadata
-    category VARCHAR(50),  -- e.g., "coding", "writing", "general"
-    tags JSONB DEFAULT '[]',
-    usage_count INTEGER DEFAULT 0,  -- Track popularity
-    
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(owner_id, slug)
+    UNIQUE(owner_id, model_id)
 );
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_provider_metadata_kind ON provider_metadata(provider_kind);
 CREATE INDEX IF NOT EXISTS idx_provider_metadata_priority ON provider_metadata(priority DESC);
-CREATE INDEX IF NOT EXISTS idx_model_configs_user_id ON model_configs(user_id);
+CREATE INDEX IF NOT EXISTS idx_model_configs_owner_id ON model_configs(owner_id);
+CREATE INDEX IF NOT EXISTS idx_model_configs_model_id ON model_configs(model_id);
 CREATE INDEX IF NOT EXISTS idx_model_configs_stable_key ON model_configs(stable_key);
-CREATE INDEX IF NOT EXISTS idx_model_configs_favorite ON model_configs(user_id, is_favorite) WHERE is_favorite = true;
-CREATE INDEX IF NOT EXISTS idx_agents_owner_id ON agents(owner_id);
-CREATE INDEX IF NOT EXISTS idx_agents_public ON agents(is_public) WHERE is_public = true;
-CREATE INDEX IF NOT EXISTS idx_agents_featured ON agents(is_featured) WHERE is_featured = true;
-CREATE INDEX IF NOT EXISTS idx_agents_category ON agents(category);
+CREATE INDEX IF NOT EXISTS idx_model_configs_favorite ON model_configs(owner_id, is_favorite) WHERE is_favorite = true;
+CREATE INDEX IF NOT EXISTS idx_model_configs_public ON model_configs(is_public) WHERE is_public = true;
+CREATE INDEX IF NOT EXISTS idx_model_configs_featured ON model_configs(is_featured) WHERE is_featured = true;
+CREATE INDEX IF NOT EXISTS idx_model_configs_category ON model_configs(category);
+
+-- Model/Provider access control
+-- Supports both role-based and user-based permissions
+CREATE TABLE IF NOT EXISTS model_access (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Target (set one or both for specificity)
+    -- NULL provider_id + NULL model_id = global access to everything
+    -- provider_id set + NULL model_id = access to all models from that provider
+    -- model_id set = access to specific model
+    provider_id UUID REFERENCES providers(id) ON DELETE CASCADE,
+    model_id UUID REFERENCES models(id) ON DELETE CASCADE,
+    
+    -- Grantee (set exactly one)
+    role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    
+    -- Permissions
+    can_use BOOLEAN DEFAULT false,        -- Can make API calls with this model
+    can_configure BOOLEAN DEFAULT false,  -- Can create/modify model_configs
+    
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    -- Ensure exactly one grantee type
+    CONSTRAINT grantee_check CHECK (
+        (role_id IS NOT NULL AND user_id IS NULL) OR
+        (role_id IS NULL AND user_id IS NOT NULL)
+    )
+);
+
+-- Indexes for model_access
+CREATE INDEX IF NOT EXISTS idx_model_access_provider ON model_access(provider_id);
+CREATE INDEX IF NOT EXISTS idx_model_access_model ON model_access(model_id);
+CREATE INDEX IF NOT EXISTS idx_model_access_role ON model_access(role_id);
+CREATE INDEX IF NOT EXISTS idx_model_access_user ON model_access(user_id);
+
+-- Grant admin role full access to all models by default
+INSERT INTO model_access (role_id, can_use, can_configure)
+SELECT id, true, true FROM roles WHERE name = 'admin'
+ON CONFLICT DO NOTHING;
