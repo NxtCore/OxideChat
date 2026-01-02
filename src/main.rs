@@ -61,9 +61,6 @@ async fn main() {
 	// Initialize AI engine with database providers
 	ai::init(&pool).await;
 
-	// Initialize provider metadata cache
-	utils::metadata::init(&pool).await;
-
 	let app_state = Arc::new(AppState { db: pool });
 
 	tokio::spawn(jobs::start_job_scheduler(app_state.clone()));

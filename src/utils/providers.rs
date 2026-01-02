@@ -1,7 +1,8 @@
 //! Optimized provider utility functions
 
 use crate::ai::OF_ENGINE;
-use crate::types::{AiModel, AiProvider, ModelCapabilities, SyncProviderResponse};
+use crate::ai::parse_extra_headers;
+use crate::types::{AiModel, AiProvider, SyncProviderResponse};
 use crate::utils::encryption::decrypt_api_key;
 use omniference::types::{ProviderConfig, ProviderEndpoint};
 use sqlx::PgPool;
@@ -209,12 +210,4 @@ async fn bulk_delete(pool: &PgPool, ids: &[Uuid]) -> Result<usize, sqlx::Error> 
 	sqlx::query("DELETE FROM models WHERE id = ANY($1)").bind(ids).execute(pool).await?;
 
 	Ok(ids.len())
-}
-
-fn parse_extra_headers(value: &serde_json::Value) -> BTreeMap<String, String> {
-	if let Some(obj) = value.as_object() {
-		obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()
-	} else {
-		BTreeMap::new()
-	}
 }

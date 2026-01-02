@@ -3,6 +3,7 @@
 //! CRUD operations for system-wide AI providers.
 
 use crate::AppState;
+use crate::ai::parse_extra_headers;
 use crate::types::{
 	AiModel, AiProvider, CreateProviderRequest, ModelResponse, ProviderResponse, SyncProviderResponse, TestProviderRequest, TestProviderResponse, UpdateProviderRequest,
 };
@@ -19,7 +20,7 @@ use omniference::{
 	OmniferenceEngine,
 	types::{ProviderConfig, ProviderEndpoint},
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// List all system providers
@@ -320,12 +321,4 @@ async fn test_provider_connection(config: ProviderConfig) -> Result<TestProvider
 		models_found: models.len(),
 		message: format!("Successfully connected, found {} models", models.len()),
 	})
-}
-
-fn parse_extra_headers(value: &serde_json::Value) -> BTreeMap<String, String> {
-	if let Some(obj) = value.as_object() {
-		obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()
-	} else {
-		BTreeMap::new()
-	}
 }

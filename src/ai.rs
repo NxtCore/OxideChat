@@ -93,7 +93,7 @@ pub fn provider_to_config(provider: &AiProvider) -> ProviderConfig {
 	}
 }
 
-fn parse_extra_headers(value: &serde_json::Value) -> BTreeMap<String, String> {
+pub fn parse_extra_headers(value: &serde_json::Value) -> BTreeMap<String, String> {
 	if let Some(obj) = value.as_object() {
 		obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()
 	} else {

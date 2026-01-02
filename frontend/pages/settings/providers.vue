@@ -256,26 +256,6 @@ const providers: ProviderConfig[] = [
 		isPreConfigured: true,
 		keyFormat: 'AIza',
 	},
-	/*{
-		kind: 'ollama',
-		name: 'Ollama',
-		description: store.getTranslation('settings.providers.ollama_description'),
-		icon: iconsStore.providers.ollama,
-		brandColor: '#ffffff',
-		defaultBaseUrl: 'http://localhost:11434',
-		isPreConfigured: true,
-		keyFormat: '...',
-	},
-	{
-		kind: 'lmstudio',
-		name: 'LM Studio',
-		description: store.getTranslation('settings.providers.lmstudio_description'),
-		icon: iconsStore.providers.lmstudio,
-		brandColor: '#0ea5e9',
-		defaultBaseUrl: 'http://localhost:1234/v1',
-		isPreConfigured: true,
-		keyFormat: '...',
-	},*/
 ];
 
 async function loadProviders() {

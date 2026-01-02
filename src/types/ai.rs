@@ -582,7 +582,6 @@ pub struct ModelWithMetadata {
 	pub provider_name: String,
 	pub provider_kind: ProviderKind,
 
-	// From provider_metadata (resolved)
 	pub provider_display_name: String,
 	pub provider_icon_svg: Option<String>,
 	pub provider_brand_color: Option<String>,
