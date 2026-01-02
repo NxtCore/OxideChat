@@ -19,11 +19,16 @@
 			>
 				<div class="flex items-center justify-between gap-4">
 					<div class="flex items-center gap-4 min-w-0">
-						<div
-							class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
-							:style="{backgroundColor: (item.template?.brandColor || '#6366f1') + '15'}"
-						>
-							<div v-if="item.template?.icon" v-html="item.template.icon" class="h-5 w-5" :style="{color: item.template.brandColor}"></div>
+						<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
+							<div
+								v-if="item.template?.icon && item.template.icon.type === 'svg'"
+								v-html="item.template.icon.icon"
+								class="h-5 w-5 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
+								:style="{color: item.template.brandColor}"
+							></div>
+							<div v-else-if="item.template?.icon && item.template.icon.type === 'png'" class="h-5 w-5">
+								<img :src="item.template.icon.icon" :alt="item.name" />
+							</div>
 							<BrainCircuit v-else class="h-5 w-5" :style="{color: '#6366f1'}" />
 						</div>
 						<div class="min-w-0">
@@ -123,6 +128,7 @@ import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, Di
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
 import {Switch} from '@/components/ui/switch';
+const {$customFetch} = useNuxtApp();
 
 interface ProviderConfig {
 	kind: string;
@@ -156,7 +162,7 @@ const displayProviders = computed(() => {
 
 	// 1. Add all configured providers
 	for (const conf of configuredProviders.value) {
-		const template = providers.find(p => {
+		const provider_template = providers.find(p => {
 			if (p.kind !== conf.kind) return false;
 			if (p.kind === 'openai_compat' && p.isPreConfigured) {
 				return conf.base_url === p.defaultBaseUrl;
@@ -166,8 +172,13 @@ const displayProviders = computed(() => {
 
 		result.push({
 			...conf,
-			template,
 			isConfigured: true,
+			template: provider_template || {
+				name: conf.name,
+				brandColor: '#fff',
+				isPreConfigured: false,
+				icon: iconsStore.getProviderIcon(conf.name),
+			},
 		});
 	}
 
@@ -209,8 +220,8 @@ const providers: ProviderConfig[] = [
 		kind: 'openrouter',
 		name: 'OpenRouter',
 		description: store.getTranslation('settings.providers.openrouter_description'),
-		icon: iconsStore.providers.openrouter,
-		brandColor: '#6366f1',
+		icon: iconsStore.getProviderIcon('openrouter'),
+		brandColor: '#fff',
 		defaultBaseUrl: 'https://openrouter.ai/api',
 		isPreConfigured: true,
 		keyFormat: 'sk-or-v1-',
@@ -219,8 +230,8 @@ const providers: ProviderConfig[] = [
 		kind: 'openai',
 		name: 'OpenAI',
 		description: store.getTranslation('settings.providers.openai_description'),
-		icon: iconsStore.providers.openai,
-		brandColor: '#10a37f',
+		icon: iconsStore.getProviderIcon('openai'),
+		brandColor: '#fff',
 		defaultBaseUrl: 'https://api.openai.com',
 		isPreConfigured: true,
 		keyFormat: 'sk-proj-',
@@ -229,8 +240,8 @@ const providers: ProviderConfig[] = [
 		kind: 'anthropic',
 		name: 'Anthropic',
 		description: store.getTranslation('settings.providers.anthropic_description'),
-		icon: iconsStore.providers.anthropic,
-		brandColor: '#d4a27f',
+		icon: iconsStore.getProviderIcon('anthropic'),
+		brandColor: '#fff',
 		defaultBaseUrl: 'https://api.anthropic.com',
 		isPreConfigured: true,
 		keyFormat: 'sk-ant-',
@@ -239,8 +250,8 @@ const providers: ProviderConfig[] = [
 		kind: 'google',
 		name: 'Google',
 		description: store.getTranslation('settings.providers.google_description'),
-		icon: iconsStore.providers.google,
-		brandColor: '#4285f4',
+		icon: iconsStore.getProviderIcon('google'),
+		brandColor: '#fff',
 		defaultBaseUrl: 'https://generativelanguage.googleapis.com',
 		isPreConfigured: true,
 		keyFormat: 'AIza',
@@ -269,7 +280,6 @@ const providers: ProviderConfig[] = [
 
 async function loadProviders() {
 	try {
-		const {$customFetch} = useNuxtApp();
 		const result = await $customFetch('/api/v1/admin/providers');
 		if (Array.isArray(result)) {
 			configuredProviders.value = result;
@@ -339,7 +349,6 @@ async function updateProvider(id: string, data: Object) {
 	if (!provider) return;
 
 	try {
-		const {$customFetch} = useNuxtApp();
 		await $customFetch(`/api/v1/admin/providers/${id}`, {
 			method: 'PUT',
 			body: data,
@@ -354,13 +363,23 @@ async function updateProvider(id: string, data: Object) {
 	await loadProviders();
 }
 
+async function syncProvider(provider: any) {
+	const toast = store.toast(store.getTranslation('settings.providers.syncing_provider'), {
+		description: store.getTranslation('settings.providers.syncing_provider_description'),
+		type: 'loading',
+		duration: Infinity,
+	});
+	await $customFetch(`/api/v1/admin/providers/${provider.id}/sync`, {
+		method: 'POST',
+	});
+	store.dismissToast(toast);
+	store.toast(store.getTranslation('settings.providers.syncing_provider_success'), {type: 'success'});
+}
 async function saveConfig() {
 	if (!selectedProvider.value) return;
 
 	saving.value = true;
 	try {
-		const {$customFetch} = useNuxtApp();
-
 		const body: any = {
 			kind: selectedProvider.value.kind,
 			name: configForm.name || selectedProvider.value.name,
@@ -402,7 +421,6 @@ async function deleteConfig() {
 
 	saving.value = true;
 	try {
-		const {$customFetch} = useNuxtApp();
 		await $customFetch(`/api/v1/admin/providers/${configForm.existingProvider.id}`, {
 			method: 'DELETE',
 		});
