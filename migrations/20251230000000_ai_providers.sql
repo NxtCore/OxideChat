@@ -15,7 +15,7 @@ CREATE TYPE provider_kind AS ENUM (
 
 -- AI Providers table
 -- Stores provider configurations (both system-wide and user-specific BYOK)
-CREATE TABLE IF NOT EXISTS ai_providers (
+CREATE TABLE IF NOT EXISTS providers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id UUID REFERENCES users(id) ON DELETE CASCADE,  -- NULL = system provider
     kind provider_kind NOT NULL,
@@ -31,13 +31,14 @@ CREATE TABLE IF NOT EXISTS ai_providers (
 
 -- AI Models table
 -- Stores discovered/configured models from providers
-CREATE TABLE IF NOT EXISTS ai_models (
+CREATE TABLE IF NOT EXISTS models (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    provider_id UUID NOT NULL REFERENCES ai_providers(id) ON DELETE CASCADE,
+    provider_id UUID NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
     model_id VARCHAR(255) NOT NULL,  -- The model ID used by the provider
     display_name VARCHAR(255) NOT NULL,
     capabilities JSONB DEFAULT '{}',  -- streaming, tools, vision, etc.
-    modalities JSONB DEFAULT '["text"]',  -- text, vision, audio, etc.
+    input_modalities JSONB DEFAULT '["text"]',  
+    output_modalities JSONB DEFAULT '["text"]', 
     context_length INTEGER,
     max_tokens INTEGER,
     is_enabled BOOLEAN DEFAULT true,
@@ -48,11 +49,11 @@ CREATE TABLE IF NOT EXISTS ai_models (
 
 -- AI Usage tracking table
 -- Tracks API usage for billing, quotas, and analytics
-CREATE TABLE IF NOT EXISTS ai_usage (
+CREATE TABLE IF NOT EXISTS usage (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    provider_id UUID REFERENCES ai_providers(id) ON DELETE SET NULL,
-    model_id UUID REFERENCES ai_models(id) ON DELETE SET NULL,
+    provider_id UUID REFERENCES providers(id) ON DELETE SET NULL,
+    model_id UUID REFERENCES models(id) ON DELETE SET NULL,
     request_type VARCHAR(50) NOT NULL,  -- 'chat', 'completion', 'embedding', etc.
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
@@ -70,12 +71,12 @@ INSERT INTO app_config (key, value) VALUES
 ON CONFLICT (key) DO NOTHING;
 
 -- Indexes for common queries
-CREATE INDEX IF NOT EXISTS idx_ai_providers_owner_id ON ai_providers(owner_id);
-CREATE INDEX IF NOT EXISTS idx_ai_providers_kind ON ai_providers(kind);
-CREATE INDEX IF NOT EXISTS idx_ai_providers_enabled ON ai_providers(is_enabled);
-CREATE INDEX IF NOT EXISTS idx_ai_models_provider_id ON ai_models(provider_id);
-CREATE INDEX IF NOT EXISTS idx_ai_models_enabled ON ai_models(is_enabled);
-CREATE INDEX IF NOT EXISTS idx_ai_usage_user_id ON ai_usage(user_id);
-CREATE INDEX IF NOT EXISTS idx_ai_usage_provider_id ON ai_usage(provider_id);
-CREATE INDEX IF NOT EXISTS idx_ai_usage_created_at ON ai_usage(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_ai_usage_user_time ON ai_usage(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_providers_owner_id ON providers(owner_id);
+CREATE INDEX IF NOT EXISTS idx_providers_kind ON providers(kind);
+CREATE INDEX IF NOT EXISTS idx_providers_enabled ON providers(is_enabled);
+CREATE INDEX IF NOT EXISTS idx_models_provider_id ON models(provider_id);
+CREATE INDEX IF NOT EXISTS idx_models_enabled ON models(is_enabled);
+CREATE INDEX IF NOT EXISTS idx_usage_user_id ON usage(user_id);
+CREATE INDEX IF NOT EXISTS idx_usage_provider_id ON usage(provider_id);
+CREATE INDEX IF NOT EXISTS idx_usage_created_at ON usage(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage(user_id, created_at DESC);

@@ -36,7 +36,10 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.providers.openai_description', 'Access GPT-5.2, GPT-5.2-Codex and other OpenAI models'),
     ('en', 'settings.providers.anthropic_description', 'Access Opus 4.5, Sonnet 4.5 and other Anthropic models'),
     ('en', 'settings.providers.google_description', 'Access Gemini 3 family and other Google AI models'),
-    ('en', 'common.cancel', 'Cancel'),
+    ('en', 'settings.providers.ollama_description', 'Access local models through Ollama'),
+    ('en', 'settings.providers.homl_description', 'Access local models through HoML (faster Ollama alternative)'),
+    ('en', 'settings.providers.lmstudio_description', 'Access local models through LM Studio'),
+    ('en', 'common.cancel', 'Cancel'),  
     ('en', 'common.save', 'Save'),
     ('en', 'common.delete', 'Delete')
 ON CONFLICT (language, key_path) DO NOTHING;
@@ -66,6 +69,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.providers.anthropic_description', 'Greift auf Opus 4.5, Sonnet 4.5 und andere Anthropic-Modelle zu'),
     ('de', 'settings.providers.google_description', 'Greift auf Gemini 3 Familie und andere Google-Modelle zu'),
     ('de', 'settings.providers.ollama_description', 'Greift auf lokale Modelle über Ollama zu'),
+    ('de', 'settings.providers.homl_description', 'Greift auf lokale Modelle über HoML (schnellere Alternative zu Ollama)'),
     ('de', 'settings.providers.lmstudio_description', 'Greift auf lokale Modelle über LM Studio zu'),
     ('de', 'common.cancel', 'Abbrechen'),
     ('de', 'common.save', 'Speichern'),

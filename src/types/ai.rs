@@ -21,6 +21,7 @@ pub enum ProviderKind {
 	Anthropic,
 	Google,
 	Ollama,
+	Homl,
 	Lmstudio,
 	Custom,
 }
@@ -35,6 +36,7 @@ impl ProviderKind {
 			Self::Anthropic => OmniProviderKind::Anthropic,
 			Self::Google => OmniProviderKind::Google,
 			Self::Ollama => OmniProviderKind::Ollama,
+			Self::Homl => OmniProviderKind::OpenAICompat,
 			Self::Lmstudio => OmniProviderKind::LMStudio,
 			Self::Openrouter => OmniProviderKind::OpenRouter,
 			Self::Custom => OmniProviderKind::Custom("custom".to_string()),
@@ -65,6 +67,7 @@ impl ProviderKind {
 			Self::Anthropic => "anthropic",
 			Self::Google => "google",
 			Self::Ollama => "ollama",
+			Self::Homl => "homl",
 			Self::Lmstudio => "lmstudio",
 			Self::Custom => "custom",
 		}
@@ -109,7 +112,8 @@ pub struct AiModel {
 	pub model_id: String,
 	pub display_name: String,
 	pub capabilities: serde_json::Value,
-	pub modalities: serde_json::Value,
+	pub input_modalities: serde_json::Value,
+	pub output_modalities: serde_json::Value,
 	pub context_length: Option<i32>,
 	pub max_tokens: Option<i32>,
 	pub is_enabled: bool,
@@ -217,7 +221,8 @@ pub struct ModelResponse {
 	pub model_id: String,
 	pub display_name: String,
 	pub capabilities: serde_json::Value,
-	pub modalities: serde_json::Value,
+	pub input_modalities: serde_json::Value,
+	pub output_modalities: serde_json::Value,
 	pub context_length: Option<i32>,
 	pub max_tokens: Option<i32>,
 	pub is_enabled: bool,
@@ -231,7 +236,8 @@ impl From<AiModel> for ModelResponse {
 			model_id: m.model_id,
 			display_name: m.display_name,
 			capabilities: m.capabilities,
-			modalities: m.modalities,
+			input_modalities: m.input_modalities,
+			output_modalities: m.output_modalities,
 			context_length: m.context_length,
 			max_tokens: m.max_tokens,
 			is_enabled: m.is_enabled,
@@ -255,28 +261,6 @@ pub struct SyncProviderResponse {
 	pub models_updated: usize,
 	pub models_removed: usize,
 	pub message: String,
-}
-
-/// Model capabilities for JSON storage
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ModelCapabilities {
-	pub supports_streaming: bool,
-	pub supports_tools: bool,
-	pub supports_vision: bool,
-	pub supports_json: bool,
-	pub supports_audio: bool,
-}
-
-impl From<omniference::types::ModelCapabilities> for ModelCapabilities {
-	fn from(c: omniference::types::ModelCapabilities) -> Self {
-		Self {
-			supports_streaming: c.supports_streaming,
-			supports_tools: c.supports_tools,
-			supports_vision: c.supports_vision,
-			supports_json: c.supports_json,
-			supports_audio: c.supports_audio,
-		}
-	}
 }
 
 // ============= Provider Metadata (Icons, Display Names) =============
@@ -347,6 +331,7 @@ impl StableModelKey {
 			ProviderKind::Anthropic => "anthropic",
 			ProviderKind::Google => "google",
 			ProviderKind::Ollama => "ollama",
+			ProviderKind::Homl => "homl",
 			ProviderKind::Lmstudio => "lmstudio",
 			ProviderKind::Custom => "custom",
 		};
@@ -584,13 +569,12 @@ pub struct UpdateAgentRequest {
 /// A model with resolved metadata and user config
 #[derive(Debug, Serialize)]
 pub struct ModelWithMetadata {
-	// From ai_models
 	pub id: Uuid,
 	pub provider_id: Uuid,
 	pub model_id: String,
 	pub display_name: String,
 	pub stable_key: String,
-	pub capabilities: ModelCapabilities,
+	pub capabilities: Vec<ModelCapabilities>,
 	pub context_length: Option<i32>,
 	pub max_tokens: Option<i32>,
 
@@ -610,4 +594,41 @@ pub struct ModelWithMetadata {
 	pub is_hidden: bool,
 	pub default_temperature: Option<f32>,
 	pub default_max_tokens: Option<i32>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ModelCapabilities {
+	ReasoningEffortNone,
+	ReasoningEffortMinimal,
+	ReasoningEffortLow,
+	ReasoningEffortMedium,
+	ReasoningEffortHigh,
+	ReasoningEffortXHigh,
+	Tools,
+}
+
+impl ModelCapabilities {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::ReasoningEffortNone => "REASONING_EFFORT_NONE",
+			Self::ReasoningEffortMinimal => "REASONING_EFFORT_MINIMAL",
+			Self::ReasoningEffortLow => "REASONING_EFFORT_LOW",
+			Self::ReasoningEffortMedium => "REASONING_EFFORT_MEDIUM",
+			Self::ReasoningEffortHigh => "REASONING_EFFORT_HIGH",
+			Self::ReasoningEffortXHigh => "REASONING_EFFORT_XHIGH",
+			Self::Tools => "TOOLS",
+		}
+	}
+	pub fn from_str(s: &str) -> Option<Self> {
+		match s {
+			"REASONING_EFFORT_NONE" => Some(Self::ReasoningEffortNone),
+			"REASONING_EFFORT_MINIMAL" => Some(Self::ReasoningEffortMinimal),
+			"REASONING_EFFORT_LOW" => Some(Self::ReasoningEffortLow),
+			"REASONING_EFFORT_MEDIUM" => Some(Self::ReasoningEffortMedium),
+			"REASONING_EFFORT_HIGH" => Some(Self::ReasoningEffortHigh),
+			"REASONING_EFFORT_XHIGH" => Some(Self::ReasoningEffortXHigh),
+			"TOOLS" => Some(Self::Tools),
+			_ => None,
+		}
+	}
 }

@@ -24,7 +24,7 @@ pub static OF_ENGINE: std::sync::OnceLock<Arc<RwLock<OmniferenceEngine>>> = std:
 pub async fn init(pool: &PgPool) {
 	let engine = Arc::new(RwLock::new(OmniferenceEngine::new()));
 
-	let providers = sqlx::query_as::<_, AiProvider>("SELECT * FROM ai_providers WHERE owner_id IS NULL AND is_enabled = true")
+	let providers = sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE owner_id IS NULL AND is_enabled = true")
 		.fetch_all(pool)
 		.await
 		.unwrap_or_default();
@@ -53,7 +53,7 @@ pub fn get() -> Arc<RwLock<OmniferenceEngine>> {
 
 /// Reload providers from the database
 pub async fn reload_providers(pool: &PgPool) {
-	let providers = sqlx::query_as::<_, AiProvider>("SELECT * FROM ai_providers WHERE owner_id IS NULL AND is_enabled = true")
+	let providers = sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE owner_id IS NULL AND is_enabled = true")
 		.fetch_all(pool)
 		.await
 		.unwrap_or_default();

@@ -127,6 +127,7 @@ impl ResolvedMetadata {
 			ProviderKind::Anthropic => ("Anthropic", "#D97757"),
 			ProviderKind::Google => ("Google AI", "#4285F4"),
 			ProviderKind::Ollama => ("Ollama", "#FFFFFF"),
+			ProviderKind::Homl => ("HoML", "#FFFFFF"),
 			ProviderKind::Lmstudio => ("LM Studio", "#1E1E1E"),
 			ProviderKind::Custom => ("Custom", "#888888"),
 		};
@@ -149,6 +150,7 @@ fn kind_to_string(kind: &ProviderKind) -> String {
 		ProviderKind::Anthropic => "anthropic",
 		ProviderKind::Google => "google",
 		ProviderKind::Ollama => "ollama",
+		ProviderKind::Homl => "homl",
 		ProviderKind::Lmstudio => "lmstudio",
 		ProviderKind::Custom => "custom",
 	}

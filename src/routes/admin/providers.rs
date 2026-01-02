@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 /// List all system providers
 pub async fn list_providers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-	let providers = sqlx::query_as::<_, AiProvider>("SELECT * FROM ai_providers WHERE owner_id IS NULL ORDER BY name")
+	let providers = sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE owner_id IS NULL ORDER BY name")
 		.fetch_all(&state.db)
 		.await;
 
@@ -42,7 +42,7 @@ pub async fn list_providers(State(state): State<Arc<AppState>>) -> impl IntoResp
 
 /// Get a single provider by ID
 pub async fn get_provider(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let provider = sqlx::query_as::<_, AiProvider>("SELECT * FROM ai_providers WHERE id = $1 AND owner_id IS NULL")
+	let provider = sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE id = $1 AND owner_id IS NULL")
 		.bind(id)
 		.fetch_optional(&state.db)
 		.await;
@@ -67,7 +67,7 @@ pub async fn create_provider(State(state): State<Arc<AppState>>, Json(req): Json
 
 	let provider = sqlx::query_as::<_, AiProvider>(
 		r#"
-		INSERT INTO ai_providers (owner_id, kind, name, base_url, api_key, extra_headers, is_enabled)
+		INSERT INTO providers (owner_id, kind, name, base_url, api_key, extra_headers, is_enabled)
 		VALUES (NULL, $1, $2, $3, $4, $5, $6)
 		RETURNING *
 		"#,
@@ -103,7 +103,7 @@ pub async fn create_provider(State(state): State<Arc<AppState>>, Json(req): Json
 /// Update an existing provider
 pub async fn update_provider(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(req): Json<UpdateProviderRequest>) -> impl IntoResponse {
 	// First get the existing provider
-	let existing = sqlx::query_as::<_, AiProvider>("SELECT * FROM ai_providers WHERE id = $1 AND owner_id IS NULL")
+	let existing = sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE id = $1 AND owner_id IS NULL")
 		.bind(id)
 		.fetch_optional(&state.db)
 		.await;
@@ -132,7 +132,7 @@ pub async fn update_provider(State(state): State<Arc<AppState>>, Path(id): Path<
 
 	let provider = sqlx::query_as::<_, AiProvider>(
 		r#"
-		UPDATE ai_providers 
+		UPDATE providers 
 		SET kind = $2, name = $3, base_url = $4, api_key = $5, extra_headers = $6, is_enabled = $7, updated_at = NOW()
 		WHERE id = $1 AND owner_id IS NULL
 		RETURNING *
@@ -165,7 +165,7 @@ pub async fn update_provider(State(state): State<Arc<AppState>>, Path(id): Path<
 
 /// Delete a provider
 pub async fn delete_provider(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let result = sqlx::query("DELETE FROM ai_providers WHERE id = $1 AND owner_id IS NULL")
+	let result = sqlx::query("DELETE FROM providers WHERE id = $1 AND owner_id IS NULL")
 		.bind(id)
 		.execute(&state.db)
 		.await;
@@ -183,7 +183,7 @@ pub async fn delete_provider(State(state): State<Arc<AppState>>, Path(id): Path<
 /// Test a provider connection (can use either an existing provider ID or inline config)
 pub async fn test_provider(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> impl IntoResponse {
 	// Get the provider from database
-	let provider = sqlx::query_as::<_, AiProvider>("SELECT * FROM ai_providers WHERE id = $1 AND owner_id IS NULL")
+	let provider = sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE id = $1 AND owner_id IS NULL")
 		.bind(id)
 		.fetch_optional(&state.db)
 		.await;
@@ -260,7 +260,7 @@ pub async fn test_provider_inline(Json(req): Json<TestProviderRequest>) -> impl 
 
 /// Sync models from a provider
 pub async fn sync_provider(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let provider = sqlx::query_as::<_, AiProvider>("SELECT * FROM ai_providers WHERE id = $1 AND owner_id IS NULL")
+	let provider = sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE id = $1 AND owner_id IS NULL")
 		.bind(id)
 		.fetch_optional(&state.db)
 		.await;
@@ -291,7 +291,7 @@ pub async fn sync_provider(State(state): State<Arc<AppState>>, Path(id): Path<Uu
 
 /// List models for a provider
 pub async fn list_models(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let models = sqlx::query_as::<_, AiModel>("SELECT * FROM ai_models WHERE provider_id = $1 ORDER BY display_name")
+	let models = sqlx::query_as::<_, AiModel>("SELECT * FROM models WHERE provider_id = $1 ORDER BY display_name")
 		.bind(id)
 		.fetch_all(&state.db)
 		.await;
