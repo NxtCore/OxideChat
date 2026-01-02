@@ -211,6 +211,10 @@ export const useMainStore = defineStore('main', {
 		},
 		dismissToast(toast: any) {
 			const {$toast} = useNuxtApp();
+			if (!toast || typeof toast.id === 'undefined') {
+				console.error('Invalid toast:', toast);
+				return;
+			}
 			$toast.dismiss(toast.id);
 		},
 	},

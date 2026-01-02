@@ -41,11 +41,14 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &AiProvider) -> Resul
 	let provider_name_lower = provider.name.to_lowercase();
 	let discovered: Vec<_> = all_discovered.into_iter().filter(|m| m.provider_name == provider_name_lower).collect();
 
-	let existing = sqlx::query_as::<_, AiModel>("SELECT * FROM models WHERE provider_id = $1")
+	let existing = match sqlx::query_as::<_, AiModel>("SELECT * FROM models WHERE provider_id = $1")
 		.bind(provider.id)
 		.fetch_all(pool)
 		.await
-		.unwrap_or_default();
+	{
+		Ok(models) => models,
+		Err(e) => return Err(format!("Failed to fetch existing models: {e}")),
+	};
 
 	let existing_map: BTreeMap<_, _> = existing.iter().map(|m| (m.model_id.as_str(), m)).collect();
 	let discovered_ids: HashSet<_> = discovered.iter().map(|m| m.id.as_str()).collect();

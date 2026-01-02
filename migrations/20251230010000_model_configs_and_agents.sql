@@ -2,7 +2,6 @@
 -- This migration adds unified model configs that serve as both capability overrides and custom personas
 
 -- Model configurations (unified: base configs + custom personas/agents)
--- Uses stable_key = "provider_kind:model_id" for persistence across provider reinstalls
 -- Also maintains optional direct FK for efficient joins
 CREATE TABLE IF NOT EXISTS model_configs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -43,8 +42,6 @@ CREATE TABLE IF NOT EXISTS model_configs (
 );
 
 -- Indexes
-CREATE INDEX IF NOT EXISTS idx_provider_metadata_kind ON provider_metadata(provider_kind);
-CREATE INDEX IF NOT EXISTS idx_provider_metadata_priority ON provider_metadata(priority DESC);
 CREATE INDEX IF NOT EXISTS idx_model_configs_owner_id ON model_configs(owner_id);
 CREATE INDEX IF NOT EXISTS idx_model_configs_model_id ON model_configs(model_id);
 CREATE INDEX IF NOT EXISTS idx_model_configs_stable_key ON model_configs(stable_key);

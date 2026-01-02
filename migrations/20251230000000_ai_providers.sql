@@ -2,15 +2,14 @@
 -- This migration creates the tables for AI provider management
 
 -- Provider kind enum
+-- Uses SCREAMING_SNAKE_CASE for consistency with the Rust code
 CREATE TYPE provider_kind AS ENUM (
-    'openai',
-    'openai_compat',
-    'openrouter',
-    'anthropic',
-    'google',
-    'ollama',
-    'lmstudio',
-    'custom'
+    'OPENAI',
+    'OPENAI_COMPAT',
+    'OPENROUTER',
+    'ANTHROPIC',
+    'GOOGLE',
+    'CUSTOM'
 );
 
 -- AI Providers table

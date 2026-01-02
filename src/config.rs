@@ -15,7 +15,7 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Supported OAuth providers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OAuthProvider {
 	Google,
 	Discord,
@@ -25,9 +25,9 @@ impl OAuthProvider {
 	/// Convert from string, returns None if unknown
 	#[must_use]
 	pub fn from_str(s: &str) -> Option<Self> {
-		match s.to_lowercase().as_str() {
-			"google" => Some(Self::Google),
-			"discord" => Some(Self::Discord),
+		match s.to_uppercase().as_str() {
+			"GOOGLE" => Some(Self::Google),
+			"DISCORD" => Some(Self::Discord),
 			_ => None,
 		}
 	}
@@ -36,8 +36,8 @@ impl OAuthProvider {
 	#[must_use]
 	pub const fn as_str(&self) -> &'static str {
 		match self {
-			Self::Google => "google",
-			Self::Discord => "discord",
+			Self::Google => "GOOGLE",
+			Self::Discord => "DISCORD",
 		}
 	}
 

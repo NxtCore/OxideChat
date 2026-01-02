@@ -12,17 +12,14 @@ pub use omniference::types::ProviderKind as OmniProviderKind;
 
 /// Provider kind enum matching the database enum
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "provider_kind", rename_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "provider_kind", rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ProviderKind {
 	Openai,
 	OpenaiCompat,
 	Openrouter,
 	Anthropic,
 	Google,
-	Ollama,
-	Homl,
-	Lmstudio,
 	Custom,
 }
 
@@ -35,11 +32,8 @@ impl ProviderKind {
 			Self::OpenaiCompat => OmniProviderKind::OpenAICompat,
 			Self::Anthropic => OmniProviderKind::Anthropic,
 			Self::Google => OmniProviderKind::Google,
-			Self::Ollama => OmniProviderKind::Ollama,
-			Self::Homl => OmniProviderKind::OpenAICompat,
-			Self::Lmstudio => OmniProviderKind::LMStudio,
 			Self::Openrouter => OmniProviderKind::OpenRouter,
-			Self::Custom => OmniProviderKind::Custom("custom".to_string()),
+			Self::Custom => OmniProviderKind::Custom("CUSTOM".to_string()),
 		}
 	}
 
@@ -51,8 +45,6 @@ impl ProviderKind {
 			OmniProviderKind::OpenAICompat => Self::OpenaiCompat,
 			OmniProviderKind::Anthropic => Self::Anthropic,
 			OmniProviderKind::Google => Self::Google,
-			OmniProviderKind::Ollama => Self::Ollama,
-			OmniProviderKind::LMStudio => Self::Lmstudio,
 			OmniProviderKind::OpenRouter => Self::Openrouter,
 			OmniProviderKind::Custom(_) => Self::Custom,
 		}
@@ -61,29 +53,24 @@ impl ProviderKind {
 	#[must_use]
 	pub fn as_str(&self) -> &'static str {
 		match self {
-			Self::Openai => "openai",
-			Self::OpenaiCompat => "openai_compat",
-			Self::Openrouter => "openrouter",
-			Self::Anthropic => "anthropic",
-			Self::Google => "google",
-			Self::Ollama => "ollama",
-			Self::Homl => "homl",
-			Self::Lmstudio => "lmstudio",
-			Self::Custom => "custom",
+			Self::Openai => "OPENAI",
+			Self::OpenaiCompat => "OPENAI_COMPAT",
+			Self::Openrouter => "OPENROUTER",
+			Self::Anthropic => "ANTHROPIC",
+			Self::Google => "GOOGLE",
+			Self::Custom => "CUSTOM",
 		}
 	}
 
 	#[must_use]
 	pub fn from_str(s: &str) -> Option<Self> {
 		match s {
-			"openai" => Some(Self::Openai),
-			"openai_compat" => Some(Self::OpenaiCompat),
-			"openrouter" => Some(Self::Openrouter),
-			"anthropic" => Some(Self::Anthropic),
-			"google" => Some(Self::Google),
-			"ollama" => Some(Self::Ollama),
-			"lmstudio" => Some(Self::Lmstudio),
-			"custom" => Some(Self::Custom),
+			"OPENAI" => Some(Self::Openai),
+			"OPENAI_COMPAT" => Some(Self::OpenaiCompat),
+			"OPENROUTER" => Some(Self::Openrouter),
+			"ANTHROPIC" => Some(Self::Anthropic),
+			"GOOGLE" => Some(Self::Google),
+			"CUSTOM" => Some(Self::Custom),
 			_ => None,
 		}
 	}
@@ -324,17 +311,7 @@ impl StableModelKey {
 	/// Create a stable key from provider kind and model ID
 	#[must_use]
 	pub fn new(kind: &ProviderKind, model_id: &str) -> Self {
-		let kind_str = match kind {
-			ProviderKind::Openai => "openai",
-			ProviderKind::OpenaiCompat => "openai_compat",
-			ProviderKind::Openrouter => "openrouter",
-			ProviderKind::Anthropic => "anthropic",
-			ProviderKind::Google => "google",
-			ProviderKind::Ollama => "ollama",
-			ProviderKind::Homl => "homl",
-			ProviderKind::Lmstudio => "lmstudio",
-			ProviderKind::Custom => "custom",
-		};
+		let kind_str = kind.as_str();
 		Self(format!("{}:{}", kind_str, model_id))
 	}
 

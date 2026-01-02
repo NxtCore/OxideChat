@@ -46,7 +46,7 @@
 							<Settings2 class="h-4 w-4" />
 							<span v-if="!item.isConfigured">{{ store.getTranslation('settings.providers.configure') }}</span>
 						</Button>
-						<Button variant="outline" size="sm" class="gap-2" @click="syncProvider(item)">
+						<Button v-if="item.isConfigured" variant="outline" size="sm" class="gap-2" @click="syncProvider(item)">
 							<RotateCw class="h-4 w-4" />
 						</Button>
 						<Switch :modelValue="item.is_enabled || false" :disabled="!item.isConfigured" @update:modelValue="(val: boolean) => toggleProvider(item, val)" />
