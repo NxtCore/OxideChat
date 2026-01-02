@@ -60,10 +60,11 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &AiProvider) -> Resul
 
 	// Categorize operations
 	for model in &discovered {
-		let capabilities_json = serde_json::to_value(&model.capabilities).unwrap_or_default();
-		let input_modalities_json = serde_json::to_value(&model.input_modalities).unwrap_or_default();
-		let output_modalities_json = serde_json::to_value(&model.output_modalities).unwrap_or_default();
-
+		let capabilities_json = serde_json::to_value(&model.capabilities).map_err(|e| format!("Failed to serialize capabilities for model {}: {}", model.id, e))?;
+		let input_modalities_json =
+			serde_json::to_value(&model.input_modalities).map_err(|e| format!("Failed to serialize input_modalities for model {}: {}", model.id, e))?;
+		let output_modalities_json =
+			serde_json::to_value(&model.output_modalities).map_err(|e| format!("Failed to serialize output_modalities for model {}: {}", model.id, e))?;
 		if existing_map.contains_key(model.id.as_str()) {
 			to_update.push((
 				provider.id,

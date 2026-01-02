@@ -344,6 +344,10 @@ async function updateProvider(id: string, data: Object) {
 }
 
 async function syncProvider(provider: any) {
+	if (!provider || !provider.id) {
+		console.error('Invalid provider:', provider);
+		return;
+	}
 	const toast = store.toast(store.getTranslation('settings.providers.syncing_provider'), {
 		description: store.getTranslation('settings.providers.syncing_provider_description'),
 		type: 'loading',

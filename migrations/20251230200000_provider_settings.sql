@@ -39,6 +39,9 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.providers.toggling_provider', 'Toggling provider'),
     ('en', 'settings.providers.toggling_provider_description', 'Please wait while the provider is being toggled'),
     ('en', 'settings.providers.toggling_provider_success', 'Provider successfully toggled'),
+    ('en', 'settings.providers.syncing_provider', 'Syncing models'),
+    ('en', 'settings.providers.syncing_provider_description', 'Models for this provider are being synced, this may take a moment'),
+    ('en', 'settings.providers.syncing_provider_success', 'Models successfully synced'),
     ('en', 'common.cancel', 'Cancel'),  
     ('en', 'common.save', 'Save'),
     ('en', 'common.delete', 'Delete')
@@ -71,6 +74,9 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.providers.toggling_provider', 'Anbieter umschalten'),
     ('de', 'settings.providers.toggling_provider_description', 'Bitte warten Sie, während der Anbieter umgeschaltet wird'),
     ('de', 'settings.providers.toggling_provider_success', 'Anbieter erfolgreich umgeschaltet'),
+    ('de', 'settings.providers.syncing_provider', 'Synchronisiere Modelle'),
+    ('de', 'settings.providers.syncing_provider_description', 'Modelle des Anbieters werden synchronisiert, dies kann einen Moment dauern'),
+    ('de', 'settings.providers.syncing_provider_success', 'Modelle erfolgreich synchronisiert'),
     ('de', 'common.cancel', 'Abbrechen'),
     ('de', 'common.save', 'Speichern'),
     ('de', 'common.delete', 'Löschen')
