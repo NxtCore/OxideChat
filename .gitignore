@@ -7,9 +7,12 @@
 .nuxt
 .nitro
 .cache
+.cargo
 dist
 node_modules/
 
 .env
 .env.*
 !.env.example
+
+

@@ -62,7 +62,7 @@ const router = useRouter();
 
 const tabs = [
 	{id: 'profile', label: 'settings.tabs.profile', icon: User, permission: 'settings.profile.view'},
-	{id: 'providers', label: 'settings.tabs.providers', icon: Cpu, permission: 'admin.config.view'},
+	{id: 'providers', label: 'settings.tabs.providers', icon: Cpu, permission: 'admin.providers.view'},
 ];
 
 const visibleTabs = computed(() => tabs.filter(tab => store.hasPermission(tab.permission)));
