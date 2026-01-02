@@ -39,9 +39,12 @@
 					<div class="shrink-0 flex items-center gap-2">
 						<Button variant="outline" size="sm" class="gap-2" @click="openConfigDialog(item)">
 							<Settings2 class="h-4 w-4" />
-							<span>{{ item.isConfigured ? store.getTranslation('settings.providers.edit') : store.getTranslation('settings.providers.configure') }}</span>
+							<span v-if="!item.isConfigured">{{ store.getTranslation('settings.providers.configure') }}</span>
 						</Button>
-						<Switch :checked="item.is_enabled || false" :disabled="!item.isConfigured" @update:modelValue="(val: boolean) => toggleProvider(item, val)" />
+						<Button variant="outline" size="sm" class="gap-2" @click="syncProvider(item)">
+							<RotateCw class="h-4 w-4" />
+						</Button>
+						<Switch :modelValue="item.is_enabled || false" :disabled="!item.isConfigured" @update:modelValue="(val: boolean) => toggleProvider(item, val)" />
 					</div>
 				</div>
 			</div>
@@ -112,7 +115,7 @@
 
 <script setup lang="ts">
 import {ref, reactive, onMounted, computed} from 'vue';
-import {Sparkles, Cpu, Zap, Server, Plus, Settings2, Loader2, BrainCircuit, Globe, AudioWaveform, Trash2, Share2} from 'lucide-vue-next';
+import {Sparkles, Cpu, Zap, Server, Plus, Settings2, Loader2, BrainCircuit, Globe, AudioWaveform, Trash2, RotateCw} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
 import {Button} from '@/components/ui/button';
@@ -242,7 +245,7 @@ const providers: ProviderConfig[] = [
 		isPreConfigured: true,
 		keyFormat: 'AIza',
 	},
-	{
+	/*{
 		kind: 'ollama',
 		name: 'Ollama',
 		description: store.getTranslation('settings.providers.ollama_description'),
@@ -261,7 +264,7 @@ const providers: ProviderConfig[] = [
 		defaultBaseUrl: 'http://localhost:1234/v1',
 		isPreConfigured: true,
 		keyFormat: '...',
-	},
+	},*/
 ];
 
 async function loadProviders() {
@@ -276,10 +279,16 @@ async function loadProviders() {
 	}
 }
 
-function toggleProvider(item: any, enabled: boolean) {
-	console.log(item);
+async function toggleProvider(item: any, enabled: boolean) {
 	if (item.isConfigured) {
-		updateProvider(item.id, {is_enabled: enabled});
+		const toast = store.toast(store.getTranslation('settings.providers.toggling_provider'), {
+			description: store.getTranslation('settings.providers.toggling_provider_description'),
+			type: 'loading',
+			duration: Infinity,
+		});
+		await updateProvider(item.id, {is_enabled: enabled});
+		store.dismissToast(toast);
+		store.toast(store.getTranslation('settings.providers.toggling_provider_success'), {type: 'success'});
 	}
 }
 

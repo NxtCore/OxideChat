@@ -39,6 +39,9 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.providers.ollama_description', 'Access local models through Ollama'),
     ('en', 'settings.providers.homl_description', 'Access local models through HoML (faster Ollama alternative)'),
     ('en', 'settings.providers.lmstudio_description', 'Access local models through LM Studio'),
+    ('en', 'settings.providers.toggling_provider', 'Toggling provider'),
+    ('en', 'settings.providers.toggling_provider_description', 'Please wait while the provider is being toggled'),
+    ('en', 'settings.providers.toggling_provider_success', 'Provider successfully toggled'),
     ('en', 'common.cancel', 'Cancel'),  
     ('en', 'common.save', 'Save'),
     ('en', 'common.delete', 'Delete')
@@ -71,6 +74,9 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.providers.ollama_description', 'Greift auf lokale Modelle über Ollama zu'),
     ('de', 'settings.providers.homl_description', 'Greift auf lokale Modelle über HoML (schnellere Alternative zu Ollama)'),
     ('de', 'settings.providers.lmstudio_description', 'Greift auf lokale Modelle über LM Studio zu'),
+    ('de', 'settings.providers.toggling_provider', 'Anbieter umschalten'),
+    ('de', 'settings.providers.toggling_provider_description', 'Bitte warten Sie, während der Anbieter umgeschaltet wird'),
+    ('de', 'settings.providers.toggling_provider_success', 'Anbieter erfolgreich umgeschaltet'),
     ('de', 'common.cancel', 'Abbrechen'),
     ('de', 'common.save', 'Speichern'),
     ('de', 'common.delete', 'Löschen')

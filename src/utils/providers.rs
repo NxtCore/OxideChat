@@ -98,11 +98,6 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &AiProvider) -> Resul
 	let updated = update_result.unwrap_or(0);
 	let removed = delete_result.unwrap_or(0);
 
-	println!("To insert: {}", to_insert.len());
-	println!("To update: {}", to_update.len());
-	println!("To delete: {}", to_delete.len());
-	println!("Synced {} models: added {}, updated {}, removed {}", discovered.len(), added, updated, removed);
-
 	Ok(SyncProviderResponse {
 		success: true,
 		models_added: added,

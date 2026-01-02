@@ -190,22 +190,28 @@ export const useMainStore = defineStore('main', {
 			const {$toast} = useNuxtApp();
 			const {description, type = 'info', duration} = options || {};
 
+			let toast;
 			switch (type) {
 				case 'success':
-					$toast.success(title, {description, duration});
+					toast = $toast.success(title, {description, duration});
 					break;
 				case 'error':
-					$toast.error(title, {description, duration});
+					toast = $toast.error(title, {description, duration});
 					break;
 				case 'warning':
-					$toast.warning(title, {description, duration});
+					toast = $toast.warning(title, {description, duration});
 					break;
 				case 'loading':
-					$toast.loading(title, {description, duration});
+					toast = $toast.loading(title, {description, duration});
 					break;
 				default:
-					$toast.info(title, {description, duration});
+					toast = $toast.info(title, {description, duration});
 			}
+			return toast;
+		},
+		dismissToast(toast: any) {
+			const {$toast} = useNuxtApp();
+			$toast.dismiss(toast.id);
 		},
 	},
 });
