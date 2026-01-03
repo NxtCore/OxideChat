@@ -1,0 +1,30 @@
+<template>
+	<ShadButton
+		class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+		:class="active ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'"
+	>
+		<!-- Pin indicator -->
+		<Pin v-if="chat.is_pinned" class="h-3 w-3 shrink-0 text-primary" />
+		<MessageSquare v-else class="h-4 w-4 shrink-0" />
+
+		<!-- Title -->
+		<span class="flex-1 truncate text-left">
+			{{ chat.title || 'New chat' }}
+		</span>
+
+		<!-- Message count badge -->
+		<span v-if="chat.message_count > 0" class="shrink-0 text-xs opacity-60">
+			{{ chat.message_count }}
+		</span>
+	</ShadButton>
+</template>
+
+<script setup lang="ts">
+import {MessageSquare, Pin} from 'lucide-vue-next';
+import type {Chat} from '~/types/chat';
+
+defineProps<{
+	chat: Chat;
+	active: boolean;
+}>();
+</script>

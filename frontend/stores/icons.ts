@@ -80,7 +80,7 @@ export const useIconsStore = defineStore('icons', {
 	},
 	getters: {
 		getProviderIcon: state => {
-			return (providerName: string): {icon: string; type: 'svg' | 'png'} | null => {
+			return (providerName: string | undefined): {icon: string; type: 'svg' | 'png'} | null => {
 				if (!providerName) return null;
 				const normalized = providerName.toLowerCase().trim();
 				if (state.providerLookup[normalized]) {

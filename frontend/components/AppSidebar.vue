@@ -13,20 +13,8 @@
 		</ShadSidebarHeader>
 
 		<ShadSidebarContent class="p-2">
-			<ShadSidebarGroup>
-				<ShadSidebarGroupLabel class="text-sidebar-foreground">{{ store.getTranslation('sidebar.chats') }}</ShadSidebarGroupLabel>
-				<ShadSidebarGroupContent>
-					<ShadSidebarMenu>
-						<!-- Chat list placeholder -->
-						<ShadSidebarMenuItem>
-							<ShadSidebarMenuButton class="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
-								<Plus class="h-4 w-4" />
-								<span class="group-data-[collapsible=icon]:hidden">{{ store.getTranslation('sidebar.new_chat') }}</span>
-							</ShadSidebarMenuButton>
-						</ShadSidebarMenuItem>
-					</ShadSidebarMenu>
-				</ShadSidebarGroupContent>
-			</ShadSidebarGroup>
+			<!-- Chat list -->
+			<ChatList />
 		</ShadSidebarContent>
 
 		<ShadSidebarFooter class="border-t border-sidebar-border p-4">
@@ -50,6 +38,36 @@
 						{{ store.auth.user?.email }}
 					</ShadDropdownMenuLabel>
 					<ShadDropdownMenuSeparator class="bg-border" />
+
+					<!-- Workspace selector -->
+					<ShadDropdownMenuSub>
+						<ShadDropdownMenuSubTrigger class="text-popover-foreground">
+							<Layers class="mr-2 h-4 w-4" />
+							<span>Workspace</span>
+							<span class="ml-auto text-xs text-muted-foreground">
+								{{ chatStore.activeWorkspace?.name || 'All' }}
+							</span>
+						</ShadDropdownMenuSubTrigger>
+						<ShadDropdownMenuSubContent class="border-border bg-popover">
+							<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent" @click="chatStore.setActiveWorkspace(null)">
+								<span :class="!chatStore.activeWorkspaceId ? 'font-medium' : ''">All chats</span>
+							</ShadDropdownMenuItem>
+							<ShadDropdownMenuSeparator class="bg-border" />
+							<ShadDropdownMenuItem
+								v-for="workspace in chatStore.workspaces"
+								:key="workspace.id"
+								class="text-popover-foreground focus:bg-accent"
+								@click="chatStore.setActiveWorkspace(workspace.id)"
+							>
+								<span :class="workspace.id === chatStore.activeWorkspaceId ? 'font-medium' : ''">
+									{{ workspace.name }}
+								</span>
+								<span class="ml-auto text-xs text-muted-foreground">{{ workspace.chat_count }}</span>
+							</ShadDropdownMenuItem>
+						</ShadDropdownMenuSubContent>
+					</ShadDropdownMenuSub>
+
+					<ShadDropdownMenuSeparator class="bg-border" />
 					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="goToSettings">
 						<Settings class="mr-2 h-4 w-4" />
 						<span>{{ store.getTranslation('settings.title') }}</span>
@@ -65,10 +83,12 @@
 </template>
 
 <script setup lang="ts">
-import {MessageSquare, Plus, ChevronUp, LogOut, Settings} from 'lucide-vue-next';
+import {MessageSquare, ChevronUp, LogOut, Settings, Layers} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
+import {useChatStore} from '@/stores/chatStore';
 
 const store = useMainStore();
+const chatStore = useChatStore();
 const router = useRouter();
 
 const userInitials = computed(() => {

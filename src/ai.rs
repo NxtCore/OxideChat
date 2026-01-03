@@ -33,12 +33,14 @@ pub async fn init(pool: &PgPool) {
 	let mut engine_write = engine.write().await;
 	for provider in providers {
 		let config = provider_to_config(&provider);
+
 		if let Err(e) = engine_write.register_provider(config).await {
 			eprintln!("[AI] Failed to register provider '{}': {}", provider.name, e);
 		} else {
 			println!("[AI] Registered provider '{}'", provider.name);
 		}
 	}
+
 	drop(engine_write);
 
 	let _ = OF_ENGINE.set(engine);

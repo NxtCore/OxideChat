@@ -64,7 +64,15 @@
 							class="flex h-8 w-8 items-center justify-center rounded-lg"
 							:style="{backgroundColor: selectedProvider.brandColor + '15'}"
 						>
-							<div v-html="selectedProvider.icon" class="h-5 w-5" :style="{color: selectedProvider.brandColor}"></div>
+							<div
+								v-if="selectedProvider.icon?.type === 'svg'"
+								v-html="selectedProvider.icon.icon"
+								class="h-5 w-5"
+								:style="{color: selectedProvider.brandColor}"
+							></div>
+							<div v-else-if="selectedProvider.icon?.type === 'png'" class="h-5 w-5">
+								<img :src="selectedProvider.icon?.icon" :alt="selectedProvider.name" />
+							</div>
 						</div>
 						<span>{{ store.getTranslation('settings.providers.configure') }} {{ selectedProvider?.name }}</span>
 					</DialogTitle>
@@ -76,7 +84,7 @@
 				<div class="space-y-4 py-4">
 					<div v-if="!selectedProvider?.isPreConfigured" class="space-y-2">
 						<Label for="provider-name">{{ store.getTranslation('settings.providers.name') }}</Label>
-						<Input id="provider-name" v-model="configForm.name" type="text" :placeholder="selectedProvider?.name || 'Provider Name'" />
+						<Input id="provider-name" v-model="configForm.name" type="text" :placeholder="selectedProvider?.name" />
 					</div>
 
 					<div class="space-y-2">
@@ -164,7 +172,7 @@ const displayProviders = computed(() => {
 	for (const conf of configuredProviders.value) {
 		const provider_template = providers.find(p => {
 			if (p.kind !== conf.kind) return false;
-			if (p.kind === 'openai_compat' && p.isPreConfigured) {
+			if (p.kind === 'OPENAI_COMPAT' && p.isPreConfigured) {
 				return conf.base_url === p.defaultBaseUrl;
 			}
 			return true;
@@ -217,7 +225,7 @@ const configForm = reactive({
 
 const providers: ProviderConfig[] = [
 	{
-		kind: 'openrouter',
+		kind: 'OPENROUTER',
 		name: 'OpenRouter',
 		description: store.getTranslation('settings.providers.openrouter_description'),
 		icon: iconsStore.getProviderIcon('openrouter'),
@@ -227,7 +235,7 @@ const providers: ProviderConfig[] = [
 		keyFormat: 'sk-or-v1-',
 	},
 	{
-		kind: 'openai',
+		kind: 'OPENAI',
 		name: 'OpenAI',
 		description: store.getTranslation('settings.providers.openai_description'),
 		icon: iconsStore.getProviderIcon('openai'),
@@ -237,7 +245,7 @@ const providers: ProviderConfig[] = [
 		keyFormat: 'sk-proj-',
 	},
 	{
-		kind: 'anthropic',
+		kind: 'ANTHROPIC',
 		name: 'Anthropic',
 		description: store.getTranslation('settings.providers.anthropic_description'),
 		icon: iconsStore.getProviderIcon('anthropic'),
@@ -247,7 +255,7 @@ const providers: ProviderConfig[] = [
 		keyFormat: 'sk-ant-',
 	},
 	{
-		kind: 'google',
+		kind: 'GOOGLE',
 		name: 'Google',
 		description: store.getTranslation('settings.providers.google_description'),
 		icon: iconsStore.getProviderIcon('google'),
@@ -309,7 +317,7 @@ function openConfigDialog(item: any) {
 
 function addCustomProvider() {
 	selectedProvider.value = {
-		kind: 'openai_compat',
+		kind: 'OPENAI_COMPAT',
 		name: '',
 		description: '',
 		icon: null,
