@@ -12,9 +12,9 @@
 			<div class="relative rounded-2xl rounded-bl-md bg-muted px-4 py-3 text-foreground">
 				<!-- Typing indicator or content -->
 				<div v-if="!content" class="flex items-center gap-1">
-					<span class="typing-dot" />
-					<span class="typing-dot delay-150" />
-					<span class="typing-dot delay-300" />
+					<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" />
+					<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.15s" />
+					<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.3s" />
 				</div>
 
 				<!-- Content with animation -->
@@ -34,7 +34,6 @@ const props = defineProps<{
 
 const chatStore = useChatStore();
 
-// In a real implementation, this would be connected to SSE stream
 const content = ref('');
 
 const animationClass = computed(() => {
@@ -64,18 +63,6 @@ const renderedContent = computed(() => {
 </script>
 
 <style scoped>
-.typing-dot {
-	@apply h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50;
-}
-
-.delay-150 {
-	animation-delay: 0.15s;
-}
-
-.delay-300 {
-	animation-delay: 0.3s;
-}
-
 .animate-fade-in {
 	animation: fadeIn 0.3s ease-out;
 }

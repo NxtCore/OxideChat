@@ -106,7 +106,6 @@ export interface Model {
 	provider_id: string;
 	model_id: string;
 	display_name: string;
-	stable_key: string;
 	capabilities: string[];
 	context_length: number | null;
 	max_tokens: number | null;

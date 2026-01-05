@@ -16,9 +16,6 @@
 			<TransitionGroup name="message">
 				<MessageItem v-for="message in messages" :key="message.id" :message="message" :animation="chatStore.preferences.streaming_animation" />
 			</TransitionGroup>
-
-			<!-- Streaming message -->
-			<StreamingMessage v-if="chatStore.isStreaming" :animation="chatStore.preferences.streaming_animation" />
 		</div>
 
 		<!-- Scroll to bottom button -->
@@ -26,7 +23,7 @@
 			<ShadButton
 				v-if="showScrollButton"
 				class="fixed bottom-24 right-8 rounded-full bg-primary p-3 text-primary-foreground shadow-lg transition-all hover:bg-primary/90"
-				@click="scrollToBottom"
+				@click="handleScrollButtonClick"
 			>
 				<ArrowDown class="h-4 w-4" />
 			</ShadButton>
@@ -37,7 +34,6 @@
 <script setup lang="ts">
 import {ArrowDown} from 'lucide-vue-next';
 import MessageItem from './MessageItem.vue';
-import StreamingMessage from './StreamingMessage.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 
@@ -49,13 +45,18 @@ const props = defineProps<{
 const chatStore = useChatStore();
 const containerRef = ref<HTMLElement>();
 const showScrollButton = ref(false);
+const isAutoScrolling = ref(true);
 
 function scrollToBottom(smooth = true) {
 	const container = containerRef.value;
 	if (!container) return;
-	container.scrollTo({
-		top: container.scrollHeight,
-		behavior: smooth ? 'smooth' : 'auto',
+
+	// Use requestAnimationFrame for smoother scrolling
+	requestAnimationFrame(() => {
+		container.scrollTo({
+			top: container.scrollHeight,
+			behavior: smooth ? 'smooth' : 'auto',
+		});
 	});
 }
 
@@ -65,22 +66,29 @@ function checkScrollPosition() {
 	const threshold = 100;
 	const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
 	showScrollButton.value = !isNearBottom;
+	isAutoScrolling.value = isNearBottom;
 }
 
-// Auto-scroll when new messages arrive
+function handleScrollButtonClick() {
+	scrollToBottom(true);
+	isAutoScrolling.value = true;
+}
+
+// Watch for message content changes (during streaming)
 watch(
-	() => props.messages.length,
+	() => props.messages.map(m => `${m.content || ''}${m.reasoning_content || ''}`).join(''),
 	() => {
-		if (!showScrollButton.value) {
-			nextTick(() => scrollToBottom(false));
+		if (isAutoScrolling.value && chatStore.isStreaming) {
+			nextTick(() => scrollToBottom(true));
 		}
-	}
+	},
+	{deep: true}
 );
 
 onMounted(() => {
 	const container = containerRef.value;
 	if (container) {
-		container.addEventListener('scroll', checkScrollPosition);
+		container.addEventListener('scroll', checkScrollPosition, {passive: true});
 		scrollToBottom(false);
 	}
 });
@@ -91,12 +99,17 @@ onUnmounted(() => {
 		container.removeEventListener('scroll', checkScrollPosition);
 	}
 });
+
+// Expose scrollToBottom for external use
+defineExpose({
+	scrollToBottom,
+});
 </script>
 
 <style scoped>
 .message-enter-active,
 .message-leave-active {
-	transition: all 0.3s ease;
+	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .message-enter-from {
@@ -117,5 +130,10 @@ onUnmounted(() => {
 .fade-enter-from,
 .fade-leave-to {
 	opacity: 0;
+}
+
+/* Ensure smooth scrolling container */
+.flex-1.overflow-y-auto {
+	scroll-behavior: smooth;
 }
 </style>

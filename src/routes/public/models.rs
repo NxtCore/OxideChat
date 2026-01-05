@@ -3,8 +3,8 @@
 //! Public endpoint for listing available AI models.
 
 use crate::AppState;
-use crate::ai;
 use crate::routes::public::auth::get_current_user;
+use crate::types::{AiModel, ProviderKind};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{extract::State, response::IntoResponse};
 use serde::Serialize;
@@ -18,7 +18,6 @@ pub struct ModelResponse {
 	pub provider_id: String,
 	pub model_id: String,
 	pub display_name: String,
-	pub stable_key: String,
 	pub capabilities: Vec<String>,
 	pub context_length: Option<u32>,
 	pub max_tokens: Option<u32>,
@@ -30,7 +29,7 @@ pub struct ModelResponse {
 
 /// GET /api/v1/models
 ///
-/// List all available AI models from registered providers.
+/// List all available AI models from the database.
 pub async fn list_models(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
 	// Authenticate user
 	let _user = match get_current_user(&state.db, &cookies).await {
@@ -38,38 +37,74 @@ pub async fn list_models(State(state): State<Arc<AppState>>, cookies: Cookies) -
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	let engine = ai::get();
-	let engine_read = engine.read().await;
-	let models = engine_read.list_models().await;
-	drop(engine_read);
+	// Fetch models from database instead of Omniference
+	let models = match sqlx::query_as::<_, AiModel>(
+		"SELECT m.* FROM models m 
+		JOIN providers p ON m.provider_id = p.id 
+		WHERE p.is_enabled = true AND m.is_enabled = true 
+		ORDER BY m.display_name",
+	)
+	.fetch_all(&state.db)
+	.await
+	{
+		Ok(models) => models,
+		Err(e) => {
+			eprintln!("[AI] Failed to fetch models from database: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	// Fetch provider information for all models
+	let provider_ids: Vec<_> = models.iter().map(|m| m.provider_id).collect();
+	let providers = match sqlx::query_as::<_, (uuid::Uuid, String, ProviderKind)>("SELECT id, name, kind FROM providers WHERE id = ANY($1)")
+		.bind(&provider_ids)
+		.fetch_all(&state.db)
+		.await
+	{
+		Ok(providers) => providers,
+		Err(e) => {
+			eprintln!("[AI] Failed to fetch providers: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	// Create a map for quick lookup
+	let provider_map: std::collections::HashMap<uuid::Uuid, (String, ProviderKind)> = providers.into_iter().map(|(id, name, kind)| (id, (name, kind))).collect();
 
 	// Convert to response format
 	let responses: Vec<ModelResponse> = models
 		.into_iter()
-		.map(|m| {
-			let provider_kind_str = match &m.provider_kind {
-				omniference::types::ProviderKind::OpenAI => "OPENAI",
-				omniference::types::ProviderKind::OpenAICompat => "OPENAI_COMPAT",
-				omniference::types::ProviderKind::OpenRouter => "OPENROUTER",
-				omniference::types::ProviderKind::Anthropic => "ANTHROPIC",
-				omniference::types::ProviderKind::Google => "GOOGLE",
-				omniference::types::ProviderKind::Custom(s) => "CUSTOM",
+		.filter_map(|m| {
+			let (provider_name, provider_kind) = provider_map.get(&m.provider_id)?;
+			let provider_kind_str = match provider_kind {
+				ProviderKind::Openai => "OPENAI",
+				ProviderKind::OpenaiCompat => "OPENAI_COMPAT",
+				ProviderKind::Openrouter => "OPENROUTER",
+				ProviderKind::Anthropic => "ANTHROPIC",
+				ProviderKind::Google => "GOOGLE",
+				ProviderKind::Custom => "CUSTOM",
 			};
 
-			ModelResponse {
-				id: m.id.clone(),
-				provider_id: m.provider_name.clone(),
-				model_id: m.id.clone(),
-				display_name: m.name.clone(),
-				stable_key: m.id.clone(),
-				capabilities: m.capabilities.iter().map(|c| c.as_str().to_string()).collect(),
-				context_length: m.context_length,
-				max_tokens: m.max_tokens,
-				provider_name: m.provider_name.clone(),
+			// Convert capabilities from JSON to string vector
+			let capabilities = if let serde_json::Value::Array(arr) = &m.capabilities {
+				arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+			} else {
+				vec![]
+			};
+
+			Some(ModelResponse {
+				id: m.id.to_string(),
+				provider_id: m.provider_id.to_string(),
+				model_id: m.model_id.clone(),
+				display_name: m.display_name.clone(),
+				capabilities,
+				context_length: m.context_length.map(|c| c as u32),
+				max_tokens: m.max_tokens.map(|c| c as u32),
+				provider_name: provider_name.clone(),
 				provider_kind: provider_kind_str.to_string(),
 				is_favorite: false,
 				is_hidden: false,
-			}
+			})
 		})
 		.collect();
 

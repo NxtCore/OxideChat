@@ -1,6 +1,6 @@
 <template>
-	<ShadSelect :model-value="chatStore.selectedModel?.stable_key || ''" @update:model-value="handleModelChange">
-		<ShadSelectTrigger class="w-auto">
+	<ShadSelect :model-value="chatStore.selectedModel?.model_id || ''" @update:model-value="handleModelChange">
+		<ShadSelectTrigger :class="cn('w-auto', props.class)">
 			<ShadSelectValue>
 				<div class="flex items-center gap-2">
 					<div
@@ -14,7 +14,7 @@
 					>
 						<img :src="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.icon" alt="Provider icon" />
 					</div>
-					<span class="max-w-[150px] truncate">
+					<span class="max-w-[150px] truncate text-xs font-medium">
 						{{ chatStore.selectedModel?.display_name || 'Select model' }}
 					</span>
 				</div>
@@ -35,7 +35,7 @@
 					Favorites
 				</ShadSelectLabel>
 				<ShadSelectGroup>
-					<ShadSelectItem v-for="model in filteredFavorites" :key="model.id" :value="model.stable_key">
+					<ShadSelectItem v-for="model in filteredFavorites" :key="model.id" :value="model.model_id">
 						<div class="flex items-center gap-2 flex-1 min-w-0">
 							<div
 								v-if="iconStore.getProviderIcon(model.provider_name)?.type === 'svg'"
@@ -59,7 +59,7 @@
 					{{ provider }}
 				</ShadSelectLabel>
 				<ShadSelectGroup>
-					<ShadSelectItem v-for="model in models" :key="model.id" :value="model.stable_key">
+					<ShadSelectItem v-for="model in models" :key="model.id" :value="model.model_id">
 						<div class="flex items-center gap-2 flex-1 min-w-0">
 							<div
 								v-if="iconStore.getProviderIcon(model.provider_name)?.type === 'svg'"
@@ -88,6 +88,11 @@
 import {Bot, Star} from 'lucide-vue-next';
 import type {Model} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
+import {cn} from '~/lib/utils';
+
+const props = defineProps<{
+	class?: string;
+}>();
 
 const chatStore = useChatStore();
 const iconStore = useIconsStore();
@@ -114,7 +119,7 @@ const filteredGrouped = computed(() => {
 
 function handleModelChange(value: string | number | bigint | boolean | Record<string, any> | null) {
 	if (typeof value !== 'string') return;
-	const model = chatStore.models.find(m => m.stable_key === value);
+	const model = chatStore.models.find(m => m.model_id === value);
 	if (model) {
 		chatStore.setSelectedModel(model);
 	}

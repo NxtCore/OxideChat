@@ -1,13 +1,14 @@
 <template>
 	<div class="flex h-full flex-col">
-		<ChatEmptyState @send="handleSendMessage" />
+		<MessageList :messages="chatStore.messages" :loading="chatStore.messagesLoading" />
+		<ChatComposer @send="handleSendMessage" />
 	</div>
 </template>
 
 <script setup lang="ts">
 import {useChatStore} from '~/stores/chatStore';
-import ChatEmptyState from './ChatEmptyState.vue';
-
+import ChatInput from '~/components/chat/ChatInput.vue';
+import MessageList from '~/components/chat/MessageList.vue';
 const chatStore = useChatStore();
 
 async function handleSendMessage(content: string) {
@@ -21,6 +22,7 @@ async function handleSendMessage(content: string) {
 		chatId = chat.id;
 	}
 
+	// Send message and stream AI response in one call
 	await chatStore.sendAndStream(chatId, content);
 }
 

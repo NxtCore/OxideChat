@@ -34,6 +34,8 @@ pub struct StreamRequest {
 	pub model_key: String,
 	/// Reasoning effort (low, medium, high)
 	pub reasoning_effort: Option<String>,
+	/// Reasoning budget tokens (for Anthropic thinking)
+	pub reasoning_budget_tokens: Option<u32>,
 	/// Enabled tools
 	pub tools_enabled: Option<Vec<String>>,
 }
@@ -80,6 +82,8 @@ fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl
 /// 3. Saves the assistant message upon completion
 pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cookies, Path(chat_id): Path<Uuid>, Json(req): Json<StreamRequest>) -> impl IntoResponse {
 	// Authenticate user
+	eprint!("[STREAM] Starting stream completion");
+
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return error_stream("not_authenticated", "Authentication required").into_response(),
@@ -101,6 +105,8 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
+	eprintln!("[STREAM] Chat verified");
+
 	let model = sqlx::query_as::<_, crate::types::AiModel>("SELECT * FROM models WHERE model_id = $1")
 		.bind(&req.model_key)
 		.fetch_optional(&state.db)
@@ -114,6 +120,8 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 			return error_stream("internal_error", "Failed to fetch model").into_response();
 		}
 	};
+
+	eprintln!("[STREAM] Model verified");
 
 	// Save the user message first
 	let user_message = sqlx::query_as::<_, Message>(
@@ -138,6 +146,8 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
+	eprintln!("[STREAM] User message saved");
+
 	// Fetch all chat messages for context
 	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 ORDER BY created_at ASC")
 		.bind(chat_id)
@@ -152,12 +162,14 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
+	eprintln!("[STREAM] Messages fetched");
+
 	// Get the AI engine and model
 	let engine = ai::get();
 	let engine_read = engine.read().await;
 
 	// Get model by stable key
-	let model = match engine_read.get_model(&req.model_key).await {
+	let omni_model = match engine_read.get_model(&req.model_key).await {
 		Some(m) => m,
 		None => {
 			let msg = format!("Model '{}' not found", req.model_key);
@@ -166,14 +178,18 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	let provider = match engine_read.get_provider(&model.provider_name).await {
+	eprintln!("[STREAM] Model verified");
+
+	let provider = match engine_read.get_provider(&omni_model.provider_name).await {
 		Some(p) => p,
 		None => {
-			let msg = format!("Provider '{}' not found", model.provider_name);
+			let msg = format!("Provider '{}' not found", omni_model.provider_name);
 			drop(engine_read);
 			return error_stream("provider_not_found", msg).into_response();
 		}
 	};
+
+	eprintln!("[STREAM] Provider verified");
 
 	// Build chat messages for omniference
 	let omni_messages: Vec<OmniMessage> = messages
@@ -186,17 +202,26 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		})
 		.collect();
 
-	// Build the request using Default
+	eprintln!("[STREAM] Messages built");
 	let mut ir = ChatRequestIR::default();
-	ir.model.alias = model.id.clone();
-	ir.model.model_id = model.id.clone();
-	ir.model.provider = provider.endpoint.clone();
-	ir.model.input_modalities = model.input_modalities.clone();
-	ir.model.output_modalities = model.output_modalities.clone();
+	ir.model.alias = omni_model.id.clone();
+	ir.model.model_id = omni_model.id.clone();
+	ir.model.provider = provider;
+	ir.model.input_modalities = omni_model.input_modalities.clone();
+	ir.model.output_modalities = omni_model.output_modalities.clone();
 	ir.messages = omni_messages;
 	ir.stream = true;
 	ir.metadata.insert("user_id".to_string(), user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), chat_id.to_string());
+	if req.reasoning_effort.is_some() || req.reasoning_budget_tokens.is_some() {
+		ir.reasoning = Some(omniference::types::ReasoningConfig {
+			effort: req.reasoning_effort.clone(),
+			budget_tokens: req.reasoning_budget_tokens,
+			summary: Some("detailed".to_string()),
+		});
+	}
+
+	eprintln!("[STREAM] Chat request: {:?}", ir);
 
 	// Execute the chat
 	let stream_result = engine_read.chat(ir).await;
@@ -204,6 +229,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	match stream_result {
 		Ok(upstream) => {
+			println!("Chat request successful");
 			let db = state.db.clone();
 			let start_time = Instant::now();
 			let user_msg_id = user_message.id;
@@ -212,13 +238,16 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 			// Create the SSE stream
 			let sse_stream = async_stream::stream! {
+				eprintln!("[STREAM] Stream generator started");
 				// First, emit the user message saved event
 				yield Ok::<_, Infallible>(Event::default().data(
 					serde_json::to_string(&StreamData::UserMessageSaved { message_id: user_msg_id }).unwrap_or_default()
 				));
 
+				eprintln!("[STREAM] About to start consuming upstream");
+
 				let mut full_content = String::new();
-				let reasoning_content = String::new();
+				let mut reasoning_content = String::new();
 				let mut input_tokens: u32 = 0;
 				let mut output_tokens: u32 = 0;
 				let mut reasoning_tokens: u32 = 0;
@@ -227,7 +256,10 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 				tokio::pin!(upstream);
 
+				let mut event_count = 0;
 				while let Some(event) = upstream.next().await {
+					event_count += 1;
+					eprintln!("[STREAM] Event #{}: {:?}", event_count, &event);
 					match event {
 						StreamEvent::TextDelta { content } => {
 							// If we were tracking reasoning time, stop it now
@@ -237,6 +269,15 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 							full_content.push_str(&content);
 							yield Ok::<_, Infallible>(Event::default().data(
 								serde_json::to_string(&StreamData::TextDelta { content }).unwrap_or_default()
+							));
+						}
+						StreamEvent::ReasoningDelta { content } => {
+							if reasoning_start.is_none() {
+								reasoning_start = Some(Instant::now());
+							}
+							reasoning_content.push_str(&content);
+							yield Ok::<_, Infallible>(Event::default().data(
+								serde_json::to_string(&StreamData::ReasoningDelta { content }).unwrap_or_default()
 							));
 						}
 						StreamEvent::Tokens { input, output } => {
@@ -282,7 +323,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 							.bind(chat_id)
 							.bind(&full_content)
 							.bind(if reasoning_content.is_empty() { None } else { Some(&reasoning_content) })
-							.bind(&model_key)
+							.bind(&model.id)
 							.bind(&reasoning_effort)
 							.bind(input_tokens as i32)
 							.bind(output_tokens as i32)
@@ -325,6 +366,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 						_ => {}
 					}
 				}
+				eprintln!("[STREAM] Stream ended after {} events", event_count);
 			};
 
 			Sse::new(sse_stream).keep_alive(KeepAlive::default()).into_response()

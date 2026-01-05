@@ -1,9 +1,12 @@
 <template>
 	<ShadPopover>
 		<ShadPopoverTrigger as-child>
-			<ShadButton class="flex items-center gap-1 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground">
+			<ShadButton
+				variant="ghost"
+				size="icon"
+				class="h-5 w-5 rounded bg-primary p-0 text-primary-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-primary/90"
+			>
 				<Info class="h-3 w-3" />
-				<span>{{ formattedCost }}</span>
 			</ShadButton>
 		</ShadPopoverTrigger>
 

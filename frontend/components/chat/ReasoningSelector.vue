@@ -1,9 +1,19 @@
 <template>
 	<div v-if="!isTokenBudget" class="space-y-2">
-		<ShadSelect v-model="effortLevel" @update:modelValue="handleEffortChange">
-			<ShadSelectTrigger :class="chatStore.reasoningEffort && chatStore.reasoningEffort !== 'none' ? 'text-primary border-primary/50' : 'text-muted-foreground'">
+		<ShadSelect v-model="effortLevel" @update:modelValue="handleEffortChange" :disabled="chatStore.isReasoningRequired">
+			<ShadSelectTrigger
+				:class="
+					cn(
+						'w-auto',
+						props.class,
+						chatStore.reasoningEffort && chatStore.reasoningEffort !== 'none' ? 'text-primary border-primary/50' : 'text-muted-foreground'
+					)
+				"
+			>
 				<Brain class="h-4 w-4" />
-				<ShadSelectValue v-if="chatStore.reasoningEffort && chatStore.reasoningEffort !== 'none'" />
+				<span v-if="chatStore.reasoningEffort && chatStore.reasoningEffort !== 'none'" class="text-xs font-medium">
+					{{ displayLabel }}
+				</span>
 			</ShadSelectTrigger>
 			<ShadSelectContent>
 				<ShadSelectGroup>
@@ -33,11 +43,16 @@
 <script setup lang="ts">
 import {Brain} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
+import {cn} from '~/lib/utils';
+
+const props = defineProps<{
+	class?: string;
+}>();
 
 const chatStore = useChatStore();
 
 const effortLevel = ref('');
-const tokenBudget = ref<number | null>(null);
+const tokenBudget = ref<number | undefined>(undefined);
 
 const isTokenBudget = computed(() => {
 	const capabilities = chatStore.selectedModel?.capabilities || [];
@@ -78,8 +93,8 @@ const tokenBudgetRange = computed(() => {
 		const match = cap.match(/REASONING_BUDGET_TOKENS_(\d+)_(\d+)/);
 		if (match) {
 			return {
-				min: parseInt(match[1]),
-				max: parseInt(match[2]),
+				min: parseInt(match[1] || '0'),
+				max: parseInt(match[2] || '0'),
 			};
 		}
 	}
@@ -120,22 +135,45 @@ onMounted(() => {
 	}
 });
 
-function handleEffortChange(value: string) {
-	const effort = value ? value.toLowerCase().replace(/_/g, '-') : null;
+// Keep UI in sync when the store changes
+watch(
+	() => chatStore.reasoningEffort,
+	val => {
+		effortLevel.value = '';
+		tokenBudget.value = undefined;
+
+		if (val) {
+			if (isTokenBudget.value) {
+				const num = parseInt(val);
+				if (!isNaN(num)) tokenBudget.value = num;
+			} else {
+				const upperEffort = val.toUpperCase().replace(/-/g, '_');
+				if (availableEffortLevels.value.includes(upperEffort)) {
+					effortLevel.value = upperEffort;
+				}
+			}
+		}
+	}
+);
+
+// When available effort levels change (model switch), ensure the selected UI value is valid
+watch(availableEffortLevels, newV => {
+	if (effortLevel.value && !newV.includes(effortLevel.value)) {
+		effortLevel.value = '';
+	}
+});
+
+function handleEffortChange(value: any) {
+	const effortStr = value ? String(value) : '';
+	const effort = effortStr ? effortStr.toLowerCase().replace(/_/g, '-') : null;
 	chatStore.setReasoningEffort(effort);
 }
 
 function handleTokenChange() {
-	if (tokenBudget.value && tokenBudget.value >= minTokens.value && tokenBudget.value <= maxTokens.value) {
+	if (tokenBudget.value !== undefined && tokenBudget.value >= minTokens.value && tokenBudget.value <= maxTokens.value) {
 		chatStore.setReasoningEffort(tokenBudget.value.toString());
-	} else if (!tokenBudget.value) {
+	} else if (tokenBudget.value === undefined) {
 		chatStore.setReasoningEffort(null);
 	}
-}
-
-function clearReasoning() {
-	chatStore.setReasoningEffort(null);
-	effortLevel.value = '';
-	tokenBudget.value = null;
 }
 </script>

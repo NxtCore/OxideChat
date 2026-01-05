@@ -102,7 +102,7 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		favoriteModels(): Model[] {
-			return this.models.filter(m => m.is_favorite || this.preferences.favorite_model_keys.includes(m.stable_key));
+			return this.models.filter(m => m.is_favorite || this.preferences.favorite_model_keys.includes(m.model_id));
 		},
 
 		groupedModels(): Record<string, Model[]> {
@@ -118,6 +118,29 @@ export const useChatStore = defineStore('chat', {
 		hasReasoningCapability(): boolean {
 			if (!this.selectedModel) return false;
 			return this.selectedModel.capabilities.some(c => c.startsWith('REASONING_'));
+		},
+
+		availableReasoningEfforts(): string[] {
+			if (!this.selectedModel) return [];
+			return this.selectedModel.capabilities.filter(c => c.startsWith('REASONING_EFFORT_')).map(c => c.replace('REASONING_EFFORT_', ''));
+		},
+
+		hasNoneReasoningOption(): boolean {
+			return this.availableReasoningEfforts.includes('NONE');
+		},
+
+		isReasoningRequired(): boolean {
+			return this.hasReasoningCapability && !this.hasNoneReasoningOption;
+		},
+
+		lowestReasoningEffort(): string | null {
+			const efforts = this.availableReasoningEfforts;
+			if (efforts.length === 0) return null;
+			const effortOrder = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH'];
+			for (const effort of effortOrder) {
+				if (efforts.includes(effort)) return effort;
+			}
+			return efforts[0] || null;
 		},
 
 		contextPercentage(): number {
@@ -214,6 +237,7 @@ export const useChatStore = defineStore('chat', {
 
 		async createChat(data?: CreateChatRequest): Promise<Chat | null> {
 			try {
+				const router = useRouter();
 				const {$customFetch} = useNuxtApp();
 				const chat = await $customFetch('/api/v1/chats', {
 					method: 'POST',
@@ -221,9 +245,9 @@ export const useChatStore = defineStore('chat', {
 				});
 				const newChat = chat as Chat;
 				this.chats.unshift(newChat);
-				// Set as active without fetching (new chat has no messages)
 				this.activeChat = newChat;
 				this.messages = [];
+				router.push(`/chats/${newChat.id}`);
 				return newChat;
 			} catch (e) {
 				console.error('Failed to create chat:', e);
@@ -287,6 +311,7 @@ export const useChatStore = defineStore('chat', {
 				this.fetchChat(chat.id);
 			} else {
 				this.messages = [];
+				this.setContextTokens(0);
 			}
 		},
 
@@ -309,7 +334,7 @@ export const useChatStore = defineStore('chat', {
 				role: 'user',
 				content,
 				reasoning_content: null,
-				model_id: this.selectedModel.stable_key,
+				model_id: this.selectedModel.model_id,
 				reasoning_effort: this.reasoningEffort,
 				input_tokens: null,
 				output_tokens: null,
@@ -331,7 +356,7 @@ export const useChatStore = defineStore('chat', {
 				role: 'assistant',
 				content: '',
 				reasoning_content: null,
-				model_id: this.selectedModel.stable_key,
+				model_id: this.selectedModel.model_id,
 				reasoning_effort: this.reasoningEffort,
 				input_tokens: null,
 				output_tokens: null,
@@ -358,7 +383,7 @@ export const useChatStore = defineStore('chat', {
 					credentials: 'include',
 					body: JSON.stringify({
 						content,
-						model_key: this.selectedModel.stable_key,
+						model_key: this.selectedModel.model_id,
 						reasoning_effort: this.reasoningEffort || undefined,
 						tools_enabled: this.enabledTools.length > 0 ? this.enabledTools : undefined,
 					}),
@@ -407,6 +432,12 @@ export const useChatStore = defineStore('chat', {
 										break;
 									case 'text_delta':
 										if (msg) msg.content += data.content;
+										break;
+									case 'reasoning_delta':
+										if (msg) {
+											if (msg.reasoning_content === null) msg.reasoning_content = '';
+											msg.reasoning_content += data.content;
+										}
 										break;
 									case 'tokens':
 										if (msg) {
@@ -496,7 +527,7 @@ export const useChatStore = defineStore('chat', {
 				// If no model selected, try to select default or first available
 				if (!this.selectedModel && this.models.length > 0) {
 					const defaultKey = this.preferences.default_model_key;
-					const defaultModel = defaultKey ? this.models.find(m => m.stable_key === defaultKey) : null;
+					const defaultModel = defaultKey ? this.models.find(m => m.model_id === defaultKey) : null;
 					this.selectedModel = defaultModel || this.models[0] || null;
 				}
 			} catch (e) {
@@ -508,7 +539,29 @@ export const useChatStore = defineStore('chat', {
 
 		setSelectedModel(model: Model | null) {
 			this.selectedModel = model;
-			this.reasoningEffort = null; // Reset reasoning when model changes
+
+			// Auto-set reasoning effort based on model capabilities
+			if (!model) {
+				this.reasoningEffort = null;
+				return;
+			}
+
+			const hasNone = model.capabilities.some(c => c === 'REASONING_EFFORT_NONE');
+			const hasReasoningCap = model.capabilities.some(c => c.startsWith('REASONING_'));
+
+			if (!hasReasoningCap) {
+				// No reasoning capability
+				this.reasoningEffort = null;
+			} else if (!hasNone) {
+				// Has reasoning but no NONE option - set to lowest available
+				const efforts = model.capabilities.filter(c => c.startsWith('REASONING_EFFORT_')).map(c => c.replace('REASONING_EFFORT_', ''));
+				const effortOrder = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH'];
+				const lowestEffort = effortOrder.find(e => efforts.includes(e));
+				this.reasoningEffort = lowestEffort ? lowestEffort.toLowerCase() : null;
+			} else {
+				// Has NONE option - don't select reasoning by default
+				this.reasoningEffort = null;
+			}
 		},
 
 		async toggleFavoriteModel(modelKey: string): Promise<boolean> {
@@ -528,7 +581,6 @@ export const useChatStore = defineStore('chat', {
 			this.updatePreferences({streaming_animation: animation});
 		},
 
-		// ===== UI State =====
 		setReasoningEffort(effort: string | null) {
 			this.reasoningEffort = effort;
 		},

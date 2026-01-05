@@ -2,7 +2,7 @@
 	<div class="flex flex-col h-full">
 		<!-- New chat button -->
 		<ShadButton
-			class="bg-secondary mx-2 mb-4 flex items-center gap-2 rounded-lg border border-border px-4 py-3 text-sm text-accent-foreground transition-colors hover:text-muted"
+			class="mx-2 mb-4 flex items-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90"
 			@click="createNewChat"
 		>
 			<Plus class="h-4 w-4" />
@@ -49,6 +49,10 @@ import ChatListItem from './ChatListItem.vue';
 import ChatContextMenu from './ChatContextMenu.vue';
 import type {Chat} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
+import {computed, ref} from 'vue';
+import {useRouter} from 'vue-router';
+
+const router = useRouter();
 
 const chatStore = useChatStore();
 
@@ -96,13 +100,13 @@ const groupedChats = computed((): ChatGroup[] => {
 });
 
 function selectChat(chat: Chat) {
+	router.push(`/chats/${chat.id}`);
 	chatStore.setActiveChat(chat);
 }
 
 async function createNewChat() {
-	await chatStore.createChat({
-		workspace_id: chatStore.activeWorkspaceId || undefined,
-	});
+	router.push('/');
+	chatStore.setActiveChat(null);
 }
 
 function showContextMenu(event: MouseEvent, chat: Chat) {

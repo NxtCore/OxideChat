@@ -1,10 +1,10 @@
 <template>
 	<ShadSelect :model-value="enabledToolsValues" multiple @update:model-value="handleToolsChange">
-		<ShadSelectTrigger class="w-auto" :class="chatStore.enabledTools.length > 0 ? 'text-primary border-primary/50' : 'text-muted-foreground'">
+		<ShadSelectTrigger :class="cn('w-auto', props.class, chatStore.enabledTools.length > 0 ? 'text-primary border-primary/50' : 'text-muted-foreground')">
 			<ShadSelectValue>
 				<div class="flex items-center gap-2">
 					<Wrench class="h-4 w-4" />
-					<span v-if="chatStore.enabledTools.length > 0" class="text-xs">
+					<span v-if="chatStore.enabledTools.length > 0" class="text-xs font-medium">
 						{{ chatStore.enabledTools.length }}
 					</span>
 				</div>
@@ -39,13 +39,11 @@
 <script setup lang="ts">
 import {Check, Wrench, Globe, Code, Calculator} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
+import {cn} from '~/lib/utils';
 
-interface Tool {
-	id: string;
-	name: string;
-	description: string;
-	icon: any;
-}
+const props = defineProps<{
+	class?: string;
+}>();
 
 const chatStore = useChatStore();
 const search = ref('');
