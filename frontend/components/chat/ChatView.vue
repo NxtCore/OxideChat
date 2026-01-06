@@ -23,8 +23,4 @@ async function handleSendMessage(content: string) {
 
 	await chatStore.sendAndStream(chatId, content);
 }
-
-onMounted(async () => {
-	await chatStore.init();
-});
 </script>

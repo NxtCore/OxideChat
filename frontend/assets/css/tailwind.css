@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@200..700&family=Outfit:wght@100..900&display=swap');
 @import 'tailwindcss';
+@plugin "@tailwindcss/typography";
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
@@ -13,7 +14,7 @@
 }
 
 ::-webkit-scrollbar-thumb {
-	background: #25272e;
+	background: var(--muted);
 	border-radius: 5px;
 }
 
@@ -214,6 +215,39 @@
 	--tracking-wide: calc(var(--tracking-normal) + 0.025em);
 	--tracking-wider: calc(var(--tracking-normal) + 0.05em);
 	--tracking-widest: calc(var(--tracking-normal) + 0.1em);
+
+	--color-prose-body: var(--foreground);
+	--color-prose-headings: var(--foreground);
+	--color-prose-lead: var(--muted-foreground);
+	--color-prose-links: var(--primary);
+	--color-prose-bold: var(--foreground);
+	--color-prose-counters: var(--muted-foreground);
+	--color-prose-bullets: var(--muted-foreground);
+	--color-prose-hr: var(--border);
+	--color-prose-quotes: var(--foreground);
+	--color-prose-quote-borders: var(--border);
+	--color-prose-captions: var(--muted-foreground);
+	--color-prose-code: var(--foreground);
+	--color-prose-pre-code: var(--popover-foreground);
+	--color-prose-pre-bg: var(--popover);
+	--color-prose-th-borders: var(--border);
+	--color-prose-td-borders: var(--border);
+	--color-prose-invert-body: var(--foreground);
+	--color-prose-invert-headings: var(--foreground);
+	--color-prose-invert-lead: var(--muted-foreground);
+	--color-prose-invert-links: var(--primary);
+	--color-prose-invert-bold: var(--foreground);
+	--color-prose-invert-counters: var(--muted-foreground);
+	--color-prose-invert-bullets: var(--muted-foreground);
+	--color-prose-invert-hr: var(--border);
+	--color-prose-invert-quotes: var(--foreground);
+	--color-prose-invert-quote-borders: var(--border);
+	--color-prose-invert-captions: var(--muted-foreground);
+	--color-prose-invert-code: var(--foreground);
+	--color-prose-invert-pre-code: var(--popover-foreground);
+	--color-prose-invert-pre-bg: var(--popover);
+	--color-prose-invert-th-borders: var(--border);
+	--color-prose-invert-td-borders: var(--border);
 }
 
 body {
@@ -228,4 +262,15 @@ body {
 	body {
 		@apply bg-background text-foreground;
 	}
+}
+
+/* Shiki theme overrides */
+.shiki {
+	background: transparent !important;
+}
+
+.dark .shiki,
+.dark .shiki span {
+	color: var(--shiki-dark) !important;
+	background-color: transparent !important;
 }

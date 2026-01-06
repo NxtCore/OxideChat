@@ -7,25 +7,41 @@
 			:style="{left: `${position.x}px`, top: `${position.y}px`}"
 		>
 			<!-- Pin/Unpin -->
-			<ShadButton class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent" @click="togglePin">
+			<ShadButton
+				variant="ghost"
+				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+				@click="togglePin"
+			>
 				<Pin class="h-4 w-4" :class="chat.is_pinned ? 'text-primary' : ''" />
 				<span>{{ chat.is_pinned ? 'Unpin' : 'Pin' }}</span>
 			</ShadButton>
 
 			<!-- Rename -->
-			<ShadButton class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent" @click="startRename">
+			<ShadButton
+				variant="ghost"
+				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+				@click="startRename"
+			>
 				<Pencil class="h-4 w-4" />
 				<span>Rename</span>
 			</ShadButton>
 
 			<!-- Move to workspace -->
-			<ShadButton class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent" @click="showMoveMenu = true">
+			<ShadButton
+				variant="ghost"
+				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+				@click="showMoveMenu = true"
+			>
 				<FolderInput class="h-4 w-4" />
 				<span>Move to...</span>
 			</ShadButton>
 
 			<!-- Archive/Unarchive -->
-			<ShadButton class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent" @click="toggleArchive">
+			<ShadButton
+				variant="ghost"
+				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+				@click="toggleArchive"
+			>
 				<Archive class="h-4 w-4" />
 				<span>{{ chat.is_archived ? 'Unarchive' : 'Archive' }}</span>
 			</ShadButton>
@@ -33,7 +49,11 @@
 			<div class="my-1 h-px bg-border" />
 
 			<!-- Export -->
-			<ShadButton class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent" @click="exportChat">
+			<ShadButton
+				variant="ghost"
+				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+				@click="exportChat"
+			>
 				<Download class="h-4 w-4" />
 				<span>Export</span>
 			</ShadButton>
@@ -41,7 +61,11 @@
 			<div class="my-1 h-px bg-border" />
 
 			<!-- Delete -->
-			<ShadButton class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-destructive hover:bg-destructive/10" @click="confirmDelete">
+			<ShadButton
+				variant="ghost"
+				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
+				@click="confirmDelete"
+			>
 				<Trash2 class="h-4 w-4" />
 				<span>Delete</span>
 			</ShadButton>

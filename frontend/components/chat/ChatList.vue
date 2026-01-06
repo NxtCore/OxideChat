@@ -101,7 +101,6 @@ const groupedChats = computed((): ChatGroup[] => {
 
 function selectChat(chat: Chat) {
 	router.push(`/chats/${chat.id}`);
-	chatStore.setActiveChat(chat);
 }
 
 async function createNewChat() {

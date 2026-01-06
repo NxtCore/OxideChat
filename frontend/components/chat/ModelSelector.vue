@@ -124,4 +124,20 @@ function handleModelChange(value: string | number | bigint | boolean | Record<st
 		chatStore.setSelectedModel(model);
 	}
 }
+
+watch(
+	() => chatStore.activeChat?.id,
+	(newVal, oldVal) => {
+		console.log('Active chat changed:', newVal, oldVal);
+		console.log('Messages:', chatStore.messages);
+		if (oldVal !== newVal && newVal && chatStore.messages.length > 0) {
+			const model = chatStore.models.find(m => m.id === chatStore.messages[chatStore.messages.length - 1]?.model_id);
+			console.log('Selected model:', model);
+			if (model) {
+				search.value = '';
+				chatStore.setSelectedModel(model);
+			}
+		}
+	}
+);
 </script>

@@ -7,13 +7,15 @@
 
 <script setup lang="ts">
 import {useChatStore} from '~/stores/chatStore';
-import ChatInput from '~/components/chat/ChatInput.vue';
 import MessageList from '~/components/chat/MessageList.vue';
+import ChatComposer from '~/components/chat/ChatComposer.vue';
+import {useRoute} from '#app';
+
 const chatStore = useChatStore();
+const route = useRoute();
 
 async function handleSendMessage(content: string) {
 	let chatId = chatStore.activeChat?.id;
-
 	if (!chatId) {
 		const chat = await chatStore.createChat({
 			workspace_id: chatStore.activeWorkspaceId || undefined,
@@ -21,12 +23,10 @@ async function handleSendMessage(content: string) {
 		if (!chat) return;
 		chatId = chat.id;
 	}
-
-	// Send message and stream AI response in one call
 	await chatStore.sendAndStream(chatId, content);
 }
 
-onMounted(async () => {
-	await chatStore.init();
-});
+if (!chatStore.activeChat || chatStore.activeChat.id !== route.params.id) {
+	await chatStore.fetchChat(route.params.id as string);
+}
 </script>

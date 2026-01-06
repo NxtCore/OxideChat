@@ -26,6 +26,7 @@ export interface Chat {
 
 export interface ChatMessage {
 	id: string;
+	client_id: string;
 	role: 'user' | 'assistant' | 'system';
 	content: string;
 	reasoning_content: string | null;

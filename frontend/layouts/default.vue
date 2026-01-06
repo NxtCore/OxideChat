@@ -34,6 +34,7 @@
 <script setup lang="ts">
 import {useHead} from 'nuxt/app';
 import {useMainStore} from '@/stores';
+import {useChatStore} from '@/stores/chatStore';
 import 'vue-sonner/style.css';
 
 useHead({
@@ -45,6 +46,7 @@ useHead({
 });
 
 const store = useMainStore();
+const chatStore = useChatStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -103,5 +105,6 @@ watch(
 
 onMounted(async () => {
 	await checkAuth();
+	await chatStore.init();
 });
 </script>

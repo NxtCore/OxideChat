@@ -26,7 +26,7 @@
 			<!-- Reasoning content -->
 			<Transition name="expand">
 				<div v-if="showReasoning && (message.reasoning_content || isStreamingReasoning)" class="w-full max-w-3xl rounded-xl bg-muted/50 border p-4">
-					<div class="prose prose-sm dark:prose-invert max-w-none opacity-80" v-html="renderedReasoning" />
+					<div class="prose prose-sm dark:prose-invert max-w-none opacity-80" v-html="renderedReasoning" @click="handleCodeBlockClick" />
 					<!-- Typing indicator for reasoning -->
 					<div v-if="isStreamingReasoning && !message.reasoning_content" class="flex items-center gap-1 py-1">
 						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" />
@@ -42,6 +42,7 @@
 				class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl"
 				:class="isUser ? 'rounded-xl bg-muted/50 px-4 py-2 text-foreground' : ''"
 				v-html="renderedContent"
+				@click="handleCodeBlockClick"
 			/>
 
 			<!-- Typing indicator (for streaming assistant message with no content yet) -->
@@ -51,18 +52,36 @@
 				<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.3s" />
 			</div>
 
-			<!-- Message info button -->
-			<MessageInfo v-if="!isUser && !isStreaming" :message="message" class="mt-1 opacity-0 transition-opacity group-hover:opacity-100" />
+			<!-- Model name and actions row -->
+			<div v-if="!isUser && !isStreaming" class="flex items-center gap-3 mt-1">
+				<!-- Model name badge -->
+				<span v-if="modelDisplayName" class="text-xs text-muted-foreground">
+					{{ modelDisplayName }}
+				</span>
+
+				<!-- Message actions -->
+				<MessageActions
+					:message="message"
+					:model-name="modelDisplayName"
+					:can-regenerate="isLastAssistantMessage"
+					class="opacity-0 transition-opacity group-hover:opacity-100"
+				/>
+			</div>
+
+			<!-- Preview Modal -->
+			<CodePreview v-if="previewData" :code="previewData.code" :language="previewData.language" :is-open="!!previewData" @close="closePreview" />
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
 import {User, Bot, Brain, ChevronDown} from 'lucide-vue-next';
-import MessageInfo from './MessageInfo.vue';
+import MessageActions from './MessageActions.vue';
+import CodePreview from './CodePreview.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useIconsStore} from '~/stores/icons';
+import {useMarkdown, extractCodeForPreview, ICON_COPY, ICON_CHECK} from '~/composables/useMarkdown';
 
 const props = defineProps<{
 	message: ChatMessage;
@@ -71,7 +90,10 @@ const props = defineProps<{
 
 const chatStore = useChatStore();
 const iconStore = useIconsStore();
+const {renderStreaming, renderComplete} = useMarkdown();
+
 const showReasoning = ref(false);
+const previewData = ref<{code: string; language: string} | null>(null);
 
 const isUser = computed(() => props.message.role === 'user');
 const isStreaming = computed(() => props.message.id.startsWith('streaming-'));
@@ -79,7 +101,24 @@ const isStreamingReasoning = computed(() => isStreaming.value && chatStore.isStr
 
 const model = computed(() => {
 	if (isUser.value) return null;
-	return chatStore.models.find(m => m.model_id === props.message.model_id);
+	return chatStore.models.find(m => m.id === props.message.model_id);
+});
+
+const modelDisplayName = computed(() => {
+	if (!model.value) return null;
+	// Return the display name, or extract from model_id (format: "Provider:model-name")
+	if (model.value.display_name) return model.value.display_name;
+	const modelId = props.message.model_id;
+	if (modelId?.includes(':')) {
+		return modelId.split(':')[1];
+	}
+	return modelId;
+});
+
+const isLastAssistantMessage = computed(() => {
+	const messages = chatStore.messages;
+	const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+	return lastAssistant?.id === props.message.id;
 });
 
 const providerIcon = computed(() => {
@@ -101,27 +140,51 @@ watch(
 	{immediate: true}
 );
 
-// Simple markdown rendering (in production, use a proper markdown library or remend)
 const renderedContent = computed(() => {
-	return renderMarkdown(props.message.content);
+	if (!props.message.content) return '';
+	if (isStreaming.value) {
+		return renderStreaming(props.message.content);
+	}
+	return renderComplete(props.message.content);
 });
 
 const renderedReasoning = computed(() => {
-	return props.message.reasoning_content ? renderMarkdown(props.message.reasoning_content) : '';
+	if (!props.message.reasoning_content) return '';
+
+	if (isStreaming.value) {
+		return renderStreaming(props.message.reasoning_content);
+	}
+	return renderComplete(props.message.reasoning_content);
 });
 
-function renderMarkdown(text: string): string {
-	if (!text) return '';
-	// Basic rendering - escape HTML and convert code blocks
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-muted p-4 rounded-lg my-2 overflow-x-auto"><code class="language-$1">$2</code></pre>')
-		.replace(/`([^`]+)`/g, '<code class="bg-muted px-1 rounded text-sm">$1</code>')
-		.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-		.replace(/\*([^*]+)\*/g, '<em>$1</em>')
-		.replace(/\n/g, '<br>');
+function handleCodeBlockClick(event: MouseEvent) {
+	const target = event.target as HTMLElement;
+
+	if (target.classList.contains('code-block-copy-btn')) {
+		const wrapper = target.closest('.code-block-wrapper');
+		const codeEl = wrapper?.querySelector('code');
+		if (codeEl) {
+			navigator.clipboard.writeText(codeEl.textContent || '');
+			target.classList.add('copied');
+			target.innerHTML = ICON_CHECK;
+			setTimeout(() => {
+				target.classList.remove('copied');
+				target.innerHTML = ICON_COPY;
+			}, 2000);
+		}
+	}
+
+	// Handle preview button
+	if (target.classList.contains('code-block-preview-btn')) {
+		const result = extractCodeForPreview(target);
+		if (result) {
+			previewData.value = result;
+		}
+	}
+}
+
+function closePreview() {
+	previewData.value = null;
 }
 </script>
 

@@ -16,30 +16,24 @@ import type {
 } from '~/types/chat';
 
 interface ChatState {
-	// Workspaces
 	workspaces: Workspace[];
 	activeWorkspaceId: string | null;
 	workspacesLoading: boolean;
 
-	// Chats
 	chats: Chat[];
 	activeChat: Chat | null;
 	chatsLoading: boolean;
 
-	// Messages
 	messages: ChatMessage[];
 	messagesLoading: boolean;
 
-	// Models
 	models: Model[];
 	selectedModel: Model | null;
 	modelsLoading: boolean;
 
-	// Preferences
 	preferences: UserPreferences;
 	preferencesLoading: boolean;
 
-	// UI State
 	isStreaming: boolean;
 	contextTokens: number;
 	reasoningEffort: string | null;
@@ -306,12 +300,12 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		setActiveChat(chat: Chat | null) {
-			this.activeChat = chat;
 			if (chat) {
 				this.fetchChat(chat.id);
 			} else {
 				this.messages = [];
 				this.setContextTokens(0);
+				this.activeChat = null;
 			}
 		},
 
@@ -331,6 +325,7 @@ export const useChatStore = defineStore('chat', {
 			const userMessageId = `user-${Date.now()}`;
 			const userMessage: ChatMessage = {
 				id: userMessageId,
+				client_id: userMessageId,
 				role: 'user',
 				content,
 				reasoning_content: null,
@@ -353,6 +348,7 @@ export const useChatStore = defineStore('chat', {
 			const streamingMessageId = `streaming-${Date.now()}`;
 			const streamingMessage: ChatMessage = {
 				id: streamingMessageId,
+				client_id: streamingMessageId,
 				role: 'assistant',
 				content: '',
 				reasoning_content: null,
@@ -481,7 +477,6 @@ export const useChatStore = defineStore('chat', {
 			} catch (e) {
 				console.error('Failed to stream:', e);
 				this.isStreaming = false;
-				// Remove placeholders on error
 				this.messages = this.messages.filter(m => m.id !== userMessageId && m.id !== streamingMessageId);
 			}
 		},
@@ -601,7 +596,6 @@ export const useChatStore = defineStore('chat', {
 		// ===== Initialization =====
 		async init() {
 			await Promise.all([this.fetchWorkspaces(), this.fetchChats(), this.fetchPreferences()]);
-			// Fetch models after preferences so we can select default model
 			await this.fetchModels();
 		},
 	},
