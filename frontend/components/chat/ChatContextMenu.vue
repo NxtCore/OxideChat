@@ -6,68 +6,62 @@
 			class="fixed z-50 min-w-48 rounded-lg border border-border bg-popover p-1 shadow-lg"
 			:style="{left: `${position.x}px`, top: `${position.y}px`}"
 		>
-			<!-- Pin/Unpin -->
 			<ShadButton
 				variant="ghost"
 				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
 				@click="togglePin"
 			>
 				<Pin class="h-4 w-4" :class="chat.is_pinned ? 'text-primary' : ''" />
-				<span>{{ chat.is_pinned ? 'Unpin' : 'Pin' }}</span>
+				<span>{{ chat.is_pinned ? store.getTranslation('chat.context_menu.unpin') : store.getTranslation('chat.context_menu.pin') }}</span>
 			</ShadButton>
 
-			<!-- Rename -->
 			<ShadButton
 				variant="ghost"
 				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
 				@click="startRename"
 			>
 				<Pencil class="h-4 w-4" />
-				<span>Rename</span>
+				<span>{{ store.getTranslation('chat.context_menu.rename') }}</span>
 			</ShadButton>
 
-			<!-- Move to workspace -->
 			<ShadButton
 				variant="ghost"
 				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
 				@click="showMoveMenu = true"
 			>
 				<FolderInput class="h-4 w-4" />
-				<span>Move to...</span>
+				<span>{{ store.getTranslation('chat.context_menu.move_to') }}</span>
 			</ShadButton>
 
-			<!-- Archive/Unarchive -->
 			<ShadButton
 				variant="ghost"
 				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
 				@click="toggleArchive"
 			>
 				<Archive class="h-4 w-4" />
-				<span>{{ chat.is_archived ? 'Unarchive' : 'Archive' }}</span>
+				<span>{{ chat.is_archived ? store.getTranslation('chat.context_menu.unarchive') : store.getTranslation('chat.context_menu.archive') }}</span>
 			</ShadButton>
 
 			<div class="my-1 h-px bg-border" />
 
-			<!-- Export -->
 			<ShadButton
 				variant="ghost"
 				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
 				@click="exportChat"
 			>
 				<Download class="h-4 w-4" />
-				<span>Export</span>
+				<span>{{ store.getTranslation('chat.context_menu.export') }}</span>
 			</ShadButton>
 
 			<div class="my-1 h-px bg-border" />
 
-			<!-- Delete -->
 			<ShadButton
 				variant="ghost"
 				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
 				@click="confirmDelete"
 			>
 				<Trash2 class="h-4 w-4" />
-				<span>Delete</span>
+				<span>{{ store.getTranslation('chat.context_menu.delete') }}</span>
 			</ShadButton>
 		</div>
 	</Teleport>
@@ -89,7 +83,7 @@ const emit = defineEmits<{
 }>();
 
 const chatStore = useChatStore();
-const mainStore = useMainStore();
+const store = useMainStore();
 const menuRef = ref<HTMLElement>();
 const showMoveMenu = ref(false);
 
@@ -99,7 +93,7 @@ async function togglePin() {
 }
 
 function startRename() {
-	const newTitle = prompt('Enter new title:', props.chat.title || 'New chat');
+	const newTitle = prompt(store.getTranslation('chat.context_menu.rename_prompt'), props.chat.title || store.getTranslation('chat.list.new_chat'));
 	if (newTitle !== null) {
 		chatStore.updateChat(props.chat.id, {title: newTitle});
 	}
@@ -129,7 +123,7 @@ function exportChat() {
 }
 
 async function confirmDelete() {
-	if (confirm('Are you sure you want to delete this chat? This cannot be undone.')) {
+	if (confirm(store.getTranslation('chat.context_menu.delete_confirm'))) {
 		await chatStore.deleteChat(props.chat.id);
 	}
 	emit('close');

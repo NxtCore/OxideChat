@@ -70,7 +70,7 @@ export const useMainStore = defineStore('main', {
 		hasAnyPermission(permissions: string[]): boolean {
 			return permissions.some(p => this.hasPermission(p));
 		},
-		getTranslation(name: string, language?: string, args: {[key: string]: any} = {}): string {
+		getTranslation(name: string, args: {[key: string]: any} = {}, language?: string): string {
 			const lang = language ?? this.base?.language ?? 'en';
 			let currentTranslation: any = this.base?.i18n?.[lang];
 
@@ -216,7 +216,7 @@ export const useMainStore = defineStore('main', {
 		},
 		dismissToast(toast: any) {
 			const {$toast} = useNuxtApp();
-			if (!toast || typeof toast.id === 'undefined') {
+			if (!toast) {
 				console.error('Invalid toast:', toast);
 				return;
 			}

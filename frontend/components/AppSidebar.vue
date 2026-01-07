@@ -13,7 +13,6 @@
 		</ShadSidebarHeader>
 
 		<ShadSidebarContent class="p-2">
-			<!-- Chat list -->
 			<ChatList />
 		</ShadSidebarContent>
 
@@ -38,19 +37,17 @@
 						{{ store.auth.user?.email }}
 					</ShadDropdownMenuLabel>
 					<ShadDropdownMenuSeparator class="bg-border" />
-
-					<!-- Workspace selector -->
 					<ShadDropdownMenuSub>
 						<ShadDropdownMenuSubTrigger class="text-popover-foreground">
 							<Layers class="mr-2 h-4 w-4" />
-							<span>Workspace</span>
+							<span>{{ store.getTranslation('sidebar.workspace') }}</span>
 							<span class="ml-auto text-xs text-muted-foreground">
-								{{ chatStore.activeWorkspace?.name || 'All' }}
+								{{ chatStore.activeWorkspace?.name || store.getTranslation('sidebar.all') }}
 							</span>
 						</ShadDropdownMenuSubTrigger>
 						<ShadDropdownMenuSubContent class="border-border bg-popover">
 							<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent" @click="chatStore.setActiveWorkspace(null)">
-								<span :class="!chatStore.activeWorkspaceId ? 'font-medium' : ''">All chats</span>
+								<span :class="!chatStore.activeWorkspaceId ? 'font-medium' : ''">{{ store.getTranslation('sidebar.all_chats') }}</span>
 							</ShadDropdownMenuItem>
 							<ShadDropdownMenuSeparator class="bg-border" />
 							<ShadDropdownMenuItem

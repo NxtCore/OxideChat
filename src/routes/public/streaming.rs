@@ -6,7 +6,7 @@
 use crate::AppState;
 use crate::ai;
 use crate::routes::public::auth::get_current_user;
-use crate::types::Message;
+use crate::types::{ChatMessageResponse, Message};
 use axum::{
 	Json,
 	extract::{Path, State},
@@ -16,28 +16,26 @@ use axum::{
 	},
 };
 use futures_util::StreamExt;
+use omniference::Sampling;
 use omniference::{
 	stream::StreamEvent,
 	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role},
 };
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc, time::Instant};
+use crate::types::ai::ModelConfig;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
 /// Request body for sending a message and streaming AI response
 #[derive(Debug, Deserialize)]
 pub struct StreamRequest {
-	/// Message content from the user
 	pub content: String,
-	/// Model stable_key to use (e.g., "openai:gpt-4o")
 	pub model_key: String,
-	/// Reasoning effort (low, medium, high)
 	pub reasoning_effort: Option<String>,
-	/// Reasoning budget tokens (for Anthropic thinking)
 	pub reasoning_budget_tokens: Option<u32>,
-	/// Enabled tools
 	pub tools_enabled: Option<Vec<String>>,
+	pub sampling: Option<Sampling>,
 }
 
 /// SSE event data
@@ -45,7 +43,7 @@ pub struct StreamRequest {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamData {
 	/// User message saved confirmation
-	UserMessageSaved { message_id: Uuid },
+	UserMessageSaved { message: ChatMessageResponse },
 	/// Text content delta
 	TextDelta { content: String },
 	/// Reasoning text delta (for models that support it)
@@ -55,22 +53,95 @@ pub enum StreamData {
 	/// Error occurred
 	Error { code: String, message: String },
 	/// Stream completed with message info
-	Done {
-		message_id: Uuid,
-		input_tokens: Option<i32>,
-		output_tokens: Option<i32>,
-		reasoning_tokens: Option<i32>,
-		latency_ms: Option<i32>,
-		reasoning_latency_ms: Option<i32>,
-	},
+	Done { message: ChatMessageResponse },
 }
 
-/// Helper to create an error SSE stream
 fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
 	let code = code.into();
 	let message = message.into();
 	let data = serde_json::to_string(&StreamData::Error { code, message }).unwrap_or_default();
 	Sse::new(futures_util::stream::once(async move { Ok::<_, Infallible>(Event::default().data(data)) })).keep_alive(KeepAlive::default())
+}
+
+/// Merge sampling options with priority order:
+/// 1. Request-level (highest priority)
+/// 2. model_configs (user preferences)
+/// 3. models table (defaults)
+fn merge_sampling_with_priority(
+	request_sampling: Option<&Sampling>,
+	model_config: Option<&ModelConfig>,
+	model: &crate::types::AiModel,
+) -> Sampling {
+	// Parse sampling from model_config if available
+	let config_sampling: Option<Sampling> = model_config
+		.and_then(|mc| serde_json::from_value(mc.sampling.clone()).ok());
+
+	// Helper macro to get field with priority
+	macro_rules! priority_field {
+		($field:ident) => {
+			request_sampling
+				.and_then(|s| s.$field.clone())
+				.or_else(|| config_sampling.as_ref().and_then(|s| s.$field.clone()))
+		};
+	}
+
+	Sampling {
+		temperature: priority_field!(temperature),
+		top_p: priority_field!(top_p),
+		top_k: priority_field!(top_k),
+		// For max_tokens, also fallback to model's max_tokens and model_config's max_output_tokens
+		max_tokens: request_sampling
+			.and_then(|s| s.max_tokens)
+			.or_else(|| config_sampling.as_ref().and_then(|s| s.max_tokens))
+			.or_else(|| model_config.and_then(|mc| mc.max_output_tokens.map(|t| t as u32)))
+			.or_else(|| model.max_tokens.map(|t| t as u32)),
+		presence_penalty: priority_field!(presence_penalty),
+		frequency_penalty: priority_field!(frequency_penalty),
+		stop: request_sampling
+			.map(|s| s.stop.clone())
+			.filter(|v| !v.is_empty())
+			.or_else(|| config_sampling.as_ref().map(|s| s.stop.clone()).filter(|v| !v.is_empty()))
+			.unwrap_or_default(),
+		parallel_tool_calls: priority_field!(parallel_tool_calls),
+		seed: priority_field!(seed),
+		logit_bias: priority_field!(logit_bias),
+		logprobs: priority_field!(logprobs),
+		top_logprobs: priority_field!(top_logprobs),
+	}
+}
+
+/// Merge reasoning config with priority order:
+/// 1. Request-level (highest priority)  
+/// 2. model_configs extra_settings
+fn merge_reasoning_with_priority(
+	request_effort: Option<&String>,
+	request_budget: Option<u32>,
+	model_config: Option<&ModelConfig>,
+) -> Option<omniference::types::ReasoningConfig> {
+	// Try to get reasoning config from model_config extra_settings
+	let config_effort: Option<String> = model_config
+		.and_then(|mc| mc.extra_settings.get("reasoning_effort"))
+		.and_then(|v| v.as_str())
+		.map(|s| s.to_string());
+	
+	let config_budget: Option<u32> = model_config
+		.and_then(|mc| mc.extra_settings.get("reasoning_budget_tokens"))
+		.and_then(|v| v.as_u64())
+		.map(|n| n as u32);
+
+	// Apply priority: request > config
+	let effort = request_effort.cloned().or(config_effort);
+	let budget = request_budget.or(config_budget);
+
+	if effort.is_some() || budget.is_some() {
+		Some(omniference::types::ReasoningConfig {
+			effort,
+			budget_tokens: budget,
+			summary: Some("detailed".to_string()),
+		})
+	} else {
+		None
+	}
 }
 
 /// POST /api/v1/chats/:chat_id/stream
@@ -123,18 +194,40 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	eprintln!("[STREAM] Model verified");
 
+	// Fetch user's model configuration (if any) for priority-based settings
+	let model_config = sqlx::query_as::<_, ModelConfig>(
+		"SELECT * FROM model_configs WHERE owner_id = $1 AND stable_key = $2"
+	)
+	.bind(user.id)
+	.bind(&req.model_key)
+	.fetch_optional(&state.db)
+	.await
+	.ok()
+	.flatten();
+
+	eprintln!("[STREAM] Model config: {:?}", model_config.as_ref().map(|mc| &mc.name));
+
 	// Save the user message first
+	let reasoning_details = crate::types::ReasoningDetails {
+		effort: req.reasoning_effort.clone(),
+		budget_tokens: req.reasoning_budget_tokens.map(|b| b as i32),
+	};
+	let usage_details = crate::types::UsageDetails::default();
+	let cost_details = crate::types::CostDetails::default();
+
 	let user_message = sqlx::query_as::<_, Message>(
 		r#"
-		INSERT INTO messages (chat_id, role, content, model_id, reasoning_effort)
-		VALUES ($1, 'user', $2, $3, $4)
+		INSERT INTO messages (chat_id, role, content, model_id, reasoning_details, usage_details, cost_details)
+		VALUES ($1, 'user', $2, $3, $4, $5, $6)
 		RETURNING *
 		"#,
 	)
 	.bind(chat_id)
 	.bind(&req.content)
 	.bind(model.id)
-	.bind(&req.reasoning_effort)
+	.bind(sqlx::types::Json(reasoning_details))
+	.bind(sqlx::types::Json(usage_details))
+	.bind(sqlx::types::Json(cost_details))
 	.fetch_one(&state.db)
 	.await;
 
@@ -213,13 +306,20 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 	ir.stream = true;
 	ir.metadata.insert("user_id".to_string(), user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), chat_id.to_string());
-	if req.reasoning_effort.is_some() || req.reasoning_budget_tokens.is_some() {
-		ir.reasoning = Some(omniference::types::ReasoningConfig {
-			effort: req.reasoning_effort.clone(),
-			budget_tokens: req.reasoning_budget_tokens,
-			summary: Some("detailed".to_string()),
-		});
-	}
+	
+	// Apply priority-based sampling: request > model_configs > model defaults
+	ir.sampling = merge_sampling_with_priority(
+		req.sampling.as_ref(),
+		model_config.as_ref(),
+		&model,
+	);
+	
+	// Apply priority-based reasoning: request > model_configs
+	ir.reasoning = merge_reasoning_with_priority(
+		req.reasoning_effort.as_ref(),
+		req.reasoning_budget_tokens,
+		model_config.as_ref(),
+	);
 
 	eprintln!("[STREAM] Chat request: {:?}", ir);
 
@@ -232,16 +332,16 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 			println!("Chat request successful");
 			let db = state.db.clone();
 			let start_time = Instant::now();
-			let user_msg_id = user_message.id;
-			let model_key = req.model_key.clone();
 			let reasoning_effort = req.reasoning_effort.clone();
+			let reasoning_budget_tokens = req.reasoning_budget_tokens.clone();
 
 			// Create the SSE stream
 			let sse_stream = async_stream::stream! {
 				eprintln!("[STREAM] Stream generator started");
 				// First, emit the user message saved event
+				let user_message_response: ChatMessageResponse = user_message.into();
 				yield Ok::<_, Infallible>(Event::default().data(
-					serde_json::to_string(&StreamData::UserMessageSaved { message_id: user_msg_id }).unwrap_or_default()
+					serde_json::to_string(&StreamData::UserMessageSaved { message: user_message_response }).unwrap_or_default()
 				));
 
 				eprintln!("[STREAM] About to start consuming upstream");
@@ -307,16 +407,32 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 						StreamEvent::Done => {
 							let latency_ms = start_time.elapsed().as_millis() as i32;
 
+							let usage_details = crate::types::UsageDetails {
+								input_tokens: Some(input_tokens as i32),
+								output_tokens: Some(output_tokens as i32),
+								reasoning_tokens: Some(reasoning_tokens as i32),
+								latency_ms: Some(latency_ms),
+								reasoning_latency_ms,
+							};
+
+							let reasoning_details = crate::types::ReasoningDetails {
+								effort: reasoning_effort.clone(),
+								budget_tokens: match reasoning_budget_tokens {
+									Some(b) => Some(b as i32),
+									None => None,
+								},
+							};
+
+							let cost_details = crate::types::CostDetails::default();
+
 							// Save the assistant message
 							let message = sqlx::query_as::<_, Message>(
 								r#"
 								INSERT INTO messages (
 									chat_id, role, content, reasoning_content,
-									model_id, reasoning_effort,
-									input_tokens, output_tokens, reasoning_tokens,
-									latency_ms, reasoning_latency_ms
+									model_id, reasoning_details, usage_details, cost_details
 								)
-								VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, $10)
+								VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7)
 								RETURNING *
 								"#,
 							)
@@ -324,12 +440,9 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 							.bind(&full_content)
 							.bind(if reasoning_content.is_empty() { None } else { Some(&reasoning_content) })
 							.bind(&model.id)
-							.bind(&reasoning_effort)
-							.bind(input_tokens as i32)
-							.bind(output_tokens as i32)
-							.bind(if reasoning_tokens > 0 { Some(reasoning_tokens as i32) } else { None::<i32> })
-							.bind(latency_ms)
-							.bind(reasoning_latency_ms)
+							.bind(sqlx::types::Json(reasoning_details))
+							.bind(sqlx::types::Json(usage_details))
+							.bind(sqlx::types::Json(cost_details))
 							.fetch_one(&db)
 							.await;
 
@@ -341,15 +454,9 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 							match message {
 								Ok(msg) => {
-									yield Ok::<_, Infallible>(Event::default().data(
-										serde_json::to_string(&StreamData::Done {
-											message_id: msg.id,
-											input_tokens: Some(input_tokens as i32),
-											output_tokens: Some(output_tokens as i32),
-											reasoning_tokens: if reasoning_tokens > 0 { Some(reasoning_tokens as i32) } else { None },
-											latency_ms: Some(latency_ms),
-											reasoning_latency_ms,
-										}).unwrap_or_default()
+								let message_response: ChatMessageResponse = msg.into();
+								yield Ok::<_, Infallible>(Event::default().data(
+									serde_json::to_string(&StreamData::Done { message: message_response }).unwrap_or_default()
 									));
 								}
 								Err(e) => {

@@ -7,7 +7,7 @@
 
 		<!-- Streaming content -->
 		<div class="flex max-w-[80%] flex-col gap-1">
-			<span class="text-xs text-muted-foreground">Assistant</span>
+			<span class="text-xs text-muted-foreground">{{ store.getTranslation('chat.streaming_message.assistant') }}</span>
 
 			<!-- Reasoning section (if present) -->
 			<div
@@ -54,6 +54,9 @@
 import {Bot, Brain, ChevronDown} from 'lucide-vue-next';
 import CodePreview from './CodePreview.vue';
 import {useMarkdown, extractCodeForPreview, ICON_COPY, ICON_CHECK} from '~/composables/useMarkdown';
+import {useMainStore} from '~/stores';
+
+const store = useMainStore();
 
 const props = defineProps<{
 	animation?: 'fade' | 'typewriter' | 'slide' | 'none';

@@ -66,6 +66,40 @@ impl MessageRole {
 	}
 }
 
+// ============= Structs =============
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CostDetails {
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub input: Option<Decimal>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub output: Option<Decimal>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub reasoning: Option<Decimal>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UsageDetails {
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub input_tokens: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub output_tokens: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub reasoning_tokens: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub latency_ms: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub reasoning_latency_ms: Option<i32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReasoningDetails {
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub effort: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub budget_tokens: Option<i32>,
+}
+
 // ============= Database Models =============
 
 /// Workspace database row
@@ -135,15 +169,9 @@ pub struct Message {
 	pub content: String,
 	pub reasoning_content: Option<String>,
 	pub model_id: Option<Uuid>,
-	pub reasoning_effort: Option<String>,
-	pub input_tokens: Option<i32>,
-	pub output_tokens: Option<i32>,
-	pub reasoning_tokens: Option<i32>,
-	pub input_cost_usd: Option<Decimal>,
-	pub output_cost_usd: Option<Decimal>,
-	pub reasoning_cost_usd: Option<Decimal>,
-	pub latency_ms: Option<i32>,
-	pub reasoning_latency_ms: Option<i32>,
+	pub cost_details: sqlx::types::Json<CostDetails>,
+	pub usage_details: sqlx::types::Json<UsageDetails>,
+	pub reasoning_details: sqlx::types::Json<ReasoningDetails>,
 	pub created_at: DateTime<Utc>,
 }
 
@@ -157,6 +185,23 @@ pub struct UserPreferences {
 	pub use_remend: bool,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
+}
+
+impl UserPreferences {
+	/// Create default preferences for a user when none exist in database
+	#[must_use]
+	pub fn default_for(user_id: Uuid) -> Self {
+		let now = Utc::now();
+		Self {
+			user_id,
+			default_model_key: None,
+			favorite_model_keys: serde_json::json!([]),
+			streaming_animation: "fade".to_string(),
+			use_remend: true,
+			created_at: now,
+			updated_at: now,
+		}
+	}
 }
 
 // ============= Request DTOs =============
@@ -214,6 +259,7 @@ pub struct SendMessageRequest {
 	pub content: String,
 	pub model_id: Option<Uuid>,
 	pub reasoning_effort: Option<String>,
+	pub reasoning_budget_tokens: Option<i32>,
 	#[serde(default)]
 	pub tools_enabled: Vec<String>,
 }
@@ -296,46 +342,23 @@ pub struct ChatMessageResponse {
 	pub content: String,
 	pub reasoning_content: Option<String>,
 	pub model_id: Option<Uuid>,
-	pub reasoning_effort: Option<String>,
-	pub input_tokens: Option<i32>,
-	pub output_tokens: Option<i32>,
-	pub reasoning_tokens: Option<i32>,
-	pub input_cost_usd: Option<Decimal>,
-	pub output_cost_usd: Option<Decimal>,
-	pub reasoning_cost_usd: Option<Decimal>,
-	pub total_cost_usd: Option<Decimal>,
-	pub latency_ms: Option<i32>,
+	pub cost_details: CostDetails,
+	pub usage_details: UsageDetails,
+	pub reasoning_details: ReasoningDetails,
 	pub created_at: DateTime<Utc>,
 }
 
 impl From<Message> for ChatMessageResponse {
 	fn from(m: Message) -> Self {
-		let total_cost = match (&m.input_cost_usd, &m.output_cost_usd, &m.reasoning_cost_usd) {
-			(Some(i), Some(o), Some(r)) => Some(*i + *o + *r),
-			(Some(i), Some(o), None) => Some(*i + *o),
-			(Some(i), None, Some(r)) => Some(*i + *r),
-			(None, Some(o), Some(r)) => Some(*o + *r),
-			(Some(i), None, None) => Some(*i),
-			(None, Some(o), None) => Some(*o),
-			(None, None, Some(r)) => Some(*r),
-			(None, None, None) => None,
-		};
-
 		Self {
 			id: m.id,
 			role: m.role,
 			content: m.content,
 			reasoning_content: m.reasoning_content,
 			model_id: m.model_id,
-			reasoning_effort: m.reasoning_effort,
-			input_tokens: m.input_tokens,
-			output_tokens: m.output_tokens,
-			reasoning_tokens: m.reasoning_tokens,
-			input_cost_usd: m.input_cost_usd,
-			output_cost_usd: m.output_cost_usd,
-			reasoning_cost_usd: m.reasoning_cost_usd,
-			total_cost_usd: total_cost,
-			latency_ms: m.latency_ms,
+			cost_details: m.cost_details.0,
+			usage_details: m.usage_details.0,
+			reasoning_details: m.reasoning_details.0,
 			created_at: m.created_at,
 		}
 	}

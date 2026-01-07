@@ -2,11 +2,8 @@
 	<ShadTooltip>
 		<ShadTooltipTrigger as-child>
 			<div class="relative flex items-center justify-center">
-				<!-- Donut chart -->
 				<svg class="h-8 w-8 -rotate-90" viewBox="0 0 36 36">
-					<!-- Background circle -->
 					<circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" stroke-width="3" class="text-muted/30" />
-					<!-- Progress circle -->
 					<circle
 						cx="18"
 						cy="18"
@@ -22,16 +19,15 @@
 					/>
 				</svg>
 
-				<!-- Center text -->
 				<span class="absolute text-[8px] font-medium" :class="colorClass"> {{ displayPercentage }}% </span>
 			</div>
 		</ShadTooltipTrigger>
 
 		<ShadTooltipContent side="bottom">
 			<div class="space-y-1 text-xs">
-				<p class="font-medium">Context Usage</p>
-				<p class="text-muted-foreground">{{ formatTokens(chatStore.contextTokens) }} / {{ formatTokens(contextLimit) }} tokens</p>
-				<p v-if="isNearLimit" class="text-amber-500">Approaching context limit</p>
+				<p class="font-medium">{{ store.getTranslation('chat.context_indicator.usage') }}</p>
+				<p class="text-muted-foreground">{{ formatTokens(chatStore.contextTokens) }} / {{ formatTokens(contextLimit) }} {{ store.getTranslation('chat.context_indicator.tokens') }}</p>
+				<p v-if="isNearLimit" class="text-amber-500">{{ store.getTranslation('chat.context_indicator.approaching_limit') }}</p>
 			</div>
 		</ShadTooltipContent>
 	</ShadTooltip>
@@ -39,8 +35,10 @@
 
 <script setup lang="ts">
 import {useChatStore} from '~/stores/chatStore';
+import {useMainStore} from '~/stores';
 
 const chatStore = useChatStore();
+const store = useMainStore();
 const circumference = 2 * Math.PI * 15.5; // ~97.4
 
 const contextLimit = computed(() => {

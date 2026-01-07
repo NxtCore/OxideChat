@@ -1,6 +1,5 @@
 <template>
 	<div ref="containerRef" class="flex-1 overflow-y-auto p-4">
-		<!-- Loading skeleton -->
 		<div v-if="loading" class="space-y-4">
 			<div v-for="i in 3" :key="i" class="flex gap-3">
 				<div class="h-8 w-8 animate-pulse rounded-full bg-muted" />
@@ -10,15 +9,13 @@
 				</div>
 			</div>
 		</div>
-
-		<!-- Messages -->
 		<div v-else class="mx-auto max-w-4xl space-y-4">
 			<TransitionGroup name="message">
-				<MessageItem v-for="message in messages" :key="message.client_id" :message="message" :animation="chatStore.preferences.streaming_animation" />
+				<MessageItem v-for="message in messages" :key="message.client_id" :message="message" :animation="store.preferences?.streaming_animation" />
 			</TransitionGroup>
 		</div>
 
-		<!-- Scroll to bottom button -->
+
 		<Transition name="fade">
 			<ShadButton
 				v-if="showScrollButton"
@@ -36,6 +33,7 @@ import {ArrowDown} from 'lucide-vue-next';
 import MessageItem from './MessageItem.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
+import {useMainStore} from '~/stores/index';
 
 const props = defineProps<{
 	messages: ChatMessage[];
@@ -43,6 +41,7 @@ const props = defineProps<{
 }>();
 
 const chatStore = useChatStore();
+const store = useMainStore();
 const containerRef = ref<HTMLElement>();
 const showScrollButton = ref(false);
 const isAutoScrolling = ref(true);

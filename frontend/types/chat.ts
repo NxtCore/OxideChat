@@ -32,6 +32,7 @@ export interface ChatMessage {
 	reasoning_content: string | null;
 	model_id: string | null;
 	reasoning_effort: string | null;
+	reasoning_budget_tokens: number | null;
 	input_tokens: number | null;
 	output_tokens: number | null;
 	reasoning_tokens: number | null;
@@ -99,6 +100,7 @@ export interface UpdatePreferencesRequest {
 	favorite_model_keys?: string[];
 	streaming_animation?: StreamingAnimation;
 	use_remend?: boolean;
+	reasoning_effort?: string | null;
 }
 
 // Model types (from backend)

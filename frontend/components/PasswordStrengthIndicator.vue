@@ -1,13 +1,11 @@
 <template>
 	<div class="password-strength-indicator flex flex-col gap-2">
-		<!-- Strength Bar -->
 		<div class="flex items-center gap-2">
 			<div class="flex-1 h-2 bg-muted rounded-full overflow-hidden">
 				<div class="h-full transition-all duration-300 rounded-full" :class="strengthBarClass" :style="{width: `${strengthPercentage}%`}" />
 			</div>
 		</div>
 
-		<!-- Requirements Checklist -->
 		<div class="grid grid-cols-2 gap-1 text-xs" v-if="showRequirements">
 			<div
 				v-for="req in requirements"

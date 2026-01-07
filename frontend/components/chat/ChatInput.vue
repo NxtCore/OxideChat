@@ -2,30 +2,26 @@
 	<div class="p-4">
 		<div class="mx-auto max-w-4xl">
 			<div class="relative flex flex-col rounded-2xl border border-border bg-card shadow-sm">
-				<!-- Textarea -->
 				<ShadTextarea
 					ref="textareaRef"
 					v-model="message"
 					:placeholder="placeholder"
 					rows="1"
-					class="min-h-[60px] w-full resize-none border-none bg-transparent px-4 py-3 text-foreground placeholder:text-muted-foreground focus-visible:ring-0"
+					class="min-h-15 w-full resize-none border-none bg-transparent px-4 py-3 text-foreground placeholder:text-muted-foreground focus-visible:ring-0"
 					:disabled="chatStore.isStreaming"
 					@keydown.enter.exact="handleEnter"
 					@input="autoResize"
 				/>
 
-				<!-- Bottom toolbar -->
 				<ChatComposer @send="sendMessage" />
 			</div>
 
-			<!-- Hint text -->
-			<p class="mt-2 text-center text-[10px] text-muted-foreground opacity-50">Press Enter to send, Shift+Enter for new line</p>
+			<p class="mt-2 text-center text-[10px] text-muted-foreground opacity-50">{{ store.getTranslation('chat.composer.hint') }}</p>
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-import {ArrowUp, Loader2, Paperclip, Globe} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
 import ChatComposer from './ChatComposer.vue';
@@ -35,16 +31,16 @@ const emit = defineEmits<{
 }>();
 
 const chatStore = useChatStore();
-const mainStore = useMainStore();
+const store = useMainStore();
 
 const message = ref('');
 const textareaRef = ref();
 
 const placeholder = computed(() => {
 	if (chatStore.selectedModel) {
-		return `Message ${chatStore.selectedModel.display_name}...`;
+		return store.getTranslation('chat.composer.placeholder_model', {model: chatStore.selectedModel.display_name});
 	}
-	return 'Select a model and start typing...';
+	return store.getTranslation('chat.composer.placeholder_default');
 });
 
 const canSend = computed(() => {

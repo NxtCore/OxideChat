@@ -125,17 +125,26 @@ pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, 
 	};
 
 	// Save the user message
+	let reasoning_details = crate::types::ReasoningDetails {
+		effort: req.reasoning_effort,
+		budget_tokens: req.reasoning_budget_tokens,
+	};
+	let usage_details = crate::types::UsageDetails::default();
+	let cost_details = crate::types::CostDetails::default();
+
 	let message = sqlx::query_as::<_, Message>(
 		r#"
-		INSERT INTO messages (chat_id, role, content, model_id, reasoning_effort)
-		VALUES ($1, 'user', $2, $3, $4)
+		INSERT INTO messages (chat_id, role, content, model_id, reasoning_details, usage_details, cost_details)
+		VALUES ($1, 'user', $2, $3, $4, $5, $6)
 		RETURNING *
 		"#,
 	)
 	.bind(chat_id)
 	.bind(&req.content)
 	.bind(req.model_id)
-	.bind(&req.reasoning_effort)
+	.bind(sqlx::types::Json(reasoning_details))
+	.bind(sqlx::types::Json(usage_details))
+	.bind(sqlx::types::Json(cost_details))
 	.fetch_one(&state.db)
 	.await;
 

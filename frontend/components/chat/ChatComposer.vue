@@ -2,24 +2,25 @@
 	<div class="p-0">
 		<div class="mx-auto max-w-4xl">
 			<div class="relative flex flex-col rounded-2xl border border-border bg-card shadow-sm">
-				<!-- Textarea -->
 				<ShadTextarea
 					ref="textareaRef"
 					v-model="message"
 					:placeholder="placeholder"
 					rows="1"
-					class="min-h-[60px] w-full resize-none border-none bg-transparent px-4 py-3 text-foreground placeholder:text-muted-foreground focus-visible:ring-0"
+					class="min-h-15 w-full resize-none border-none bg-transparent px-4 py-3 text-foreground placeholder:text-muted-foreground focus-visible:ring-0"
 					:disabled="chatStore.isStreaming"
 					@keydown.enter.exact="handleEnter"
 					@input="autoResize"
 				/>
 
-				<!-- Bottom toolbar -->
 				<div class="flex items-center justify-between px-2 py-1">
 					<div class="flex items-center gap-1">
-						<ModelSelector class="!border-none !bg-transparent !shadow-none hover:bg-muted/50" />
-						<ReasoningSelector v-if="chatStore.hasReasoningCapability" class="!border-none !bg-transparent !shadow-none hover:bg-muted/50" />
-						<ToolSelector v-if="chatStore.hasToolCapability" class="!border-none !bg-transparent !shadow-none hover:bg-muted/50" />
+						<ModelSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
+						<ReasoningSelector
+							v-if="chatStore.hasReasoningCapability(chatStore.selectedModel)"
+							class="border-none! bg-transparent! shadow-none! hover:bg-muted/50"
+						/>
+						<ToolSelector v-if="chatStore.hasToolCapability(chatStore.selectedModel)" class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
 					</div>
 
 					<div class="flex items-center gap-2">
@@ -36,15 +37,15 @@
 				</div>
 			</div>
 
-			<!-- Hint text -->
-			<p class="mt-2 text-center text-[10px] text-muted-foreground opacity-50">Press Enter to send, Shift+Enter for new line</p>
+			<p class="mt-2 text-center text-[10px] text-muted-foreground opacity-50">{{ store.getTranslation('chat.composer.hint') }}</p>
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-import {ArrowUp, Loader2, Paperclip, Globe} from 'lucide-vue-next';
+import {ArrowUp, Loader2} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
+import {useMainStore} from '~/stores';
 import ModelSelector from './ModelSelector.vue';
 import ReasoningSelector from './ReasoningSelector.vue';
 import ContextLimitIndicator from './ContextLimitIndicator.vue';
@@ -53,14 +54,15 @@ import ToolSelector from './ToolSelector.vue';
 const emit = defineEmits<{send: (content: string) => void}>();
 
 const chatStore = useChatStore();
+const store = useMainStore();
 const message = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
 const placeholder = computed(() => {
 	if (chatStore.selectedModel) {
-		return `Message ${chatStore.selectedModel.display_name}...`;
+		return store.getTranslation('chat.composer.placeholder_model', {model: chatStore.selectedModel.display_name});
 	}
-	return 'Select a model and start typing...';
+	return store.getTranslation('chat.composer.placeholder_default');
 });
 
 const canSend = computed(() => {

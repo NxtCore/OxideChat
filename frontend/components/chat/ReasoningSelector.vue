@@ -15,7 +15,7 @@
 					{{ displayLabel }}
 				</span>
 			</ShadSelectTrigger>
-			<ShadSelectContent>
+				<ShadContent>
 				<ShadSelectGroup>
 					<ShadSelectItem v-for="(label, index) in effortLabels" :key="availableEffortLevels[index]" :value="availableEffortLevels[index]">
 						{{ label }}
@@ -25,25 +25,55 @@
 		</ShadSelect>
 	</div>
 	<div v-else class="space-y-2">
-		<ShadLabel class="text-sm text-muted-foreground"> Token Budget ({{ minTokens }}-{{ maxTokens }}) </ShadLabel>
-		<ShadInput
-			v-model.number="tokenBudget"
-			type="number"
-			:min="minTokens"
-			:max="maxTokens"
-			:step="1024"
-			placeholder="Auto"
-			class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-			@input="handleTokenChange"
-		/>
-		<p class="text-xs text-muted-foreground">Leave empty for automatic selection</p>
+		<Popover>
+			<PopoverTrigger as-child>
+				<ShadButton
+					variant="outline"
+					:class="cn('w-auto justify-between font-normal', props.class, tokenBudget ? 'text-primary border-primary/50' : 'text-muted-foreground')"
+				>
+					<div class="flex items-center gap-2">
+						<Brain class="h-4 w-4" />
+						<span v-if="tokenBudget" class="text-xs font-medium">{{ displayLabel }}</span>
+						<span v-else class="text-xs">{{ store.getTranslation('chat.reasoning_selector.auto') }}</span>
+					</div>
+				</ShadButton>
+			</PopoverTrigger>
+			<PopoverContent class="w-80">
+				<div class="space-y-4">
+					<div class="flex justify-between items-center">
+						<h4 class="font-medium leading-none">{{ store.getTranslation('chat.reasoning_selector.token_limit') }}</h4>
+						<span class="text-xs text-muted-foreground">{{ minTokens }}-{{ maxTokens }}</span>
+					</div>
+					<div class="pt-2">
+						<Slider v-model="sliderValue" :min="minTokens" :max="maxTokens" :step="1024" @update:modelValue="handleSliderChange" />
+					</div>
+					<div class="flex items-center gap-2">
+						<ShadInput
+							v-model.number="tempTokenInput"
+							type="number"
+							:min="minTokens"
+							:max="maxTokens"
+							:placeholder="store.getTranslation('chat.reasoning_selector.auto')"
+							class="h-8"
+							@input="handleInputChange"
+						/>
+						<ShadButton variant="ghost" size="sm" class="h-8 px-2 text-muted-foreground hover:text-foreground" @click="resetToAuto">{{ store.getTranslation('chat.reasoning_selector.auto') }}</ShadButton>
+					</div>
+				</div>
+			</PopoverContent>
+		</Popover>
 	</div>
 </template>
 
 <script setup lang="ts">
 import {Brain} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
+import {useMainStore} from '~/stores';
 import {cn} from '~/lib/utils';
+import {Popover, PopoverTrigger, PopoverContent} from '~/components/ui/popover';
+import {Slider} from '~/components/ui/slider';
+
+const store = useMainStore();
 
 const props = defineProps<{
 	class?: string;
@@ -53,6 +83,14 @@ const chatStore = useChatStore();
 
 const effortLevel = ref('');
 const tokenBudget = ref<number | undefined>(undefined);
+const tempTokenInput = ref<number | undefined>(undefined);
+
+const sliderValue = computed({
+	get: () => [tokenBudget.value || minTokens.value],
+	set: val => {
+		// Handled in handleSliderChange
+	},
+});
 
 const isTokenBudget = computed(() => {
 	const capabilities = chatStore.selectedModel?.capabilities || [];
@@ -69,17 +107,17 @@ const effortLabels = computed(() => {
 	return availableEffortLevels.value.map(effort => {
 		switch (effort) {
 			case 'NONE':
-				return 'None';
+				return store.getTranslation('chat.reasoning_selector.none');
 			case 'MINIMAL':
-				return 'Minimal';
+				return store.getTranslation('chat.reasoning_selector.minimal');
 			case 'LOW':
-				return 'Low';
+				return store.getTranslation('chat.reasoning_selector.low');
 			case 'MEDIUM':
-				return 'Medium';
+				return store.getTranslation('chat.reasoning_selector.medium');
 			case 'HIGH':
-				return 'High';
+				return store.getTranslation('chat.reasoning_selector.high');
 			case 'XHIGH':
-				return 'Extra High';
+				return store.getTranslation('chat.reasoning_selector.extra_high');
 			default:
 				return effort;
 		}
@@ -107,24 +145,29 @@ const maxTokens = computed(() => tokenBudgetRange.value.max);
 
 const displayLabel = computed(() => {
 	if (isTokenBudget.value && tokenBudget.value) {
-		return `${tokenBudget.value / 1024}K`;
+		return `${Math.round(tokenBudget.value / 1024)}K ${store.getTranslation('chat.reasoning_selector.tokens')}`;
 	}
 
 	if (effortLevel.value) {
 		const index = availableEffortLevels.value.indexOf(effortLevel.value);
-		return effortLabels.value[index] || 'Medium';
+		return effortLabels.value[index] || store.getTranslation('chat.reasoning_selector.medium');
 	}
 
-	return 'Auto';
+	return store.getTranslation('chat.reasoning_selector.auto');
 });
 
 onMounted(() => {
+	syncFromStore();
+});
+
+function syncFromStore() {
 	const currentEffort = chatStore.reasoningEffort;
 	if (currentEffort) {
 		if (isTokenBudget.value) {
 			const num = parseInt(currentEffort);
 			if (!isNaN(num)) {
 				tokenBudget.value = num;
+				tempTokenInput.value = num;
 			}
 		} else {
 			const upperEffort = currentEffort.toUpperCase().replace(/-/g, '_');
@@ -132,27 +175,18 @@ onMounted(() => {
 				effortLevel.value = upperEffort;
 			}
 		}
+	} else {
+		tokenBudget.value = undefined;
+		tempTokenInput.value = undefined;
+		effortLevel.value = '';
 	}
-});
+}
 
 // Keep UI in sync when the store changes
 watch(
 	() => chatStore.reasoningEffort,
-	val => {
-		effortLevel.value = '';
-		tokenBudget.value = undefined;
-
-		if (val) {
-			if (isTokenBudget.value) {
-				const num = parseInt(val);
-				if (!isNaN(num)) tokenBudget.value = num;
-			} else {
-				const upperEffort = val.toUpperCase().replace(/-/g, '_');
-				if (availableEffortLevels.value.includes(upperEffort)) {
-					effortLevel.value = upperEffort;
-				}
-			}
-		}
+	() => {
+		syncFromStore();
 	}
 );
 
@@ -169,11 +203,33 @@ function handleEffortChange(value: any) {
 	chatStore.setReasoningEffort(effort);
 }
 
-function handleTokenChange() {
-	if (tokenBudget.value !== undefined && tokenBudget.value >= minTokens.value && tokenBudget.value <= maxTokens.value) {
-		chatStore.setReasoningEffort(tokenBudget.value.toString());
-	} else if (tokenBudget.value === undefined) {
-		chatStore.setReasoningEffort(null);
+function handleSliderChange(val: number[] | undefined) {
+	if (val && val.length > 0) {
+		const newValue = val[0];
+		if (newValue !== undefined) {
+			tokenBudget.value = newValue;
+			tempTokenInput.value = newValue;
+			chatStore.setReasoningEffort(newValue.toString(), true);
+		}
 	}
+}
+
+function handleInputChange() {
+	if (tempTokenInput.value !== undefined) {
+		let val = tempTokenInput.value;
+		if (val < minTokens.value) val = minTokens.value;
+		if (val > maxTokens.value) val = maxTokens.value;
+
+		tokenBudget.value = val;
+		chatStore.setReasoningEffort(val.toString());
+	} else {
+		resetToAuto();
+	}
+}
+
+function resetToAuto() {
+	tokenBudget.value = undefined;
+	tempTokenInput.value = undefined;
+	chatStore.setReasoningEffort(null);
 }
 </script>

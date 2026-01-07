@@ -3,11 +3,11 @@
 		<DialogContent class="max-w-4xl h-[80vh] flex flex-col p-0 gap-0">
 			<DialogHeader class="px-4 py-3 border-b border-border">
 				<div class="flex items-center justify-between">
-					<DialogTitle class="text-sm font-medium"> Preview: {{ language.toUpperCase() }} </DialogTitle>
+					<DialogTitle class="text-sm font-medium">{{ store.getTranslation('chat.code_preview.title') }} {{ language.toUpperCase() }}</DialogTitle>
 					<Tabs v-model="activeTab">
 						<TabsList class="h-8">
-							<TabsTrigger value="preview" class="h-7 px-3 text-xs"> Preview </TabsTrigger>
-							<TabsTrigger value="code" class="h-7 px-3 text-xs"> Code </TabsTrigger>
+							<TabsTrigger value="preview" class="h-7 px-3 text-xs">{{ store.getTranslation('chat.code_preview.preview') }}</TabsTrigger>
+							<TabsTrigger value="code" class="h-7 px-3 text-xs">{{ store.getTranslation('chat.code_preview.code') }}</TabsTrigger>
 						</TabsList>
 					</Tabs>
 				</div>
@@ -54,6 +54,9 @@ import {Tabs, TabsList, TabsTrigger} from '@/components/ui/tabs';
 import {Button as ShadButton} from '@/components/ui/button';
 import {Copy, Check} from 'lucide-vue-next';
 import {generatePreviewHtml} from '~/composables/useMarkdown';
+import {useMainStore} from '~/stores';
+
+const store = useMainStore();
 
 const props = defineProps<{
 	code: string;

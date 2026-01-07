@@ -10,15 +10,15 @@
 				</div>
 			</ShadSelectValue>
 		</ShadSelectTrigger>
-		<ShadSelectContent class="max-h-[400px] w-80">
+		<ShadSelectContent class="max-h-100 w-80">
 			<div class="flex flex-col gap-2 p-2 border-b border-border">
 				<ShadInput
 					v-model="search"
 					type="text"
-					placeholder="Search tools..."
+					:placeholder="store.getTranslation('chat.tool_selector.search_tools')"
 					class="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
 				/>
-				<p v-if="!hasToolSupport" class="text-xs text-amber-500">Selected model doesn't support tools</p>
+				<p v-if="!hasToolSupport" class="text-xs text-amber-500">{{ store.getTranslation('chat.tool_selector.no_tool_support') }}</p>
 			</div>
 			<ShadSelectGroup>
 				<ShadSelectItem v-for="tool in filteredTools" :key="tool.id" :value="tool.id" @click.prevent="toggleTool(tool.id)">
@@ -31,7 +31,9 @@
 					</div>
 				</ShadSelectItem>
 			</ShadSelectGroup>
-			<div v-if="filteredTools.length === 0" class="p-4 text-center text-sm text-muted-foreground">No tools found</div>
+			<div v-if="filteredTools.length === 0" class="p-4 text-center text-sm text-muted-foreground">
+				{{ store.getTranslation('chat.tool_selector.no_tools_found') }}
+			</div>
 		</ShadSelectContent>
 	</ShadSelect>
 </template>
@@ -39,7 +41,10 @@
 <script setup lang="ts">
 import {Check, Wrench, Globe, Code, Calculator} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
+import {useMainStore} from '~/stores';
 import {cn} from '~/lib/utils';
+
+const store = useMainStore();
 
 const props = defineProps<{
 	class?: string;

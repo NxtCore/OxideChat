@@ -10,47 +10,19 @@
 				<div v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.type === 'png'" class="h-4 w-4 flex items-center justify-center">
 					<img :src="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.icon" alt="Provider icon" />
 				</div>
-				<span class="max-w-[150px] truncate text-xs font-medium">
-					{{ chatStore.selectedModel?.display_name || 'Select model' }}
+				<span class="max-w-37.5 truncate text-xs font-medium">
+					{{ chatStore.selectedModel?.display_name || store.getTranslation('chat.model_selector.select_model') }}
 				</span>
 				<ChevronDown class="h-3 w-3 text-muted-foreground" />
 			</button>
 		</PopoverTrigger>
-		<PopoverContent class="w-[520px] p-0 overflow-hidden" align="start" :side-offset="8">
-			<div class="flex h-[400px]">
-				<div class="w-14 border-r border-border flex flex-col items-center py-2 gap-1 overflow-y-auto">
-					<button
-						class="w-10 h-10 flex items-center justify-center rounded-lg transition-colors"
-						:class="selectedProvider === 'favorites' ? 'bg-primary/20 text-primary' : 'hover:bg-accent text-muted-foreground'"
-						@click="selectedProvider = 'favorites'"
-					>
-						<Star class="h-5 w-5" :class="selectedProvider === 'favorites' ? 'fill-primary' : ''" />
-					</button>
-					<div class="w-8 h-px bg-border my-1" />
-					<button
-						v-for="provider in availableProviders"
-						:key="provider"
-						class="w-10 h-10 flex items-center justify-center rounded-lg transition-colors"
-						:class="selectedProvider === provider ? 'bg-primary/20 text-primary' : 'hover:bg-accent text-muted-foreground'"
-						@click="selectedProvider = provider"
-					>
-						<div
-							v-if="iconStore.getProviderIcon(provider)?.type === 'svg'"
-							class="h-5 w-5 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full"
-							v-html="iconStore.getProviderIcon(provider)?.icon"
-						/>
-						<div v-else-if="iconStore.getProviderIcon(provider)?.type === 'png'" class="h-5 w-5 flex items-center justify-center">
-							<img :src="iconStore.getProviderIcon(provider)?.icon" alt="Provider icon" />
-						</div>
-						<Bot v-else class="h-5 w-5" />
-					</button>
-				</div>
-
+		<PopoverContent class="w-130 p-0 overflow-hidden" align="start" :side-offset="8">
+			<div class="flex h-100">
 				<div class="flex-1 flex flex-col overflow-hidden">
 					<div class="p-2 border-b border-border flex items-center gap-2">
 						<div class="relative flex-1">
 							<Search class="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-							<ShadInput v-model="search" type="text" placeholder="Search models..." class="pl-8 h-8 text-sm" />
+							<ShadInput v-model="search" type="text" :placeholder="store.getTranslation('chat.model_selector.search_models')" class="pl-8 h-8 text-sm" />
 						</div>
 						<button class="p-1.5 rounded-md hover:bg-accent text-muted-foreground">
 							<Filter class="h-4 w-4" />
@@ -58,7 +30,9 @@
 					</div>
 
 					<div class="flex-1 overflow-y-auto">
-						<div v-if="displayedModels.length === 0" class="p-4 text-center text-sm text-muted-foreground">No models found</div>
+						<div v-if="displayedModels.length === 0" class="p-4 text-center text-sm text-muted-foreground">
+							{{ store.getTranslation('chat.model_selector.no_models') }}
+						</div>
 						<div
 							v-for="model in displayedModels"
 							:key="model.id"
@@ -102,7 +76,7 @@
 												</button>
 											</TooltipTrigger>
 											<TooltipContent>
-												<p>Tool calling</p>
+												<p>{{ store.getTranslation('chat.model_selector.tool_calling') }}</p>
 											</TooltipContent>
 										</Tooltip>
 										<Tooltip v-if="chatStore.hasReasoningCapability(model)">
@@ -112,7 +86,7 @@
 												</button>
 											</TooltipTrigger>
 											<TooltipContent>
-												<p>Reasoning capable</p>
+												<p>{{ store.getTranslation('chat.model_selector.reasoning_capable') }}</p>
 											</TooltipContent>
 										</Tooltip>
 									</div>
@@ -124,12 +98,41 @@
 											</button>
 										</TooltipTrigger>
 										<TooltipContent>
-											<p>Toggle favorite</p>
+											<p>{{ store.getTranslation('chat.model_selector.toggle_favorite') }}</p>
 										</TooltipContent>
 									</Tooltip>
 								</div>
 							</div>
 						</div>
+					</div>
+
+					<div class="flex items-center gap-2 p-2 border-t border-border overflow-x-auto">
+						<button
+							class="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg transition-colors"
+							:class="selectedProvider === 'favorites' ? 'bg-primary/20 text-primary' : 'hover:bg-accent text-muted-foreground'"
+							@click="selectedProvider = 'favorites'"
+						>
+							<Star class="h-5 w-5" :class="selectedProvider === 'favorites' ? 'fill-primary' : ''" />
+						</button>
+						<div class="shrink-0 w-px h-6 bg-border" />
+						<button
+							v-for="provider in availableProviders"
+							:key="provider"
+							class="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg transition-colors"
+							:class="selectedProvider === provider ? 'bg-primary/20 text-primary' : 'hover:bg-accent text-muted-foreground'"
+							:title="provider"
+							@click="selectedProvider = provider"
+						>
+							<div
+								v-if="iconStore.getProviderIcon(provider)?.type === 'svg'"
+								class="h-5 w-5 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full"
+								v-html="iconStore.getProviderIcon(provider)?.icon"
+							/>
+							<div v-else-if="iconStore.getProviderIcon(provider)?.type === 'png'" class="h-5 w-5 flex items-center justify-center">
+								<img :src="iconStore.getProviderIcon(provider)?.icon" alt="Provider icon" />
+							</div>
+							<Bot v-else class="h-5 w-5" />
+						</button>
 					</div>
 				</div>
 			</div>
@@ -212,7 +215,8 @@ watch(
 	() => chatStore.activeChat?.id,
 	(newVal, oldVal) => {
 		if (oldVal !== newVal && newVal && chatStore.messages.length > 0) {
-			const model = chatStore.models.find(m => m.id === chatStore.messages[chatStore.messages.length - 1]?.model_id);
+			const last_llm_message = chatStore.messages.findLast(m => m.role === 'assistant');
+			const model = chatStore.models.find(m => m.id === last_llm_message?.model_id);
 			if (model) {
 				search.value = '';
 				chatStore.setSelectedModel(model);

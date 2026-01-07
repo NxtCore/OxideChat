@@ -35,6 +35,7 @@ interface ChatState {
 	isStreaming: boolean;
 	contextTokens: number;
 	reasoningEffort: string | null;
+	reasoningBudget: number | null;
 	enabledTools: string[];
 }
 
@@ -65,6 +66,7 @@ export const useChatStore = defineStore('chat', {
 		isStreaming: false,
 		contextTokens: 0,
 		reasoningEffort: null,
+		reasoningBudget: null,
 		enabledTools: [],
 	}),
 
@@ -127,7 +129,7 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		isReasoningRequired(): boolean {
-			return this.hasReasoningCapability && !this.hasNoneReasoningOption;
+			return this.hasReasoningCapability(null) && !this.hasNoneReasoningOption;
 		},
 
 		lowestReasoningEffort(): string | null {
@@ -339,6 +341,7 @@ export const useChatStore = defineStore('chat', {
 				reasoning_content: null,
 				model_id: this.selectedModel.model_id,
 				reasoning_effort: this.reasoningEffort,
+				reasoning_budget_tokens: this.reasoningBudget,
 				input_tokens: null,
 				output_tokens: null,
 				reasoning_tokens: null,
@@ -362,6 +365,7 @@ export const useChatStore = defineStore('chat', {
 				reasoning_content: null,
 				model_id: this.selectedModel.model_id,
 				reasoning_effort: this.reasoningEffort,
+				reasoning_budget_tokens: this.reasoningBudget,
 				input_tokens: null,
 				output_tokens: null,
 				reasoning_tokens: null,
@@ -389,6 +393,7 @@ export const useChatStore = defineStore('chat', {
 						content,
 						model_key: this.selectedModel.model_id,
 						reasoning_effort: this.reasoningEffort || undefined,
+						reasoning_budget_tokens: this.reasoningBudget || undefined,
 						tools_enabled: this.enabledTools.length > 0 ? this.enabledTools : undefined,
 					}),
 				});
@@ -411,7 +416,6 @@ export const useChatStore = defineStore('chat', {
 
 					buffer += decoder.decode(value, {stream: true});
 
-					// Process complete SSE events
 					const lines = buffer.split('\n');
 					buffer = lines.pop() || '';
 
@@ -428,10 +432,13 @@ export const useChatStore = defineStore('chat', {
 
 								switch (data.type) {
 									case 'user_message_saved':
-										// Update user message with real ID
 										if (userMsgIndex !== -1) {
 											const userMsg = this.messages[userMsgIndex];
-											if (userMsg) userMsg.id = data.message_id;
+											if (userMsg) {
+												const clientId = userMsg.client_id;
+												Object.assign(userMsg, data.message);
+												userMsg.client_id = clientId;
+											}
 										}
 										break;
 									case 'text_delta':
@@ -453,16 +460,12 @@ export const useChatStore = defineStore('chat', {
 										break;
 									case 'done':
 										if (msg) {
-											msg.id = data.message_id;
-											msg.input_tokens = data.input_tokens;
-											msg.output_tokens = data.output_tokens;
-											msg.reasoning_tokens = data.reasoning_tokens || null;
-											msg.latency_ms = data.latency_ms;
-											msg.reasoning_latency_ms = data.reasoning_latency_ms || null;
+											const clientId = msg.client_id;
+											Object.assign(msg, data.message);
+											msg.client_id = clientId;
 										}
 										this.isStreaming = false;
 
-										// Update chat in list (2 messages added: user + assistant)
 										const chatIndex = this.chats.findIndex(c => c.id === chatId);
 										const chat = this.chats[chatIndex];
 										if (chat) {
@@ -471,6 +474,8 @@ export const useChatStore = defineStore('chat', {
 										}
 										break;
 									case 'error':
+										const store = useMainStore();
+										store.toast(data.message, {type: 'error'});
 										console.error('Stream error:', data.code, data.message);
 										if (msg) msg.content = `Error: ${data.message}`;
 										this.isStreaming = false;
@@ -542,6 +547,7 @@ export const useChatStore = defineStore('chat', {
 
 			if (!model) {
 				this.reasoningEffort = null;
+				this.reasoningBudget = null;
 				return;
 			}
 
@@ -550,13 +556,16 @@ export const useChatStore = defineStore('chat', {
 
 			if (!hasReasoningCap) {
 				this.reasoningEffort = null;
+				this.reasoningBudget = null;
 			} else if (!hasNone) {
 				const efforts = model.capabilities.filter(c => c.startsWith('REASONING_EFFORT_')).map(c => c.replace('REASONING_EFFORT_', ''));
 				const effortOrder = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH'];
 				const lowestEffort = effortOrder.find(e => efforts.includes(e));
 				this.reasoningEffort = lowestEffort ? lowestEffort.toLowerCase() : null;
+				this.reasoningBudget = null;
 			} else {
 				this.reasoningEffort = null;
+				this.reasoningBudget = null;
 			}
 		},
 
@@ -578,8 +587,12 @@ export const useChatStore = defineStore('chat', {
 			this.updatePreferences({streaming_animation: animation});
 		},
 
-		setReasoningEffort(effort: string | null) {
-			this.reasoningEffort = effort;
+		setReasoningEffort(effort: string | null, isTokenBudget = false) {
+			if (isTokenBudget) {
+				this.reasoningBudget = effort ? parseInt(effort) : null;
+			} else {
+				this.reasoningEffort = effort;
+			}
 		},
 
 		toggleTool(toolName: string) {

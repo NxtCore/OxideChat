@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-use crate::types::UserPreferences;
+use crate::types::PreferencesResponse;
 
 // ============================================================================
 // Request Types

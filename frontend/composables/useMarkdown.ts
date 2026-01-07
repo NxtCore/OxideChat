@@ -10,11 +10,9 @@ import {Marked} from 'marked';
 import remend from 'remend';
 import {createHighlighter, type Highlighter, type BundledLanguage} from 'shiki';
 
-// Singleton highlighter instance
 let highlighter: Highlighter | null = null;
 let highlighterPromise: Promise<Highlighter> | null = null;
 
-// Languages to preload for common use cases
 const PRELOAD_LANGUAGES: BundledLanguage[] = ['javascript', 'typescript', 'python', 'rust', 'html', 'css', 'json', 'markdown', 'bash', 'sql', 'vue', 'jsx', 'tsx'];
 
 /**
@@ -38,7 +36,6 @@ async function getHighlighter(): Promise<Highlighter> {
  * Check if a language is supported by shiki.
  */
 function isLanguageSupported(lang: string): lang is BundledLanguage {
-	// Common aliases
 	const aliases: Record<string, BundledLanguage> = {
 		js: 'javascript',
 		ts: 'typescript',
@@ -77,13 +74,11 @@ function normalizeLanguage(lang: string): BundledLanguage {
 const PREVIEWABLE_LANGUAGES = ['html', 'css', 'javascript', 'js', 'svg'];
 
 export function useMarkdown() {
-	// Check if dark mode is active via document class
 	const isDark = () => {
-		if (typeof document === 'undefined') return true; // SSR default to dark
+		if (typeof document === 'undefined') return true;
 		return document.documentElement.classList.contains('dark');
 	};
 
-	// Create marked instance with custom renderer
 	const createMarkedInstance = (hl: Highlighter | null) => {
 		const marked = new Marked();
 
@@ -102,14 +97,12 @@ export function useMarkdown() {
 								theme: isDark() ? 'github-dark' : 'github-light',
 							});
 						} catch {
-							// Fallback to escaped text
 							highlightedCode = `<pre class="shiki"><code>${escapeHtml(text)}</code></pre>`;
 						}
 					} else {
 						highlightedCode = `<pre class="shiki"><code>${escapeHtml(text)}</code></pre>`;
 					}
 
-					// Wrap with our code block container using Tailwind classes
 					const previewAttr = isPreviewable ? `data-previewable="true"` : '';
 					const langAttr = lang ? `data-language="${escapeHtml(lang)}"` : '';
 
@@ -121,7 +114,7 @@ export function useMarkdown() {
 								<button class="code-block-copy-btn inline-flex items-center justify-center p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Copy">${ICON_COPY}</button>
 							</div>
 						</div>
-						<div class="overflow-x-auto [&>pre]:!m-0 [&>pre]:!p-4 [&>pre]:!bg-transparent [&_code]:font-mono [&_code]:text-sm [&_code]:leading-relaxed">${highlightedCode}</div>
+						<div class="overflow-x-auto [&>pre]:m-0! [&>pre]:p-4! [&>pre]:bg-transparent! [&_code]:font-mono [&_code]:text-sm [&_code]:leading-relaxed">${highlightedCode}</div>
 					</div>`;
 				},
 			},
@@ -130,11 +123,9 @@ export function useMarkdown() {
 		return marked;
 	};
 
-	// Reactive highlighter loading
 	const isHighlighterReady = ref(false);
 	let markedInstance: Marked | null = null;
 
-	// Initialize highlighter on mount
 	onMounted(async () => {
 		console.log('Initializing syntax highlighter...');
 		try {
@@ -204,7 +195,6 @@ export function useMarkdown() {
 	};
 }
 
-// Icons for code blocks
 export const ICON_COPY = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clipboard"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>`;
 export const ICON_CHECK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check"><path d="M20 6 9 17l-5-5"/></svg>`;
 export const ICON_PLAY = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-play"><polygon points="6 3 20 12 6 21 6 3"/></svg>`;
@@ -227,7 +217,6 @@ export function extractCodeForPreview(element: HTMLElement): {code: string; lang
 	const codeEl = wrapper.querySelector('code');
 	if (!codeEl) return null;
 
-	// Get text content (strips HTML tags from highlighted code)
 	const code = codeEl.textContent || '';
 
 	return {code, language};
