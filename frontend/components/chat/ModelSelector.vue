@@ -1,94 +1,150 @@
 <template>
-	<ShadSelect :model-value="chatStore.selectedModel?.model_id || ''" @update:model-value="handleModelChange">
-		<ShadSelectTrigger :class="cn('w-auto', props.class)">
-			<ShadSelectValue>
-				<div class="flex items-center gap-2">
-					<div
-						v-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.type === 'svg'"
-						class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-						v-html="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.icon"
-					/>
-					<div
-						v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.type === 'png'"
-						class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-					>
-						<img :src="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.icon" alt="Provider icon" />
-					</div>
-					<span class="max-w-[150px] truncate text-xs font-medium">
-						{{ chatStore.selectedModel?.display_name || 'Select model' }}
-					</span>
-				</div>
-			</ShadSelectValue>
-		</ShadSelectTrigger>
-		<ShadSelectContent class="max-h-[400px]">
-			<div class="p-2 sticky -top-2 z-10 bg-popover border-b">
-				<ShadInput
-					v-model="search"
-					type="text"
-					placeholder="Search models..."
-					class="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+	<Popover v-model:open="isOpen">
+		<PopoverTrigger as-child>
+			<button :class="cn('flex items-center gap-2 px-2 py-1 rounded-md hover:bg-accent transition-colors', props.class)">
+				<div
+					v-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.type === 'svg'"
+					class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
+					v-html="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.icon"
 				/>
-			</div>
-			<template v-if="filteredFavorites.length > 0">
-				<ShadSelectLabel class="flex items-center gap-2 px-2 py-1.5 text-sm font-semibold">
-					<Star class="h-3 w-3 text-primary" />
-					Favorites
-				</ShadSelectLabel>
-				<ShadSelectGroup>
-					<ShadSelectItem v-for="model in filteredFavorites" :key="model.id" :value="model.model_id">
-						<div class="flex items-center gap-2 flex-1 min-w-0">
-							<div
-								v-if="iconStore.getProviderIcon(model.provider_name)?.type === 'svg'"
-								class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-								v-html="iconStore.getProviderIcon(model.provider_name)?.icon"
-							/>
-							<div
-								v-else-if="iconStore.getProviderIcon(model.provider_name)?.type === 'png'"
-								class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-							>
-								<img :src="iconStore.getProviderIcon(model.provider_name)?.icon" alt="Provider icon" />
-							</div>
-							<span class="truncate">{{ model.display_name }}</span>
+				<div v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.type === 'png'" class="h-4 w-4 flex items-center justify-center">
+					<img :src="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.icon" alt="Provider icon" />
+				</div>
+				<span class="max-w-[150px] truncate text-xs font-medium">
+					{{ chatStore.selectedModel?.display_name || 'Select model' }}
+				</span>
+				<ChevronDown class="h-3 w-3 text-muted-foreground" />
+			</button>
+		</PopoverTrigger>
+		<PopoverContent class="w-[520px] p-0 overflow-hidden" align="start" :side-offset="8">
+			<div class="flex h-[400px]">
+				<div class="w-14 border-r border-border flex flex-col items-center py-2 gap-1 overflow-y-auto">
+					<button
+						class="w-10 h-10 flex items-center justify-center rounded-lg transition-colors"
+						:class="selectedProvider === 'favorites' ? 'bg-primary/20 text-primary' : 'hover:bg-accent text-muted-foreground'"
+						@click="selectedProvider = 'favorites'"
+					>
+						<Star class="h-5 w-5" :class="selectedProvider === 'favorites' ? 'fill-primary' : ''" />
+					</button>
+					<div class="w-8 h-px bg-border my-1" />
+					<button
+						v-for="provider in availableProviders"
+						:key="provider"
+						class="w-10 h-10 flex items-center justify-center rounded-lg transition-colors"
+						:class="selectedProvider === provider ? 'bg-primary/20 text-primary' : 'hover:bg-accent text-muted-foreground'"
+						@click="selectedProvider = provider"
+					>
+						<div
+							v-if="iconStore.getProviderIcon(provider)?.type === 'svg'"
+							class="h-5 w-5 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full"
+							v-html="iconStore.getProviderIcon(provider)?.icon"
+						/>
+						<div v-else-if="iconStore.getProviderIcon(provider)?.type === 'png'" class="h-5 w-5 flex items-center justify-center">
+							<img :src="iconStore.getProviderIcon(provider)?.icon" alt="Provider icon" />
 						</div>
-					</ShadSelectItem>
-				</ShadSelectGroup>
-				<ShadSelectSeparator />
-			</template>
-			<template v-for="(models, provider) in filteredGrouped" :key="provider">
-				<ShadSelectLabel class="px-2 py-1.5 text-sm font-semibold">
-					{{ provider }}
-				</ShadSelectLabel>
-				<ShadSelectGroup>
-					<ShadSelectItem v-for="model in models" :key="model.id" :value="model.model_id">
-						<div class="flex items-center gap-2 flex-1 min-w-0">
-							<div
-								v-if="iconStore.getProviderIcon(model.provider_name)?.type === 'svg'"
-								class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-								v-html="iconStore.getProviderIcon(model.provider_name)?.icon"
-							/>
-							<div
-								v-else-if="iconStore.getProviderIcon(model.provider_name)?.type === 'png'"
-								class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-							>
-								<img :src="iconStore.getProviderIcon(model.provider_name)?.icon" alt="Provider icon" />
-							</div>
-							<span class="truncate">{{ model.display_name }}</span>
+						<Bot v-else class="h-5 w-5" />
+					</button>
+				</div>
+
+				<div class="flex-1 flex flex-col overflow-hidden">
+					<div class="p-2 border-b border-border flex items-center gap-2">
+						<div class="relative flex-1">
+							<Search class="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+							<ShadInput v-model="search" type="text" placeholder="Search models..." class="pl-8 h-8 text-sm" />
 						</div>
-					</ShadSelectItem>
-				</ShadSelectGroup>
-			</template>
-			<div v-if="Object.keys(filteredGrouped).length === 0 && filteredFavorites.length === 0" class="p-4 text-center text-sm text-muted-foreground">
-				No models found
+						<button class="p-1.5 rounded-md hover:bg-accent text-muted-foreground">
+							<Filter class="h-4 w-4" />
+						</button>
+					</div>
+
+					<div class="flex-1 overflow-y-auto">
+						<div v-if="displayedModels.length === 0" class="p-4 text-center text-sm text-muted-foreground">No models found</div>
+						<div
+							v-for="model in displayedModels"
+							:key="model.id"
+							class="px-3 py-2 hover:bg-accent/50 cursor-pointer transition-colors border-b border-border/50 last:border-0"
+							@click="selectModel(model)"
+						>
+							<div class="flex items-start gap-3">
+								<div
+									v-if="iconStore.getProviderIcon(model.provider_name)?.type === 'svg'"
+									class="h-5 w-5 mt-0.5 flex items-center justify-center text-muted-foreground [&>svg]:h-full [&>svg]:w-full"
+									v-html="iconStore.getProviderIcon(model.provider_name)?.icon"
+								/>
+								<div v-else-if="iconStore.getProviderIcon(model.provider_name)?.type === 'png'" class="h-5 w-5 mt-0.5 flex items-center justify-center">
+									<img :src="iconStore.getProviderIcon(model.provider_name)?.icon" alt="Provider icon" />
+								</div>
+								<Bot v-else class="h-5 w-5 mt-0.5 text-muted-foreground" />
+
+								<div class="flex-1 min-w-0">
+									<div class="flex items-center gap-2 flex-wrap">
+										<span class="font-medium text-sm">{{ model.display_name }}</span>
+										<Star v-if="model.is_favorite" class="h-3.5 w-3.5 text-yellow-500 fill-yellow-500" />
+										<span
+											v-for="cap in getDisplayCapabilities(model)"
+											:key="cap"
+											class="px-1.5 py-0.5 text-xs rounded bg-accent text-accent-foreground"
+										>
+											{{ cap }}
+										</span>
+									</div>
+									<p class="text-xs text-muted-foreground mt-0.5 truncate">
+										{{ getModelDescription(model) }}
+									</p>
+								</div>
+
+								<div class="flex items-center gap-1 ml-2">
+									<div v-if="model.capabilities.length > 0" class="p-1 gap-1 rounded-4xl bg-muted">
+										<Tooltip v-if="model.capabilities.includes('TOOLS')">
+											<TooltipTrigger as-child>
+												<button class="rounded p-1">
+													<Wrench class="h-4 w-4" />
+												</button>
+											</TooltipTrigger>
+											<TooltipContent>
+												<p>Tool calling</p>
+											</TooltipContent>
+										</Tooltip>
+										<Tooltip v-if="chatStore.hasReasoningCapability(model)">
+											<TooltipTrigger as-child>
+												<button class="p-1 text-muted-foreground">
+													<Sparkles class="h-4 w-4" />
+												</button>
+											</TooltipTrigger>
+											<TooltipContent>
+												<p>Reasoning capable</p>
+											</TooltipContent>
+										</Tooltip>
+									</div>
+									<Tooltip>
+										<TooltipTrigger as-child>
+											<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleFavorite(model)">
+												<Star v-if="chatStore.isFavoriteModel(model)" class="h-4 w-4 fill-primary stroke-primary" />
+												<Star v-else class="h-4 w-4" />
+											</button>
+										</TooltipTrigger>
+										<TooltipContent>
+											<p>Toggle favorite</p>
+										</TooltipContent>
+									</Tooltip>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
-		</ShadSelectContent>
-	</ShadSelect>
+		</PopoverContent>
+	</Popover>
 </template>
 
 <script setup lang="ts">
-import {Bot, Star} from 'lucide-vue-next';
+import {Bot, Star, ChevronDown, Search, Filter, Wrench, Sparkles} from 'lucide-vue-next';
 import type {Model} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
+import {useMainStore} from '~/stores';
 import {cn} from '~/lib/utils';
+import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
+import {Tooltip, TooltipContent, TooltipTrigger} from '~/components/ui/tooltip';
 
 const props = defineProps<{
 	class?: string;
@@ -96,43 +152,67 @@ const props = defineProps<{
 
 const chatStore = useChatStore();
 const iconStore = useIconsStore();
+const store = useMainStore();
 const search = ref('');
+const isOpen = ref(false);
+const selectedProvider = ref<string>('favorites');
 
-const filteredFavorites = computed(() => {
-	const query = search.value.toLowerCase();
-	return chatStore.favoriteModels.filter(m => m.display_name.toLowerCase().includes(query) || m.model_id.toLowerCase().includes(query));
+const availableProviders = computed(() => {
+	const providers = new Set<string>();
+	for (const model of chatStore.models) {
+		providers.add(model.provider_name);
+	}
+	return Array.from(providers).sort();
 });
 
-const filteredGrouped = computed(() => {
+const displayedModels = computed(() => {
 	const query = search.value.toLowerCase();
-	const result: Record<string, Model[]> = {};
+	let models: Model[];
 
-	for (const [provider, models] of Object.entries(chatStore.groupedModels)) {
-		const filtered = models.filter(m => m.display_name.toLowerCase().includes(query) || m.model_id.toLowerCase().includes(query));
-		if (filtered.length > 0) {
-			result[provider] = filtered;
-		}
+	if (selectedProvider.value === 'favorites') {
+		models = chatStore.favoriteModels;
+	} else {
+		models = chatStore.models.filter(m => m.provider_name === selectedProvider.value);
 	}
 
-	return result;
+	if (query) {
+		models = models.filter(m => m.display_name.toLowerCase().includes(query) || m.model_id.toLowerCase().includes(query));
+	}
+
+	return models;
 });
 
-function handleModelChange(value: string | number | bigint | boolean | Record<string, any> | null) {
-	if (typeof value !== 'string') return;
-	const model = chatStore.models.find(m => m.model_id === value);
-	if (model) {
-		chatStore.setSelectedModel(model);
+function getDisplayCapabilities(model: Model): string[] {
+	const caps: string[] = [];
+	if (model.capabilities.includes('vision')) caps.push('👁');
+	if (model.capabilities.includes('tools')) caps.push('🔧');
+	if (model.context_length && model.context_length >= 100000) {
+		caps.push(`${Math.round(model.context_length / 1000)}k`);
 	}
+	return caps;
+}
+
+function getModelDescription(model: Model): string {
+	if (model.provider_display_name) {
+		return `${model.provider_display_name}'s ${model.display_name.split(' ').slice(-1)[0]} model`;
+	}
+	return model.model_id;
+}
+
+function selectModel(model: Model) {
+	chatStore.setSelectedModel(model);
+	isOpen.value = false;
+}
+
+function toggleFavorite(model: Model) {
+	chatStore.toggleFavoriteModel(model.model_id);
 }
 
 watch(
 	() => chatStore.activeChat?.id,
 	(newVal, oldVal) => {
-		console.log('Active chat changed:', newVal, oldVal);
-		console.log('Messages:', chatStore.messages);
 		if (oldVal !== newVal && newVal && chatStore.messages.length > 0) {
 			const model = chatStore.models.find(m => m.id === chatStore.messages[chatStore.messages.length - 1]?.model_id);
-			console.log('Selected model:', model);
 			if (model) {
 				search.value = '';
 				chatStore.setSelectedModel(model);

@@ -2,6 +2,7 @@ import {defineStore} from 'pinia';
 import localizedFormat from 'dayjs/plugin/localizedFormat';
 import dayjs from 'dayjs';
 import 'dayjs/locale/de';
+import type {UserPreferences} from '~/types/chat';
 
 dayjs.locale('de');
 dayjs.extend(localizedFormat);
@@ -20,6 +21,7 @@ interface User {
 	auth_method: string;
 	roles: string[];
 	permissions: string[];
+	preferences: object;
 	created_at: string;
 }
 
@@ -34,12 +36,14 @@ export const useMainStore = defineStore('main', {
 		breadcrumbs: BreadcrumbType[];
 		base: any;
 		initialized: boolean;
+		preferences: UserPreferences | null;
 		auth: AuthState;
 	} => {
 		return {
 			breadcrumbs: [],
 			base: null,
 			initialized: false,
+			preferences: null,
 			auth: {
 				user: null,
 				isAuthenticated: false,
@@ -113,9 +117,10 @@ export const useMainStore = defineStore('main', {
 			this.auth.loading = true;
 			try {
 				const {$customFetch} = useNuxtApp();
-				const user = await $customFetch('/api/v1/users/@me');
+				const user = (await $customFetch('/api/v1/users/@me')) as User;
 				if (user) {
-					this.auth.user = user as User;
+					this.auth.user = user;
+					this.preferences = user.preferences;
 					this.auth.isAuthenticated = true;
 				}
 			} catch (e: any) {

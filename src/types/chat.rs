@@ -148,7 +148,7 @@ pub struct Message {
 }
 
 /// User preferences database row
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct UserPreferences {
 	pub user_id: Uuid,
 	pub default_model_key: Option<String>,

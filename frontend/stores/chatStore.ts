@@ -1,4 +1,5 @@
 import {defineStore} from 'pinia';
+import {useMainStore} from './index';
 import type {
 	Workspace,
 	Chat,
@@ -31,9 +32,6 @@ interface ChatState {
 	selectedModel: Model | null;
 	modelsLoading: boolean;
 
-	preferences: UserPreferences;
-	preferencesLoading: boolean;
-
 	isStreaming: boolean;
 	contextTokens: number;
 	reasoningEffort: string | null;
@@ -64,9 +62,6 @@ export const useChatStore = defineStore('chat', {
 		selectedModel: null,
 		modelsLoading: false,
 
-		preferences: {...defaultPreferences},
-		preferencesLoading: false,
-
 		isStreaming: false,
 		contextTokens: 0,
 		reasoningEffort: null,
@@ -96,22 +91,30 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		favoriteModels(): Model[] {
-			return this.models.filter(m => m.is_favorite || this.preferences.favorite_model_keys.includes(m.model_id));
+			const mainStore = useMainStore();
+			return this.models.filter(m => m.is_favorite || mainStore.preferences?.favorite_model_keys.includes(m.model_id));
 		},
 
 		groupedModels(): Record<string, Model[]> {
 			const grouped: Record<string, Model[]> = {};
 			for (const model of this.models.filter(m => !m.is_hidden)) {
-				const provider = model.provider_display_name;
+				const provider = model.provider_name;
 				if (!grouped[provider]) grouped[provider] = [];
 				grouped[provider].push(model);
 			}
 			return grouped;
 		},
 
-		hasReasoningCapability(): boolean {
-			if (!this.selectedModel) return false;
-			return this.selectedModel.capabilities.some(c => c.startsWith('REASONING_'));
+		hasReasoningCapability: state => (model: Model | null) => {
+			if (!model) model = state.selectedModel;
+			if (!model) return false;
+			return model.capabilities.some(c => c.startsWith('REASONING_'));
+		},
+
+		hasToolCapability: state => (model: Model | null) => {
+			if (!model) model = state.selectedModel;
+			if (!model) return false;
+			return model.capabilities.includes('TOOLS');
 		},
 
 		availableReasoningEfforts(): string[] {
@@ -140,6 +143,11 @@ export const useChatStore = defineStore('chat', {
 		contextPercentage(): number {
 			if (!this.selectedModel?.context_length) return 0;
 			return Math.min(100, (this.contextTokens / this.selectedModel.context_length) * 100);
+		},
+
+		isFavoriteModel: state => (model: Model) => {
+			const mainStore = useMainStore();
+			return mainStore.preferences?.favorite_model_keys.includes(model.model_id);
 		},
 	},
 
@@ -483,27 +491,25 @@ export const useChatStore = defineStore('chat', {
 
 		// ===== Preferences =====
 		async fetchPreferences() {
-			this.preferencesLoading = true;
 			try {
 				const {$customFetch} = useNuxtApp();
+				const mainStore = useMainStore();
 				const prefs = await $customFetch('/api/v1/users/@me/preferences');
-				this.preferences = prefs as UserPreferences;
+				mainStore.preferences = prefs as UserPreferences;
 			} catch (e) {
 				console.error('Failed to fetch preferences:', e);
-				this.preferences = {...defaultPreferences};
-			} finally {
-				this.preferencesLoading = false;
 			}
 		},
 
 		async updatePreferences(data: UpdatePreferencesRequest): Promise<boolean> {
 			try {
 				const {$customFetch} = useNuxtApp();
+				const mainStore = useMainStore();
 				const updated = await $customFetch('/api/v1/users/@me/preferences', {
 					method: 'PATCH',
 					body: data,
 				});
-				this.preferences = updated as UserPreferences;
+				mainStore.preferences = updated as UserPreferences;
 				return true;
 			} catch (e) {
 				console.error('Failed to update preferences:', e);
@@ -511,17 +517,16 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		// ===== Models =====
 		async fetchModels() {
 			this.modelsLoading = true;
 			try {
 				const {$customFetch} = useNuxtApp();
+				const mainStore = useMainStore();
 				const models = await $customFetch('/api/v1/models');
 				this.models = models as Model[];
 
-				// If no model selected, try to select default or first available
 				if (!this.selectedModel && this.models.length > 0) {
-					const defaultKey = this.preferences.default_model_key;
+					const defaultKey = mainStore.preferences?.default_model_key;
 					const defaultModel = defaultKey ? this.models.find(m => m.model_id === defaultKey) : null;
 					this.selectedModel = defaultModel || this.models[0] || null;
 				}
@@ -535,7 +540,6 @@ export const useChatStore = defineStore('chat', {
 		setSelectedModel(model: Model | null) {
 			this.selectedModel = model;
 
-			// Auto-set reasoning effort based on model capabilities
 			if (!model) {
 				this.reasoningEffort = null;
 				return;
@@ -545,22 +549,20 @@ export const useChatStore = defineStore('chat', {
 			const hasReasoningCap = model.capabilities.some(c => c.startsWith('REASONING_'));
 
 			if (!hasReasoningCap) {
-				// No reasoning capability
 				this.reasoningEffort = null;
 			} else if (!hasNone) {
-				// Has reasoning but no NONE option - set to lowest available
 				const efforts = model.capabilities.filter(c => c.startsWith('REASONING_EFFORT_')).map(c => c.replace('REASONING_EFFORT_', ''));
 				const effortOrder = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH'];
 				const lowestEffort = effortOrder.find(e => efforts.includes(e));
 				this.reasoningEffort = lowestEffort ? lowestEffort.toLowerCase() : null;
 			} else {
-				// Has NONE option - don't select reasoning by default
 				this.reasoningEffort = null;
 			}
 		},
 
 		async toggleFavoriteModel(modelKey: string): Promise<boolean> {
-			const favorites = [...this.preferences.favorite_model_keys];
+			const mainStore = useMainStore();
+			const favorites = [...(mainStore.preferences?.favorite_model_keys || [])];
 			const index = favorites.indexOf(modelKey);
 
 			if (index === -1) {
@@ -593,7 +595,6 @@ export const useChatStore = defineStore('chat', {
 			this.contextTokens = tokens;
 		},
 
-		// ===== Initialization =====
 		async init() {
 			await Promise.all([this.fetchWorkspaces(), this.fetchChats(), this.fetchPreferences()]);
 			await this.fetchModels();

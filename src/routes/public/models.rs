@@ -19,12 +19,12 @@ pub struct ModelResponse {
 	pub model_id: String,
 	pub display_name: String,
 	pub capabilities: Vec<String>,
+	pub input_modalities: Vec<String>,
+	pub output_modalities: Vec<String>,
 	pub context_length: Option<u32>,
 	pub max_tokens: Option<u32>,
 	pub provider_name: String,
 	pub provider_kind: String,
-	pub is_favorite: bool,
-	pub is_hidden: bool,
 }
 
 /// GET /api/v1/models
@@ -91,6 +91,16 @@ pub async fn list_models(State(state): State<Arc<AppState>>, cookies: Cookies) -
 			} else {
 				vec![]
 			};
+			let input_modalities = if let serde_json::Value::Array(arr) = &m.input_modalities {
+				arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+			} else {
+				vec![]
+			};
+			let output_modalities = if let serde_json::Value::Array(arr) = &m.output_modalities {
+				arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+			} else {
+				vec![]
+			};
 
 			Some(ModelResponse {
 				id: m.id.to_string(),
@@ -102,8 +112,8 @@ pub async fn list_models(State(state): State<Arc<AppState>>, cookies: Cookies) -
 				max_tokens: m.max_tokens.map(|c| c as u32),
 				provider_name: provider_name.clone(),
 				provider_kind: provider_kind_str.to_string(),
-				is_favorite: false,
-				is_hidden: false,
+				input_modalities,
+				output_modalities,
 			})
 		})
 		.collect();

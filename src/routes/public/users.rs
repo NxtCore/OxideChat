@@ -19,7 +19,6 @@ pub async fn get_me(State(state): State<Arc<AppState>>, cookies: Cookies) -> imp
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	// Use shared helper function to build user response with roles
 	match user_to_response(&state.db, &user).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(user_response)).build(),
 		Err(e) => {

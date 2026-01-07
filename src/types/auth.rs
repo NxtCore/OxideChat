@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
+use crate::types::UserPreferences;
+
 // ============================================================================
 // Request Types
 // ============================================================================
@@ -46,6 +48,7 @@ pub struct UserResponse {
 	pub auth_method: String,
 	pub roles: Vec<String>,
 	pub permissions: Vec<String>,
+	pub preferences: PreferencesResponse,
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 

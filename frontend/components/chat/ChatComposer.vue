@@ -19,7 +19,7 @@
 					<div class="flex items-center gap-1">
 						<ModelSelector class="!border-none !bg-transparent !shadow-none hover:bg-muted/50" />
 						<ReasoningSelector v-if="chatStore.hasReasoningCapability" class="!border-none !bg-transparent !shadow-none hover:bg-muted/50" />
-						<ToolSelector class="!border-none !bg-transparent !shadow-none hover:bg-muted/50" />
+						<ToolSelector v-if="chatStore.hasToolCapability" class="!border-none !bg-transparent !shadow-none hover:bg-muted/50" />
 					</div>
 
 					<div class="flex items-center gap-2">

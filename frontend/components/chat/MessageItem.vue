@@ -106,7 +106,6 @@ const model = computed(() => {
 
 const modelDisplayName = computed(() => {
 	if (!model.value) return null;
-	// Return the display name, or extract from model_id (format: "Provider:model-name")
 	if (model.value.display_name) return model.value.display_name;
 	const modelId = props.message.model_id;
 	if (modelId?.includes(':')) {
@@ -129,7 +128,6 @@ const providerIcon = computed(() => {
 	return iconStore.getProviderIcon(model.value.provider_name);
 });
 
-// Auto-expand reasoning while streaming
 watch(
 	() => props.message.reasoning_content,
 	newVal => {
@@ -174,7 +172,6 @@ function handleCodeBlockClick(event: MouseEvent) {
 		}
 	}
 
-	// Handle preview button
 	if (target.classList.contains('code-block-preview-btn')) {
 		const result = extractCodeForPreview(target);
 		if (result) {
