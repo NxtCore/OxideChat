@@ -6,7 +6,9 @@
 use crate::AppState;
 use crate::ai;
 use crate::routes::public::auth::get_current_user;
-use crate::types::{ChatMessageResponse, Message};
+use crate::types::ai::ModelConfig;
+use crate::types::{ChatMessageResponse, Message, Tool, UserToolSettings};
+use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
 	Json,
 	extract::{Path, State},
@@ -19,11 +21,10 @@ use futures_util::StreamExt;
 use omniference::Sampling;
 use omniference::{
 	stream::StreamEvent,
-	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role},
+	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec},
 };
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, sync::Arc, time::Instant};
-use crate::types::ai::ModelConfig;
+use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
@@ -48,6 +49,14 @@ pub enum StreamData {
 	TextDelta { content: String },
 	/// Reasoning text delta (for models that support it)
 	ReasoningDelta { content: String },
+	/// Tool call started
+	ToolCallStart { id: String, name: String },
+	/// Tool call argument delta
+	ToolCallDelta { id: String, args_delta: String },
+	/// Tool call ended (arguments complete)
+	ToolCallEnd { id: String },
+	/// Tool execution result
+	ToolResult { id: String, output: serde_json::Value, error: Option<String> },
 	/// Token count update
 	Tokens { input: u32, output: u32, reasoning: Option<u32> },
 	/// Error occurred
@@ -67,14 +76,9 @@ fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl
 /// 1. Request-level (highest priority)
 /// 2. model_configs (user preferences)
 /// 3. models table (defaults)
-fn merge_sampling_with_priority(
-	request_sampling: Option<&Sampling>,
-	model_config: Option<&ModelConfig>,
-	model: &crate::types::AiModel,
-) -> Sampling {
+fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>, model: &crate::types::AiModel) -> Sampling {
 	// Parse sampling from model_config if available
-	let config_sampling: Option<Sampling> = model_config
-		.and_then(|mc| serde_json::from_value(mc.sampling.clone()).ok());
+	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.clone()).ok());
 
 	// Helper macro to get field with priority
 	macro_rules! priority_field {
@@ -123,7 +127,7 @@ fn merge_reasoning_with_priority(
 		.and_then(|mc| mc.extra_settings.get("reasoning_effort"))
 		.and_then(|v| v.as_str())
 		.map(|s| s.to_string());
-	
+
 	let config_budget: Option<u32> = model_config
 		.and_then(|mc| mc.extra_settings.get("reasoning_budget_tokens"))
 		.and_then(|v| v.as_u64())
@@ -141,6 +145,70 @@ fn merge_reasoning_with_priority(
 		})
 	} else {
 		None
+	}
+}
+
+/// Execute a tool by its name, looking it up from the database
+async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, tool_name: &str, input: serde_json::Value) -> Result<serde_json::Value, String> {
+	use crate::types::ToolSourceKind;
+
+	// Look up the tool by name
+	let tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true AND (is_public = true OR owner_id = $2)")
+		.bind(tool_name)
+		.bind(user_id)
+		.fetch_optional(db)
+		.await
+		.map_err(|e| format!("Database error: {e}"))?
+		.ok_or_else(|| format!("Tool '{}' not found", tool_name))?;
+
+	// Get user settings for this tool
+	let user_settings = sqlx::query_as::<_, UserToolSettings>("SELECT * FROM user_tool_settings WHERE user_id = $1 AND tool_id = $2")
+		.bind(user_id)
+		.bind(tool.id)
+		.fetch_optional(db)
+		.await
+		.ok()
+		.flatten();
+
+	let settings = user_settings.as_ref().map(|s| s.settings.clone()).unwrap_or_else(|| serde_json::json!({}));
+
+	let ctx = ToolContext {
+		user_id,
+		settings,
+		timeout_ms: Some(30000),
+	};
+
+	// Execute based on source kind
+	match tool.source_kind {
+		ToolSourceKind::Builtin => {
+			let builtin_id = tool
+				.source_config
+				.get("builtin_id")
+				.and_then(|v| v.as_str())
+				.ok_or("Missing builtin_id in source_config")?;
+
+			let executor = get_builtin_executor(builtin_id).map_err(|e| format!("{:?}", e))?;
+			executor.execute(input, &ctx).await.map_err(|e| format!("{:?}", e))
+		}
+		ToolSourceKind::Http => {
+			// Parse headers from JSON Value to HashMap
+			let headers: HashMap<String, String> = tool
+				.source_config
+				.get("headers")
+				.and_then(|v| serde_json::from_value(v.clone()).ok())
+				.unwrap_or_default();
+
+			let http_config = crate::utils::tools::http::HttpConfig {
+				method: tool.source_config.get("method").and_then(|v| v.as_str()).unwrap_or("GET").to_string(),
+				url: tool.source_config.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+				headers,
+				body_template: tool.source_config.get("body_template").and_then(|v| v.as_str()).map(String::from),
+			};
+
+			let executor = HttpExecutor::new(tool_name.to_string(), http_config).map_err(|e| format!("{:?}", e))?;
+			executor.execute(input, &ctx).await.map_err(|e| format!("{:?}", e))
+		}
+		_ => Err(format!("Unsupported tool source: {:?}", tool.source_kind)),
 	}
 }
 
@@ -195,15 +263,13 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 	eprintln!("[STREAM] Model verified");
 
 	// Fetch user's model configuration (if any) for priority-based settings
-	let model_config = sqlx::query_as::<_, ModelConfig>(
-		"SELECT * FROM model_configs WHERE owner_id = $1 AND stable_key = $2"
-	)
-	.bind(user.id)
-	.bind(&req.model_key)
-	.fetch_optional(&state.db)
-	.await
-	.ok()
-	.flatten();
+	let model_config = sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE owner_id = $1 AND stable_key = $2")
+		.bind(user.id)
+		.bind(&req.model_key)
+		.fetch_optional(&state.db)
+		.await
+		.ok()
+		.flatten();
 
 	eprintln!("[STREAM] Model config: {:?}", model_config.as_ref().map(|mc| &mc.name));
 
@@ -306,20 +372,12 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 	ir.stream = true;
 	ir.metadata.insert("user_id".to_string(), user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), chat_id.to_string());
-	
+
 	// Apply priority-based sampling: request > model_configs > model defaults
-	ir.sampling = merge_sampling_with_priority(
-		req.sampling.as_ref(),
-		model_config.as_ref(),
-		&model,
-	);
-	
+	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), model_config.as_ref(), &model);
+
 	// Apply priority-based reasoning: request > model_configs
-	ir.reasoning = merge_reasoning_with_priority(
-		req.reasoning_effort.as_ref(),
-		req.reasoning_budget_tokens,
-		model_config.as_ref(),
-	);
+	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, model_config.as_ref());
 
 	eprintln!("[STREAM] Chat request: {:?}", ir);
 
@@ -353,6 +411,9 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 				let mut reasoning_tokens: u32 = 0;
 				let mut reasoning_start: Option<Instant> = None;
 				let mut reasoning_latency_ms: Option<i32> = None;
+				let mut pending_tool_calls: HashMap<String, (String, String)> = HashMap::new();
+				let mut tool_results: Vec<(String, String, serde_json::Value, serde_json::Value, Option<String>)> = Vec::new();
+
 
 				tokio::pin!(upstream);
 
@@ -379,6 +440,51 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 							yield Ok::<_, Infallible>(Event::default().data(
 								serde_json::to_string(&StreamData::ReasoningDelta { content }).unwrap_or_default()
 							));
+						}
+						StreamEvent::ToolCallStart { id, name, args_json } => {
+							eprintln!("[STREAM] Tool call start: {} ({})", name, id);
+							pending_tool_calls.insert(id.clone(), (name.clone(), args_json.to_string()));
+							yield Ok::<_, Infallible>(Event::default().data(
+								serde_json::to_string(&StreamData::ToolCallStart { id, name }).unwrap_or_default()
+							));
+						}
+						StreamEvent::ToolCallDelta { id, args_delta_json } => {
+							if let Some((_, args)) = pending_tool_calls.get_mut(&id) {
+								args.push_str(&args_delta_json.to_string());
+							}
+							yield Ok::<_, Infallible>(Event::default().data(
+								serde_json::to_string(&StreamData::ToolCallDelta {
+									id,
+									args_delta: args_delta_json.to_string()
+								}).unwrap_or_default()
+							));
+						}
+						StreamEvent::ToolCallEnd { id } => {
+							eprintln!("[STREAM] Tool call end: {}", id);
+							yield Ok::<_, Infallible>(Event::default().data(
+								serde_json::to_string(&StreamData::ToolCallEnd { id: id.clone() }).unwrap_or_default()
+							));
+
+							// Execute the tool
+							if let Some((tool_name, args_str)) = pending_tool_calls.remove(&id) {
+								let args: serde_json::Value = serde_json::from_str(&args_str).unwrap_or_default();
+								eprintln!("[STREAM] Executing tool: {} with args: {:?}", tool_name, args);
+
+								// Find and execute the tool
+								let tool_result = execute_tool_by_name(&db, user.id, &tool_name, args.clone()).await;
+
+								let (output, error) = match tool_result {
+									Ok(output) => (output, None),
+									Err(e) => (serde_json::json!({"error": e}), Some(e)),
+								};
+
+								// Store for later injection into LLM context
+								tool_results.push((id.clone(), tool_name, args, output.clone(), error.clone()));
+
+								yield Ok::<_, Infallible>(Event::default().data(
+									serde_json::to_string(&StreamData::ToolResult { id, output, error }).unwrap_or_default()
+								));
+							}
 						}
 						StreamEvent::Tokens { input, output } => {
 							input_tokens = input;

@@ -122,7 +122,7 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		isReasoningRequired(): boolean {
-			return this.hasReasoningCapability(null) && !this.hasNoneReasoningOption;
+			return this.hasReasoningCapability(null) && this.availableReasoningEfforts.length < 2;
 		},
 
 		lowestReasoningEffort(): string | null {

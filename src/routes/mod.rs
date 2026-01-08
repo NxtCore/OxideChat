@@ -58,5 +58,15 @@ pub fn build_router() -> Router<Arc<AppState>> {
 		.route("/api/v1/models", get(public::models::list_models))
 		// Streaming (POST - saves message and streams response)
 		.route("/api/v1/chats/{chat_id}/stream", post(public::streaming::stream_completion))
+		// Tools
+		.route("/api/v1/tools", get(public::tools::list_tools))
+		.route("/api/v1/tools", post(public::tools::create_tool))
+		.route("/api/v1/tools/wasm/upload", post(public::tools::upload_wasm))
+		.route("/api/v1/tools/{id}", get(public::tools::get_tool))
+		.route("/api/v1/tools/{id}", put(public::tools::update_tool))
+		.route("/api/v1/tools/{id}", delete(public::tools::delete_tool))
+		.route("/api/v1/tools/{id}/settings", get(public::tools::get_tool_settings))
+		.route("/api/v1/tools/{id}/settings", put(public::tools::set_tool_settings))
+		.route("/api/v1/tools/{id}/test", post(public::tools::test_tool))
 		.layer(CookieManagerLayer::new())
 }

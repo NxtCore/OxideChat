@@ -6,5 +6,6 @@ pub mod models;
 pub mod oauth;
 pub mod preferences;
 pub mod streaming;
+pub mod tools;
 pub mod users;
 pub mod workspaces;

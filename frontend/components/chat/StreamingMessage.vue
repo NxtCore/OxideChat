@@ -32,16 +32,36 @@
 				</div>
 			</Transition>
 
+			<!-- Tool calls section -->
+			<div v-if="Object.keys(toolCalls).length > 0" class="flex flex-col gap-2 mt-2">
+				<ToolExecutionDisplay
+					v-for="(tool, id) in toolCalls"
+					:key="id"
+					:id="String(id)"
+					:name="tool.name"
+					:args="tool.args"
+					:output="tool.output"
+					:error="tool.error"
+					:is-executing="tool.isExecuting"
+				/>
+			</div>
+
 			<div class="relative rounded-2xl rounded-bl-md bg-muted px-4 py-3 text-foreground">
 				<!-- Typing indicator or content -->
-				<div v-if="!content" class="flex items-center gap-1">
+				<div v-if="!content && Object.keys(toolCalls).length === 0" class="flex items-center gap-1">
 					<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" />
 					<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.15s" />
 					<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.3s" />
 				</div>
 
 				<!-- Content with animation -->
-				<div v-else class="prose prose-sm dark:prose-invert max-w-none" :class="animationClass" v-html="renderedContent" @click="handleCodeBlockClick" />
+				<div
+					v-else-if="content"
+					class="prose prose-sm dark:prose-invert max-w-none"
+					:class="animationClass"
+					v-html="renderedContent"
+					@click="handleCodeBlockClick"
+				/>
 			</div>
 		</div>
 	</div>
@@ -53,8 +73,17 @@
 <script setup lang="ts">
 import {Bot, Brain, ChevronDown} from 'lucide-vue-next';
 import CodePreview from './CodePreview.vue';
+import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
 import {useMarkdown, extractCodeForPreview, ICON_COPY, ICON_CHECK} from '~/composables/useMarkdown';
 import {useMainStore} from '~/stores';
+
+interface ToolCallState {
+	name: string;
+	args: string;
+	output?: any;
+	error?: string;
+	isExecuting: boolean;
+}
 
 const store = useMainStore();
 
@@ -66,6 +95,7 @@ const content = ref('');
 const reasoningContent = ref('');
 const showReasoning = ref(false);
 const previewData = ref<{code: string; language: string} | null>(null);
+const toolCalls = ref<Record<string, ToolCallState>>({});
 
 const {renderStreaming} = useMarkdown();
 
@@ -149,6 +179,32 @@ defineExpose({
 	},
 	getContent: () => content.value,
 	getReasoningContent: () => reasoningContent.value,
+	// Tool call methods
+	startToolCall: (id: string, name: string) => {
+		toolCalls.value[id] = {
+			name,
+			args: '',
+			isExecuting: false,
+		};
+	},
+	appendToolCallArgs: (id: string, argsDelta: string) => {
+		if (toolCalls.value[id]) {
+			toolCalls.value[id].args += argsDelta;
+		}
+	},
+	endToolCall: (id: string) => {
+		if (toolCalls.value[id]) {
+			toolCalls.value[id].isExecuting = true;
+		}
+	},
+	setToolResult: (id: string, output: any, error?: string) => {
+		if (toolCalls.value[id]) {
+			toolCalls.value[id].output = output;
+			toolCalls.value[id].error = error;
+			toolCalls.value[id].isExecuting = false;
+		}
+	},
+	getToolCalls: () => toolCalls.value,
 });
 </script>
 

@@ -34,7 +34,7 @@
 					<div class="flex items-center gap-2">
 						<Brain class="h-4 w-4" />
 						<span v-if="tokenBudget" class="text-xs font-medium">{{ displayLabel }}</span>
-						<span v-else class="text-xs">{{ store.getTranslation('chat.reasoning_selector.auto') }}</span>
+						<span v-else class="text-xs">{{ store.getTranslation('chat.reasoning_selector.disabled') }}</span>
 					</div>
 				</ShadButton>
 			</PopoverTrigger>
@@ -53,12 +53,12 @@
 							type="number"
 							:min="minTokens"
 							:max="maxTokens"
-							:placeholder="store.getTranslation('chat.reasoning_selector.auto')"
+							:placeholder="store.getTranslation('chat.reasoning_selector.disabled')"
 							class="h-8"
 							@input="handleInputChange"
 						/>
-						<ShadButton variant="ghost" size="sm" class="h-8 px-2 text-muted-foreground hover:text-foreground" @click="resetToAuto">{{
-							store.getTranslation('chat.reasoning_selector.auto')
+						<ShadButton variant="ghost" size="sm" class="h-8 px-2 text-muted-foreground hover:text-foreground" @click="resetToDisabled">{{
+							store.getTranslation('chat.reasoning_selector.disabled')
 						}}</ShadButton>
 					</div>
 				</div>
@@ -155,7 +155,7 @@ const displayLabel = computed(() => {
 		return effortLabels.value[index] || store.getTranslation('chat.reasoning_selector.medium');
 	}
 
-	return store.getTranslation('chat.reasoning_selector.auto');
+	return store.getTranslation('chat.reasoning_selector.disabled');
 });
 
 onMounted(() => {
@@ -225,13 +225,13 @@ function handleInputChange() {
 		tokenBudget.value = val;
 		chatStore.setReasoningEffort(val.toString());
 	} else {
-		resetToAuto();
+		resetToDisabled();
 	}
 }
 
-function resetToAuto() {
+function resetToDisabled() {
 	tokenBudget.value = undefined;
 	tempTokenInput.value = undefined;
-	chatStore.setReasoningEffort(null);
+	chatStore.setReasoningEffort(null, true);
 }
 </script>

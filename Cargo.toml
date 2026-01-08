@@ -41,6 +41,11 @@ rust_decimal = { version = "1.39.0", features = ["db-postgres", "serde"] }
 futures-util = "0.3.31"
 async-stream = "0.3.6"
 tokio-util = "0.7.17"
+extism = "1"
+sha2 = "0.10"
+base64 = "0.22"
+thiserror = "2"
+async-trait = "0.1"
 
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }
