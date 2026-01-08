@@ -1,6 +1,5 @@
 <template>
 	<div v-if="!store.initialized" class="flex h-screen items-center justify-center">
-		<!-- Simple loading state -->
 		<svg
 			xmlns="http://www.w3.org/2000/svg"
 			width="24"
@@ -34,6 +33,7 @@
 <script setup lang="ts">
 import {useHead} from 'nuxt/app';
 import {useMainStore} from '@/stores';
+import {useChatStore} from '@/stores/chatStore';
 import 'vue-sonner/style.css';
 
 useHead({
@@ -45,6 +45,7 @@ useHead({
 });
 
 const store = useMainStore();
+const chatStore = useChatStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -103,5 +104,6 @@ watch(
 
 onMounted(async () => {
 	await checkAuth();
+	await chatStore.init();
 });
 </script>

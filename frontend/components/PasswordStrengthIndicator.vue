@@ -1,13 +1,11 @@
 <template>
 	<div class="password-strength-indicator flex flex-col gap-2">
-		<!-- Strength Bar -->
 		<div class="flex items-center gap-2">
 			<div class="flex-1 h-2 bg-muted rounded-full overflow-hidden">
 				<div class="h-full transition-all duration-300 rounded-full" :class="strengthBarClass" :style="{width: `${strengthPercentage}%`}" />
 			</div>
 		</div>
 
-		<!-- Requirements Checklist -->
 		<div class="grid grid-cols-2 gap-1 text-xs" v-if="showRequirements">
 			<div
 				v-for="req in requirements"
@@ -45,12 +43,12 @@ const MAX_LENGTH = 128;
 const requirements = computed(() => [
 	{
 		key: 'length',
-		label: store.getTranslation('auth.password.min_length', undefined, {min: MIN_LENGTH.toString()}) || `At least ${MIN_LENGTH} characters`,
+		label: store.getTranslation('auth.password.min_length', {min: MIN_LENGTH.toString()}) || `At least ${MIN_LENGTH} characters`,
 		met: props.password.length >= MIN_LENGTH,
 	},
 	{
 		key: 'maxLength',
-		label: store.getTranslation('auth.password.max_length', undefined, {max: MAX_LENGTH.toString()}) || `Maximum ${MAX_LENGTH} characters`,
+		label: store.getTranslation('auth.password.max_length', {max: MAX_LENGTH.toString()}) || `Maximum ${MAX_LENGTH} characters`,
 		met: props.password.length > 0 && props.password.length <= MAX_LENGTH,
 	},
 	{

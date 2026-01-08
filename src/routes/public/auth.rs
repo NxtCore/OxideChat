@@ -5,7 +5,7 @@
 use crate::AppState;
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::{AuthResponse, LoginRequest, RegisterRequest, SetupRequest, User};
-use crate::utils::auth::{create_session, hash_password, user_to_response, users_exist, validate_email, validate_password, validate_username, verify_password};
+use crate::utils::auth::{create_session, hash_password, initialize_user_defaults, user_to_response, users_exist, validate_email, validate_password, validate_username, verify_password};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{Json, extract::State, response::IntoResponse};
 use sqlx::PgPool;
@@ -94,6 +94,12 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	.await
 	{
 		eprintln!("[AUTH] Failed to assign admin role: {e}");
+		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+	}
+
+	// Initialize user defaults (preferences + workspace)
+	if let Err(e) = initialize_user_defaults(&state.db, &user.id).await {
+		eprintln!("[AUTH] Failed to initialize user defaults: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
@@ -205,6 +211,12 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 	.await
 	{
 		eprintln!("[AUTH] Failed to assign user role: {e}");
+		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+	}
+
+	// Initialize user defaults (preferences + workspace)
+	if let Err(e) = initialize_user_defaults(&state.db, &user.id).await {
+		eprintln!("[AUTH] Failed to initialize user defaults: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 

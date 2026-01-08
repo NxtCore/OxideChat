@@ -2,6 +2,7 @@ import {defineStore} from 'pinia';
 import localizedFormat from 'dayjs/plugin/localizedFormat';
 import dayjs from 'dayjs';
 import 'dayjs/locale/de';
+import type {UserPreferences} from '~/types/chat';
 
 dayjs.locale('de');
 dayjs.extend(localizedFormat);
@@ -20,6 +21,7 @@ interface User {
 	auth_method: string;
 	roles: string[];
 	permissions: string[];
+	preferences: object;
 	created_at: string;
 }
 
@@ -34,12 +36,14 @@ export const useMainStore = defineStore('main', {
 		breadcrumbs: BreadcrumbType[];
 		base: any;
 		initialized: boolean;
+		preferences: UserPreferences | null;
 		auth: AuthState;
 	} => {
 		return {
 			breadcrumbs: [],
 			base: null,
 			initialized: false,
+			preferences: null,
 			auth: {
 				user: null,
 				isAuthenticated: false,
@@ -66,7 +70,7 @@ export const useMainStore = defineStore('main', {
 		hasAnyPermission(permissions: string[]): boolean {
 			return permissions.some(p => this.hasPermission(p));
 		},
-		getTranslation(name: string, language?: string, args: {[key: string]: any} = {}): string {
+		getTranslation(name: string, args: {[key: string]: any} = {}, language?: string): string {
 			const lang = language ?? this.base?.language ?? 'en';
 			let currentTranslation: any = this.base?.i18n?.[lang];
 
@@ -87,7 +91,6 @@ export const useMainStore = defineStore('main', {
 			return name;
 		},
 		updateBreadcrumbs(breadcrumbs: BreadcrumbType[]) {
-			// @ts-ignore
 			this.breadcrumbs = breadcrumbs;
 		},
 		formatDate(timestamp: string, format = 'L') {
@@ -113,9 +116,10 @@ export const useMainStore = defineStore('main', {
 			this.auth.loading = true;
 			try {
 				const {$customFetch} = useNuxtApp();
-				const user = await $customFetch('/api/v1/users/@me');
+				const user = (await $customFetch('/api/v1/users/@me')) as User;
 				if (user) {
-					this.auth.user = user as User;
+					this.auth.user = user;
+					this.preferences = user.preferences;
 					this.auth.isAuthenticated = true;
 				}
 			} catch (e: any) {
@@ -134,7 +138,6 @@ export const useMainStore = defineStore('main', {
 			if (response?.user) {
 				this.auth.user = response.user as User;
 				this.auth.isAuthenticated = true;
-				// Refresh base data to update needs_setup
 				await this.getBaseData();
 			}
 			return response;
@@ -211,7 +214,7 @@ export const useMainStore = defineStore('main', {
 		},
 		dismissToast(toast: any) {
 			const {$toast} = useNuxtApp();
-			if (!toast || typeof toast.id === 'undefined') {
+			if (!toast) {
 				console.error('Invalid toast:', toast);
 				return;
 			}

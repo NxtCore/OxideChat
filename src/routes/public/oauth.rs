@@ -7,7 +7,7 @@ use crate::config::OAuthProvider;
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::User;
 use crate::types::oauth::{OAuthCallbackParams, OAuthState, OAuthUserInfo};
-use crate::utils::auth::create_session;
+use crate::utils::auth::{create_session, initialize_user_defaults};
 use crate::utils::oauth::{self, OAuthError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use axum::extract::{Path, Query, State};
@@ -246,6 +246,9 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 	.bind(&user_info.raw_data)
 	.execute(pool)
 	.await?;
+
+	// Initialize user defaults (preferences + workspace)
+	initialize_user_defaults(pool, &user.id).await?;
 
 	AuditLog::log(pool, LogEvent::OAuthAccountCreated, Some(user.id), Some(EntityType::User), Some(user.id));
 

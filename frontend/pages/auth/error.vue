@@ -11,12 +11,10 @@
 				</ShadCardHeader>
 				<ShadCardContent>
 					<div class="flex flex-col gap-4">
-						<!-- Error-specific guidance -->
 						<div v-if="errorCode === 'oauth_email_conflict'" class="rounded-lg bg-muted p-4 text-sm">
 							<p class="text-muted-foreground">{{ store.getTranslation('auth.errors.oauth_email_conflict_help') }}</p>
 						</div>
 
-						<!-- Action buttons -->
 						<div class="flex flex-col gap-2">
 							<ShadButton @click="navigateTo('/auth/login')" class="w-full">
 								{{ store.getTranslation('auth.errors.back_to_login') }}

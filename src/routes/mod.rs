@@ -6,7 +6,7 @@ pub mod public;
 use crate::AppState;
 use axum::{
 	Router,
-	routing::{delete, get, post, put},
+	routing::{delete, get, patch, post, put},
 };
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
@@ -37,5 +37,26 @@ pub fn build_router() -> Router<Arc<AppState>> {
 		.route("/api/v1/auth/oauth/{provider}/callback", get(public::oauth::oauth_callback))
 		// Users
 		.route("/api/v1/users/@me", get(public::users::get_me))
+		.route("/api/v1/users/@me/preferences", get(public::preferences::get_preferences))
+		.route("/api/v1/users/@me/preferences", patch(public::preferences::update_preferences))
+		// Workspaces
+		.route("/api/v1/workspaces", get(public::workspaces::list_workspaces))
+		.route("/api/v1/workspaces", post(public::workspaces::create_workspace))
+		.route("/api/v1/workspaces/{id}", get(public::workspaces::get_workspace))
+		.route("/api/v1/workspaces/{id}", patch(public::workspaces::update_workspace))
+		.route("/api/v1/workspaces/{id}", delete(public::workspaces::delete_workspace))
+		// Chats
+		.route("/api/v1/chats", get(public::chats::list_chats))
+		.route("/api/v1/chats", post(public::chats::create_chat))
+		.route("/api/v1/chats/{id}", get(public::chats::get_chat))
+		.route("/api/v1/chats/{id}", patch(public::chats::update_chat))
+		.route("/api/v1/chats/{id}", delete(public::chats::delete_chat))
+		// Messages
+		.route("/api/v1/chats/{chat_id}/messages", get(public::messages::list_messages))
+		.route("/api/v1/chats/{chat_id}/messages", post(public::messages::send_message))
+		// Models
+		.route("/api/v1/models", get(public::models::list_models))
+		// Streaming (POST - saves message and streams response)
+		.route("/api/v1/chats/{chat_id}/stream", post(public::streaming::stream_completion))
 		.layer(CookieManagerLayer::new())
 }

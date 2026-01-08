@@ -1,4 +1,10 @@
 pub mod auth;
 pub mod base;
+pub mod chats;
+pub mod messages;
+pub mod models;
 pub mod oauth;
+pub mod preferences;
+pub mod streaming;
 pub mod users;
+pub mod workspaces;

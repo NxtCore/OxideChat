@@ -1,7 +1,6 @@
 <template>
 	<div class="min-h-screen bg-background text-foreground selection:bg-primary/20 font-sans">
-		<div class="container max-w-[1400px] mx-auto">
-			<!-- Header -->
+		<div class="container mx-auto">
 			<div class="mb-8">
 				<button
 					@click="goBack"
@@ -20,8 +19,7 @@
 			</div>
 
 			<div class="grid w-full grid-cols-1 gap-8 lg:grid-cols-4">
-				<!-- Sidebar Navigation -->
-				<aside class="w-full flex-shrink-0 lg:w-64 lg:pr-2">
+				<aside class="w-full shrink-0 lg:w-64 lg:pr-2">
 					<nav class="space-y-1">
 						<NuxtLink
 							v-for="tab in visibleTabs"
@@ -36,9 +34,7 @@
 					</nav>
 				</aside>
 
-				<!-- Main Content -->
 				<main class="col-span-3 flex-1">
-					<!-- Fade transition for content -->
 					<div class="animate-in fade-in slide-in-from-bottom-2 duration-300">
 						<NuxtPage />
 					</div>

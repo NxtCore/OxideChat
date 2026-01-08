@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
 	routes::public::auth::{MAX_PASSWORD_LENGTH, MAX_USERNAME_LENGTH, MIN_PASSWORD_LENGTH, MIN_USERNAME_LENGTH, SESSION_COOKIE_NAME, SESSION_DURATION_DAYS},
-	types::{CountRow, PermissionNameRow, RoleNameRow, User, UserResponse},
+	types::{CountRow, PermissionNameRow, PreferencesResponse, RoleNameRow, User, UserPreferences, UserResponse},
 	utils::response::ErrorCode,
 };
 
@@ -46,6 +46,18 @@ pub async fn get_user_roles(pool: &PgPool, user_id: &Uuid) -> Result<Vec<String>
 	Ok(roles.into_iter().map(|r| r.name).collect())
 }
 
+// Get user preferences by user ID.
+pub async fn get_user_preferences(pool: &PgPool, user_id: &Uuid) -> Result<UserPreferences, sqlx::Error> {
+	match sqlx::query_as("SELECT * FROM user_preferences WHERE user_id = $1")
+		.bind(user_id)
+		.fetch_optional(pool)
+		.await?
+	{
+		Some(prefs) => Ok(prefs),
+		None => Ok(UserPreferences::default_for(*user_id)),
+	}
+}
+
 /// Get user permissions by user ID (via role_permissions junction).
 pub async fn get_user_permissions(pool: &PgPool, user_id: &Uuid) -> Result<Vec<String>, sqlx::Error> {
 	let permissions: Vec<PermissionNameRow> = sqlx::query_as(
@@ -58,6 +70,35 @@ pub async fn get_user_permissions(pool: &PgPool, user_id: &Uuid) -> Result<Vec<S
 	.fetch_all(pool)
 	.await?;
 	Ok(permissions.into_iter().map(|p| p.name).collect())
+}
+
+/// Initialize default data for a newly created user.
+///
+/// Creates:
+/// - Default user preferences
+/// - Default workspace named "Personal"
+pub async fn initialize_user_defaults(pool: &PgPool, user_id: &Uuid) -> Result<(), sqlx::Error> {
+	// Create default user preferences
+	sqlx::query(
+		"INSERT INTO user_preferences (user_id, default_model_key, favorite_model_keys, streaming_animation, use_remend)
+		 VALUES ($1, NULL, '[]', 'fade', true)
+		 ON CONFLICT (user_id) DO NOTHING",
+	)
+	.bind(user_id)
+	.execute(pool)
+	.await?;
+
+	// Create default workspace
+	sqlx::query(
+		"INSERT INTO workspaces (user_id, name, is_default, sort_order)
+		 VALUES ($1, 'Personal', true, 0)
+		 ON CONFLICT (user_id, name) DO NOTHING",
+	)
+	.bind(user_id)
+	.execute(pool)
+	.await?;
+
+	Ok(())
 }
 
 /// Create a session for a user and set the session cookie.
@@ -93,6 +134,7 @@ pub async fn create_session(pool: &PgPool, cookies: &Cookies, user_id: &Uuid) ->
 pub async fn user_to_response(pool: &PgPool, user: &User) -> Result<UserResponse, sqlx::Error> {
 	let roles = get_user_roles(pool, &user.id).await?;
 	let permissions = get_user_permissions(pool, &user.id).await?;
+	let preferences = get_user_preferences(pool, &user.id).await?;
 	Ok(UserResponse {
 		id: user.id,
 		email: user.email.clone(),
@@ -100,6 +142,7 @@ pub async fn user_to_response(pool: &PgPool, user: &User) -> Result<UserResponse
 		auth_method: user.auth_method.clone(),
 		roles,
 		permissions,
+		preferences: PreferencesResponse::from(preferences),
 		created_at: user.created_at,
 	})
 }
