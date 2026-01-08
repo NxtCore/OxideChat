@@ -21,7 +21,9 @@
 			</template>
 
 			<template v-for="group in groupedChats" :key="group.label">
-				<div class="mb-2 mt-4 px-2 text-xs font-medium text-muted-foreground">{{ store.getTranslation('chat.list.' + group.label.replace(/\s+/g, '_').toLowerCase()) }}</div>
+				<div class="mb-2 mt-4 px-2 text-xs font-medium text-muted-foreground">
+					{{ store.getTranslation('chat.list.' + group.label.replace(/\s+/g, '_').toLowerCase()) }}
+				</div>
 				<ChatListItem
 					v-for="chat in group.chats"
 					:key="chat.id"

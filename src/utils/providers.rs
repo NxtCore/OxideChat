@@ -59,7 +59,6 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &AiProvider) -> Resul
 
 	// Categorize operations
 	for model in &discovered {
-		println!("Discovered model: {:?}", model);
 		let capabilities_json = serde_json::to_value(&model.capabilities).map_err(|e| format!("Failed to serialize capabilities for model {}: {}", model.id, e))?;
 		let input_modalities_json =
 			serde_json::to_value(&model.input_modalities).map_err(|e| format!("Failed to serialize input_modalities for model {}: {}", model.id, e))?;

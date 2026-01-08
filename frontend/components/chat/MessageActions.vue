@@ -24,7 +24,6 @@
 		</ShadTooltip>
 
 		<ShadPopover>
-		<ShadPopover>
 			<ShadPopoverTrigger as-child>
 				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50">
 					<Info class="h-3.5 w-3.5" />
@@ -42,7 +41,6 @@
 
 					<div class="h-px bg-border" />
 
-					<div class="space-y-1">
 					<div class="space-y-1">
 						<div class="flex justify-between text-xs">
 							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.input_tokens') }}</span>

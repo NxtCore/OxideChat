@@ -39,13 +39,6 @@ interface ChatState {
 	enabledTools: string[];
 }
 
-const defaultPreferences: UserPreferences = {
-	default_model_key: null,
-	favorite_model_keys: [],
-	streaming_animation: 'fade',
-	use_remend: true,
-};
-
 export const useChatStore = defineStore('chat', {
 	state: (): ChatState => ({
 		workspaces: [],
@@ -316,7 +309,6 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-
 		async sendAndStream(chatId: string, content: string): Promise<void> {
 			if (!this.selectedModel) {
 				console.error('No model selected');
@@ -324,7 +316,6 @@ export const useChatStore = defineStore('chat', {
 			}
 
 			this.isStreaming = true;
-
 
 			const userMessageId = `user-${Date.now()}`;
 			const userMessage: ChatMessage = {
@@ -348,7 +339,6 @@ export const useChatStore = defineStore('chat', {
 				created_at: new Date().toISOString(),
 			};
 			this.messages.push(userMessage);
-
 
 			const streamingMessageId = `streaming-${Date.now()}`;
 			const streamingMessage: ChatMessage = {

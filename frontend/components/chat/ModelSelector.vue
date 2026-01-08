@@ -3,12 +3,15 @@
 		<PopoverTrigger as-child>
 			<button :class="cn('flex items-center gap-2 px-2 py-1 rounded-md hover:bg-accent transition-colors', props.class)">
 				<div
-					v-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.type === 'svg'"
+					v-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name, chatStore.selectedModel?.model_id)?.type === 'svg'"
 					class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-					v-html="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.icon"
+					v-html="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name, chatStore.selectedModel?.model_id)?.icon"
 				/>
-				<div v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.type === 'png'" class="h-4 w-4 flex items-center justify-center">
-					<img :src="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name)?.icon" alt="Provider icon" />
+				<div
+					v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name, chatStore.selectedModel?.model_id)?.type === 'png'"
+					class="h-4 w-4 flex items-center justify-center"
+				>
+					<img :src="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name, chatStore.selectedModel?.model_id)?.icon" alt="Provider icon" />
 				</div>
 				<span class="max-w-37.5 truncate text-xs font-medium">
 					{{ chatStore.selectedModel?.display_name || store.getTranslation('chat.model_selector.select_model') }}
@@ -41,12 +44,15 @@
 						>
 							<div class="flex items-start gap-3">
 								<div
-									v-if="iconStore.getProviderIcon(model.provider_name)?.type === 'svg'"
+									v-if="iconStore.getProviderIcon(model.provider_name, model?.model_id)?.type === 'svg'"
 									class="h-5 w-5 mt-0.5 flex items-center justify-center text-muted-foreground [&>svg]:h-full [&>svg]:w-full"
-									v-html="iconStore.getProviderIcon(model.provider_name)?.icon"
+									v-html="iconStore.getProviderIcon(model.provider_name, model?.model_id)?.icon"
 								/>
-								<div v-else-if="iconStore.getProviderIcon(model.provider_name)?.type === 'png'" class="h-5 w-5 mt-0.5 flex items-center justify-center">
-									<img :src="iconStore.getProviderIcon(model.provider_name)?.icon" alt="Provider icon" />
+								<div
+									v-else-if="iconStore.getProviderIcon(model.provider_name, model?.model_id)?.type === 'png'"
+									class="h-5 w-5 mt-0.5 flex items-center justify-center"
+								>
+									<img :src="iconStore.getProviderIcon(model.provider_name, model?.model_id)?.icon" alt="Provider icon" />
 								</div>
 								<Bot v-else class="h-5 w-5 mt-0.5 text-muted-foreground" />
 

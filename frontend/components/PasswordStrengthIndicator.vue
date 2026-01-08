@@ -43,12 +43,12 @@ const MAX_LENGTH = 128;
 const requirements = computed(() => [
 	{
 		key: 'length',
-		label: store.getTranslation('auth.password.min_length', undefined, {min: MIN_LENGTH.toString()}) || `At least ${MIN_LENGTH} characters`,
+		label: store.getTranslation('auth.password.min_length', {min: MIN_LENGTH.toString()}) || `At least ${MIN_LENGTH} characters`,
 		met: props.password.length >= MIN_LENGTH,
 	},
 	{
 		key: 'maxLength',
-		label: store.getTranslation('auth.password.max_length', undefined, {max: MAX_LENGTH.toString()}) || `Maximum ${MAX_LENGTH} characters`,
+		label: store.getTranslation('auth.password.max_length', {max: MAX_LENGTH.toString()}) || `Maximum ${MAX_LENGTH} characters`,
 		met: props.password.length > 0 && props.password.length <= MAX_LENGTH,
 	},
 	{

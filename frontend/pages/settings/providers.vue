@@ -364,7 +364,6 @@ async function syncProvider(provider: any) {
 	await $customFetch(`/api/v1/admin/providers/${provider.id}/sync`, {
 		method: 'POST',
 	});
-	console.log(toast);
 	store.dismissToast(toast);
 	store.toast(store.getTranslation('settings.providers.syncing_provider_success'), {type: 'success'});
 }

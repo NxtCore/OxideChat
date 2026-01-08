@@ -15,7 +15,7 @@
 					{{ displayLabel }}
 				</span>
 			</ShadSelectTrigger>
-				<ShadContent>
+			<ShadSelectContent>
 				<ShadSelectGroup>
 					<ShadSelectItem v-for="(label, index) in effortLabels" :key="availableEffortLevels[index]" :value="availableEffortLevels[index]">
 						{{ label }}
@@ -57,7 +57,9 @@
 							class="h-8"
 							@input="handleInputChange"
 						/>
-						<ShadButton variant="ghost" size="sm" class="h-8 px-2 text-muted-foreground hover:text-foreground" @click="resetToAuto">{{ store.getTranslation('chat.reasoning_selector.auto') }}</ShadButton>
+						<ShadButton variant="ghost" size="sm" class="h-8 px-2 text-muted-foreground hover:text-foreground" @click="resetToAuto">{{
+							store.getTranslation('chat.reasoning_selector.auto')
+						}}</ShadButton>
 					</div>
 				</div>
 			</PopoverContent>

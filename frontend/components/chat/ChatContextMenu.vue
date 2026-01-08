@@ -18,7 +18,7 @@
 			<ShadButton
 				variant="ghost"
 				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
-				@click="startRename"
+				@click="openRenameDialog"
 			>
 				<Pencil class="h-4 w-4" />
 				<span>{{ store.getTranslation('chat.context_menu.rename') }}</span>
@@ -58,12 +58,49 @@
 			<ShadButton
 				variant="ghost"
 				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
-				@click="confirmDelete"
+				@click="openDeleteDialog"
 			>
 				<Trash2 class="h-4 w-4" />
 				<span>{{ store.getTranslation('chat.context_menu.delete') }}</span>
 			</ShadButton>
 		</div>
+
+		<ShadDialog v-model:open="showRenameDialog">
+			<ShadDialogContent class="sm:max-w-md">
+				<ShadDialogHeader>
+					<ShadDialogTitle>{{ store.getTranslation('chat.context_menu.rename') }}</ShadDialogTitle>
+					<ShadDialogDescription>{{ store.getTranslation('chat.context_menu.rename_prompt') }}</ShadDialogDescription>
+				</ShadDialogHeader>
+				<div class="py-4">
+					<ShadInput v-model="renameValue" :placeholder="store.getTranslation('chat.list.new_chat')" @keydown.enter="submitRename" />
+				</div>
+				<ShadDialogFooter>
+					<ShadButton variant="outline" @click="showRenameDialog = false">
+						{{ store.getTranslation('common.cancel') }}
+					</ShadButton>
+					<ShadButton @click="submitRename">
+						{{ store.getTranslation('common.save') }}
+					</ShadButton>
+				</ShadDialogFooter>
+			</ShadDialogContent>
+		</ShadDialog>
+
+		<ShadDialog v-model:open="showDeleteDialog">
+			<ShadDialogContent class="sm:max-w-md">
+				<ShadDialogHeader>
+					<ShadDialogTitle>{{ store.getTranslation('chat.context_menu.delete') }}</ShadDialogTitle>
+					<ShadDialogDescription>{{ store.getTranslation('chat.context_menu.delete_confirm') }}</ShadDialogDescription>
+				</ShadDialogHeader>
+				<ShadDialogFooter>
+					<ShadButton variant="outline" @click="showDeleteDialog = false">
+						{{ store.getTranslation('common.cancel') }}
+					</ShadButton>
+					<ShadButton variant="destructive" @click="executeDelete">
+						{{ store.getTranslation('chat.context_menu.delete') }}
+					</ShadButton>
+				</ShadDialogFooter>
+			</ShadDialogContent>
+		</ShadDialog>
 	</Teleport>
 </template>
 
@@ -86,17 +123,25 @@ const chatStore = useChatStore();
 const store = useMainStore();
 const menuRef = ref<HTMLElement>();
 const showMoveMenu = ref(false);
+const showRenameDialog = ref(false);
+const showDeleteDialog = ref(false);
+const renameValue = ref('');
 
 async function togglePin() {
 	await chatStore.updateChat(props.chat.id, {is_pinned: !props.chat.is_pinned});
 	emit('close');
 }
 
-function startRename() {
-	const newTitle = prompt(store.getTranslation('chat.context_menu.rename_prompt'), props.chat.title || store.getTranslation('chat.list.new_chat'));
-	if (newTitle !== null) {
-		chatStore.updateChat(props.chat.id, {title: newTitle});
+function openRenameDialog() {
+	renameValue.value = props.chat.title || store.getTranslation('chat.list.new_chat');
+	showRenameDialog.value = true;
+}
+
+async function submitRename() {
+	if (renameValue.value.trim()) {
+		await chatStore.updateChat(props.chat.id, {title: renameValue.value.trim()});
 	}
+	showRenameDialog.value = false;
 	emit('close');
 }
 
@@ -122,10 +167,13 @@ function exportChat() {
 	emit('close');
 }
 
-async function confirmDelete() {
-	if (confirm(store.getTranslation('chat.context_menu.delete_confirm'))) {
-		await chatStore.deleteChat(props.chat.id);
-	}
+function openDeleteDialog() {
+	showDeleteDialog.value = true;
+}
+
+async function executeDelete() {
+	await chatStore.deleteChat(props.chat.id);
+	showDeleteDialog.value = false;
 	emit('close');
 }
 

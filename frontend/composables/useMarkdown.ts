@@ -5,10 +5,19 @@
  * - `remend` for self-healing markdown during streaming
  * - `marked` for parsing markdown to HTML
  * - `shiki` for syntax highlighting in code blocks
+ * - `DOMPurify` for sanitizing HTML output to prevent XSS
  */
+import DOMPurify from 'dompurify';
 import {Marked} from 'marked';
 import remend from 'remend';
 import {createHighlighter, type Highlighter, type BundledLanguage} from 'shiki';
+
+function sanitize(html: string): string {
+	return DOMPurify.sanitize(html, {
+		ADD_ATTR: ['data-language', 'data-previewable', 'title'],
+		ADD_TAGS: ['button'],
+	});
+}
 
 let highlighter: Highlighter | null = null;
 let highlighterPromise: Promise<Highlighter> | null = null;
@@ -150,10 +159,10 @@ export function useMarkdown() {
 
 		const healed = remend(content);
 		if (ready && markedInstance) {
-			return markedInstance.parse(healed, {async: false}) as string;
+			return sanitize(markedInstance.parse(healed, {async: false}) as string);
 		}
 
-		return renderFallback(healed);
+		return sanitize(renderFallback(healed));
 	}
 
 	/**
@@ -164,10 +173,10 @@ export function useMarkdown() {
 		const ready = isHighlighterReady.value;
 		if (!content) return '';
 		if (ready && markedInstance) {
-			return markedInstance.parse(content, {async: false}) as string;
+			return sanitize(markedInstance.parse(content, {async: false}) as string);
 		}
 
-		return renderFallback(content);
+		return sanitize(renderFallback(content));
 	}
 
 	/**
