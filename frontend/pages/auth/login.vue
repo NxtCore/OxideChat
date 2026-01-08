@@ -8,7 +8,6 @@
 				</ShadCardHeader>
 				<ShadCardContent>
 					<form @submit.prevent="handleLogin" class="flex flex-col gap-6">
-						<!-- OAuth Buttons -->
 						<div v-if="store.base?.oauth_providers.length > 0" class="flex flex-col gap-3">
 							<ShadButton v-if="store.isOAuthEnabled('google')" variant="outline" type="button" class="w-full" @click="handleOauthLogin('google')">
 								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="size-5">
@@ -30,14 +29,12 @@
 							</ShadButton>
 						</div>
 
-						<!-- Separator -->
 						<div v-if="store.base?.oauth_providers.length > 0" class="relative flex items-center">
 							<div class="flex-1 border-t border-border"></div>
 							<span class="bg-card px-4 text-xs text-muted-foreground">{{ store.getTranslation('auth.login.or_continue') }}</span>
 							<div class="flex-1 border-t border-border"></div>
 						</div>
 
-						<!-- Email/Password Fields -->
 						<div class="flex flex-col gap-4">
 							<div class="flex flex-col gap-2">
 								<ShadLabel for="email">{{ store.getTranslation('auth.login.email') }}</ShadLabel>
@@ -51,7 +48,6 @@
 							</div>
 						</div>
 
-						<!-- Submit -->
 						<div class="flex flex-col gap-4">
 							<ShadButton type="submit" class="w-full" :disabled="loading">
 								<Loader2 v-if="loading" class="mr-2 h-4 w-4 animate-spin" />

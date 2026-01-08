@@ -4,6 +4,4 @@
 	</NuxtLayout>
 </template>
 
-<script setup lang="ts">
-// Main entry point for the application
-</script>
+<script setup lang="ts"></script>

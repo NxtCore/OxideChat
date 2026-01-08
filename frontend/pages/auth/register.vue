@@ -8,7 +8,6 @@
 				</ShadCardHeader>
 				<ShadCardContent>
 					<form @submit.prevent="handleRegister" class="flex flex-col gap-6">
-						<!-- OAuth Buttons -->
 						<div v-if="store.base?.oauth_providers.length > 0" class="flex flex-col gap-3">
 							<ShadButton v-if="store.isOAuthEnabled('google')" variant="outline" type="button" class="w-full" @click="handleOauthRegister('google')">
 								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="size-5">
@@ -37,7 +36,6 @@
 							<div class="flex-1 border-t border-border"></div>
 						</div>
 
-						<!-- Form Fields -->
 						<div class="flex flex-col gap-4">
 							<div class="flex flex-col gap-2">
 								<ShadLabel for="email">{{ store.getTranslation('auth.login.email') }}</ShadLabel>
@@ -64,7 +62,6 @@
 							</div>
 						</div>
 
-						<!-- Submit -->
 						<div class="flex flex-col gap-4">
 							<ShadButton type="submit" class="w-full" :disabled="loading">
 								<Loader2 v-if="loading" class="mr-2 h-4 w-4 animate-spin" />

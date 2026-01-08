@@ -8,7 +8,6 @@
 				</ShadCardHeader>
 				<ShadCardContent>
 					<form @submit.prevent="handleSetup" class="flex flex-col gap-6">
-						<!-- Form Fields -->
 						<div class="flex flex-col gap-4">
 							<div class="flex flex-col gap-2">
 								<ShadLabel for="email">{{ store.getTranslation('auth.login.email') }}</ShadLabel>
@@ -35,7 +34,6 @@
 							</div>
 						</div>
 
-						<!-- Submit -->
 						<ShadButton type="submit" class="w-full" :disabled="loading">
 							<Loader2 v-if="loading" class="mr-2 h-4 w-4 animate-spin" />
 							{{ loading ? store.getTranslation('auth.register.submitting') : store.getTranslation('auth.setup.submit') }}

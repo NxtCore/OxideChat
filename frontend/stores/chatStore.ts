@@ -154,7 +154,6 @@ export const useChatStore = defineStore('chat', {
 	},
 
 	actions: {
-		// ===== Workspaces =====
 		async fetchWorkspaces() {
 			this.workspacesLoading = true;
 			try {
@@ -214,11 +213,9 @@ export const useChatStore = defineStore('chat', {
 
 		setActiveWorkspace(id: string | null) {
 			this.activeWorkspaceId = id;
-			// Re-fetch chats for this workspace
 			this.fetchChats({workspace_id: id || undefined});
 		},
 
-		// ===== Chats =====
 		async fetchChats(params?: ChatListParams) {
 			this.chatsLoading = true;
 			try {
@@ -319,10 +316,7 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		/**
-		 * Send a message and stream the AI response.
-		 * This is a unified action that saves the user message and streams the AI response.
-		 */
+
 		async sendAndStream(chatId: string, content: string): Promise<void> {
 			if (!this.selectedModel) {
 				console.error('No model selected');
@@ -331,7 +325,7 @@ export const useChatStore = defineStore('chat', {
 
 			this.isStreaming = true;
 
-			// Create a placeholder user message
+
 			const userMessageId = `user-${Date.now()}`;
 			const userMessage: ChatMessage = {
 				id: userMessageId,
@@ -355,7 +349,7 @@ export const useChatStore = defineStore('chat', {
 			};
 			this.messages.push(userMessage);
 
-			// Create a placeholder assistant message for streaming
+
 			const streamingMessageId = `streaming-${Date.now()}`;
 			const streamingMessage: ChatMessage = {
 				id: streamingMessageId,
@@ -494,7 +488,6 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		// ===== Preferences =====
 		async fetchPreferences() {
 			try {
 				const {$customFetch} = useNuxtApp();

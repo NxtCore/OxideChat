@@ -91,7 +91,6 @@ export const useMainStore = defineStore('main', {
 			return name;
 		},
 		updateBreadcrumbs(breadcrumbs: BreadcrumbType[]) {
-			// @ts-ignore
 			this.breadcrumbs = breadcrumbs;
 		},
 		formatDate(timestamp: string, format = 'L') {
@@ -139,7 +138,6 @@ export const useMainStore = defineStore('main', {
 			if (response?.user) {
 				this.auth.user = response.user as User;
 				this.auth.isAuthenticated = true;
-				// Refresh base data to update needs_setup
 				await this.getBaseData();
 			}
 			return response;

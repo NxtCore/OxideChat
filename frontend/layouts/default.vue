@@ -1,6 +1,5 @@
 <template>
 	<div v-if="!store.initialized" class="flex h-screen items-center justify-center">
-		<!-- Simple loading state -->
 		<svg
 			xmlns="http://www.w3.org/2000/svg"
 			width="24"
