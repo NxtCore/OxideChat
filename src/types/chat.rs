@@ -100,6 +100,24 @@ pub struct ReasoningDetails {
 	pub budget_tokens: Option<i32>,
 }
 
+/// Tool execution result for API response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolExecutionResponse {
+	pub tool_call_id: String,
+	pub tool_name: String,
+	pub input_args: serde_json::Value,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub output: Option<serde_json::Value>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub error: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub execution_ms: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub tool_id: Option<Uuid>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub tool_function: Option<Uuid>,
+}
+
 // ============= Database Models =============
 
 /// Workspace database row
@@ -335,7 +353,7 @@ pub struct ChatWithMessagesResponse {
 }
 
 /// Chat message response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ChatMessageResponse {
 	pub id: Uuid,
 	pub role: String,
@@ -345,6 +363,8 @@ pub struct ChatMessageResponse {
 	pub cost_details: CostDetails,
 	pub usage_details: UsageDetails,
 	pub reasoning_details: ReasoningDetails,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub tool_calls: Option<Vec<ToolExecutionResponse>>,
 	pub created_at: DateTime<Utc>,
 }
 
@@ -359,6 +379,7 @@ impl From<Message> for ChatMessageResponse {
 			cost_details: m.cost_details.0,
 			usage_details: m.usage_details.0,
 			reasoning_details: m.reasoning_details.0,
+			tool_calls: None,
 			created_at: m.created_at,
 		}
 	}

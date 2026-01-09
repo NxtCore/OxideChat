@@ -256,7 +256,26 @@ export const useChatStore = defineStore('chat', {
 				const data = await $customFetch(`/api/v1/chats/${id}`);
 				const chatWithMessages = data as ChatWithMessages;
 				this.activeChat = chatWithMessages.chat;
-				this.messages = chatWithMessages.messages;
+
+				// Transform tool_calls array from API (snake_case) to toolCalls Record format for UI
+				this.messages = chatWithMessages.messages.map(msg => {
+					const rawMsg = msg as any;
+					if (rawMsg.tool_calls && Array.isArray(rawMsg.tool_calls)) {
+						const toolCallsRecord: Record<string, any> = {};
+						for (const tc of rawMsg.tool_calls) {
+							toolCallsRecord[tc.tool_call_id] = {
+								name: tc.tool_name || '',
+								args: typeof tc.input_args === 'string' ? tc.input_args : JSON.stringify(tc.input_args),
+								output: tc.output,
+								error: tc.error,
+								isExecuting: false,
+							};
+						}
+						return {...msg, toolCalls: toolCallsRecord};
+					}
+					return msg;
+				});
+
 				return chatWithMessages;
 			} catch (e) {
 				console.error('Failed to fetch chat:', e);
@@ -434,6 +453,39 @@ export const useChatStore = defineStore('chat', {
 											msg.reasoning_content += data.content;
 										}
 										break;
+									case 'tool_call_start':
+										if (msg) {
+											if (!msg.toolCalls) msg.toolCalls = {};
+											msg.toolCalls[data.id] = {
+												name: data.name,
+												args: '',
+												isExecuting: false,
+											};
+										}
+										break;
+									case 'tool_call_delta': {
+										const toolCall = msg?.toolCalls?.[data.id];
+										if (toolCall) {
+											toolCall.args += data.args_delta;
+										}
+										break;
+									}
+									case 'tool_call_end': {
+										const toolCall = msg?.toolCalls?.[data.id];
+										if (toolCall) {
+											toolCall.isExecuting = true;
+										}
+										break;
+									}
+									case 'tool_result': {
+										const toolCall = msg?.toolCalls?.[data.id];
+										if (toolCall) {
+											toolCall.output = data.output;
+											toolCall.error = data.error;
+											toolCall.isExecuting = false;
+										}
+										break;
+									}
 									case 'tokens':
 										if (msg) {
 											msg.input_tokens = data.input;
@@ -445,8 +497,29 @@ export const useChatStore = defineStore('chat', {
 									case 'done':
 										if (msg) {
 											const clientId = msg.client_id;
+											// Preserve locally tracked toolCalls before overwriting
+											const localToolCalls = msg.toolCalls;
 											Object.assign(msg, data.message);
 											msg.client_id = clientId;
+
+											// Transform server tool_calls to toolCalls format, or restore local ones
+											const rawDoneMsg = data.message as any;
+											if (rawDoneMsg.tool_calls && Array.isArray(rawDoneMsg.tool_calls)) {
+												const toolCallsRecord: Record<string, any> = {};
+												for (const tc of rawDoneMsg.tool_calls) {
+													toolCallsRecord[tc.tool_call_id] = {
+														name: tc.tool_name || '',
+														args: typeof tc.input_args === 'string' ? tc.input_args : JSON.stringify(tc.input_args),
+														output: tc.output,
+														error: tc.error,
+														isExecuting: false,
+													};
+												}
+												msg.toolCalls = toolCallsRecord;
+											} else if (localToolCalls && Object.keys(localToolCalls).length > 0) {
+												// Restore locally tracked tool calls if server didn't provide them
+												msg.toolCalls = localToolCalls;
+											}
 										}
 										this.isStreaming = false;
 

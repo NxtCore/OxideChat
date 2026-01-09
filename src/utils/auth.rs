@@ -72,6 +72,35 @@ pub async fn get_user_permissions(pool: &PgPool, user_id: &Uuid) -> Result<Vec<S
 	Ok(permissions.into_iter().map(|p| p.name).collect())
 }
 
+fn permission_matches(user_permission: &str, required: &str) -> bool {
+	if user_permission == required {
+		return true;
+	}
+	if let Some(prefix) = user_permission.strip_suffix(".*") {
+		return required.starts_with(prefix) && required[prefix.len()..].starts_with('.');
+	}
+	if user_permission == "*" {
+		return true;
+	}
+	false
+}
+
+/// Check if a user has a specific permission (supports wildcards like `admin.*` or `*`).
+pub async fn has_permission(pool: &PgPool, user_id: &Uuid, permission: &str) -> bool {
+	get_user_permissions(pool, user_id)
+		.await
+		.map(|perms| perms.iter().any(|p| permission_matches(p, permission)))
+		.unwrap_or(false)
+}
+
+/// Check if a user has any of the specified permissions (supports wildcards).
+pub async fn has_any_permission(pool: &PgPool, user_id: &Uuid, permissions: &[&str]) -> bool {
+	get_user_permissions(pool, user_id)
+		.await
+		.map(|user_perms| permissions.iter().any(|req| user_perms.iter().any(|p| permission_matches(p, req))))
+		.unwrap_or(false)
+}
+
 /// Initialize default data for a newly created user.
 ///
 /// Creates:

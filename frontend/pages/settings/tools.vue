@@ -85,181 +85,180 @@
 
 		<!-- Create/Edit Tool Dialog -->
 		<Dialog v-model:open="dialogOpen">
-			<DialogContent class="sm:max-w-[600px]">
+			<DialogContent class="sm:max-w-[550px]">
 				<DialogHeader>
-					<DialogTitle class="flex items-center gap-3">
-						<Wrench class="h-5 w-5 text-primary" />
-						<span>{{ editingTool ? 'Edit Tool' : 'Create Tool' }}</span>
-					</DialogTitle>
-					<DialogDescription>
-						{{ editingTool ? 'Update your tool configuration' : 'Define a new tool for AI to use' }}
-					</DialogDescription>
+					<DialogTitle>{{ editingTool ? 'Edit Tool' : 'Create Tool' }}</DialogTitle>
 				</DialogHeader>
 
-				<div class="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
-					<div class="grid grid-cols-2 gap-4">
-						<div class="space-y-2">
-							<Label for="tool-name">Name (identifier)</Label>
-							<Input id="tool-name" v-model="toolForm.name" type="text" placeholder="fetch_website" />
-						</div>
-						<div class="space-y-2">
-							<Label for="tool-display-name">Display Name</Label>
-							<Input id="tool-display-name" v-model="toolForm.display_name" type="text" placeholder="Fetch Website" />
-						</div>
-					</div>
+				<Tabs v-model="activeTab" class="w-full">
+					<TabsList class="grid w-full" :class="isBuiltinTool ? 'grid-cols-2' : 'grid-cols-3'">
+						<TabsTrigger value="general">General</TabsTrigger>
+						<TabsTrigger value="source">Source</TabsTrigger>
+						<TabsTrigger v-if="!isBuiltinTool" value="functions">Functions</TabsTrigger>
+					</TabsList>
 
-					<div class="space-y-2">
-						<Label for="tool-description">Description</Label>
-						<Textarea id="tool-description" v-model="toolForm.description" placeholder="Fetches content from a URL and returns the HTML" rows="2" />
-					</div>
-
-					<div class="space-y-2">
-						<Label>Source Type</Label>
-						<div class="grid grid-cols-4 gap-2">
-							<button
-								v-for="kind in sourceKinds"
-								:key="kind.value"
-								type="button"
-								class="flex flex-col items-center gap-2 rounded-lg border p-3 transition-all"
-								:class="toolForm.source_kind === kind.value ? 'border-primary bg-primary/5' : 'border-border hover:border-border/80'"
-								@click="toolForm.source_kind = kind.value"
-							>
-								<component :is="kind.icon" class="h-5 w-5" :class="toolForm.source_kind === kind.value ? 'text-primary' : 'text-muted-foreground'" />
-								<span class="text-xs font-medium">{{ kind.label }}</span>
-							</button>
-						</div>
-					</div>
-
-					<!-- Source-specific config -->
-					<div v-if="toolForm.source_kind === 'HTTP'" class="space-y-4 rounded-lg border border-border p-4">
-						<h4 class="font-medium text-sm">HTTP Configuration</h4>
-						<div class="grid grid-cols-4 gap-4">
+					<div class="mt-4 max-h-[50vh] overflow-y-auto pr-1">
+						<!-- General Tab -->
+						<TabsContent value="general" class="space-y-4 mt-0">
 							<div class="space-y-2">
-								<Label>Method</Label>
-								<ShadSelect v-model="httpConfig.method">
+								<Label for="tool-name">Identifier</Label>
+								<Input id="tool-name" v-model="toolForm.name" placeholder="fetch_website" />
+							</div>
+							<div class="space-y-2">
+								<Label for="tool-display-name">Display Name</Label>
+								<Input id="tool-display-name" v-model="toolForm.display_name" placeholder="Fetch Website" />
+							</div>
+							<div class="space-y-2">
+								<Label for="tool-description">Description</Label>
+								<Textarea id="tool-description" v-model="toolForm.description" placeholder="Fetches content from a URL" rows="2" />
+							</div>
+							<div class="flex items-center justify-between pt-2">
+								<div class="flex items-center gap-2">
+									<Switch v-model:modelValue="toolForm.is_public" />
+									<Label>Public</Label>
+								</div>
+							</div>
+						</TabsContent>
+
+						<!-- Source Tab -->
+						<TabsContent value="source" class="space-y-4 mt-0">
+							<div class="grid grid-cols-4 gap-2">
+								<button
+									v-for="kind in sourceKinds"
+									:key="kind.value"
+									type="button"
+									class="flex flex-col items-center justify-center gap-1.5 rounded-lg border p-2.5 transition-all"
+									:class="[
+										toolForm.source_kind === kind.value ? 'border-primary bg-primary/5' : 'border-border',
+										kind.disabled || isBuiltinTool ? 'opacity-50 cursor-not-allowed' : 'hover:border-border/80',
+									]"
+									:disabled="kind.disabled || isBuiltinTool"
+									@click="!kind.disabled && (toolForm.source_kind = kind.value)"
+								>
+									<component :is="kind.icon" class="h-4 w-4" :class="toolForm.source_kind === kind.value ? 'text-primary' : 'text-muted-foreground'" />
+									<span class="text-xs font-medium">{{ kind.label }}</span>
+									<span v-if="kind.disabled" class="text-[10px] text-muted-foreground">Soon</span>
+								</button>
+							</div>
+
+							<!-- HTTP Config -->
+							<div v-if="toolForm.source_kind === 'HTTP'" class="space-y-3 pt-2">
+								<div class="flex gap-2">
+									<div class="w-24">
+										<ShadSelect v-model="httpConfig.method">
+											<ShadSelectTrigger><ShadSelectValue /></ShadSelectTrigger>
+											<ShadSelectContent>
+												<ShadSelectItem value="GET">GET</ShadSelectItem>
+												<ShadSelectItem value="POST">POST</ShadSelectItem>
+												<ShadSelectItem value="PUT">PUT</ShadSelectItem>
+											</ShadSelectContent>
+										</ShadSelect>
+									</div>
+									<Input v-model="httpConfig.url" placeholder="https://api.example.com/{{input.query}}" class="flex-1" />
+								</div>
+								<div class="space-y-1">
+									<Label class="text-xs">Headers (JSON)</Label>
+									<Textarea
+										v-model="httpConfig.headers_json"
+										placeholder='{"Authorization": "Bearer {{settings.api_key}}"}'
+										rows="2"
+										class="font-mono text-xs"
+									/>
+								</div>
+							</div>
+
+							<!-- MCP Config -->
+							<div v-if="toolForm.source_kind === 'MCP'" class="space-y-3 pt-2">
+								<ShadSelect v-model="mcpConfig.transport">
 									<ShadSelectTrigger><ShadSelectValue /></ShadSelectTrigger>
 									<ShadSelectContent>
-										<ShadSelectItem value="GET">GET</ShadSelectItem>
-										<ShadSelectItem value="POST">POST</ShadSelectItem>
-										<ShadSelectItem value="PUT">PUT</ShadSelectItem>
+										<ShadSelectItem value="stdio">Stdio (Local Process)</ShadSelectItem>
+										<ShadSelectItem value="sse">SSE (HTTP)</ShadSelectItem>
 									</ShadSelectContent>
 								</ShadSelect>
+								<template v-if="mcpConfig.transport === 'stdio'">
+									<Input v-model="mcpConfig.command" placeholder="Command (e.g. npx)" />
+									<Input v-model="mcpConfig.args" placeholder="Arguments (comma-separated)" />
+								</template>
+								<template v-if="mcpConfig.transport === 'sse'">
+									<Input v-model="mcpConfig.url" placeholder="http://localhost:3001/mcp" />
+									<Textarea v-model="mcpConfig.headers_json" placeholder='{"Authorization": "Bearer token"}' rows="2" class="font-mono text-xs" />
+								</template>
+								<Input v-model="mcpConfig.tool_name" placeholder="Tool name from server" />
 							</div>
-							<div class="col-span-3 space-y-2">
-								<Label>URL</Label>
-								<Input v-model="httpConfig.url" placeholder="https://api.example.com/{{input.query}}" />
+
+							<!-- Settings Schema (not for BUILTIN) -->
+							<div v-if="!isBuiltinTool" class="space-y-2 pt-2 border-t border-border">
+								<Label class="text-xs text-muted-foreground">Settings Schema (optional)</Label>
+								<SchemaBuilder v-model="toolForm.settings_schema_json" :is-settings="true" />
 							</div>
-						</div>
-						<div class="space-y-2">
-							<Label>Headers (JSON)</Label>
-							<Textarea
-								v-model="httpConfig.headers_json"
-								placeholder='{"Authorization": "Bearer {{settings.api_key}}"}'
-								rows="2"
-								class="font-mono text-sm"
-							/>
-						</div>
-					</div>
+						</TabsContent>
 
-					<div v-if="toolForm.source_kind === 'BUILTIN'" class="space-y-4 rounded-lg border border-border p-4">
-						<h4 class="font-medium text-sm">Builtin Tool</h4>
-						<div class="space-y-2">
-							<Label>Builtin ID</Label>
-							<ShadSelect v-model="builtinConfig.builtin_id">
-								<ShadSelectTrigger><ShadSelectValue /></ShadSelectTrigger>
-								<ShadSelectContent>
-									<ShadSelectItem value="exa_search">Exa Search</ShadSelectItem>
-								</ShadSelectContent>
-							</ShadSelect>
-						</div>
-					</div>
-
-					<div v-if="toolForm.source_kind === 'WASM'" class="space-y-4 rounded-lg border border-border p-4">
-						<h4 class="font-medium text-sm">WASM Plugin</h4>
-						<div class="space-y-2">
-							<Label>WASM File</Label>
-							<div class="flex gap-2">
-								<Input type="file" accept=".wasm" @change="handleWasmUpload" :disabled="uploading" />
+						<!-- Functions Tab (hidden for BUILTIN) -->
+						<TabsContent v-if="!isBuiltinTool" value="functions" class="space-y-4 mt-0">
+							<div class="flex items-center justify-between">
+								<div class="flex gap-1 overflow-x-auto">
+									<button
+										v-for="(func, idx) in toolForm.functions"
+										:key="idx"
+										type="button"
+										class="px-2.5 py-1 text-xs rounded-md transition-colors whitespace-nowrap"
+										:class="activeFunctionIdx === idx ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'"
+										@click="activeFunctionIdx = idx"
+									>
+										{{ func.name || 'New' }}
+									</button>
+								</div>
+								<ShadButton variant="ghost" size="sm" @click="addfunction" type="button">
+									<Plus class="h-3 w-3" />
+								</ShadButton>
 							</div>
-							<div v-if="wasmConfig.blob_id" class="text-xs text-green-500 flex items-center gap-1">
-								<Check class="h-3 w-3" />
-								WASM uploaded ({{ wasmConfig.size_bytes }} bytes)
+
+							<div v-if="toolForm.functions[activeFunctionIdx]" class="space-y-3">
+								<div class="flex gap-2">
+									<div class="flex-1 space-y-1">
+										<Label class="text-xs">Name</Label>
+										<Input v-model="toolForm.functions[activeFunctionIdx].name" placeholder="search_web" />
+									</div>
+									<div class="flex-1 space-y-1">
+										<Label class="text-xs">Entrypoint</Label>
+										<Input v-model="toolForm.functions[activeFunctionIdx].entrypoint" placeholder="Optional" />
+									</div>
+								</div>
+								<div class="space-y-1">
+									<Label class="text-xs">Description</Label>
+									<Input v-model="toolForm.functions[activeFunctionIdx].description" placeholder="What this function does" />
+								</div>
+								<div class="space-y-1">
+									<Label class="text-xs">Input Schema</Label>
+									<SchemaBuilder v-model="toolForm.functions[activeFunctionIdx].input_schema_json" />
+								</div>
+								<div v-if="toolForm.functions.length > 1" class="pt-2">
+									<ShadButton
+										variant="ghost"
+										size="sm"
+										class="text-destructive hover:text-destructive h-7 text-xs"
+										@click="removeFunction(activeFunctionIdx)"
+										type="button"
+									>
+										<Trash2 class="h-3 w-3 mr-1" />
+										Remove
+									</ShadButton>
+								</div>
 							</div>
-							<div v-if="uploading" class="text-xs text-muted-foreground flex items-center gap-1">
-								<Loader2 class="h-3 w-3 animate-spin" />
-								Uploading...
-							</div>
-						</div>
-						<div class="space-y-2">
-							<Label>Entry Point Function</Label>
-							<Input v-model="wasmConfig.entrypoint" placeholder="execute" />
-							<p class="text-xs text-muted-foreground">Name of the exported function to call</p>
-						</div>
+						</TabsContent>
 					</div>
+				</Tabs>
 
-					<div v-if="toolForm.source_kind === 'MCP'" class="space-y-4 rounded-lg border border-border p-4">
-						<h4 class="font-medium text-sm">MCP Server</h4>
-						<div class="space-y-2">
-							<Label>Transport</Label>
-							<ShadSelect v-model="mcpConfig.transport">
-								<ShadSelectTrigger><ShadSelectValue /></ShadSelectTrigger>
-								<ShadSelectContent>
-									<ShadSelectItem value="stdio">Stdio (Local Process)</ShadSelectItem>
-									<ShadSelectItem value="sse">SSE (HTTP)</ShadSelectItem>
-								</ShadSelectContent>
-							</ShadSelect>
-						</div>
-						<div v-if="mcpConfig.transport === 'stdio'" class="space-y-2">
-							<Label>Command</Label>
-							<Input v-model="mcpConfig.command" placeholder="npx" />
-							<Label>Arguments (comma-separated)</Label>
-							<Input v-model="mcpConfig.args" placeholder="-y,@modelcontextprotocol/server-filesystem" />
-						</div>
-						<div v-if="mcpConfig.transport === 'sse'" class="space-y-2">
-							<Label>URL</Label>
-							<Input v-model="mcpConfig.url" placeholder="http://localhost:3001/mcp" />
-							<Label>Headers (JSON)</Label>
-							<Textarea v-model="mcpConfig.headers_json" placeholder='{"Authorization": "Bearer token"}' rows="2" class="font-mono text-sm" />
-						</div>
-						<div class="space-y-2">
-							<Label>Tool Name (from server)</Label>
-							<Input v-model="mcpConfig.tool_name" placeholder="read_file" />
-						</div>
-					</div>
-
-					<div class="space-y-2">
-						<Label>Input Schema</Label>
-						<SchemaBuilder v-model="toolForm.input_schema_json" />
-						<p class="text-xs text-muted-foreground">Define what parameters the AI should provide</p>
-					</div>
-
-					<div class="space-y-2">
-						<Label>Settings Schema (optional)</Label>
-						<SchemaBuilder v-model="toolForm.settings_schema_json" :is-settings="true" />
-						<p class="text-xs text-muted-foreground">Define user settings like API keys</p>
-					</div>
-
-					<div class="flex items-center gap-4">
-						<div class="flex items-center gap-2">
-							<Switch v-model:checked="toolForm.is_enabled" />
-							<Label>Enabled</Label>
-						</div>
-						<div class="flex items-center gap-2">
-							<Switch v-model:checked="toolForm.is_public" />
-							<Label>Public</Label>
-						</div>
-					</div>
-				</div>
-
-				<DialogFooter class="gap-2 sm:gap-0">
-					<ShadButton v-if="editingTool" variant="destructive" @click="deleteTool" :disabled="saving" class="mr-auto">
-						<Trash2 class="h-4 w-4 mr-2" />
+				<DialogFooter class="gap-2 sm:gap-0 pt-2">
+					<ShadButton v-if="editingTool && !isBuiltinTool" variant="destructive" size="sm" @click="deleteTool" :disabled="saving" class="mr-auto">
+						<Trash2 class="h-3 w-3 mr-1" />
 						Delete
 					</ShadButton>
-					<div class="flex flex-row gap-2">
-						<ShadButton variant="outline" @click="dialogOpen = false">Cancel</ShadButton>
-						<ShadButton @click="saveTool" :disabled="saving">
-							<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
+					<div class="flex gap-2">
+						<ShadButton variant="outline" size="sm" @click="dialogOpen = false">Cancel</ShadButton>
+						<ShadButton size="sm" @click="saveTool" :disabled="saving">
+							<Loader2 v-if="saving" class="h-3 w-3 animate-spin mr-1" />
 							Save
 						</ShadButton>
 					</div>
@@ -281,7 +280,22 @@
 				<div class="space-y-4 py-4">
 					<div v-for="(field, key) in settingsFields" :key="key" class="space-y-2">
 						<Label :for="`setting-${key}`">{{ field.title || key }}</Label>
-						<Input :id="`setting-${key}`" v-model="userSettings[key]" :type="field.secret ? 'password' : 'text'" :placeholder="field.description || ''" />
+						<template v-if="field.enum && field.enum.length > 0">
+							<ShadSelect v-model="userSettings[key]">
+								<ShadSelectTrigger :id="`setting-${key}`">
+									<ShadSelectValue :placeholder="field.description || 'Select...'" />
+								</ShadSelectTrigger>
+								<ShadSelectContent>
+									<ShadSelectItem v-for="option in field.enum" :key="option" :value="option">
+										{{ option }}
+									</ShadSelectItem>
+								</ShadSelectContent>
+							</ShadSelect>
+						</template>
+						<template v-else>
+							<Input :id="`setting-${key}`" v-model="userSettings[key]" :type="field.secret ? 'password' : 'text'" :placeholder="field.description || ''" />
+						</template>
+						<p v-if="field.description && field.enum" class="text-xs text-muted-foreground">{{ field.description }}</p>
 					</div>
 				</div>
 
@@ -306,7 +320,8 @@ import {Plus, Settings2, Loader2, Wrench, Globe, Code, Server, Sparkles, Key, Pl
 import SchemaBuilder from '@/components/settings/SchemaBuilder.vue';
 import ToolTestDialog from '@/components/settings/ToolTestDialog.vue';
 import {useMainStore} from '@/stores';
-import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog';
+import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog';
+import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
 import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
 import {Label} from '@/components/ui/label';
@@ -314,6 +329,15 @@ import {Switch} from '@/components/ui/switch';
 
 const {$customFetch} = useNuxtApp();
 const store = useMainStore();
+
+interface ToolFunction {
+	id?: string;
+	name: string;
+	description?: string;
+	input_schema: any;
+	entrypoint?: string;
+	sort_order?: number;
+}
 
 interface Tool {
 	id: string;
@@ -323,7 +347,9 @@ interface Tool {
 	icon?: string;
 	source_kind: string;
 	source_config: any;
+	/** @deprecated Use functions array */
 	input_schema: any;
+	functions: ToolFunction[];
 	settings_schema?: any;
 	is_enabled: boolean;
 	is_public: boolean;
@@ -341,37 +367,82 @@ const settingsTool = ref<Tool | null>(null);
 const userSettings = ref<Record<string, string>>({});
 const testDialogOpen = ref(false);
 const testingTool = ref<Tool | null>(null);
+const activeFunctionIdx = ref(0);
+const activeTab = ref('general');
+
+const isBuiltinTool = computed(() => toolForm.source_kind === 'BUILTIN');
+
+function addfunction() {
+	toolForm.functions.push({
+		name: '',
+		description: '',
+		input_schema_json: JSON.stringify({type: 'object', properties: {}}, null, 2),
+		entrypoint: '',
+	});
+	activeFunctionIdx.value = toolForm.functions.length - 1;
+}
+
+function removeFunction(idx: number) {
+	if (toolForm.functions.length <= 1) return;
+	toolForm.functions.splice(idx, 1);
+	if (activeFunctionIdx.value >= toolForm.functions.length) {
+		activeFunctionIdx.value = Math.max(0, toolForm.functions.length - 1);
+	}
+}
 
 const sourceKinds = [
-	{value: 'BUILTIN', label: 'Builtin', icon: Sparkles},
-	{value: 'HTTP', label: 'HTTP', icon: Globe},
-	{value: 'WASM', label: 'WASM', icon: Code},
-	{value: 'MCP', label: 'MCP', icon: Server},
+	{value: 'BUILTIN', label: 'Builtin', icon: Sparkles, disabled: false},
+	{value: 'HTTP', label: 'HTTP', icon: Globe, disabled: false},
+	{value: 'WASM', label: 'WASM', icon: Code, disabled: true},
+	{value: 'MCP', label: 'MCP', icon: Server, disabled: false},
 ];
 
 // Builtin tool templates - these are pre-configured tools users can easily add
 const builtinToolTemplates = [
 	{
-		name: 'exa_search',
-		display_name: 'Exa Search',
-		description: 'Search the web using Exa AI for current and accurate information',
+		name: 'websearch',
+		display_name: 'Web Search',
+		description: 'Search the web using Exa or Tavily for current and accurate information',
 		source_kind: 'BUILTIN',
 		icon: Globe,
-		source_config: {builtin_id: 'exa_search'},
-		input_schema: {
-			type: 'object',
-			properties: {
-				query: {type: 'string', description: 'Search query'},
-				num_results: {type: 'integer', description: 'Number of results (1-10)', default: 5},
+		source_config: {builtin_id: 'websearch'},
+		functions: [
+			{
+				name: 'websearch',
+				description: 'Search the web for current information',
+				input_schema: {
+					type: 'object',
+					properties: {
+						query: {type: 'string', description: 'Search query'},
+						num_results: {type: 'integer', description: 'Number of results (1-20)', default: 10},
+					},
+					required: ['query'],
+				},
 			},
-			required: ['query'],
-		},
+			{
+				name: 'crawl',
+				description: 'Crawl a single website content',
+				input_schema: {
+					type: 'object',
+					properties: {
+						url: {type: 'string', description: 'URL to crawl'},
+					},
+					required: ['url'],
+				},
+			},
+		],
 		settings_schema: {
 			type: 'object',
+			required: ['api_key', 'provider'],
 			properties: {
-				api_key: {type: 'string', title: 'Exa API Key', secret: true, description: 'Get your API key from exa.ai'},
+				api_key: {type: 'string', title: 'API Key', secret: true, description: 'Get your API key from the specified provider'},
+				provider: {
+					type: 'string',
+					title: 'Provider',
+					enum: ['exa', 'tavily'],
+					description: 'Web search provider to use',
+				},
 			},
-			required: ['api_key'],
 		},
 	},
 ];
@@ -379,7 +450,6 @@ const builtinToolTemplates = [
 const displayTools = computed(() => {
 	const result: any[] = [...tools.value];
 
-	console.log('Displaying tools:', builtinToolTemplates);
 	// Add unconfigured builtin templates
 	for (const template of builtinToolTemplates) {
 		const exists = tools.value.some(t => t.name === template.name);
@@ -387,6 +457,7 @@ const displayTools = computed(() => {
 			result.push({
 				...template,
 				id: `template_${template.name}`,
+				input_schema: template.functions[0]?.input_schema || {},
 				is_enabled: false,
 				is_public: false,
 				is_template: true,
@@ -402,7 +473,7 @@ const toolForm = reactive({
 	display_name: '',
 	description: '',
 	source_kind: 'HTTP',
-	input_schema_json: '',
+	functions: [] as {id?: string; name: string; description: string; input_schema_json: string; entrypoint: string}[],
 	settings_schema_json: '',
 	is_enabled: true,
 	is_public: false,
@@ -416,7 +487,7 @@ const httpConfig = reactive({
 });
 
 const builtinConfig = reactive({
-	builtin_id: 'exa_search',
+	builtin_id: 'websearch',
 });
 
 const wasmConfig = reactive({
@@ -449,7 +520,7 @@ async function handleWasmUpload(event: Event) {
 		const arrayBuffer = await file.arrayBuffer();
 		const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
 
-		const result = await $customFetch<{blob_id: string; size_bytes: number}>('/api/v1/tools/wasm/upload', {
+		const result = await $customFetch<{blob_id: string; size_bytes: number}>('/api/v1/admin/tools/wasm/upload', {
 			method: 'POST',
 			body: {
 				filename: file.name,
@@ -490,7 +561,7 @@ function getSourceBadgeClass(sourceKind: string) {
 async function loadTools() {
 	loading.value = true;
 	try {
-		const result = await $customFetch('/api/v1/tools');
+		const result = await $customFetch('/api/v1/admin/tools');
 		if (Array.isArray(result)) {
 			tools.value = result;
 		}
@@ -508,12 +579,21 @@ function openCreateDialog() {
 		display_name: '',
 		description: '',
 		source_kind: 'HTTP',
-		input_schema_json: JSON.stringify({type: 'object', properties: {}}, null, 2),
+		functions: [
+			{
+				name: 'default',
+				description: '',
+				input_schema_json: JSON.stringify({type: 'object', properties: {}}, null, 2),
+				entrypoint: '',
+			},
+		],
 		settings_schema_json: '',
 		is_enabled: true,
 		is_public: false,
 	});
 	Object.assign(httpConfig, {method: 'GET', url: '', headers_json: '{}', body_template: ''});
+	activeFunctionIdx.value = 0;
+	activeTab.value = 'general';
 	dialogOpen.value = true;
 }
 
@@ -527,13 +607,18 @@ async function configureTemplate(template: any) {
 			description: template.description,
 			source_kind: template.source_kind,
 			source_config: template.source_config,
-			input_schema: template.input_schema,
+			functions: template.functions.map((f: any) => ({
+				name: f.name,
+				description: f.description,
+				input_schema: f.input_schema,
+				entrypoint: f.entrypoint,
+			})),
 			settings_schema: template.settings_schema,
 			is_enabled: true,
 			is_public: false,
 		};
 
-		const created = (await $customFetch('/api/v1/tools', {method: 'POST', body})) as Tool;
+		const created = (await $customFetch('/api/v1/admin/tools', {method: 'POST', body})) as Tool;
 		store.toast('Tool added! Please configure your API key.', {type: 'success'});
 		await loadTools();
 
@@ -553,12 +638,32 @@ async function configureTemplate(template: any) {
 
 function openEditDialog(tool: Tool) {
 	editingTool.value = tool;
+
+	// Convert functions array to editable format
+	const funcs =
+		tool.functions?.length > 0
+			? tool.functions.map(f => ({
+					id: f.id,
+					name: f.name,
+					description: f.description || '',
+					input_schema_json: JSON.stringify(f.input_schema, null, 2),
+					entrypoint: f.entrypoint || '',
+				}))
+			: [
+					{
+						name: tool.name,
+						description: tool.description || '',
+						input_schema_json: JSON.stringify(tool.input_schema, null, 2),
+						entrypoint: '',
+					},
+				];
+
 	Object.assign(toolForm, {
 		name: tool.name,
 		display_name: tool.display_name || '',
 		description: tool.description || '',
 		source_kind: tool.source_kind,
-		input_schema_json: JSON.stringify(tool.input_schema, null, 2),
+		functions: funcs,
 		settings_schema_json: tool.settings_schema ? JSON.stringify(tool.settings_schema, null, 2) : '',
 		is_enabled: tool.is_enabled,
 		is_public: tool.is_public,
@@ -576,13 +681,15 @@ function openEditDialog(tool: Tool) {
 		builtinConfig.builtin_id = tool.source_config.builtin_id || 'exa_search';
 	}
 
+	activeFunctionIdx.value = 0;
+	activeTab.value = 'general';
 	dialogOpen.value = true;
 }
 
 async function openSettingsDialog(tool: Tool) {
 	settingsTool.value = tool;
 	try {
-		const settings = (await $customFetch(`/api/v1/tools/${tool.id}/settings`)) as Record<string, string>;
+		const settings = (await $customFetch(`/api/v1/admin/tools/${tool.id}/settings`)) as Record<string, string>;
 		userSettings.value = settings || {};
 	} catch {
 		userSettings.value = {} as Record<string, string>;
@@ -629,22 +736,31 @@ async function saveTool() {
 			}
 		}
 
+		// Convert functions to API format
+		const functions = toolForm.functions.map((f, idx) => ({
+			id: f.id,
+			name: f.name || toolForm.name,
+			description: f.description || null,
+			input_schema: JSON.parse(f.input_schema_json || '{}'),
+			entrypoint: f.entrypoint || null,
+		}));
+
 		const body = {
 			name: toolForm.name,
 			display_name: toolForm.display_name || null,
 			description: toolForm.description || null,
 			source_kind: toolForm.source_kind,
 			source_config,
-			input_schema: JSON.parse(toolForm.input_schema_json || '{}'),
+			functions,
 			settings_schema: toolForm.settings_schema_json ? JSON.parse(toolForm.settings_schema_json) : null,
 			is_enabled: toolForm.is_enabled,
 			is_public: toolForm.is_public,
 		};
 
 		if (editingTool.value) {
-			await $customFetch(`/api/v1/tools/${editingTool.value.id}`, {method: 'PUT', body});
+			await $customFetch(`/api/v1/admin/tools/${editingTool.value.id}`, {method: 'PUT', body});
 		} else {
-			await $customFetch('/api/v1/tools', {method: 'POST', body});
+			await $customFetch('/api/v1/admin/tools', {method: 'POST', body});
 		}
 
 		store.toast('Tool saved successfully', {type: 'success'});
@@ -661,7 +777,7 @@ async function deleteTool() {
 	if (!editingTool.value) return;
 	saving.value = true;
 	try {
-		await $customFetch(`/api/v1/tools/${editingTool.value.id}`, {method: 'DELETE'});
+		await $customFetch(`/api/v1/admin/tools/${editingTool.value.id}`, {method: 'DELETE'});
 		store.toast('Tool deleted', {type: 'success'});
 		dialogOpen.value = false;
 		await loadTools();
@@ -674,7 +790,7 @@ async function deleteTool() {
 
 async function toggleTool(tool: Tool, enabled: boolean) {
 	try {
-		await $customFetch(`/api/v1/tools/${tool.id}`, {
+		await $customFetch(`/api/v1/admin/tools/${tool.id}`, {
 			method: 'PUT',
 			body: {is_enabled: enabled},
 		});
@@ -688,7 +804,7 @@ async function saveSettings() {
 	if (!settingsTool.value) return;
 	saving.value = true;
 	try {
-		await $customFetch(`/api/v1/tools/${settingsTool.value.id}/settings`, {
+		await $customFetch(`/api/v1/admin/tools/${settingsTool.value.id}/settings`, {
 			method: 'PUT',
 			body: {settings: userSettings.value},
 		});

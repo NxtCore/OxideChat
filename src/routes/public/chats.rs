@@ -4,7 +4,9 @@
 
 use crate::AppState;
 use crate::routes::public::auth::get_current_user;
-use crate::types::{Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, Message, UpdateChatRequest};
+use crate::types::{
+	Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, Message, ToolExecutionResponse, UpdateChatRequest,
+};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -12,6 +14,7 @@ use axum::{
 	http::StatusCode,
 	response::IntoResponse,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -226,7 +229,86 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 					return ErrorBuilder::new(ErrorCode::InternalError).build();
 				}
 			};
-			let message_responses: Vec<ChatMessageResponse> = messages.into_iter().map(Into::into).collect();
+
+			// Collect message IDs to fetch tool executions
+			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+
+			// Fetch tool executions for all messages
+			let tool_executions: Vec<(
+				Uuid,
+				Option<Uuid>,
+				String,
+				serde_json::Value,
+				Option<serde_json::Value>,
+				Option<String>,
+				Option<i32>,
+				Option<Uuid>,
+				Option<Uuid>,
+				Option<String>,
+			)> = if message_ids.is_empty() {
+				vec![]
+			} else {
+				sqlx::query_as::<
+					_,
+					(
+						Uuid,
+						Option<Uuid>,
+						String,
+						serde_json::Value,
+						Option<serde_json::Value>,
+						Option<String>,
+						Option<i32>,
+						Option<Uuid>,
+						Option<Uuid>,
+						Option<String>,
+					),
+				>(
+					r#"
+					SELECT te.id, te.message_id, te.tool_call_id, te.input_args, te.output, te.error, te.execution_ms, te.tool_id, te.tool_function, t.name
+					FROM tool_executions te
+					LEFT JOIN tools t ON te.tool_id = t.id
+					WHERE te.message_id = ANY($1)
+					ORDER BY te.created_at ASC
+					"#,
+				)
+				.bind(&message_ids)
+				.fetch_all(&state.db)
+				.await
+				.unwrap_or_default()
+			};
+
+			// Group tool executions by message_id
+			let mut executions_by_message: HashMap<Uuid, Vec<ToolExecutionResponse>> = HashMap::new();
+			for (id, message_id, tool_call_id, input_args, output, error, execution_ms, tool_id, tool_function, tool_name) in tool_executions {
+				if let Some(msg_id) = message_id {
+					executions_by_message.entry(msg_id).or_default().push(ToolExecutionResponse {
+						tool_call_id,
+						tool_name: tool_name.unwrap_or_else(|| format!("tool_{}", id)),
+						input_args,
+						output,
+						error,
+						execution_ms,
+						tool_id,
+						tool_function,
+					});
+				}
+			}
+
+			// Build message responses with tool_calls attached
+			let message_responses: Vec<ChatMessageResponse> = messages
+				.into_iter()
+				.map(|m| {
+					let msg_id = m.id;
+					let mut response: ChatMessageResponse = m.into();
+					if let Some(tools) = executions_by_message.remove(&msg_id) {
+						if !tools.is_empty() {
+							response.tool_calls = Some(tools);
+						}
+					}
+					response
+				})
+				.collect();
+
 			let response = ChatWithMessagesResponse {
 				chat: chat_response,
 				messages: message_responses,

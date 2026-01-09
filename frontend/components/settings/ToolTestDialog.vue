@@ -9,6 +9,22 @@
 				<DialogDescription> Enter input values to test this tool </DialogDescription>
 			</DialogHeader>
 
+			<!-- Function selector for multi-function tools -->
+			<div v-if="hasMultipleFunctions" class="mb-4">
+				<Label class="text-sm font-medium mb-2">Select Function</Label>
+				<ShadSelect v-model="selectedFunctionIdx">
+					<ShadSelectTrigger>
+						<ShadSelectValue placeholder="Select a function..." />
+					</ShadSelectTrigger>
+					<ShadSelectContent>
+						<ShadSelectItem v-for="(fn, idx) in tool?.functions" :key="fn.id" :value="idx">
+							{{ fn.name }}
+							<span v-if="fn.description" class="text-muted-foreground ml-2 text-xs">- {{ fn.description }}</span>
+						</ShadSelectItem>
+					</ShadSelectContent>
+				</ShadSelect>
+			</div>
+
 			<Tabs v-model="activeTab" class="flex-1 min-h-0 flex flex-col">
 				<TabsList class="grid w-full grid-cols-2">
 					<TabsTrigger value="form">Form</TabsTrigger>
@@ -122,14 +138,30 @@ import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
 import {Label} from '@/components/ui/label';
 import {Switch} from '@/components/ui/switch';
+import {
+	Select as ShadSelect,
+	SelectContent as ShadSelectContent,
+	SelectItem as ShadSelectItem,
+	SelectTrigger as ShadSelectTrigger,
+	SelectValue as ShadSelectValue,
+} from '@/components/ui/select';
 
 const {$customFetch} = useNuxtApp();
+
+interface ToolFunction {
+	id: string;
+	name: string;
+	description?: string;
+	input_schema: any;
+	entrypoint?: string;
+}
 
 interface Tool {
 	id: string;
 	name: string;
 	display_name?: string;
 	input_schema: any;
+	functions?: ToolFunction[];
 }
 
 interface SchemaProperty {
@@ -158,12 +190,32 @@ const testing = ref(false);
 const testResult = ref<TestResult | null>(null);
 const formInputs = ref<Record<string, any>>({});
 const jsonInput = ref('{}');
+const selectedFunctionIdx = ref(0);
+
+// Check if tool has multiple functions
+const hasMultipleFunctions = computed(() => {
+	return (props.tool?.functions?.length ?? 0) > 1;
+});
+
+// Get the currently selected function (or null if single function/legacy)
+const selectedFunction = computed(() => {
+	if (!props.tool?.functions?.length) return null;
+	return props.tool.functions[selectedFunctionIdx.value] || props.tool.functions[0];
+});
+
+// Get the input schema to use (selected function's or legacy tool schema)
+const activeInputSchema = computed(() => {
+	if (selectedFunction.value) {
+		return selectedFunction.value.input_schema;
+	}
+	return props.tool?.input_schema;
+});
 
 // Parse the input schema to extract properties
 const schemaProperties = computed<SchemaProperty[]>(() => {
-	if (!props.tool?.input_schema?.properties) return [];
+	const schema = activeInputSchema.value;
+	if (!schema?.properties) return [];
 
-	const schema = props.tool.input_schema;
 	const required = schema.required || [];
 
 	return Object.entries(schema.properties).map(([name, propSchema]: [string, any]) => ({
@@ -236,10 +288,12 @@ watch(
 		testResult.value = null;
 		formInputs.value = {};
 		jsonInput.value = '{}';
+		selectedFunctionIdx.value = 0;
 
-		// Initialize with defaults
-		if (tool?.input_schema?.properties) {
-			for (const [name, propSchema] of Object.entries(tool.input_schema.properties) as [string, any][]) {
+		// Initialize with defaults from active schema
+		const schema = tool?.functions?.length ? tool.functions[0]?.input_schema : tool?.input_schema;
+		if (schema?.properties) {
+			for (const [name, propSchema] of Object.entries(schema.properties) as [string, any][]) {
 				if (propSchema.default !== undefined) {
 					formInputs.value[name] = propSchema.default;
 				}
@@ -248,6 +302,22 @@ watch(
 	},
 	{immediate: true}
 );
+
+// Reset form when selected function changes
+watch(selectedFunctionIdx, () => {
+	formInputs.value = {};
+	jsonInput.value = '{}';
+
+	// Initialize with defaults from active schema
+	const schema = activeInputSchema.value;
+	if (schema?.properties) {
+		for (const [name, propSchema] of Object.entries(schema.properties) as [string, any][]) {
+			if (propSchema.default !== undefined) {
+				formInputs.value[name] = propSchema.default;
+			}
+		}
+	}
+});
 
 async function runTest() {
 	if (!props.tool) return;
@@ -268,9 +338,16 @@ async function runTest() {
 			return;
 		}
 
-		const result = await $customFetch<TestResult>(`/api/v1/tools/${props.tool.id}/test`, {
+		const body: {input: any; function_name?: string} = {input};
+
+		// Include function name if testing a specific function
+		if (selectedFunction.value) {
+			body.function_name = selectedFunction.value.name;
+		}
+
+		const result = await $customFetch<TestResult>(`/api/v1/admin/tools/${props.tool.id}/test`, {
 			method: 'POST',
-			body: {input},
+			body,
 		});
 
 		testResult.value = result;

@@ -4,7 +4,7 @@
 
 use crate::AppState;
 use crate::routes::public::auth::get_current_user;
-use crate::types::{ChatMessageResponse, Message, MessageListParams, SendMessageRequest};
+use crate::types::{ChatMessageResponse, Message, MessageListParams, SendMessageRequest, ToolExecutionResponse};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -84,11 +84,71 @@ pub async fn list_messages(
 		.await
 	};
 
-	
-
 	match messages {
 		Ok(messages) => {
-			let responses: Vec<ChatMessageResponse> = messages.into_iter().map(Into::into).collect();
+			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+
+			// Fetch all tool executions for these messages
+			let tool_executions = if message_ids.is_empty() {
+				vec![]
+			} else {
+				sqlx::query_as::<
+					_,
+					(
+						Uuid,
+						Uuid,
+						String,
+						serde_json::Value,
+						Option<serde_json::Value>,
+						Option<String>,
+						Option<i32>,
+						Option<Uuid>,
+						Option<Uuid>,
+						Option<String>,
+					),
+				>(
+					r#"
+					SELECT te.id, te.message_id, te.tool_call_id, te.input_args, te.output, te.error, te.execution_ms, te.tool_id, te.tool_function, t.name
+					FROM tool_executions te
+					LEFT JOIN tools t ON te.tool_id = t.id
+					WHERE te.message_id = ANY($1)
+					ORDER BY te.created_at ASC
+					"#,
+				)
+				.bind(&message_ids)
+				.fetch_all(&state.db)
+				.await
+				.unwrap_or_default()
+			};
+
+			// Group tool executions by message_id
+			let mut executions_by_message: std::collections::HashMap<Uuid, Vec<ToolExecutionResponse>> = std::collections::HashMap::new();
+			for (id, message_id, tool_call_id, input_args, output, error, execution_ms, tool_id, tool_function, tool_name) in tool_executions {
+				let response = ToolExecutionResponse {
+					tool_call_id,
+					tool_name: tool_name.unwrap_or_else(|| format!("tool_{}", id)),
+					input_args,
+					output,
+					error,
+					execution_ms,
+					tool_id,
+					tool_function,
+				};
+				executions_by_message.entry(message_id).or_default().push(response);
+			}
+
+			// Build responses with tool calls
+			let responses: Vec<ChatMessageResponse> = messages
+				.into_iter()
+				.map(|m| {
+					let msg_id = m.id;
+					let response: ChatMessageResponse = m.into();
+					let mut response = response;
+					response.tool_calls = executions_by_message.remove(&msg_id);
+					response
+				})
+				.collect();
+
 			ResponseBuilder::new(ResponseBody::Json(responses)).build()
 		}
 		Err(e) => {

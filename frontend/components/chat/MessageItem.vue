@@ -30,6 +30,21 @@
 					</div>
 				</div>
 			</Transition>
+
+			<!-- Tool calls section (for assistant messages) -->
+			<div v-if="!isUser && message.toolCalls && Object.keys(message.toolCalls).length > 0" class="flex flex-col gap-2 mt-2 w-full max-w-3xl">
+				<ToolExecutionDisplay
+					v-for="(tool, id) in message.toolCalls"
+					:key="id"
+					:id="String(id)"
+					:name="tool.name"
+					:args="tool.args"
+					:output="tool.output"
+					:error="tool.error"
+					:is-executing="tool.isExecuting"
+				/>
+			</div>
+
 			<div
 				v-if="message.content || !isStreaming"
 				class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl"
@@ -64,6 +79,7 @@
 import {User, Bot, Brain, ChevronDown} from 'lucide-vue-next';
 import MessageActions from './MessageActions.vue';
 import CodePreview from './CodePreview.vue';
+import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useIconsStore} from '~/stores/icons';

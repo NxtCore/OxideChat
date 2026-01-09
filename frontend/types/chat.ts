@@ -24,6 +24,14 @@ export interface Chat {
 	updated_at: string;
 }
 
+export interface ToolCallState {
+	name: string;
+	args: string;
+	output?: any;
+	error?: string;
+	isExecuting: boolean;
+}
+
 export interface ChatMessage {
 	id: string;
 	client_id: string;
@@ -42,6 +50,7 @@ export interface ChatMessage {
 	total_cost_usd: string | null;
 	latency_ms: number | null;
 	reasoning_latency_ms: number | null;
+	toolCalls?: Record<string, ToolCallState>;
 	created_at: string;
 }
 

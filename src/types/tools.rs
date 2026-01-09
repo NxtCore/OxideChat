@@ -69,6 +69,7 @@ pub struct Tool {
 	pub icon: Option<String>,
 	pub source_kind: ToolSourceKind,
 	pub source_config: serde_json::Value,
+	/// Deprecated: use tool_functions table instead. Kept for backward compat.
 	pub input_schema: serde_json::Value,
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
@@ -77,11 +78,24 @@ pub struct Tool {
 	pub updated_at: DateTime<Utc>,
 }
 
+/// Tool function database row - one tool can have multiple functions
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct ToolFunction {
+	pub id: Uuid,
+	pub tool_id: Uuid,
+	pub name: String,
+	pub description: Option<String>,
+	pub input_schema: serde_json::Value,
+	pub entrypoint: Option<String>,
+	pub sort_order: i32,
+	pub created_at: DateTime<Utc>,
+}
+
 /// User-provided tool settings database row
 #[derive(Debug, Clone, FromRow)]
 pub struct UserToolSettings {
 	pub id: Uuid,
-	pub user_id: Uuid,
+	pub user_id: Option<Uuid>,
 	pub tool_id: Uuid,
 	pub settings: serde_json::Value,
 	pub created_at: DateTime<Utc>,
@@ -170,6 +184,15 @@ pub struct McpSseConfig {
 
 // ============= Request DTOs =============
 
+/// Request to create a tool function
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CreateToolFunctionRequest {
+	pub name: String,
+	pub description: Option<String>,
+	pub input_schema: serde_json::Value,
+	pub entrypoint: Option<String>,
+}
+
 /// Request to create a new tool
 #[derive(Debug, Deserialize)]
 pub struct CreateToolRequest {
@@ -179,7 +202,12 @@ pub struct CreateToolRequest {
 	pub icon: Option<String>,
 	pub source_kind: ToolSourceKind,
 	pub source_config: serde_json::Value,
-	pub input_schema: serde_json::Value,
+	/// Deprecated: use `functions` array instead
+	#[serde(default)]
+	pub input_schema: Option<serde_json::Value>,
+	/// Array of functions this tool exposes
+	#[serde(default)]
+	pub functions: Vec<CreateToolFunctionRequest>,
 	#[serde(default)]
 	pub settings_schema: serde_json::Value,
 	#[serde(default = "default_true")]
@@ -192,6 +220,17 @@ fn default_true() -> bool {
 	true
 }
 
+/// Request to update a tool function
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UpdateToolFunctionRequest {
+	/// Function ID (None = create new)
+	pub id: Option<Uuid>,
+	pub name: String,
+	pub description: Option<String>,
+	pub input_schema: serde_json::Value,
+	pub entrypoint: Option<String>,
+}
+
 /// Request to update an existing tool
 #[derive(Debug, Deserialize)]
 pub struct UpdateToolRequest {
@@ -200,7 +239,12 @@ pub struct UpdateToolRequest {
 	pub description: Option<String>,
 	pub icon: Option<String>,
 	pub source_config: Option<serde_json::Value>,
+	/// Deprecated: use `functions` array instead
 	pub input_schema: Option<serde_json::Value>,
+	/// Functions to upsert (id=None creates, id present updates)
+	pub functions: Option<Vec<UpdateToolFunctionRequest>>,
+	/// Function IDs to delete
+	pub delete_function_ids: Option<Vec<Uuid>>,
 	pub settings_schema: Option<serde_json::Value>,
 	pub is_enabled: Option<bool>,
 	pub is_public: Option<bool>,
@@ -246,9 +290,36 @@ pub struct SetToolSettingsRequest {
 #[derive(Debug, Deserialize)]
 pub struct TestToolRequest {
 	pub input: serde_json::Value,
+	/// Optional function name for multi-function tools
+	#[serde(default)]
+	pub function_name: Option<String>,
 }
 
 // ============= Response DTOs =============
+
+/// Tool function response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolFunctionResponse {
+	pub id: Uuid,
+	pub name: String,
+	pub description: Option<String>,
+	pub input_schema: serde_json::Value,
+	pub entrypoint: Option<String>,
+	pub sort_order: i32,
+}
+
+impl From<ToolFunction> for ToolFunctionResponse {
+	fn from(f: ToolFunction) -> Self {
+		Self {
+			id: f.id,
+			name: f.name,
+			description: f.description,
+			input_schema: f.input_schema,
+			entrypoint: f.entrypoint,
+			sort_order: f.sort_order,
+		}
+	}
+}
 
 /// Tool response
 #[derive(Debug, Serialize)]
@@ -260,7 +331,10 @@ pub struct ToolResponse {
 	pub description: Option<String>,
 	pub icon: Option<String>,
 	pub source_kind: ToolSourceKind,
+	/// Deprecated: use `functions` array
 	pub input_schema: serde_json::Value,
+	/// Functions exposed by this tool
+	pub functions: Vec<ToolFunctionResponse>,
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
 	pub is_public: bool,
@@ -269,8 +343,9 @@ pub struct ToolResponse {
 	pub updated_at: DateTime<Utc>,
 }
 
-impl From<Tool> for ToolResponse {
-	fn from(t: Tool) -> Self {
+impl ToolResponse {
+	/// Create response from tool and its functions
+	pub fn from_tool_with_functions(t: Tool, functions: Vec<ToolFunction>) -> Self {
 		Self {
 			id: t.id,
 			owner_id: t.owner_id,
@@ -280,10 +355,33 @@ impl From<Tool> for ToolResponse {
 			icon: t.icon,
 			source_kind: t.source_kind,
 			input_schema: t.input_schema,
+			functions: functions.into_iter().map(ToolFunctionResponse::from).collect(),
 			settings_schema: t.settings_schema,
 			is_enabled: t.is_enabled,
 			is_public: t.is_public,
 			has_user_settings: false, // Set by query
+			created_at: t.created_at,
+			updated_at: t.updated_at,
+		}
+	}
+}
+
+impl From<Tool> for ToolResponse {
+	fn from(t: Tool) -> Self {
+		Self {
+			id: t.id,
+			owner_id: t.owner_id,
+			name: t.name.clone(),
+			display_name: t.display_name,
+			description: t.description.clone(),
+			icon: t.icon,
+			source_kind: t.source_kind,
+			input_schema: t.input_schema.clone(),
+			functions: vec![], // Legacy: no functions loaded
+			settings_schema: t.settings_schema,
+			is_enabled: t.is_enabled,
+			is_public: t.is_public,
+			has_user_settings: false,
 			created_at: t.created_at,
 			updated_at: t.updated_at,
 		}
@@ -340,6 +438,14 @@ pub struct TestToolResponse {
 	pub execution_ms: i32,
 }
 
+/// Tool execution result
+#[derive(Debug, Clone)]
+pub struct ToolExecutionResult {
+	pub tool_id: Uuid,
+	pub function_id: Option<Uuid>,
+	pub output: serde_json::Value,
+}
+
 /// MCP discovery response
 #[derive(Debug, Serialize)]
 pub struct McpDiscoveryResponse {
@@ -356,9 +462,9 @@ pub struct McpDiscoveredTool {
 	pub input_schema: serde_json::Value,
 }
 
-/// Tool execution log response
+/// Tool execution log response (for audit/logging views)
 #[derive(Debug, Serialize)]
-pub struct ToolExecutionResponse {
+pub struct ToolExecutionLogResponse {
 	pub id: Uuid,
 	pub tool_id: Option<Uuid>,
 	pub tool_name: Option<String>,
@@ -373,7 +479,8 @@ pub struct ToolExecutionResponse {
 // ============= Conversion to omniference ToolSpec =============
 
 impl Tool {
-	/// Convert to omniference ToolSpec for LLM requests
+	/// Convert to omniference ToolSpec for LLM requests (legacy single-function)
+	#[deprecated(note = "Use to_tool_specs with functions instead")]
 	pub fn to_tool_spec(&self) -> omniference::types::ToolSpec {
 		omniference::types::ToolSpec::JsonSchema {
 			name: self.name.clone(),
@@ -381,5 +488,33 @@ impl Tool {
 			schema: self.input_schema.clone(),
 			strict: Some(false),
 		}
+	}
+
+	/// Convert tool with functions to omniference ToolSpecs (one per function)
+	pub fn to_tool_specs(&self, functions: &[ToolFunction]) -> Vec<omniference::types::ToolSpec> {
+		if functions.is_empty() {
+			// Fallback to legacy single-function mode
+			#[allow(deprecated)]
+			return vec![self.to_tool_spec()];
+		}
+
+		functions
+			.iter()
+			.map(|f| {
+				let name = if functions.len() == 1 {
+					// Single function: use tool name directly
+					self.name.clone()
+				} else {
+					// Multiple functions: use {tool}_{function} format (no dots - OpenAI doesn't allow them)
+					format!("{}_{}", self.name, f.name)
+				};
+				omniference::types::ToolSpec::JsonSchema {
+					name,
+					description: f.description.clone().or_else(|| self.description.clone()),
+					schema: f.input_schema.clone(),
+					strict: Some(false),
+				}
+			})
+			.collect()
 	}
 }

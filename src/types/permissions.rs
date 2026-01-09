@@ -29,4 +29,6 @@ pub mod consts {
 	pub const ADMIN_USERS_EDIT: &str = "admin.users.edit";
 	pub const ADMIN_CONFIG_VIEW: &str = "admin.config.view";
 	pub const ADMIN_CONFIG_EDIT: &str = "admin.config.edit";
+	pub const ADMIN_TOOLS_VIEW: &str = "admin.tools.view";
+	pub const ADMIN_TOOLS_EDIT: &str = "admin.tools.edit";
 }

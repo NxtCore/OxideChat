@@ -28,6 +28,16 @@ pub fn build_router() -> Router<Arc<AppState>> {
 		.route("/api/v1/admin/providers/{id}/test", post(admin::providers::test_provider))
 		.route("/api/v1/admin/providers/{id}/sync", post(admin::providers::sync_provider))
 		.route("/api/v1/admin/providers/{id}/models", get(admin::providers::list_models))
+		// Admin Tools
+		.route("/api/v1/admin/tools", get(admin::tools::list_tools))
+		.route("/api/v1/admin/tools", post(admin::tools::create_tool))
+		.route("/api/v1/admin/tools/wasm/upload", post(admin::tools::upload_wasm))
+		.route("/api/v1/admin/tools/{id}", get(admin::tools::get_tool))
+		.route("/api/v1/admin/tools/{id}", put(admin::tools::update_tool))
+		.route("/api/v1/admin/tools/{id}", delete(admin::tools::delete_tool))
+		.route("/api/v1/admin/tools/{id}/settings", get(admin::tools::get_tool_settings))
+		.route("/api/v1/admin/tools/{id}/settings", put(admin::tools::set_tool_settings))
+		.route("/api/v1/admin/tools/{id}/test", post(admin::tools::test_tool))
 		// Auth
 		.route("/api/v1/auth/setup", post(public::auth::setup))
 		.route("/api/v1/auth/register", post(public::auth::register))
@@ -54,19 +64,10 @@ pub fn build_router() -> Router<Arc<AppState>> {
 		// Messages
 		.route("/api/v1/chats/{chat_id}/messages", get(public::messages::list_messages))
 		.route("/api/v1/chats/{chat_id}/messages", post(public::messages::send_message))
+		.route("/api/v1/chats/{chat_id}/stream", post(public::streaming::stream_completion))
 		// Models
 		.route("/api/v1/models", get(public::models::list_models))
-		// Streaming (POST - saves message and streams response)
-		.route("/api/v1/chats/{chat_id}/stream", post(public::streaming::stream_completion))
 		// Tools
 		.route("/api/v1/tools", get(public::tools::list_tools))
-		.route("/api/v1/tools", post(public::tools::create_tool))
-		.route("/api/v1/tools/wasm/upload", post(public::tools::upload_wasm))
-		.route("/api/v1/tools/{id}", get(public::tools::get_tool))
-		.route("/api/v1/tools/{id}", put(public::tools::update_tool))
-		.route("/api/v1/tools/{id}", delete(public::tools::delete_tool))
-		.route("/api/v1/tools/{id}/settings", get(public::tools::get_tool_settings))
-		.route("/api/v1/tools/{id}/settings", put(public::tools::set_tool_settings))
-		.route("/api/v1/tools/{id}/test", post(public::tools::test_tool))
 		.layer(CookieManagerLayer::new())
 }

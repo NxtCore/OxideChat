@@ -43,19 +43,22 @@ pub enum ToolError {
 #[derive(Debug, Clone)]
 pub struct ToolContext {
 	/// User ID executing the tool
-	pub user_id: Uuid,
+	pub user_id: Option<Uuid>,
 	/// User-provided settings for this tool (API keys, etc.)
 	pub settings: Value,
 	/// Optional timeout in milliseconds
 	pub timeout_ms: Option<u64>,
+	/// Optional function name being executed (for multi-function tools)
+	pub function_name: Option<String>,
 }
 
 impl Default for ToolContext {
 	fn default() -> Self {
 		Self {
-			user_id: Uuid::nil(),
+			user_id: None,
 			settings: Value::Object(serde_json::Map::new()),
 			timeout_ms: Some(30000), // 30 second default
+			function_name: None,
 		}
 	}
 }

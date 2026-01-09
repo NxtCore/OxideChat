@@ -9,7 +9,7 @@ pub mod http;
 pub mod mcp;
 mod wasm;
 
-pub use builtin::{BuiltinExecutor, get_builtin_executor};
+pub use builtin::get_builtin_executor;
 pub use executor::{ToolContext, ToolError, ToolExecutor};
 pub use http::HttpExecutor;
 pub use mcp::{McpClient, McpExecutor};

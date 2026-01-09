@@ -373,13 +373,20 @@ CREATE TABLE IF NOT EXISTS tools (
 -- User-provided settings for tools (API keys, etc.)
 CREATE TABLE IF NOT EXISTS user_tool_settings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
-    settings JSONB NOT NULL DEFAULT '{}',  -- Encrypted if ENCRYPTION_KEY set
+    settings JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(user_id, tool_id)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Partial unique index for system-wide settings (user_id IS NULL)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tool_settings_tool_null_user ON user_tool_settings(tool_id)
+WHERE user_id IS NULL;
+
+-- Partial unique index for per-user settings (user_id IS NOT NULL)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tool_settings_user_tool_not_null ON user_tool_settings(user_id, tool_id)
+WHERE user_id IS NOT NULL;
 
 -- MCP Servers - for MCP tool sources (supports stdio and SSE transports)
 CREATE TABLE IF NOT EXISTS mcp_servers (
@@ -404,6 +411,7 @@ CREATE TABLE IF NOT EXISTS tool_executions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
     tool_id UUID REFERENCES tools(id) ON DELETE SET NULL,
+    tool_function UUID REFERENCES tool_functions(id) ON DELETE SET NULL,
     
     tool_call_id VARCHAR(255) NOT NULL,  -- From LLM
     input_args JSONB NOT NULL,
@@ -412,6 +420,19 @@ CREATE TABLE IF NOT EXISTS tool_executions (
     
     execution_ms INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Create tool_functions table
+CREATE TABLE IF NOT EXISTS tool_functions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    input_schema JSONB NOT NULL,
+    entrypoint VARCHAR(255),               -- Optional override for WASM/HTTP routing
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(tool_id, name)
 );
 
 
@@ -477,6 +498,10 @@ CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(is_enabled) WH
 CREATE INDEX IF NOT EXISTS idx_tool_executions_message ON tool_executions(message_id);
 CREATE INDEX IF NOT EXISTS idx_tool_executions_tool ON tool_executions(tool_id);
 CREATE INDEX IF NOT EXISTS idx_tool_executions_created ON tool_executions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_function ON tool_executions(tool_function);
+CREATE INDEX IF NOT EXISTS idx_tool_functions_tool ON tool_functions(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_functions_name ON tool_functions(tool_id, name);
+
 
 --- Translations
 INSERT INTO i18n_translations (language, key_path, value) VALUES
