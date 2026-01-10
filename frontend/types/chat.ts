@@ -32,25 +32,40 @@ export interface ToolCallState {
 	isExecuting: boolean;
 }
 
+export interface ChatMessageToolCall {
+	tool_call_id: string;
+	tool_name: string;
+	input_args: string;
+	output: string | null;
+	error: string | null;
+	execution_ms: number | null;
+	tool_id: string | null;
+	tool_function: string | null;
+}
+
 export interface ChatMessage {
 	id: string;
-	client_id: string;
 	role: 'user' | 'assistant' | 'system';
 	content: string;
 	reasoning_content: string | null;
 	model_id: string | null;
-	reasoning_effort: string | null;
-	reasoning_budget_tokens: number | null;
-	input_tokens: number | null;
-	output_tokens: number | null;
-	reasoning_tokens: number | null;
-	input_cost_usd: string | null;
-	output_cost_usd: string | null;
-	reasoning_cost_usd: string | null;
-	total_cost_usd: string | null;
-	latency_ms: number | null;
-	reasoning_latency_ms: number | null;
-	toolCalls?: Record<string, ToolCallState>;
+	cost_details: {
+		input: string | null;
+		output: string | null;
+		reasoning: string | null;
+	};
+	usage_details: {
+		input_tokens: number | null;
+		output_tokens: number | null;
+		reasoning_tokens: number | null;
+		latency_ms: number | null;
+		reasoning_latency_ms: number | null;
+	};
+	reasoning_details: {
+		effort: string | null;
+		budget_tokens: number | null;
+	};
+	tool_calls: Array<ChatMessageToolCall>;
 	created_at: string;
 }
 

@@ -53,26 +53,7 @@ const props = defineProps<{
 const chatStore = useChatStore();
 const search = ref('');
 
-const availableTools = ref<Tool[]>([
-	{
-		id: 'web_search',
-		name: 'Web Search',
-		description: 'Search the web for current information',
-		icon: Globe,
-	},
-	{
-		id: 'code_execution',
-		name: 'Code Execution',
-		description: 'Run code in a sandboxed environment',
-		icon: Code,
-	},
-	{
-		id: 'calculator',
-		name: 'Calculator',
-		description: 'Perform precise calculations',
-		icon: Calculator,
-	},
-]);
+const availableTools = ref<{id: string; name: string; description: string; icon: any}[]>([]);
 
 const enabledToolsValues = ref<string[]>([]);
 

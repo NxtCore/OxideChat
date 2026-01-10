@@ -200,17 +200,18 @@ pub async fn update_tool(State(state): State<Arc<AppState>>, cookies: Cookies, P
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let existing = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
+	let existing = match sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
 		.bind(tool_id)
 		.fetch_optional(&state.db)
-		.await;
-
-	if let Err(e) = existing {
-		eprintln!("[TOOLS] Failed to fetch tool for update: {e}");
-		return ErrorBuilder::new(ErrorCode::InternalError).build();
-	}
-
-	if existing.unwrap().is_none() {
+		.await
+	{
+		Ok(existing) => existing,
+		Err(e) => {
+			eprintln!("[TOOLS] Failed to fetch tool for update: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+	if existing.is_none() {
 		return ErrorBuilder::new(ErrorCode::NotFound).build();
 	}
 
