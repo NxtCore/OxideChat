@@ -13,7 +13,6 @@
 			</TabsList>
 
 			<TabsContent value="visual" class="space-y-3 pt-2">
-				<!-- Properties list -->
 				<div v-for="(prop, index) in properties" :key="index" class="border border-border rounded-lg p-3 space-y-3">
 					<div class="flex items-center justify-between">
 						<div class="flex items-center gap-2">
@@ -27,7 +26,7 @@
 
 					<div class="grid grid-cols-2 gap-3">
 						<div class="space-y-1">
-							<Label class="text-xs">Type</Label>
+							<Label class="text-xs">{{ store.getTranslation('settings.schema_builder.type') }}</Label>
 							<ShadSelect v-model="prop.type">
 								<ShadSelectTrigger class="h-8">
 									<ShadSelectValue />
@@ -43,45 +42,43 @@
 							</ShadSelect>
 						</div>
 						<div class="space-y-1">
-							<Label class="text-xs">Default</Label>
-							<Input v-model="prop.default" placeholder="Default value" class="h-8 text-sm" />
+							<Label class="text-xs">{{ store.getTranslation('settings.schema_builder.default') }}</Label>
+							<Input v-model="prop.default" :placeholder="store.getTranslation('settings.schema_builder.default_placeholder')" class="h-8 text-sm" />
 						</div>
 					</div>
 
 					<div class="space-y-1">
-						<Label class="text-xs">Description</Label>
-						<Input v-model="prop.description" placeholder="Describe this parameter" class="h-8 text-sm" />
+						<Label class="text-xs">{{ store.getTranslation('settings.schema_builder.description') }}</Label>
+						<Input v-model="prop.description" :placeholder="store.getTranslation('settings.schema_builder.description_placeholder')" class="h-8 text-sm" />
 					</div>
 
-					<!-- Enum options -->
 					<div class="space-y-1">
-						<Label class="text-xs">Options (for dropdown)</Label>
-						<Input v-model="prop.enumString" placeholder="option1, option2, option3" class="h-8 text-sm" />
-						<p class="text-xs text-muted-foreground">Comma-separated. Leave empty for free-form input.</p>
+						<Label class="text-xs">{{ store.getTranslation('settings.schema_builder.options') }}</Label>
+						<Input v-model="prop.enumString" :placeholder="store.getTranslation('settings.schema_builder.options_placeholder')" class="h-8 text-sm" />
+						<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.schema_builder.options_hint') }}</p>
 					</div>
 
 					<div class="flex items-center gap-4">
 						<label class="flex items-center gap-2 text-sm">
 							<input type="checkbox" v-model="prop.required" class="rounded border-border" />
-							Required
+							{{ store.getTranslation('settings.schema_builder.required') }}
 						</label>
 						<label v-if="isSettings" class="flex items-center gap-2 text-sm">
 							<input type="checkbox" v-model="prop.secret" class="rounded border-border" />
-							Secret (e.g. API key)
+							{{ store.getTranslation('settings.schema_builder.secret') }}
 						</label>
 					</div>
 				</div>
 
-				<!-- Add property button -->
 				<ShadButton variant="outline" size="sm" class="w-full gap-2" @click="addProperty">
 					<Plus class="h-4 w-4" />
-					Add Property
+					{{ store.getTranslation('settings.schema_builder.add_property') }}
 				</ShadButton>
 			</TabsContent>
 
 			<TabsContent value="code" class="pt-2">
 				<Textarea v-model="jsonCode" :placeholder="defaultPlaceholder" rows="8" class="font-mono text-sm" @blur="syncFromJson" />
-				<p class="text-xs text-muted-foreground mt-1">JSON Schema format</p>
+				<p class="text-xs text-muted-foreground mt-1">{{ store.getTranslation('settings.schema_builder.json_format') }}</p>
 			</TabsContent>
 		</Tabs>
 	</div>
@@ -94,6 +91,9 @@ import {Tabs, TabsList, TabsTrigger, TabsContent} from '@/components/ui/tabs';
 import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
 import {Label} from '@/components/ui/label';
+import {useMainStore} from '~/stores';
+
+const store = useMainStore();
 
 interface PropertyDef {
 	name: string;
@@ -121,7 +121,6 @@ const defaultPlaceholder = computed(() =>
 		: '{"type": "object", "properties": {"query": {"type": "string"}}}'
 );
 
-// Parse JSON to properties on init
 function parseSchema(json: string): PropertyDef[] {
 	try {
 		const schema = JSON.parse(json || '{}');
@@ -142,7 +141,6 @@ function parseSchema(json: string): PropertyDef[] {
 	}
 }
 
-// Build JSON from properties
 function buildSchema(): string {
 	if (properties.value.length === 0) {
 		return JSON.stringify({type: 'object', properties: {}}, null, 2);
@@ -219,7 +217,6 @@ function syncFromJson() {
 	properties.value = parseSchema(jsonCode.value);
 }
 
-// Initialize from modelValue
 watch(
 	modelValue,
 	val => {
@@ -231,7 +228,6 @@ watch(
 	{immediate: true}
 );
 
-// Sync visual changes to model
 watch(
 	properties,
 	() => {
@@ -244,14 +240,12 @@ watch(
 	{deep: true}
 );
 
-// Sync code changes to model
 watch(jsonCode, val => {
 	if (activeMode.value === 'code') {
 		modelValue.value = val;
 	}
 });
 
-// Sync when switching tabs
 watch(activeMode, newMode => {
 	if (newMode === 'visual') {
 		properties.value = parseSchema(jsonCode.value);

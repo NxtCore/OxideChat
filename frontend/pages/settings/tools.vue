@@ -2,32 +2,29 @@
 	<div class="max-w-4xl lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
 		<div class="flex flex-row items-center justify-between">
 			<div class="mb-6">
-				<h2 class="text-lg font-semibold text-foreground">Tools</h2>
-				<p class="text-sm text-muted-foreground">Manage custom tools that AI models can use during conversations</p>
+				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.tools.title') }}</h2>
+				<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.tools.description') }}</p>
 			</div>
 			<ShadButton variant="default" size="sm" class="gap-2" @click="openCreateDialog">
 				<Plus class="h-4 w-4" />
-				<span>Add Tool</span>
+				<span>{{ store.getTranslation('settings.tools.add') }}</span>
 			</ShadButton>
 		</div>
 
-		<!-- Loading state -->
 		<div v-if="loading" class="flex items-center justify-center py-12">
 			<Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
 		</div>
 
-		<!-- Empty state -->
 		<div v-else-if="displayTools.length === 0" class="rounded-lg border border-dashed border-border bg-muted/20 p-12 text-center">
 			<Wrench class="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-			<h3 class="text-lg font-medium text-foreground mb-2">No tools yet</h3>
-			<p class="text-sm text-muted-foreground mb-4">Create custom tools to extend AI capabilities</p>
+			<h3 class="text-lg font-medium text-foreground mb-2">{{ store.getTranslation('settings.tools.no_tools') }}</h3>
+			<p class="text-sm text-muted-foreground mb-4">{{ store.getTranslation('settings.tools.no_tools_description') }}</p>
 			<ShadButton variant="outline" size="sm" class="gap-2" @click="openCreateDialog">
 				<Plus class="h-4 w-4" />
-				<span>Create your first tool</span>
+				<span>{{ store.getTranslation('settings.tools.create_first') }}</span>
 			</ShadButton>
 		</div>
 
-		<!-- Tools list -->
 		<div v-else class="space-y-3">
 			<div
 				v-for="tool in displayTools"
@@ -47,23 +44,23 @@
 									{{ tool.source_kind }}
 								</span>
 								<span v-if="tool.is_template" class="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-									Template
+									{{ store.getTranslation('settings.tools.template') }}
 								</span>
 								<span
 									v-else-if="tool.has_user_settings"
 									class="inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-500"
 								>
-									Configured
+									{{ store.getTranslation('settings.tools.configured') }}
 								</span>
 							</div>
-							<p class="text-sm text-muted-foreground truncate">{{ tool.description || 'No description' }}</p>
+							<p class="text-sm text-muted-foreground truncate">{{ tool.description || store.getTranslation('settings.tools.no_description') }}</p>
 						</div>
 					</div>
 					<div class="shrink-0 flex items-center gap-2">
 						<template v-if="tool.is_template">
 							<ShadButton variant="default" size="sm" class="gap-2" @click="configureTemplate(tool)">
 								<Plus class="h-4 w-4" />
-								Configure
+								{{ store.getTranslation('settings.tools.configure') }}
 							</ShadButton>
 						</template>
 						<template v-else>
@@ -83,44 +80,50 @@
 			</div>
 		</div>
 
-		<!-- Create/Edit Tool Dialog -->
 		<Dialog v-model:open="dialogOpen">
 			<DialogContent class="sm:max-w-[550px]">
 				<DialogHeader>
-					<DialogTitle>{{ editingTool ? 'Edit Tool' : 'Create Tool' }}</DialogTitle>
+					<DialogTitle>{{ editingTool ? store.getTranslation('settings.tools.edit') : store.getTranslation('settings.tools.create') }}</DialogTitle>
 				</DialogHeader>
 
 				<Tabs v-model="activeTab" class="w-full">
 					<TabsList class="grid w-full" :class="isBuiltinTool ? 'grid-cols-2' : 'grid-cols-3'">
-						<TabsTrigger value="general">General</TabsTrigger>
-						<TabsTrigger value="source">Source</TabsTrigger>
-						<TabsTrigger v-if="!isBuiltinTool" value="functions">Functions</TabsTrigger>
+						<TabsTrigger value="general">{{ store.getTranslation('settings.tools.general') }}</TabsTrigger>
+						<TabsTrigger value="source">{{ store.getTranslation('settings.tools.source') }}</TabsTrigger>
+						<TabsTrigger v-if="!isBuiltinTool" value="functions">{{ store.getTranslation('settings.tools.functions') }}</TabsTrigger>
 					</TabsList>
 
 					<div class="mt-4 max-h-[50vh] overflow-y-auto pr-1">
-						<!-- General Tab -->
 						<TabsContent value="general" class="space-y-4 mt-0">
 							<div class="space-y-2">
-								<Label for="tool-name">Identifier</Label>
-								<Input id="tool-name" v-model="toolForm.name" placeholder="fetch_website" />
+								<Label for="tool-name">{{ store.getTranslation('settings.tools.identifier') }}</Label>
+								<Input id="tool-name" v-model="toolForm.name" :placeholder="store.getTranslation('settings.tools.identifier_placeholder')" />
 							</div>
 							<div class="space-y-2">
-								<Label for="tool-display-name">Display Name</Label>
-								<Input id="tool-display-name" v-model="toolForm.display_name" placeholder="Fetch Website" />
+								<Label for="tool-display-name">{{ store.getTranslation('settings.tools.display_name') }}</Label>
+								<Input
+									id="tool-display-name"
+									v-model="toolForm.display_name"
+									:placeholder="store.getTranslation('settings.tools.display_name_placeholder')"
+								/>
 							</div>
 							<div class="space-y-2">
-								<Label for="tool-description">Description</Label>
-								<Textarea id="tool-description" v-model="toolForm.description" placeholder="Fetches content from a URL" rows="2" />
+								<Label for="tool-description">{{ store.getTranslation('settings.tools.description') }}</Label>
+								<Textarea
+									id="tool-description"
+									v-model="toolForm.description"
+									:placeholder="store.getTranslation('settings.tools.description_placeholder')"
+									rows="2"
+								/>
 							</div>
 							<div class="flex items-center justify-between pt-2">
 								<div class="flex items-center gap-2">
 									<Switch v-model:modelValue="toolForm.is_public" />
-									<Label>Public</Label>
+									<Label>{{ store.getTranslation('settings.tools.public') }}</Label>
 								</div>
 							</div>
 						</TabsContent>
 
-						<!-- Source Tab -->
 						<TabsContent value="source" class="space-y-4 mt-0">
 							<div class="grid grid-cols-4 gap-2">
 								<button
@@ -137,11 +140,10 @@
 								>
 									<component :is="kind.icon" class="h-4 w-4" :class="toolForm.source_kind === kind.value ? 'text-primary' : 'text-muted-foreground'" />
 									<span class="text-xs font-medium">{{ kind.label }}</span>
-									<span v-if="kind.disabled" class="text-[10px] text-muted-foreground">Soon</span>
+									<span v-if="kind.disabled" class="text-[10px] text-muted-foreground">{{ store.getTranslation('settings.tools.soon') }}</span>
 								</button>
 							</div>
 
-							<!-- HTTP Config -->
 							<div v-if="toolForm.source_kind === 'HTTP'" class="space-y-3 pt-2">
 								<div class="flex gap-2">
 									<div class="w-24">
@@ -154,47 +156,49 @@
 											</ShadSelectContent>
 										</ShadSelect>
 									</div>
-									<Input v-model="httpConfig.url" placeholder="https://api.example.com/{{input.query}}" class="flex-1" />
+									<Input v-model="httpConfig.url" :placeholder="store.getTranslation('settings.tools.url_placeholder')" class="flex-1" />
 								</div>
 								<div class="space-y-1">
-									<Label class="text-xs">Headers (JSON)</Label>
+									<Label class="text-xs">{{ store.getTranslation('settings.tools.headers') }}</Label>
 									<Textarea
 										v-model="httpConfig.headers_json"
-										placeholder='{"Authorization": "Bearer {{settings.api_key}}"}'
+										:placeholder="store.getTranslation('settings.tools.headers_placeholder')"
 										rows="2"
 										class="font-mono text-xs"
 									/>
 								</div>
 							</div>
 
-							<!-- MCP Config -->
 							<div v-if="toolForm.source_kind === 'MCP'" class="space-y-3 pt-2">
 								<ShadSelect v-model="mcpConfig.transport">
 									<ShadSelectTrigger><ShadSelectValue /></ShadSelectTrigger>
 									<ShadSelectContent>
-										<ShadSelectItem value="stdio">Stdio (Local Process)</ShadSelectItem>
-										<ShadSelectItem value="sse">SSE (HTTP)</ShadSelectItem>
+										<ShadSelectItem value="stdio">{{ store.getTranslation('settings.tools.stdio') }}</ShadSelectItem>
+										<ShadSelectItem value="sse">{{ store.getTranslation('settings.tools.sse') }}</ShadSelectItem>
 									</ShadSelectContent>
 								</ShadSelect>
 								<template v-if="mcpConfig.transport === 'stdio'">
-									<Input v-model="mcpConfig.command" placeholder="Command (e.g. npx)" />
-									<Input v-model="mcpConfig.args" placeholder="Arguments (comma-separated)" />
+									<Input v-model="mcpConfig.command" :placeholder="store.getTranslation('settings.tools.command_placeholder')" />
+									<Input v-model="mcpConfig.args" :placeholder="store.getTranslation('settings.tools.args_placeholder')" />
 								</template>
 								<template v-if="mcpConfig.transport === 'sse'">
-									<Input v-model="mcpConfig.url" placeholder="http://localhost:3001/mcp" />
-									<Textarea v-model="mcpConfig.headers_json" placeholder='{"Authorization": "Bearer token"}' rows="2" class="font-mono text-xs" />
+									<Input v-model="mcpConfig.url" :placeholder="store.getTranslation('settings.tools.url_placeholder')" />
+									<Textarea
+										v-model="mcpConfig.headers_json"
+										:placeholder="store.getTranslation('settings.tools.headers_placeholder')"
+										rows="2"
+										class="font-mono text-xs"
+									/>
 								</template>
-								<Input v-model="mcpConfig.tool_name" placeholder="Tool name from server" />
+								<Input v-model="mcpConfig.tool_name" :placeholder="store.getTranslation('settings.tools.tool_name_placeholder')" />
 							</div>
 
-							<!-- Settings Schema (not for BUILTIN) -->
 							<div v-if="!isBuiltinTool" class="space-y-2 pt-2 border-t border-border">
-								<Label class="text-xs text-muted-foreground">Settings Schema (optional)</Label>
+								<Label class="text-xs text-muted-foreground">{{ store.getTranslation('settings.tools.settings_schema') }}</Label>
 								<SchemaBuilder v-model="toolForm.settings_schema_json" :is-settings="true" />
 							</div>
 						</TabsContent>
 
-						<!-- Functions Tab (hidden for BUILTIN) -->
 						<TabsContent v-if="!isBuiltinTool" value="functions" class="space-y-4 mt-0">
 							<div class="flex items-center justify-between">
 								<div class="flex gap-1 overflow-x-auto">
@@ -206,7 +210,7 @@
 										:class="activeFunctionIdx === idx ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'"
 										@click="activeFunctionIdx = idx"
 									>
-										{{ func.name || 'New' }}
+										{{ func.name || store.getTranslation('settings.tools.new') }}
 									</button>
 								</div>
 								<ShadButton variant="ghost" size="sm" @click="addfunction" type="button">
@@ -217,20 +221,29 @@
 							<div v-if="toolForm.functions[activeFunctionIdx]" class="space-y-3">
 								<div class="flex gap-2">
 									<div class="flex-1 space-y-1">
-										<Label class="text-xs">Name</Label>
-										<Input v-model="toolForm.functions[activeFunctionIdx].name" placeholder="search_web" />
+										<Label class="text-xs">{{ store.getTranslation('settings.tools.name') }}</Label>
+										<Input
+											v-model="toolForm.functions[activeFunctionIdx].name"
+											:placeholder="store.getTranslation('settings.tools.function_name_placeholder')"
+										/>
 									</div>
 									<div class="flex-1 space-y-1">
-										<Label class="text-xs">Entrypoint</Label>
-										<Input v-model="toolForm.functions[activeFunctionIdx].entrypoint" placeholder="Optional" />
+										<Label class="text-xs">{{ store.getTranslation('settings.tools.entrypoint') }}</Label>
+										<Input
+											v-model="toolForm.functions[activeFunctionIdx].entrypoint"
+											:placeholder="store.getTranslation('settings.tools.optional')"
+										/>
 									</div>
 								</div>
 								<div class="space-y-1">
-									<Label class="text-xs">Description</Label>
-									<Input v-model="toolForm.functions[activeFunctionIdx].description" placeholder="What this function does" />
+									<Label class="text-xs">{{ store.getTranslation('settings.tools.description') }}</Label>
+									<Input
+										v-model="toolForm.functions[activeFunctionIdx].description"
+										:placeholder="store.getTranslation('settings.tools.function_description_placeholder')"
+									/>
 								</div>
 								<div class="space-y-1">
-									<Label class="text-xs">Input Schema</Label>
+									<Label class="text-xs">{{ store.getTranslation('settings.tools.input_schema') }}</Label>
 									<SchemaBuilder v-model="toolForm.functions[activeFunctionIdx].input_schema_json" />
 								</div>
 								<div v-if="toolForm.functions.length > 1" class="pt-2">
@@ -242,7 +255,7 @@
 										type="button"
 									>
 										<Trash2 class="h-3 w-3 mr-1" />
-										Remove
+										{{ store.getTranslation('settings.tools.remove') }}
 									</ShadButton>
 								</div>
 							</div>
@@ -253,28 +266,29 @@
 				<DialogFooter class="gap-2 sm:gap-0 pt-2">
 					<ShadButton v-if="editingTool && !isBuiltinTool" variant="destructive" size="sm" @click="deleteTool" :disabled="saving" class="mr-auto">
 						<Trash2 class="h-3 w-3 mr-1" />
-						Delete
+						{{ store.getTranslation('common.delete') }}
 					</ShadButton>
 					<div class="flex gap-2">
-						<ShadButton variant="outline" size="sm" @click="dialogOpen = false">Cancel</ShadButton>
+						<ShadButton variant="outline" size="sm" @click="dialogOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 						<ShadButton size="sm" @click="saveTool" :disabled="saving">
 							<Loader2 v-if="saving" class="h-3 w-3 animate-spin mr-1" />
-							Save
+							{{ store.getTranslation('common.save') }}
 						</ShadButton>
 					</div>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>
 
-		<!-- Settings Dialog -->
 		<Dialog v-model:open="settingsDialogOpen">
 			<DialogContent class="sm:max-w-[400px]">
 				<DialogHeader>
 					<DialogTitle class="flex items-center gap-3">
 						<Key class="h-5 w-5 text-primary" />
-						<span>Tool Settings</span>
+						<span>{{ store.getTranslation('settings.tools.settings') }}</span>
 					</DialogTitle>
-					<DialogDescription> Configure your personal settings for {{ settingsTool?.display_name || settingsTool?.name }} </DialogDescription>
+					<DialogDescription>{{
+						store.getTranslation('settings.tools.settings_description', {name: settingsTool?.display_name || settingsTool?.name})
+					}}</DialogDescription>
 				</DialogHeader>
 
 				<div class="space-y-4 py-4">
@@ -283,7 +297,7 @@
 						<template v-if="field.enum && field.enum.length > 0">
 							<ShadSelect v-model="userSettings[key]">
 								<ShadSelectTrigger :id="`setting-${key}`">
-									<ShadSelectValue :placeholder="field.description || 'Select...'" />
+									<ShadSelectValue :placeholder="field.description || store.getTranslation('settings.tools.select_placeholder')" />
 								</ShadSelectTrigger>
 								<ShadSelectContent>
 									<ShadSelectItem v-for="option in field.enum" :key="option" :value="option">
@@ -300,16 +314,15 @@
 				</div>
 
 				<DialogFooter>
-					<ShadButton variant="outline" @click="settingsDialogOpen = false">Cancel</ShadButton>
+					<ShadButton variant="outline" @click="settingsDialogOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton @click="saveSettings" :disabled="saving">
 						<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
-						Save
+						{{ store.getTranslation('common.save') }}
 					</ShadButton>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>
 
-		<!-- Test Tool Dialog -->
 		<ToolTestDialog v-model:open="testDialogOpen" :tool="testingTool" />
 	</div>
 </template>
@@ -397,19 +410,18 @@ const sourceKinds = [
 	{value: 'MCP', label: 'MCP', icon: Server, disabled: false},
 ];
 
-// Builtin tool templates - these are pre-configured tools users can easily add
 const builtinToolTemplates = [
 	{
 		name: 'websearch',
 		display_name: 'Web Search',
-		description: 'Search the web using Exa or Tavily for current and accurate information',
+		description: 'Search web using Exa or Tavily for current and accurate information',
 		source_kind: 'BUILTIN',
 		icon: Globe,
 		source_config: {builtin_id: 'websearch'},
 		functions: [
 			{
 				name: 'websearch',
-				description: 'Search the web for current information',
+				description: 'Search web for current information',
 				input_schema: {
 					type: 'object',
 					properties: {
@@ -435,7 +447,7 @@ const builtinToolTemplates = [
 			type: 'object',
 			required: ['api_key', 'provider'],
 			properties: {
-				api_key: {type: 'string', title: 'API Key', secret: true, description: 'Get your API key from the specified provider'},
+				api_key: {type: 'string', title: 'API Key', secret: true, description: 'Get your API key from specified provider'},
 				provider: {
 					type: 'string',
 					title: 'Provider',
@@ -450,7 +462,6 @@ const builtinToolTemplates = [
 const displayTools = computed(() => {
 	const result: any[] = [...tools.value];
 
-	// Add unconfigured builtin templates
 	for (const template of builtinToolTemplates) {
 		const exists = tools.value.some(t => t.name === template.name);
 		if (!exists) {
@@ -598,7 +609,6 @@ function openCreateDialog() {
 }
 
 async function configureTemplate(template: any) {
-	// Create the tool from the template
 	try {
 		saving.value = true;
 		const body = {
@@ -622,7 +632,6 @@ async function configureTemplate(template: any) {
 		store.toast('Tool added! Please configure your API key.', {type: 'success'});
 		await loadTools();
 
-		// Open settings dialog to configure API key
 		if (created.settings_schema) {
 			const tool = tools.value.find(t => t.id === created.id);
 			if (tool) {
@@ -639,7 +648,6 @@ async function configureTemplate(template: any) {
 function openEditDialog(tool: Tool) {
 	editingTool.value = tool;
 
-	// Convert functions array to editable format
 	const funcs =
 		tool.functions?.length > 0
 			? tool.functions.map(f => ({
@@ -736,7 +744,6 @@ async function saveTool() {
 			}
 		}
 
-		// Convert functions to API format
 		const functions = toolForm.functions.map((f, idx) => ({
 			id: f.id,
 			name: f.name || toolForm.name,

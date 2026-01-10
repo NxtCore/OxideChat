@@ -1,7 +1,3 @@
-//! Admin tool management routes.
-//!
-//! CRUD endpoints for managing system-wide tools (owner_id IS NULL).
-
 use crate::AppState;
 use crate::routes::public::auth::get_current_user;
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
@@ -20,7 +16,6 @@ use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
-/// GET /api/v1/tools
 pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
@@ -31,7 +26,6 @@ pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) ->
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	// Fetch all tools
 	let tools = match sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE owner_id IS NULL AND is_public = true ORDER BY created_at DESC")
 		.fetch_all(&state.db)
 		.await
@@ -43,7 +37,6 @@ pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) ->
 		}
 	};
 
-	// Fetch all functions for these tools
 	let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
 	let functions: Vec<ToolFunction> = if tool_ids.is_empty() {
 		vec![]
@@ -55,13 +48,11 @@ pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) ->
 			.unwrap_or_default()
 	};
 
-	// Group functions by tool_id
 	let mut functions_by_tool: std::collections::HashMap<Uuid, Vec<ToolFunction>> = std::collections::HashMap::new();
 	for f in functions {
 		functions_by_tool.entry(f.tool_id).or_default().push(f);
 	}
 
-	// Build responses
 	let responses: Vec<ToolResponse> = tools
 		.into_iter()
 		.map(|t| {

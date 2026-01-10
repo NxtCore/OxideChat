@@ -1,5 +1,3 @@
-//! Unified web search tool supporting multiple providers (Exa, Tavily)
-
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -13,7 +11,6 @@ const EXA_CONTENTS_URL: &str = "https://api.exa.ai/contents";
 const TAVILY_API_URL: &str = "https://api.tavily.com/search";
 const TAVILY_EXTRACT_URL: &str = "https://api.tavily.com/extract";
 
-/// Websearch input
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WebsearchInput {
 	pub query: String,
@@ -21,13 +18,11 @@ pub struct WebsearchInput {
 	pub num_results: Option<u32>,
 }
 
-/// Crawl input
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CrawlInput {
 	pub url: String,
 }
 
-/// Unified websearch result
 #[derive(Debug, Serialize)]
 pub struct WebsearchResult {
 	pub title: Option<String>,
@@ -35,7 +30,6 @@ pub struct WebsearchResult {
 	pub description: Option<String>,
 }
 
-/// Exa search request
 #[derive(Debug, Serialize)]
 struct ExaSearchRequest {
 	query: String,
@@ -52,7 +46,6 @@ struct ExaContentsConfig {
 	highlights: bool,
 }
 
-/// Exa search response
 #[derive(Debug, Deserialize)]
 struct ExaSearchResponse {
 	results: Vec<ExaResult>,
@@ -65,14 +58,12 @@ struct ExaResult {
 	text: Option<String>,
 }
 
-/// Exa contents request
 #[derive(Debug, Serialize)]
 struct ExaContentsRequest {
 	ids: Vec<String>,
 	text: bool,
 }
 
-/// Exa contents response
 #[derive(Debug, Deserialize)]
 struct ExaContentsResponse {
 	results: Vec<ExaContentResult>,
@@ -85,7 +76,6 @@ struct ExaContentResult {
 	text: String,
 }
 
-/// Tavily search request
 #[derive(Debug, Serialize)]
 struct TavilySearchRequest {
 	#[serde(rename = "api_key")]
@@ -97,7 +87,6 @@ struct TavilySearchRequest {
 	include_raw_content: bool,
 }
 
-/// Tavily search response
 #[derive(Debug, Deserialize)]
 struct TavilySearchResponse {
 	results: Vec<TavilyResult>,
@@ -129,13 +118,11 @@ struct TavilyExtractResult {
 	raw_content: Option<String>,
 }
 
-/// Websearch executor supporting Exa and Tavily providers
 pub struct WebsearchExecutor {
 	client: Client,
 }
 
 impl WebsearchExecutor {
-	/// Create a new websearch executor
 	pub fn new() -> Result<Self, ToolError> {
 		let client = Client::builder()
 			.timeout(Duration::from_secs(30))
@@ -312,7 +299,7 @@ impl WebsearchExecutor {
 			.results
 			.into_iter()
 			.map(|r| WebsearchResult {
-				title: None, // Extract endpoint doesn't guarantee title
+				title: None,
 				url: r.url,
 				description: r.raw_content,
 			})
@@ -330,7 +317,6 @@ impl WebsearchExecutor {
 #[async_trait]
 impl ToolExecutor for WebsearchExecutor {
 	async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
-		// Validate function name
 		let function = match ctx.function_name.as_deref() {
 			Some("search") | Some("websearch") | None => "search",
 			Some("crawl") => "crawl",
@@ -351,7 +337,6 @@ impl ToolExecutor for WebsearchExecutor {
 				self.execute_crawl_tavily(&crawl_input, api_key).await
 			}
 			("crawl", _) => {
-				// Exa crawl
 				let crawl_input: CrawlInput = serde_json::from_value(input).map_err(|e| ToolError::InvalidInput(format!("Invalid input: {e}")))?;
 				self.execute_crawl_exa(&crawl_input, api_key).await
 			}

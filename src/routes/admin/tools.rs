@@ -1,7 +1,3 @@
-//! Admin tool management routes.
-//!
-//! CRUD endpoints for managing system-wide tools (owner_id IS NULL).
-
 use crate::AppState;
 use crate::routes::public::auth::get_current_user;
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
@@ -20,7 +16,6 @@ use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
-/// GET /api/v1/admin/tools
 pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
@@ -31,7 +26,6 @@ pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) ->
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	// Fetch all tools
 	let tools = match sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE owner_id IS NULL ORDER BY created_at DESC")
 		.fetch_all(&state.db)
 		.await
@@ -43,7 +37,6 @@ pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) ->
 		}
 	};
 
-	// Fetch all functions for these tools
 	let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
 	let functions: Vec<ToolFunction> = if tool_ids.is_empty() {
 		vec![]
@@ -55,13 +48,11 @@ pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) ->
 			.unwrap_or_default()
 	};
 
-	// Group functions by tool_id
 	let mut functions_by_tool: std::collections::HashMap<Uuid, Vec<ToolFunction>> = std::collections::HashMap::new();
 	for f in functions {
 		functions_by_tool.entry(f.tool_id).or_default().push(f);
 	}
 
-	// Build responses
 	let responses: Vec<ToolResponse> = tools
 		.into_iter()
 		.map(|t| {
@@ -73,7 +64,6 @@ pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) ->
 	ResponseBuilder::new(ResponseBody::Json(responses)).build()
 }
 
-/// GET /api/v1/admin/tools/:id
 pub async fn get_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
@@ -91,7 +81,6 @@ pub async fn get_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 
 	match tool {
 		Ok(Some(tool)) => {
-			// Fetch functions for this tool
 			let functions = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 ORDER BY sort_order, created_at")
 				.bind(tool_id)
 				.fetch_all(&state.db)
@@ -108,7 +97,6 @@ pub async fn get_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 	}
 }
 
-/// POST /api/v1/admin/tools
 pub async fn create_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Json(req): Json<CreateToolRequest>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
@@ -119,7 +107,6 @@ pub async fn create_tool(State(state): State<Arc<AppState>>, cookies: Cookies, J
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	// Use legacy input_schema if no functions provided (backward compat)
 	let legacy_schema = req.input_schema.clone().unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
 
 	let tool = sqlx::query_as::<_, Tool>(
@@ -154,11 +141,9 @@ pub async fn create_tool(State(state): State<Arc<AppState>>, cookies: Cookies, J
 		}
 	};
 
-	// Insert functions
 	let mut functions: Vec<ToolFunction> = vec![];
 
 	if !req.functions.is_empty() {
-		// Use provided functions array
 		for (idx, func) in req.functions.iter().enumerate() {
 			let f = sqlx::query_as::<_, ToolFunction>(
 				r#"
@@ -181,7 +166,6 @@ pub async fn create_tool(State(state): State<Arc<AppState>>, cookies: Cookies, J
 			}
 		}
 	} else if req.input_schema.is_some() {
-		// Legacy: create single function from input_schema
 		let f = sqlx::query_as::<_, ToolFunction>(
 			r#"
 			INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
@@ -206,7 +190,6 @@ pub async fn create_tool(State(state): State<Arc<AppState>>, cookies: Cookies, J
 		.build()
 }
 
-/// PUT /api/v1/admin/tools/:id
 pub async fn update_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>, Json(req): Json<UpdateToolRequest>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
@@ -231,7 +214,6 @@ pub async fn update_tool(State(state): State<Arc<AppState>>, cookies: Cookies, P
 		return ErrorBuilder::new(ErrorCode::NotFound).build();
 	}
 
-	// Update tool
 	let tool = sqlx::query_as::<_, Tool>(
 		r#"
         UPDATE tools SET
@@ -270,7 +252,6 @@ pub async fn update_tool(State(state): State<Arc<AppState>>, cookies: Cookies, P
 		}
 	};
 
-	// Handle function deletions
 	if let Some(ref delete_ids) = req.delete_function_ids {
 		for func_id in delete_ids {
 			let _ = sqlx::query("DELETE FROM tool_functions WHERE id = $1 AND tool_id = $2")
@@ -281,7 +262,6 @@ pub async fn update_tool(State(state): State<Arc<AppState>>, cookies: Cookies, P
 		}
 	}
 
-	// Handle function upserts
 	if let Some(ref funcs) = req.functions {
 		for (idx, func) in funcs.iter().enumerate() {
 			if let Some(func_id) = func.id {
@@ -326,7 +306,6 @@ pub async fn update_tool(State(state): State<Arc<AppState>>, cookies: Cookies, P
 		}
 	}
 
-	// Fetch updated functions
 	let functions = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 ORDER BY sort_order, created_at")
 		.bind(tool_id)
 		.fetch_all(&state.db)
@@ -336,7 +315,6 @@ pub async fn update_tool(State(state): State<Arc<AppState>>, cookies: Cookies, P
 	ResponseBuilder::new(ResponseBody::Json(ToolResponse::from_tool_with_functions(tool, functions))).build()
 }
 
-/// DELETE /api/v1/admin/tools/:id
 pub async fn delete_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
@@ -362,7 +340,6 @@ pub async fn delete_tool(State(state): State<Arc<AppState>>, cookies: Cookies, P
 	}
 }
 
-/// GET /api/v1/admin/tools/:id/settings
 pub async fn get_tool_settings(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
@@ -437,7 +414,6 @@ pub async fn set_tool_settings(
 	}
 }
 
-/// POST /api/v1/admin/tools/wasm/upload
 pub async fn upload_wasm(State(state): State<Arc<AppState>>, cookies: Cookies, Json(req): Json<UploadWasmRequest>) -> impl IntoResponse {
 	use base64::Engine;
 
@@ -522,7 +498,6 @@ pub async fn upload_wasm(State(state): State<Arc<AppState>>, cookies: Cookies, J
 	}
 }
 
-/// POST /api/v1/admin/tools/:id/test
 pub async fn test_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>, Json(req): Json<TestToolRequest>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
@@ -611,7 +586,6 @@ pub async fn test_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Pat
 				}
 			};
 
-			// Look up function entrypoint if function_name is provided
 			let function_entrypoint = if let Some(ref fn_name) = req.function_name {
 				sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 AND name = $2")
 					.bind(tool_id)
@@ -625,7 +599,6 @@ pub async fn test_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Pat
 				None
 			};
 
-			// Build URL with optional entrypoint override
 			let url = if let Some(entrypoint) = &function_entrypoint {
 				if entrypoint.starts_with("http") {
 					entrypoint.clone()

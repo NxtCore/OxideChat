@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-// ============= Enums =============
-
 /// Tool source kind enum matching the database enum
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "tool_source_kind", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -43,8 +41,6 @@ impl ToolSourceKind {
 	}
 }
 
-// ============= Database Rows =============
-
 /// WASM blob storage database row
 #[derive(Debug, Clone, FromRow)]
 pub struct WasmBlob {
@@ -69,7 +65,6 @@ pub struct Tool {
 	pub icon: Option<String>,
 	pub source_kind: ToolSourceKind,
 	pub source_config: serde_json::Value,
-	/// Deprecated: use tool_functions table instead. Kept for backward compat.
 	pub input_schema: serde_json::Value,
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
@@ -131,8 +126,6 @@ pub struct ToolExecution {
 	pub created_at: DateTime<Utc>,
 }
 
-// ============= Source Config Types =============
-
 /// WASM source configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WasmSourceConfig {
@@ -182,8 +175,6 @@ pub struct McpSseConfig {
 	pub headers: std::collections::HashMap<String, String>,
 }
 
-// ============= Request DTOs =============
-
 /// Request to create a tool function
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CreateToolFunctionRequest {
@@ -202,10 +193,8 @@ pub struct CreateToolRequest {
 	pub icon: Option<String>,
 	pub source_kind: ToolSourceKind,
 	pub source_config: serde_json::Value,
-	/// Deprecated: use `functions` array instead
 	#[serde(default)]
 	pub input_schema: Option<serde_json::Value>,
-	/// Array of functions this tool exposes
 	#[serde(default)]
 	pub functions: Vec<CreateToolFunctionRequest>,
 	#[serde(default)]
@@ -220,10 +209,8 @@ fn default_true() -> bool {
 	true
 }
 
-/// Request to update a tool function
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UpdateToolFunctionRequest {
-	/// Function ID (None = create new)
 	pub id: Option<Uuid>,
 	pub name: String,
 	pub description: Option<String>,
@@ -239,11 +226,8 @@ pub struct UpdateToolRequest {
 	pub description: Option<String>,
 	pub icon: Option<String>,
 	pub source_config: Option<serde_json::Value>,
-	/// Deprecated: use `functions` array instead
 	pub input_schema: Option<serde_json::Value>,
-	/// Functions to upsert (id=None creates, id present updates)
 	pub functions: Option<Vec<UpdateToolFunctionRequest>>,
-	/// Function IDs to delete
 	pub delete_function_ids: Option<Vec<Uuid>>,
 	pub settings_schema: Option<serde_json::Value>,
 	pub is_enabled: Option<bool>,
@@ -254,9 +238,7 @@ pub struct UpdateToolRequest {
 #[derive(Debug, Deserialize)]
 pub struct UploadWasmRequest {
 	pub filename: String,
-	/// Base64 encoded file content
 	pub content: String,
-	/// Force compilation even if file appears to be WASM
 	#[serde(default)]
 	pub force_compile: bool,
 }
@@ -290,12 +272,9 @@ pub struct SetToolSettingsRequest {
 #[derive(Debug, Deserialize)]
 pub struct TestToolRequest {
 	pub input: serde_json::Value,
-	/// Optional function name for multi-function tools
 	#[serde(default)]
 	pub function_name: Option<String>,
 }
-
-// ============= Response DTOs =============
 
 /// Tool function response
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -331,9 +310,7 @@ pub struct ToolResponse {
 	pub description: Option<String>,
 	pub icon: Option<String>,
 	pub source_kind: ToolSourceKind,
-	/// Deprecated: use `functions` array
 	pub input_schema: serde_json::Value,
-	/// Functions exposed by this tool
 	pub functions: Vec<ToolFunctionResponse>,
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
@@ -344,7 +321,6 @@ pub struct ToolResponse {
 }
 
 impl ToolResponse {
-	/// Create response from tool and its functions
 	pub fn from_tool_with_functions(t: Tool, functions: Vec<ToolFunction>) -> Self {
 		Self {
 			id: t.id,
@@ -359,7 +335,7 @@ impl ToolResponse {
 			settings_schema: t.settings_schema,
 			is_enabled: t.is_enabled,
 			is_public: t.is_public,
-			has_user_settings: false, // Set by query
+			has_user_settings: false,
 			created_at: t.created_at,
 			updated_at: t.updated_at,
 		}
@@ -377,7 +353,7 @@ impl From<Tool> for ToolResponse {
 			icon: t.icon,
 			source_kind: t.source_kind,
 			input_schema: t.input_schema.clone(),
-			functions: vec![], // Legacy: no functions loaded
+			functions: vec![],
 			settings_schema: t.settings_schema,
 			is_enabled: t.is_enabled,
 			is_public: t.is_public,
@@ -413,7 +389,7 @@ impl From<McpServer> for McpServerResponse {
 			is_enabled: s.is_enabled,
 			last_health_check: s.last_health_check,
 			health_status: s.health_status,
-			discovered_tools: vec![], // Set by discovery
+			discovered_tools: vec![],
 			created_at: s.created_at,
 			updated_at: s.updated_at,
 		}
@@ -476,10 +452,7 @@ pub struct ToolExecutionLogResponse {
 	pub created_at: DateTime<Utc>,
 }
 
-// ============= Conversion to omniference ToolSpec =============
-
 impl Tool {
-	/// Convert to omniference ToolSpec for LLM requests (legacy single-function)
 	#[deprecated(note = "Use to_tool_specs with functions instead")]
 	pub fn to_tool_spec(&self) -> omniference::types::ToolSpec {
 		omniference::types::ToolSpec::JsonSchema {
@@ -490,10 +463,8 @@ impl Tool {
 		}
 	}
 
-	/// Convert tool with functions to omniference ToolSpecs (one per function)
 	pub fn to_tool_specs(&self, functions: &[ToolFunction]) -> Vec<omniference::types::ToolSpec> {
 		if functions.is_empty() {
-			// Fallback to legacy single-function mode
 			#[allow(deprecated)]
 			return vec![self.to_tool_spec()];
 		}
@@ -502,10 +473,8 @@ impl Tool {
 			.iter()
 			.map(|f| {
 				let name = if functions.len() == 1 {
-					// Single function: use tool name directly
 					self.name.clone()
 				} else {
-					// Multiple functions: use {tool}_{function} format (no dots - OpenAI doesn't allow them)
 					format!("{}_{}", self.name, f.name)
 				};
 				omniference::types::ToolSpec::JsonSchema {

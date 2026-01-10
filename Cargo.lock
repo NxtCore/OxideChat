@@ -2157,6 +2157,8 @@ dependencies = [
 [[package]]
 name = "omniference"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e9cb21c6168904d1eaa270da9c5675751a3a134ac4eb8cc2906bea4a45f6cca"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5276,3 +5278,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "omniference"
+version = "0.1.0"

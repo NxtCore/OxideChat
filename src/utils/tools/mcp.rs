@@ -14,8 +14,6 @@ use tokio::sync::Mutex;
 
 use super::executor::{ToolContext, ToolError, ToolExecutor};
 
-// ============= MCP Protocol Types =============
-
 #[derive(Debug, Serialize, Deserialize)]
 struct JsonRpcRequest {
 	jsonrpc: String,
@@ -70,15 +68,11 @@ struct McpContent {
 	text: Option<String>,
 }
 
-// ============= MCP Transport Trait =============
-
 #[async_trait]
 trait McpTransport: Send + Sync {
 	async fn send(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError>;
 	async fn close(&self) -> Result<(), ToolError>;
 }
-
-// ============= Stdio Transport =============
 
 struct StdioTransport {
 	child: Arc<Mutex<Child>>,
@@ -104,7 +98,6 @@ impl McpTransport for StdioTransport {
 	async fn send(&self, mut request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError> {
 		let mut child = self.child.lock().await;
 
-		// Get next request ID
 		let mut id = self.request_id.lock().await;
 		request.id = *id;
 		*id += 1;
@@ -112,7 +105,6 @@ impl McpTransport for StdioTransport {
 
 		let stdin = child.stdin.as_mut().ok_or_else(|| ToolError::McpError("No stdin available".to_string()))?;
 
-		// Send request
 		let request_str = serde_json::to_string(&request).map_err(|e| ToolError::McpError(format!("Failed to serialize request: {e}")))?;
 
 		stdin
@@ -125,7 +117,6 @@ impl McpTransport for StdioTransport {
 			.map_err(|e| ToolError::McpError(format!("Failed to write newline: {e}")))?;
 		stdin.flush().await.map_err(|e| ToolError::McpError(format!("Failed to flush stdin: {e}")))?;
 
-		// Read response
 		let stdout = child.stdout.as_mut().ok_or_else(|| ToolError::McpError("No stdout available".to_string()))?;
 		let mut reader = BufReader::new(stdout);
 		let mut response_line = String::new();
@@ -145,8 +136,6 @@ impl McpTransport for StdioTransport {
 		Ok(())
 	}
 }
-
-// ============= SSE Transport =============
 
 struct SseTransport {
 	url: String,
@@ -174,7 +163,6 @@ impl SseTransport {
 #[async_trait]
 impl McpTransport for SseTransport {
 	async fn send(&self, mut request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError> {
-		// Get next request ID
 		let mut id = self.request_id.lock().await;
 		request.id = *id;
 		*id += 1;
@@ -204,12 +192,9 @@ impl McpTransport for SseTransport {
 	}
 
 	async fn close(&self) -> Result<(), ToolError> {
-		// SSE transport doesn't need cleanup
 		Ok(())
 	}
 }
-
-// ============= MCP Client =============
 
 pub struct McpClient {
 	transport: Box<dyn McpTransport>,
@@ -259,7 +244,6 @@ impl McpClient {
 			return Err(ToolError::McpError(format!("Initialize failed: {}", error.message)));
 		}
 
-		// Send initialized notification
 		let notification = JsonRpcRequest {
 			jsonrpc: "2.0".to_string(),
 			id: 0,
@@ -271,7 +255,6 @@ impl McpClient {
 		Ok(())
 	}
 
-	/// List available tools from the MCP server
 	pub async fn list_tools(&self) -> Result<Vec<McpToolInfo>, ToolError> {
 		let request = JsonRpcRequest {
 			jsonrpc: "2.0".to_string(),
@@ -292,7 +275,6 @@ impl McpClient {
 		Ok(result.tools)
 	}
 
-	/// Call a tool on the MCP server
 	pub async fn call_tool(&self, tool_name: &str, arguments: Value) -> Result<Value, ToolError> {
 		let request = JsonRpcRequest {
 			jsonrpc: "2.0".to_string(),
@@ -318,21 +300,16 @@ impl McpClient {
 			return Err(ToolError::ExecutionFailed(error_text));
 		}
 
-		// Combine all text content
 		let text: String = result.content.iter().filter_map(|c| c.text.as_deref()).collect::<Vec<_>>().join("\n");
 
 		Ok(json!({ "result": text }))
 	}
 
-	/// Close the MCP connection
 	pub async fn close(&self) -> Result<(), ToolError> {
 		self.transport.close().await
 	}
 }
 
-// ============= MCP Tool Executor =============
-
-/// Executor that wraps an MCP client for a specific tool
 pub struct McpExecutor {
 	client: Arc<McpClient>,
 	tool_name: String,

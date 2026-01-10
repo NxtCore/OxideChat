@@ -1,11 +1,8 @@
-//! Tool executor trait and common types.
-
 use async_trait::async_trait;
 use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Errors that can occur during tool execution
 #[derive(Debug, Error)]
 pub enum ToolError {
 	#[error("Tool not found: {0}")]
@@ -39,16 +36,11 @@ pub enum ToolError {
 	Internal(String),
 }
 
-/// Context provided to tool executors
 #[derive(Debug, Clone)]
 pub struct ToolContext {
-	/// User ID executing the tool
 	pub user_id: Option<Uuid>,
-	/// User-provided settings for this tool (API keys, etc.)
 	pub settings: Value,
-	/// Optional timeout in milliseconds
 	pub timeout_ms: Option<u64>,
-	/// Optional function name being executed (for multi-function tools)
 	pub function_name: Option<String>,
 }
 
@@ -57,15 +49,12 @@ impl Default for ToolContext {
 		Self {
 			user_id: None,
 			settings: Value::Object(serde_json::Map::new()),
-			timeout_ms: Some(30000), // 30 second default
+			timeout_ms: Some(30000),
 			function_name: None,
 		}
 	}
 }
 
-/// Trait for tool executors
-///
-/// Each tool source type (WASM, HTTP, MCP, Builtin) implements this trait.
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
 	/// Execute the tool with the given input

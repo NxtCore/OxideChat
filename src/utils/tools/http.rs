@@ -46,7 +46,6 @@ impl HttpExecutor {
 	fn substitute_template(template: &str, settings: &Value, input: &Value) -> String {
 		let mut result = template.to_string();
 
-		// Substitute settings (e.g., {{settings.api_key}})
 		if let Value::Object(settings_map) = settings {
 			for (key, value) in settings_map {
 				let placeholder = format!("{{{{settings.{key}}}}}");
@@ -56,7 +55,6 @@ impl HttpExecutor {
 			}
 		}
 
-		// Substitute input values (e.g., {{input.query}})
 		if let Value::Object(input_map) = input {
 			for (key, value) in input_map {
 				let placeholder = format!("{{{{input.{key}}}}}");
@@ -75,10 +73,8 @@ impl HttpExecutor {
 #[async_trait]
 impl ToolExecutor for HttpExecutor {
 	async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
-		// Substitute URL template
 		let url = Self::substitute_template(&self.config.url, &ctx.settings, &input);
 
-		// Build request
 		let mut request = match self.config.method.to_uppercase().as_str() {
 			"GET" => self.client.get(&url),
 			"POST" => self.client.post(&url),
@@ -88,27 +84,22 @@ impl ToolExecutor for HttpExecutor {
 			method => return Err(ToolError::InvalidInput(format!("Unsupported HTTP method: {method}"))),
 		};
 
-		// Add headers with template substitution
 		for (key, value) in &self.config.headers {
 			let substituted_value = Self::substitute_template(value, &ctx.settings, &input);
 			request = request.header(key.as_str(), substituted_value);
 		}
 
-		// Add body if configured
 		if let Some(body_template) = &self.config.body_template {
 			let body = Self::substitute_template(body_template, &ctx.settings, &input);
 			request = request.body(body);
 		} else if matches!(self.config.method.to_uppercase().as_str(), "POST" | "PUT" | "PATCH") {
-			// Default to sending input as JSON body
 			request = request.json(&input);
 		}
 
-		// Set timeout if specified
 		if let Some(timeout_ms) = ctx.timeout_ms {
 			request = request.timeout(Duration::from_millis(timeout_ms));
 		}
 
-		// Execute request
 		let response = request.send().await.map_err(|e| ToolError::HttpError(format!("HTTP request failed: {e}")))?;
 
 		let status = response.status();
@@ -121,7 +112,6 @@ impl ToolExecutor for HttpExecutor {
 			return Err(ToolError::HttpError(format!("HTTP {status}: {body}")));
 		}
 
-		// Try to parse as JSON, otherwise return as string
 		match serde_json::from_str::<Value>(&body) {
 			Ok(json) => Ok(json),
 			Err(_) => Ok(Value::String(body)),

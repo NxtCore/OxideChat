@@ -1,53 +1,47 @@
 <template>
 	<div class="flex flex-col gap-2">
-		<!-- Tool call header -->
 		<div class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none" @click="isExpanded = !isExpanded">
 			<Wrench class="h-3.5 w-3.5" />
-			<span class="text-[10px] font-bold uppercase tracking-widest">Tool: {{ name }}</span>
+			<span class="text-[10px] font-bold uppercase tracking-widest">{{ store.getTranslation('chat.tool_execution.tool') }}: {{ name }}</span>
 			<span v-if="isExecuting" class="flex items-center gap-1 text-xs text-muted-foreground">
 				<Loader2 class="h-3 w-3 animate-spin" />
-				Running...
+				{{ store.getTranslation('chat.tool_execution.running') }}
 			</span>
 			<span v-else-if="error" class="flex items-center gap-1 text-xs text-destructive">
 				<AlertCircle class="h-3 w-3" />
-				Failed
+				{{ store.getTranslation('chat.tool_execution.failed') }}
 			</span>
 			<span v-else-if="output !== undefined" class="flex items-center gap-1 text-xs text-green-500">
 				<CheckCircle class="h-3 w-3" />
-				Complete
+				{{ store.getTranslation('chat.tool_execution.complete') }}
 			</span>
 			<ChevronDown class="ml-auto h-3 w-3 transition-transform" :class="isExpanded ? 'rotate-180' : ''" />
 		</div>
 
-		<!-- Expandable content -->
 		<Transition name="expand">
 			<div v-if="isExpanded" class="w-full rounded-xl bg-muted/50 border px-4 py-3">
-				<!-- Arguments section -->
 				<div class="mb-3">
-					<span class="text-xs font-medium text-muted-foreground mb-1 block">Arguments</span>
+					<span class="text-xs font-medium text-muted-foreground mb-1 block">{{ store.getTranslation('chat.tool_execution.arguments') }}</span>
 					<div class="rounded-md bg-background/50 p-2 text-xs font-mono overflow-x-auto">
 						<pre class="whitespace-pre-wrap">{{ formattedArgs }}</pre>
 					</div>
 				</div>
 
-				<!-- Output section (if available) -->
 				<div v-if="output !== undefined" class="mb-3">
-					<span class="text-xs font-medium text-muted-foreground mb-1 block">Output</span>
+					<span class="text-xs font-medium text-muted-foreground mb-1 block">{{ store.getTranslation('chat.tool_execution.output') }}</span>
 					<div class="rounded-md bg-background/50 p-2 text-xs font-mono overflow-x-auto max-h-64 overflow-y-auto">
 						<pre class="whitespace-pre-wrap">{{ formattedOutput }}</pre>
 					</div>
 				</div>
 
-				<!-- Error section (if any) -->
 				<div v-if="error" class="mb-3">
-					<span class="text-xs font-medium text-destructive mb-1 block">Error</span>
+					<span class="text-xs font-medium text-destructive mb-1 block">{{ store.getTranslation('chat.tool_execution.error') }}</span>
 					<div class="rounded-md bg-destructive/10 border border-destructive/20 p-2 text-xs text-destructive">
 						{{ error }}
 					</div>
 				</div>
 
-				<!-- Duration (if available) -->
-				<div v-if="durationMs" class="text-xs text-muted-foreground">Completed in {{ durationMs }}ms</div>
+				<div v-if="durationMs" class="text-xs text-muted-foreground">{{ store.getTranslation('chat.tool_execution.completed_in', {ms: durationMs}) }}</div>
 			</div>
 		</Transition>
 	</div>
@@ -55,6 +49,9 @@
 
 <script setup lang="ts">
 import {Wrench, ChevronDown, Loader2, CheckCircle, AlertCircle} from 'lucide-vue-next';
+import {useMainStore} from '~/stores';
+
+const store = useMainStore();
 
 const props = defineProps<{
 	id: string;

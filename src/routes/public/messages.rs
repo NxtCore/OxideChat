@@ -30,7 +30,6 @@ pub async fn list_messages(
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	// Verify chat belongs to user
 	let chat_exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM chats WHERE id = $1 AND user_id = $2)")
 		.bind(chat_id)
 		.bind(user.id)
@@ -46,7 +45,6 @@ pub async fn list_messages(
 		_ => {}
 	}
 
-	// Build query based on cursor
 	let messages = if let Some(before_id) = params.before {
 		sqlx::query_as::<_, Message>(
 			r#"
@@ -88,7 +86,6 @@ pub async fn list_messages(
 		Ok(messages) => {
 			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
 
-			// Fetch all tool executions for these messages
 			let tool_executions = if message_ids.is_empty() {
 				vec![]
 			} else {
@@ -121,7 +118,6 @@ pub async fn list_messages(
 				.unwrap_or_default()
 			};
 
-			// Group tool executions by message_id
 			let mut executions_by_message: std::collections::HashMap<Uuid, Vec<ToolExecutionResponse>> = std::collections::HashMap::new();
 			for (id, message_id, tool_call_id, input_args, output, error, execution_ms, tool_id, tool_function, tool_name) in tool_executions {
 				let response = ToolExecutionResponse {
@@ -137,7 +133,6 @@ pub async fn list_messages(
 				executions_by_message.entry(message_id).or_default().push(response);
 			}
 
-			// Build responses with tool calls
 			let responses: Vec<ChatMessageResponse> = messages
 				.into_iter()
 				.map(|m| {
@@ -168,7 +163,6 @@ pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, 
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	// Verify chat belongs to user and get it
 	let chat = sqlx::query_as::<_, crate::types::Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
 		.bind(chat_id)
 		.bind(user.id)
@@ -184,7 +178,6 @@ pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, 
 		}
 	};
 
-	// Save the user message
 	let reasoning_details = crate::types::ReasoningDetails {
 		effort: req.reasoning_effort,
 		budget_tokens: req.reasoning_budget_tokens,
@@ -208,7 +201,6 @@ pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, 
 	.fetch_one(&state.db)
 	.await;
 
-	// Update chat's updated_at
 	let _ = sqlx::query("UPDATE chats SET updated_at = NOW() WHERE id = $1")
 		.bind(chat_id)
 		.execute(&state.db)

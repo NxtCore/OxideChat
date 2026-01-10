@@ -4,17 +4,16 @@
 			<DialogHeader>
 				<DialogTitle class="flex items-center gap-3">
 					<Play class="h-5 w-5 text-primary" />
-					<span>Test {{ tool?.display_name || tool?.name }}</span>
+					<span>{{ store.getTranslation('settings.tool_test.test') }} {{ tool?.display_name || tool?.name }}</span>
 				</DialogTitle>
-				<DialogDescription> Enter input values to test this tool </DialogDescription>
+				<DialogDescription>{{ store.getTranslation('settings.tool_test.description') }}</DialogDescription>
 			</DialogHeader>
 
-			<!-- Function selector for multi-function tools -->
 			<div v-if="hasMultipleFunctions" class="mb-4">
-				<Label class="text-sm font-medium mb-2">Select Function</Label>
+				<Label class="text-sm font-medium mb-2">{{ store.getTranslation('settings.tool_test.select_function') }}</Label>
 				<ShadSelect v-model="selectedFunctionIdx">
 					<ShadSelectTrigger>
-						<ShadSelectValue placeholder="Select a function..." />
+						<ShadSelectValue :placeholder="store.getTranslation('settings.tool_test.select_placeholder')" />
 					</ShadSelectTrigger>
 					<ShadSelectContent>
 						<ShadSelectItem v-for="(fn, idx) in tool?.functions" :key="fn.id" :value="idx">
@@ -27,12 +26,14 @@
 
 			<Tabs v-model="activeTab" class="flex-1 min-h-0 flex flex-col">
 				<TabsList class="grid w-full grid-cols-2">
-					<TabsTrigger value="form">Form</TabsTrigger>
+					<TabsTrigger value="form">{{ store.getTranslation('settings.tool_test.form') }}</TabsTrigger>
 					<TabsTrigger value="json">JSON</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value="form" class="flex-1 overflow-y-auto space-y-4 py-4">
-					<div v-if="schemaProperties.length === 0" class="text-sm text-muted-foreground text-center py-8">This tool has no input parameters</div>
+					<div v-if="schemaProperties.length === 0" class="text-sm text-muted-foreground text-center py-8">
+						{{ store.getTranslation('settings.tool_test.no_parameters') }}
+					</div>
 					<div v-for="prop in schemaProperties" :key="prop.name" class="space-y-2">
 						<div class="flex items-center gap-2">
 							<Label :for="`input-${prop.name}`" class="text-sm font-medium">
@@ -45,10 +46,9 @@
 						</div>
 						<p v-if="prop.description" class="text-xs text-muted-foreground">{{ prop.description }}</p>
 
-						<!-- Enum/Select field -->
 						<ShadSelect v-if="prop.enum" v-model="formInputs[prop.name]">
 							<ShadSelectTrigger :id="`input-${prop.name}`">
-								<ShadSelectValue :placeholder="prop.default ?? 'Select...'" />
+								<ShadSelectValue :placeholder="prop.default ?? store.getTranslation('settings.tool_test.select_placeholder')" />
 							</ShadSelectTrigger>
 							<ShadSelectContent>
 								<ShadSelectItem v-for="option in prop.enum" :key="option" :value="option">
@@ -57,13 +57,11 @@
 							</ShadSelectContent>
 						</ShadSelect>
 
-						<!-- Boolean field -->
 						<div v-else-if="prop.type === 'boolean'" class="flex items-center gap-2">
 							<Switch :id="`input-${prop.name}`" v-model:checked="formInputs[prop.name]" />
 							<Label :for="`input-${prop.name}`" class="text-sm">{{ formInputs[prop.name] ? 'True' : 'False' }}</Label>
 						</div>
 
-						<!-- Number/Integer field -->
 						<Input
 							v-else-if="prop.type === 'number' || prop.type === 'integer'"
 							:id="`input-${prop.name}`"
@@ -73,13 +71,16 @@
 							:placeholder="prop.default?.toString() ?? ''"
 						/>
 
-						<!-- Array field (comma-separated) -->
 						<div v-else-if="prop.type === 'array'" class="space-y-1">
-							<Input :id="`input-${prop.name}`" v-model="formInputs[prop.name]" type="text" placeholder="Comma-separated values" />
-							<p class="text-xs text-muted-foreground">Enter values separated by commas</p>
+							<Input
+								:id="`input-${prop.name}`"
+								v-model="formInputs[prop.name]"
+								type="text"
+								:placeholder="store.getTranslation('settings.tool_test.array_placeholder')"
+							/>
+							<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.tool_test.array_hint') }}</p>
 						</div>
 
-						<!-- Object field (JSON) -->
 						<Textarea
 							v-else-if="prop.type === 'object'"
 							:id="`input-${prop.name}`"
@@ -89,7 +90,6 @@
 							class="font-mono text-sm"
 						/>
 
-						<!-- String field (default) -->
 						<Input v-else :id="`input-${prop.name}`" v-model="formInputs[prop.name]" type="text" :placeholder="prop.default ?? ''" />
 					</div>
 				</TabsContent>
@@ -99,12 +99,11 @@
 				</TabsContent>
 			</Tabs>
 
-			<!-- Results area -->
 			<div v-if="testResult" class="border-t border-border pt-4 space-y-2">
 				<div class="flex items-center gap-2">
 					<component :is="testResult.success ? CheckCircle : XCircle" class="h-4 w-4" :class="testResult.success ? 'text-green-500' : 'text-destructive'" />
 					<span class="text-sm font-medium" :class="testResult.success ? 'text-green-500' : 'text-destructive'">
-						{{ testResult.success ? 'Success' : 'Failed' }}
+						{{ testResult.success ? store.getTranslation('settings.tool_test.success') : store.getTranslation('settings.tool_test.failed') }}
 					</span>
 					<span class="text-xs text-muted-foreground">{{ testResult.execution_ms }}ms</span>
 				</div>
@@ -112,17 +111,17 @@
 					{{ testResult.error }}
 				</div>
 				<details v-if="testResult.output" class="text-sm">
-					<summary class="cursor-pointer text-muted-foreground hover:text-foreground">View output</summary>
+					<summary class="cursor-pointer text-muted-foreground hover:text-foreground">{{ store.getTranslation('settings.tool_test.view_output') }}</summary>
 					<pre class="h-[200px] mt-2 p-2 bg-muted rounded text-xs overflow-auto">{{ JSON.stringify(testResult.output, null, 2) }}</pre>
 				</details>
 			</div>
 
 			<DialogFooter>
-				<ShadButton variant="outline" @click="open = false">Close</ShadButton>
+				<ShadButton variant="outline" @click="open = false">{{ store.getTranslation('common.close') }}</ShadButton>
 				<ShadButton @click="runTest" :disabled="testing">
 					<Loader2 v-if="testing" class="h-4 w-4 animate-spin mr-2" />
 					<Play v-else class="h-4 w-4 mr-2" />
-					Run Test
+					{{ store.getTranslation('settings.tool_test.run_test') }}
 				</ShadButton>
 			</DialogFooter>
 		</DialogContent>
@@ -145,8 +144,10 @@ import {
 	SelectTrigger as ShadSelectTrigger,
 	SelectValue as ShadSelectValue,
 } from '@/components/ui/select';
+import {useMainStore} from '~/stores';
 
 const {$customFetch} = useNuxtApp();
+const store = useMainStore();
 
 interface ToolFunction {
 	id: string;
@@ -192,18 +193,15 @@ const formInputs = ref<Record<string, any>>({});
 const jsonInput = ref('{}');
 const selectedFunctionIdx = ref(0);
 
-// Check if tool has multiple functions
 const hasMultipleFunctions = computed(() => {
 	return (props.tool?.functions?.length ?? 0) > 1;
 });
 
-// Get the currently selected function (or null if single function/legacy)
 const selectedFunction = computed(() => {
 	if (!props.tool?.functions?.length) return null;
 	return props.tool.functions[selectedFunctionIdx.value] || props.tool.functions[0];
 });
 
-// Get the input schema to use (selected function's or legacy tool schema)
 const activeInputSchema = computed(() => {
 	if (selectedFunction.value) {
 		return selectedFunction.value.input_schema;
@@ -211,7 +209,6 @@ const activeInputSchema = computed(() => {
 	return props.tool?.input_schema;
 });
 
-// Parse the input schema to extract properties
 const schemaProperties = computed<SchemaProperty[]>(() => {
 	const schema = activeInputSchema.value;
 	if (!schema?.properties) return [];
@@ -228,7 +225,6 @@ const schemaProperties = computed<SchemaProperty[]>(() => {
 	}));
 });
 
-// Sync form inputs to JSON when in form mode
 watch(
 	formInputs,
 	inputs => {
@@ -259,7 +255,6 @@ watch(
 	{deep: true}
 );
 
-// Sync JSON to form inputs when switching tabs
 watch(activeTab, newTab => {
 	if (newTab === 'form') {
 		try {
@@ -275,13 +270,10 @@ watch(activeTab, newTab => {
 					}
 				}
 			}
-		} catch {
-			// Invalid JSON, don't update form
-		}
+		} catch {}
 	}
 });
 
-// Reset when tool changes
 watch(
 	() => props.tool,
 	tool => {
@@ -290,7 +282,6 @@ watch(
 		jsonInput.value = '{}';
 		selectedFunctionIdx.value = 0;
 
-		// Initialize with defaults from active schema
 		const schema = tool?.functions?.length ? tool.functions[0]?.input_schema : tool?.input_schema;
 		if (schema?.properties) {
 			for (const [name, propSchema] of Object.entries(schema.properties) as [string, any][]) {
@@ -303,12 +294,10 @@ watch(
 	{immediate: true}
 );
 
-// Reset form when selected function changes
 watch(selectedFunctionIdx, () => {
 	formInputs.value = {};
 	jsonInput.value = '{}';
 
-	// Initialize with defaults from active schema
 	const schema = activeInputSchema.value;
 	if (schema?.properties) {
 		for (const [name, propSchema] of Object.entries(schema.properties) as [string, any][]) {
@@ -340,7 +329,6 @@ async function runTest() {
 
 		const body: {input: any; function_name?: string} = {input};
 
-		// Include function name if testing a specific function
 		if (selectedFunction.value) {
 			body.function_name = selectedFunction.value.name;
 		}

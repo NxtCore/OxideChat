@@ -8,9 +8,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-// ============= Enums =============
-
-/// Streaming animation types for message rendering
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "VARCHAR", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
@@ -45,7 +42,6 @@ impl StreamingAnimation {
 	}
 }
 
-/// Message role
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "VARCHAR", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
@@ -65,8 +61,6 @@ impl MessageRole {
 		}
 	}
 }
-
-// ============= Structs =============
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CostDetails {
@@ -100,7 +94,6 @@ pub struct ReasoningDetails {
 	pub budget_tokens: Option<i32>,
 }
 
-/// Tool execution result for API response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolExecutionResponse {
 	pub tool_call_id: String,
@@ -118,9 +111,6 @@ pub struct ToolExecutionResponse {
 	pub tool_function: Option<Uuid>,
 }
 
-// ============= Database Models =============
-
-/// Workspace database row
 #[derive(Debug, Clone, FromRow)]
 pub struct Workspace {
 	pub id: Uuid,
@@ -134,7 +124,6 @@ pub struct Workspace {
 	pub updated_at: DateTime<Utc>,
 }
 
-/// Workspace with chat count for list queries
 #[derive(Debug, Clone, FromRow)]
 pub struct WorkspaceWithCount {
 	pub id: Uuid,
@@ -165,7 +154,6 @@ impl From<WorkspaceWithCount> for WorkspaceResponse {
 	}
 }
 
-/// Chat database row
 #[derive(Debug, Clone, FromRow)]
 pub struct Chat {
 	pub id: Uuid,
@@ -178,7 +166,6 @@ pub struct Chat {
 	pub updated_at: DateTime<Utc>,
 }
 
-/// Message database row
 #[derive(Debug, Clone, FromRow)]
 pub struct Message {
 	pub id: Uuid,
@@ -193,7 +180,6 @@ pub struct Message {
 	pub created_at: DateTime<Utc>,
 }
 
-/// User preferences database row
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct UserPreferences {
 	pub user_id: Uuid,
@@ -206,7 +192,6 @@ pub struct UserPreferences {
 }
 
 impl UserPreferences {
-	/// Create default preferences for a user when none exist in database
 	#[must_use]
 	pub fn default_for(user_id: Uuid) -> Self {
 		let now = Utc::now();
@@ -222,9 +207,6 @@ impl UserPreferences {
 	}
 }
 
-// ============= Request DTOs =============
-
-/// Request to create a workspace
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkspaceRequest {
 	pub name: String,
@@ -234,7 +216,6 @@ pub struct CreateWorkspaceRequest {
 	pub is_default: bool,
 }
 
-/// Request to update a workspace
 #[derive(Debug, Deserialize)]
 pub struct UpdateWorkspaceRequest {
 	pub name: Option<String>,
@@ -244,14 +225,12 @@ pub struct UpdateWorkspaceRequest {
 	pub is_default: Option<bool>,
 }
 
-/// Request to create a chat
 #[derive(Debug, Deserialize)]
 pub struct CreateChatRequest {
 	pub workspace_id: Option<Uuid>,
 	pub title: Option<String>,
 }
 
-/// Request to update a chat
 #[derive(Debug, Deserialize)]
 pub struct UpdateChatRequest {
 	pub title: Option<String>,
@@ -261,7 +240,6 @@ pub struct UpdateChatRequest {
 	pub is_archived: Option<bool>,
 }
 
-/// Chat list filter parameters
 #[derive(Debug, Deserialize)]
 pub struct ChatListParams {
 	pub workspace_id: Option<Uuid>,
@@ -271,7 +249,6 @@ pub struct ChatListParams {
 	pub offset: Option<i32>,
 }
 
-/// Request to send a message
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
 	pub content: String,
@@ -282,7 +259,6 @@ pub struct SendMessageRequest {
 	pub tools_enabled: Vec<String>,
 }
 
-/// Message list pagination
 #[derive(Debug, Deserialize)]
 pub struct MessageListParams {
 	pub limit: Option<i32>,
@@ -290,7 +266,6 @@ pub struct MessageListParams {
 	pub after: Option<Uuid>,
 }
 
-/// Request to update user preferences
 #[derive(Debug, Deserialize)]
 pub struct UpdatePreferencesRequest {
 	pub default_model_key: Option<String>,
@@ -299,9 +274,6 @@ pub struct UpdatePreferencesRequest {
 	pub use_remend: Option<bool>,
 }
 
-// ============= Response DTOs =============
-
-/// Workspace response
 #[derive(Debug, Serialize)]
 pub struct WorkspaceResponse {
 	pub id: Uuid,
@@ -331,7 +303,6 @@ impl WorkspaceResponse {
 	}
 }
 
-/// Chat response (list view)
 #[derive(Debug, Serialize)]
 pub struct ChatResponse {
 	pub id: Uuid,
@@ -345,14 +316,12 @@ pub struct ChatResponse {
 	pub updated_at: DateTime<Utc>,
 }
 
-/// Chat with messages (detail view)
 #[derive(Debug, Serialize)]
 pub struct ChatWithMessagesResponse {
 	pub chat: ChatResponse,
 	pub messages: Vec<ChatMessageResponse>,
 }
 
-/// Chat message response
 #[derive(Debug, Serialize, Clone)]
 pub struct ChatMessageResponse {
 	pub id: Uuid,
@@ -385,7 +354,6 @@ impl From<Message> for ChatMessageResponse {
 	}
 }
 
-/// User preferences response
 #[derive(Debug, Serialize)]
 pub struct PreferencesResponse {
 	pub default_model_key: Option<String>,
@@ -405,7 +373,6 @@ impl From<UserPreferences> for PreferencesResponse {
 	}
 }
 
-/// Default preferences when user has no saved preferences
 impl Default for PreferencesResponse {
 	fn default() -> Self {
 		Self {

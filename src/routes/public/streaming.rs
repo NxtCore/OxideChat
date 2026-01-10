@@ -1,7 +1,6 @@
 //! Streaming routes for AI responses.
 //!
 //! Server-Sent Events (SSE) endpoint for streaming AI chat completions.
-//! This endpoint saves the user message first, then streams the AI response.
 
 use crate::AppState;
 use crate::ai;
@@ -84,10 +83,8 @@ fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl
 /// 2. model_configs (user preferences)
 /// 3. models table (defaults)
 fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>, model: &crate::types::AiModel) -> Sampling {
-	// Parse sampling from model_config if available
 	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.clone()).ok());
 
-	// Helper macro to get field with priority
 	macro_rules! priority_field {
 		($field:ident) => {
 			request_sampling
@@ -100,7 +97,6 @@ fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_confi
 		temperature: priority_field!(temperature),
 		top_p: priority_field!(top_p),
 		top_k: priority_field!(top_k),
-		// For max_tokens, also fallback to model's max_tokens and model_config's max_output_tokens
 		max_tokens: request_sampling
 			.and_then(|s| s.max_tokens)
 			.or_else(|| config_sampling.as_ref().and_then(|s| s.max_tokens))
@@ -129,7 +125,6 @@ fn merge_reasoning_with_priority(
 	request_budget: Option<u32>,
 	model_config: Option<&ModelConfig>,
 ) -> Option<omniference::types::ReasoningConfig> {
-	// Try to get reasoning config from model_config extra_settings
 	let config_effort: Option<String> = model_config
 		.and_then(|mc| mc.extra_settings.get("reasoning_effort"))
 		.and_then(|v| v.as_str())
@@ -140,7 +135,6 @@ fn merge_reasoning_with_priority(
 		.and_then(|v| v.as_u64())
 		.map(|n| n as u32);
 
-	// Apply priority: request > config
 	let effort = request_effort.cloned().or(config_effort);
 	let budget = request_budget.or(config_budget);
 
@@ -155,19 +149,13 @@ fn merge_reasoning_with_priority(
 	}
 }
 
-/// Execute a tool by its name, looking it up from the database
-/// Supports both simple tool names and {tool}_{function} format for multi-function tools
 async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: &str, input: serde_json::Value) -> Result<crate::types::ToolExecutionResult, String> {
 	use crate::types::ToolSourceKind;
 
-	// Try to find the tool by progressively splitting on underscores from the end
-	// This handles cases like "websearch_crawl" -> tool="websearch", function="crawl"
-	// But also "my_tool_name_func" -> tool="my_tool_name", function="func"
 	let mut tool: Option<Tool> = None;
 	let mut function_name: Option<String> = None;
 	let mut function_id: Option<Uuid> = None;
 
-	// First try exact match (no function suffix)
 	tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true AND (is_public = true OR owner_id = $2)")
 		.bind(full_tool_name)
 		.bind(user_id)
@@ -175,9 +163,7 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 		.await
 		.map_err(|e| format!("Database error: {e}"))?;
 
-	// If not found, try splitting on underscore from the end
 	if tool.is_none() && full_tool_name.contains('_') {
-		// Find all underscore positions and try from the last one backwards
 		let underscores: Vec<_> = full_tool_name.match_indices('_').collect();
 		for (pos, _) in underscores.iter().rev() {
 			let potential_tool_name = &full_tool_name[..*pos];
@@ -200,7 +186,6 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 
 	let tool = tool.ok_or_else(|| format!("Tool '{}' not found", full_tool_name))?;
 
-	// If function name specified, look up the function to get its entrypoint
 	let function_entrypoint = if let Some(fn_name) = &function_name {
 		let func = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 AND name = $2")
 			.bind(tool.id)
@@ -215,7 +200,6 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 		None
 	};
 
-	// Get user settings for this tool, with fallback to default/anonymous settings
 	let settings = sqlx::query_as::<_, UserToolSettings>(
 		"SELECT * FROM user_tool_settings 
 		WHERE tool_id = $1 
@@ -238,11 +222,8 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 		function_name: function_name.map(|s| s.to_string()),
 	};
 
-	// Execute based on source kind
 	match tool.source_kind {
 		ToolSourceKind::Builtin => {
-			// For builtins, use the builtin_id from source_config
-			// Function entrypoint can override which builtin function to call (future use)
 			let builtin_id = tool
 				.source_config
 				.get("builtin_id")
@@ -258,10 +239,8 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 			})
 		}
 		ToolSourceKind::Http => {
-			// For HTTP tools, function entrypoint can specify a different URL path
 			let base_url = tool.source_config.get("url").and_then(|v| v.as_str()).unwrap_or("");
 			let url = if let Some(entrypoint) = &function_entrypoint {
-				// If function has an entrypoint, treat it as a URL path to append
 				if entrypoint.starts_with("http") {
 					entrypoint.clone()
 				} else {
@@ -296,15 +275,7 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 	}
 }
 
-/// POST /api/v1/chats/:chat_id/stream
-///
-/// Send a message and stream the AI response.
-/// This is a unified endpoint that:
-/// 1. Saves the user message to the database
-/// 2. Streams the AI response via SSE
-/// 3. Saves the assistant message upon completion
 pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cookies, Path(chat_id): Path<Uuid>, Json(req): Json<StreamRequest>) -> impl IntoResponse {
-	// Authenticate user
 	eprint!("[STREAM] Starting stream completion");
 
 	let user = match get_current_user(&state.db, &cookies).await {
@@ -312,7 +283,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		None => return error_stream("not_authenticated", "Authentication required").into_response(),
 	};
 
-	// Verify chat belongs to user
 	let chat = sqlx::query_as::<_, crate::types::Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
 		.bind(chat_id)
 		.bind(user.id)
@@ -346,7 +316,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	eprintln!("[STREAM] Model verified");
 
-	// Fetch user's model configuration (if any) for priority-based settings
 	let model_config = sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE owner_id = $1 AND stable_key = $2")
 		.bind(user.id)
 		.bind(&req.model_key)
@@ -357,7 +326,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	eprintln!("[STREAM] Model config: {:?}", model_config.as_ref().map(|mc| &mc.name));
 
-	// Save the user message first
 	let reasoning_details = crate::types::ReasoningDetails {
 		effort: req.reasoning_effort.clone(),
 		budget_tokens: req.reasoning_budget_tokens.map(|b| b as i32),
@@ -391,7 +359,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	eprintln!("[STREAM] User message saved");
 
-	// Fetch all chat messages for context
 	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 ORDER BY created_at ASC")
 		.bind(chat_id)
 		.fetch_all(&state.db)
@@ -407,11 +374,9 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	eprintln!("[STREAM] Messages fetched");
 
-	// Get the AI engine and model
 	let engine = ai::get();
 	let engine_read = engine.read().await;
 
-	// Get model by stable key
 	let omni_model = match engine_read.get_model(&req.model_key).await {
 		Some(m) => m,
 		None => {
@@ -434,7 +399,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	eprintln!("[STREAM] Provider verified");
 
-	// Build chat messages for omniference
 	let omni_messages: Vec<OmniMessage> = messages
 		.iter()
 		.filter(|m| m.role == "user" || m.role == "assistant")
@@ -481,7 +445,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 				eprintln!("[STREAM] Found {} tools from DB", tools.len());
 				let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
 
-				// Fetch functions for all tools
 				let functions: Vec<ToolFunction> = if tool_ids.is_empty() {
 					vec![]
 				} else {
@@ -492,13 +455,11 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 						.unwrap_or_default()
 				};
 
-				// Group functions by tool_id
 				let mut functions_by_tool: HashMap<Uuid, Vec<ToolFunction>> = HashMap::new();
 				for f in functions {
 					functions_by_tool.entry(f.tool_id).or_default().push(f);
 				}
 
-				// Expand each tool to its function specs
 				let mut tool_specs: Vec<ToolSpec> = vec![];
 				for tool in tools {
 					let funcs = functions_by_tool.get(&tool.id).map(|v| v.as_slice()).unwrap_or(&[]);
@@ -516,20 +477,16 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	eprintln!("[STREAM] Chat request: {:?}", ir);
 
-	// Clone what we need for the stream closure (before moving into it)
 	let omni_messages_for_stream = ir.messages.clone();
 	let ir_for_stream = ir.clone();
 
-	// Verify we can start a chat (quick validation)
 	let db = state.db.clone();
 	let start_time = Instant::now();
 	let reasoning_effort = req.reasoning_effort.clone();
 	let reasoning_budget_tokens = req.reasoning_budget_tokens;
 
-	// Create the SSE stream
 	let sse_stream = async_stream::stream! {
 	eprintln!("[STREAM] Stream generator started");
-	// First, emit the user message saved event
 	let user_message_response: ChatMessageResponse = user_message.into();
 	yield Ok::<_, Infallible>(Event::default().data(
 		serde_json::to_string(&StreamData::UserMessageSaved { message: user_message_response }).unwrap_or_default()
@@ -545,15 +502,12 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 	let mut reasoning_start: Option<Instant> = None;
 	let mut reasoning_latency_ms: Option<i32> = None;
 
-	// Agentic loop state
 	let mut current_messages = omni_messages_for_stream;
 	let mut iteration = 0;
 	const MAX_ITERATIONS: usize = 10;
 
-	// Track all tool executions across iterations for batch insert after message save
 	let mut all_tool_executions: Vec<(String, String, serde_json::Value, serde_json::Value, Option<String>, i32, Option<Uuid>, Option<Uuid>)> = Vec::new();
 
-	// Clone what we need for the agentic loop
 	let engine = ai::get();
 	let tool_specs = ir_for_stream.tools.clone();
 	let tool_choice = ir_for_stream.tool_choice.clone();
@@ -574,12 +528,10 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 				eprintln!("[STREAM] Agentic loop iteration {}", iteration);
 
-				// Build IR for this iteration
 				base_ir.messages = current_messages.clone();
 				base_ir.tools = tool_specs.clone();
 				base_ir.tool_choice = tool_choice.clone();
 
-				// Get fresh engine read lock
 				let engine_read = engine.read().await;
 				let stream_result = engine_read.chat(base_ir.clone()).await;
 				drop(engine_read);
@@ -610,7 +562,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 					eprintln!("[STREAM] Event #{}: {:?}", event_count, &event);
 					match event {
 						StreamEvent::TextDelta { content } => {
-							// If we were tracking reasoning time, stop it now
 							if let Some(start) = reasoning_start.take() {
 								reasoning_latency_ms = Some(start.elapsed().as_millis() as i32);
 							}
@@ -653,12 +604,10 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 								serde_json::to_string(&StreamData::ToolCallEnd { id: id.clone() }).unwrap_or_default()
 							));
 
-							// Execute the tool
 							if let Some((tool_name, args_str)) = pending_tool_calls.remove(&id) {
 								let args: serde_json::Value = serde_json::from_str(&args_str).unwrap_or_default();
 								eprintln!("[STREAM] Executing tool: {} with args: {:?}", tool_name, args);
 
-								// Time the execution
 								let exec_start = Instant::now();
 								let tool_result = execute_tool_by_name(&db, user.id, &tool_name, args.clone()).await;
 								let execution_ms = exec_start.elapsed().as_millis() as i32;
@@ -668,7 +617,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 									Err(e) => (serde_json::json!({"error": e}), Some(e), None, None),
 								};
 
-								// Store for later batch insert after message is saved
 								tool_results.push((id.clone(), tool_name.clone(), args, output.clone(), error.clone(), execution_ms, tool_id, tool_function));
 
 								yield Ok::<_, Infallible>(Event::default().data(
@@ -688,7 +636,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 							));
 						}
 						StreamEvent::OpenAIMetadata { completion_tokens_details, .. } => {
-							// Extract reasoning tokens from OpenAI metadata
 							if let Some(details) = completion_tokens_details {
 								if details.reasoning_tokens > 0 {
 									reasoning_tokens += details.reasoning_tokens;
@@ -702,9 +649,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 						}
 						StreamEvent::Done => {
 							eprintln!("[STREAM] Stream done, tool_results: {}", tool_results.len());
-							// Check if we need to continue (have tool results to send back)
 							if tool_results.is_empty() {
-								// No tool calls, we're done - save and exit
 								let latency_ms = start_time.elapsed().as_millis() as i32;
 
 								let usage_details = crate::types::UsageDetails {
@@ -725,7 +670,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 								let cost_details = crate::types::CostDetails::default();
 
-								// Save the assistant message
 								let message = sqlx::query_as::<_, Message>(
 									r#"
 										INSERT INTO messages (
@@ -746,7 +690,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 								.fetch_one(&db)
 								.await;
 
-								// Update chat updated_at
 								let _ = sqlx::query("UPDATE chats SET updated_at = NOW() WHERE id = $1")
 									.bind(chat_id)
 									.execute(&db)
@@ -754,7 +697,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 								match message {
 									Ok(msg) => {
-									// Batch insert all tool executions with message_id
 									if !all_tool_executions.is_empty() {
 										for (call_id, _tool_name, args, output, error, exec_ms, tool_id, function_id) in &all_tool_executions {
 											let _ = sqlx::query(
@@ -791,10 +733,8 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 								}
 								break 'agentic_loop;
 							} else {
-								// We have tool results - add them to context and continue
 								eprintln!("[STREAM] Continuing agentic loop with {} tool results", tool_results.len());
 
-								// Add assistant message with tool calls to context
 								if !iteration_content.is_empty() {
 									current_messages.push(OmniMessage {
 										role: Role::Assistant,
@@ -803,7 +743,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 									});
 								}
 
-								// Add tool results as tool role messages and collect for batch insert
 								for (call_id, tool_name, args, output, error, exec_ms, tool_id, function_id) in tool_results.drain(..) {
 									let result_text = if let Some(ref err) = error {
 										format!("Error: {}", err)
@@ -817,11 +756,9 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 										name: Some(format!("{}:{}", tool_name, call_id)),
 									});
 
-									// Collect for batch insert after final message save
 									all_tool_executions.push((call_id, tool_name, args, output, error, exec_ms, tool_id, function_id));
 								}
 
-								// Continue to next iteration
 								continue 'agentic_loop;
 							}
 						}
