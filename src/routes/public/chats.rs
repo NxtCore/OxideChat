@@ -4,7 +4,9 @@
 
 use crate::AppState;
 use crate::routes::public::auth::get_current_user;
-use crate::types::{Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, Message, UpdateChatRequest};
+use crate::types::{
+	Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, Message, ToolExecutionResponse, UpdateChatRequest,
+};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -12,6 +14,7 @@ use axum::{
 	http::StatusCode,
 	response::IntoResponse,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -48,7 +51,6 @@ pub async fn list_chats(State(state): State<Arc<AppState>>, cookies: Cookies, Qu
 	let limit = params.limit.unwrap_or(50).min(100);
 	let offset = params.offset.unwrap_or(0);
 
-	// Build query based on filters
 	let chats = if let Some(workspace_id) = params.workspace_id {
 		if params.include_archived {
 			sqlx::query_as::<_, Chat>(
@@ -141,7 +143,6 @@ pub async fn create_chat(State(state): State<Arc<AppState>>, cookies: Cookies, J
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	// Validate workspace belongs to user if provided
 	if let Some(workspace_id) = req.workspace_id {
 		let workspace_exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = $1 AND user_id = $2)")
 			.bind(workspace_id)
@@ -211,7 +212,6 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 		}
 	};
 
-	// Get messages
 	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 ORDER BY created_at ASC")
 		.bind(id)
 		.fetch_all(&state.db)
@@ -226,7 +226,82 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 					return ErrorBuilder::new(ErrorCode::InternalError).build();
 				}
 			};
-			let message_responses: Vec<ChatMessageResponse> = messages.into_iter().map(Into::into).collect();
+
+			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+
+			let tool_executions: Vec<(
+				Uuid,
+				Option<Uuid>,
+				String,
+				serde_json::Value,
+				Option<serde_json::Value>,
+				Option<String>,
+				Option<i32>,
+				Option<Uuid>,
+				Option<Uuid>,
+				Option<String>,
+			)> = if message_ids.is_empty() {
+				vec![]
+			} else {
+				sqlx::query_as::<
+					_,
+					(
+						Uuid,
+						Option<Uuid>,
+						String,
+						serde_json::Value,
+						Option<serde_json::Value>,
+						Option<String>,
+						Option<i32>,
+						Option<Uuid>,
+						Option<Uuid>,
+						Option<String>,
+					),
+				>(
+					r#"
+					SELECT te.id, te.message_id, te.tool_call_id, te.input_args, te.output, te.error, te.execution_ms, te.tool_id, te.tool_function, t.name
+					FROM tool_executions te
+					LEFT JOIN tools t ON te.tool_id = t.id
+					WHERE te.message_id = ANY($1)
+					ORDER BY te.created_at ASC
+					"#,
+				)
+				.bind(&message_ids)
+				.fetch_all(&state.db)
+				.await
+				.unwrap_or_default()
+			};
+
+			let mut executions_by_message: HashMap<Uuid, Vec<ToolExecutionResponse>> = HashMap::new();
+			for (id, message_id, tool_call_id, input_args, output, error, execution_ms, tool_id, tool_function, tool_name) in tool_executions {
+				if let Some(msg_id) = message_id {
+					executions_by_message.entry(msg_id).or_default().push(ToolExecutionResponse {
+						tool_call_id,
+						tool_name: tool_name.unwrap_or_else(|| format!("tool_{}", id)),
+						input_args,
+						output,
+						error,
+						execution_ms,
+						tool_id,
+						tool_function,
+					});
+				}
+			}
+
+			let message_responses: Vec<ChatMessageResponse> = messages
+				.into_iter()
+				.map(|m| {
+					let msg_id = m.id;
+					let mut response: ChatMessageResponse = m.into();
+					if let Some(tools) = executions_by_message.remove(&msg_id) {
+						if !tools.is_empty() {
+							response.tool_calls = Some(tools);
+						}
+					}
+					response
+				})
+				.collect();
+
 			let response = ChatWithMessagesResponse {
 				chat: chat_response,
 				messages: message_responses,
@@ -265,7 +340,6 @@ pub async fn update_chat(State(state): State<Arc<AppState>>, cookies: Cookies, P
 		}
 	};
 
-	// Validate new workspace if provided
 	if let Some(workspace_id) = req.workspace_id {
 		let workspace_exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = $1 AND user_id = $2)")
 			.bind(workspace_id)
@@ -283,7 +357,6 @@ pub async fn update_chat(State(state): State<Arc<AppState>>, cookies: Cookies, P
 		}
 	}
 
-	// Apply updates
 	let title = req.title.or(existing.title);
 	let workspace_id = req.workspace_id.or(existing.workspace_id);
 	let is_pinned = req.is_pinned.unwrap_or(existing.is_pinned);

@@ -4,7 +4,7 @@
 
 use crate::AppState;
 use crate::routes::public::auth::get_current_user;
-use crate::types::{ChatMessageResponse, Message, MessageListParams, SendMessageRequest};
+use crate::types::{ChatMessageResponse, Message, MessageListParams, SendMessageRequest, ToolExecutionResponse};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -30,7 +30,6 @@ pub async fn list_messages(
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	// Verify chat belongs to user
 	let chat_exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM chats WHERE id = $1 AND user_id = $2)")
 		.bind(chat_id)
 		.bind(user.id)
@@ -46,7 +45,6 @@ pub async fn list_messages(
 		_ => {}
 	}
 
-	// Build query based on cursor
 	let messages = if let Some(before_id) = params.before {
 		sqlx::query_as::<_, Message>(
 			r#"
@@ -84,11 +82,68 @@ pub async fn list_messages(
 		.await
 	};
 
-	
-
 	match messages {
 		Ok(messages) => {
-			let responses: Vec<ChatMessageResponse> = messages.into_iter().map(Into::into).collect();
+			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+
+			let tool_executions = if message_ids.is_empty() {
+				vec![]
+			} else {
+				sqlx::query_as::<
+					_,
+					(
+						Uuid,
+						Uuid,
+						String,
+						serde_json::Value,
+						Option<serde_json::Value>,
+						Option<String>,
+						Option<i32>,
+						Option<Uuid>,
+						Option<Uuid>,
+						Option<String>,
+					),
+				>(
+					r#"
+					SELECT te.id, te.message_id, te.tool_call_id, te.input_args, te.output, te.error, te.execution_ms, te.tool_id, te.tool_function, t.name
+					FROM tool_executions te
+					LEFT JOIN tools t ON te.tool_id = t.id
+					WHERE te.message_id = ANY($1)
+					ORDER BY te.created_at ASC
+					"#,
+				)
+				.bind(&message_ids)
+				.fetch_all(&state.db)
+				.await
+				.unwrap_or_default()
+			};
+
+			let mut executions_by_message: std::collections::HashMap<Uuid, Vec<ToolExecutionResponse>> = std::collections::HashMap::new();
+			for (id, message_id, tool_call_id, input_args, output, error, execution_ms, tool_id, tool_function, tool_name) in tool_executions {
+				let response = ToolExecutionResponse {
+					tool_call_id,
+					tool_name: tool_name.unwrap_or_else(|| format!("tool_{}", id)),
+					input_args,
+					output,
+					error,
+					execution_ms,
+					tool_id,
+					tool_function,
+				};
+				executions_by_message.entry(message_id).or_default().push(response);
+			}
+
+			let responses: Vec<ChatMessageResponse> = messages
+				.into_iter()
+				.map(|m| {
+					let msg_id = m.id;
+					let response: ChatMessageResponse = m.into();
+					let mut response = response;
+					response.tool_calls = executions_by_message.remove(&msg_id);
+					response
+				})
+				.collect();
+
 			ResponseBuilder::new(ResponseBody::Json(responses)).build()
 		}
 		Err(e) => {
@@ -108,7 +163,6 @@ pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, 
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	// Verify chat belongs to user and get it
 	let chat = sqlx::query_as::<_, crate::types::Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
 		.bind(chat_id)
 		.bind(user.id)
@@ -124,7 +178,6 @@ pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, 
 		}
 	};
 
-	// Save the user message
 	let reasoning_details = crate::types::ReasoningDetails {
 		effort: req.reasoning_effort,
 		budget_tokens: req.reasoning_budget_tokens,
@@ -148,7 +201,6 @@ pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, 
 	.fetch_one(&state.db)
 	.await;
 
-	// Update chat's updated_at
 	let _ = sqlx::query("UPDATE chats SET updated_at = NOW() WHERE id = $1")
 		.bind(chat_id)
 		.execute(&state.db)

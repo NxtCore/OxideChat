@@ -218,7 +218,7 @@ export const useMainStore = defineStore('main', {
 				console.error('Invalid toast:', toast);
 				return;
 			}
-			$toast.dismiss(toast.id);
+			$toast.dismiss(toast);
 		},
 	},
 });

@@ -9,21 +9,19 @@
 		<div class="flex max-w-[80%] flex-col gap-1">
 			<span class="text-xs text-muted-foreground">{{ store.getTranslation('chat.streaming_message.assistant') }}</span>
 
-			<!-- Reasoning section (if present) -->
 			<div
 				v-if="reasoningContent"
 				class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none"
 				@click="showReasoning = !showReasoning"
 			>
 				<Brain class="h-3.5 w-3.5 fill-current" />
-				<span class="text-[10px] font-bold uppercase tracking-widest">Reasoning</span>
+				<span class="text-[10px] font-bold uppercase tracking-widest">{{ store.getTranslation('chat.message_item.reasoning') }}</span>
 				<ChevronDown class="h-3 w-3 transition-transform" :class="showReasoning ? 'rotate-180' : ''" />
 			</div>
 
 			<Transition name="expand">
 				<div v-if="showReasoning && reasoningContent" class="w-full max-w-3xl rounded-xl bg-muted/50 border p-4">
 					<div class="prose prose-sm dark:prose-invert max-w-none opacity-80" v-html="renderedReasoning" @click="handleCodeBlockClick" />
-					<!-- Typing indicator for reasoning -->
 					<div v-if="!reasoningContent" class="flex items-center gap-1 py-1">
 						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" />
 						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" style="animation-delay: 0.15s" />
@@ -32,29 +30,54 @@
 				</div>
 			</Transition>
 
+			<div v-if="Object.keys(toolCalls).length > 0" class="flex flex-col gap-2 mt-2">
+				<ToolExecutionDisplay
+					v-for="(tool, id) in toolCalls"
+					:key="id"
+					:id="String(id)"
+					:name="tool.name"
+					:args="tool.args"
+					:output="tool.output"
+					:error="tool.error"
+					:is-executing="tool.isExecuting"
+				/>
+			</div>
+
 			<div class="relative rounded-2xl rounded-bl-md bg-muted px-4 py-3 text-foreground">
-				<!-- Typing indicator or content -->
-				<div v-if="!content" class="flex items-center gap-1">
+				<div v-if="!content && Object.keys(toolCalls).length === 0" class="flex items-center gap-1">
 					<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" />
 					<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.15s" />
 					<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.3s" />
 				</div>
 
-				<!-- Content with animation -->
-				<div v-else class="prose prose-sm dark:prose-invert max-w-none" :class="animationClass" v-html="renderedContent" @click="handleCodeBlockClick" />
+				<div
+					v-else-if="content"
+					class="prose prose-sm dark:prose-invert max-w-none"
+					:class="animationClass"
+					v-html="renderedContent"
+					@click="handleCodeBlockClick"
+				/>
 			</div>
 		</div>
 	</div>
 
-	<!-- Preview Modal -->
 	<CodePreview v-if="previewData" :code="previewData.code" :language="previewData.language" :is-open="!!previewData" @close="closePreview" />
 </template>
 
 <script setup lang="ts">
 import {Bot, Brain, ChevronDown} from 'lucide-vue-next';
 import CodePreview from './CodePreview.vue';
+import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
 import {useMarkdown, extractCodeForPreview, ICON_COPY, ICON_CHECK} from '~/composables/useMarkdown';
 import {useMainStore} from '~/stores';
+
+interface ToolCallState {
+	name: string;
+	args: string;
+	output?: any;
+	error?: string;
+	isExecuting: boolean;
+}
 
 const store = useMainStore();
 
@@ -66,6 +89,7 @@ const content = ref('');
 const reasoningContent = ref('');
 const showReasoning = ref(false);
 const previewData = ref<{code: string; language: string} | null>(null);
+const toolCalls = ref<Record<string, ToolCallState>>({});
 
 const {renderStreaming} = useMarkdown();
 
@@ -90,7 +114,6 @@ const renderedReasoning = computed(() => {
 	return renderStreaming(reasoningContent.value);
 });
 
-// Auto-expand reasoning when it starts arriving
 watch(
 	() => reasoningContent.value,
 	newVal => {
@@ -101,11 +124,9 @@ watch(
 	{immediate: true}
 );
 
-// Handle clicks on code blocks (copy & preview buttons)
 function handleCodeBlockClick(event: MouseEvent) {
 	const target = event.target as HTMLElement;
 
-	// Handle copy button
 	if (target.classList.contains('code-block-copy-btn')) {
 		const wrapper = target.closest('.code-block-wrapper');
 		const codeEl = wrapper?.querySelector('code');
@@ -120,7 +141,6 @@ function handleCodeBlockClick(event: MouseEvent) {
 		}
 	}
 
-	// Handle preview button
 	if (target.classList.contains('code-block-preview-btn')) {
 		const result = extractCodeForPreview(target);
 		if (result) {
@@ -133,7 +153,6 @@ function closePreview() {
 	previewData.value = null;
 }
 
-// Expose methods for parent to update content
 defineExpose({
 	setContent: (text: string) => {
 		content.value = text;
@@ -149,6 +168,31 @@ defineExpose({
 	},
 	getContent: () => content.value,
 	getReasoningContent: () => reasoningContent.value,
+	startToolCall: (id: string, name: string) => {
+		toolCalls.value[id] = {
+			name,
+			args: '',
+			isExecuting: false,
+		};
+	},
+	appendToolCallArgs: (id: string, argsDelta: string) => {
+		if (toolCalls.value[id]) {
+			toolCalls.value[id].args += argsDelta;
+		}
+	},
+	endToolCall: (id: string) => {
+		if (toolCalls.value[id]) {
+			toolCalls.value[id].isExecuting = true;
+		}
+	},
+	setToolResult: (id: string, output: any, error?: string) => {
+		if (toolCalls.value[id]) {
+			toolCalls.value[id].output = output;
+			toolCalls.value[id].error = error;
+			toolCalls.value[id].isExecuting = false;
+		}
+	},
+	getToolCalls: () => toolCalls.value,
 });
 </script>
 

@@ -16,7 +16,7 @@
 				@click="showReasoning = !showReasoning"
 			>
 				<Brain class="h-3.5 w-3.5 fill-current" />
-				<span class="text-[10px] font-bold uppercase tracking-widest">Reasoning</span>
+				<span class="text-[10px] font-bold uppercase tracking-widest">{{ store.getTranslation('chat.message_item.reasoning') }}</span>
 				<ChevronDown class="h-3 w-3 transition-transform" :class="showReasoning ? 'rotate-180' : ''" />
 			</div>
 
@@ -30,6 +30,20 @@
 					</div>
 				</div>
 			</Transition>
+
+			<div v-if="!isUser && message.toolCalls && Object.keys(message.toolCalls).length > 0" class="flex flex-col gap-2 mt-2 w-full max-w-3xl">
+				<ToolExecutionDisplay
+					v-for="(tool, id) in message.toolCalls"
+					:key="id"
+					:id="String(id)"
+					:name="tool.name"
+					:args="tool.args"
+					:output="tool.output"
+					:error="tool.error"
+					:is-executing="tool.isExecuting"
+				/>
+			</div>
+
 			<div
 				v-if="message.content || !isStreaming"
 				class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl"
@@ -64,6 +78,7 @@
 import {User, Bot, Brain, ChevronDown} from 'lucide-vue-next';
 import MessageActions from './MessageActions.vue';
 import CodePreview from './CodePreview.vue';
+import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useIconsStore} from '~/stores/icons';
@@ -120,11 +135,9 @@ const providerIcon = computed(() => {
 watch(
 	[() => props.message.reasoning_content, () => props.message.content],
 	([, newContent]) => {
-		// Auto-open reasoning when streaming reasoning with no content yet
 		if (props.message.reasoning_content && isStreaming.value && !props.message.content) {
 			showReasoning.value = true;
 		}
-		// Collapse reasoning when main content starts (even if still streaming)
 		if (newContent && showReasoning.value) {
 			showReasoning.value = false;
 		}

@@ -1,0 +1,60 @@
+# =============================================================================
+# Docker Build Ignore File
+# Exclude files that aren't needed for the build to speed up context transfer
+# =============================================================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Rust build artifacts (we build fresh in container)
+target/
+**/*.rs.bk
+
+# Frontend build artifacts (we build fresh in container)
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/dist/
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Testing
+*.test
+*.spec
+coverage/
+
+# Misc
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Development configs
+.claude/
+.agent/
+clippy.toml
+rustfmt.toml
+.prettierrc

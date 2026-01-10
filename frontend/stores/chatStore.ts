@@ -122,7 +122,7 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		isReasoningRequired(): boolean {
-			return this.hasReasoningCapability(null) && !this.hasNoneReasoningOption;
+			return this.hasReasoningCapability(null) && this.availableReasoningEfforts.length < 2;
 		},
 
 		lowestReasoningEffort(): string | null {
@@ -256,7 +256,26 @@ export const useChatStore = defineStore('chat', {
 				const data = await $customFetch(`/api/v1/chats/${id}`);
 				const chatWithMessages = data as ChatWithMessages;
 				this.activeChat = chatWithMessages.chat;
-				this.messages = chatWithMessages.messages;
+				this.messages = chatWithMessages.messages.map(msg => {
+					const rawMsg = msg as any;
+					if (rawMsg.tool_calls && Array.isArray(rawMsg.tool_calls)) {
+						const toolCallsRecord: Record<string, any> = {};
+						for (const tc of rawMsg.tool_calls) {
+							toolCallsRecord[tc.tool_call_id] = {
+								name: tc.tool_name || '',
+								args: typeof tc.input_args === 'string' ? tc.input_args : JSON.stringify(tc.input_args),
+								output: tc.output,
+								error: tc.error,
+								isExecuting: false,
+							};
+						}
+						return {...msg, toolCalls: toolCallsRecord};
+					}
+					return msg;
+				});
+				const lastAssistantMessage = this.messages.findLast(m => m.role === 'assistant');
+				if (lastAssistantMessage)
+					this.setContextTokens((lastAssistantMessage.usage_details?.input_tokens || 0) + (lastAssistantMessage.usage_details?.output_tokens || 0));
 				return chatWithMessages;
 			} catch (e) {
 				console.error('Failed to fetch chat:', e);
@@ -320,45 +339,54 @@ export const useChatStore = defineStore('chat', {
 			const userMessageId = `user-${Date.now()}`;
 			const userMessage: ChatMessage = {
 				id: userMessageId,
-				client_id: userMessageId,
 				role: 'user',
 				content,
 				reasoning_content: null,
 				model_id: this.selectedModel.model_id,
-				reasoning_effort: this.reasoningEffort,
-				reasoning_budget_tokens: this.reasoningBudget,
-				input_tokens: null,
-				output_tokens: null,
-				reasoning_tokens: null,
-				input_cost_usd: null,
-				output_cost_usd: null,
-				reasoning_cost_usd: null,
-				total_cost_usd: null,
-				latency_ms: null,
-				reasoning_latency_ms: null,
+				cost_details: {
+					input: null,
+					output: null,
+					reasoning: null,
+				},
+				usage_details: {
+					input_tokens: null,
+					output_tokens: null,
+					reasoning_tokens: null,
+					latency_ms: null,
+					reasoning_latency_ms: null,
+				},
+				reasoning_details: {
+					effort: this.reasoningEffort,
+					budget_tokens: this.reasoningBudget,
+				},
+				tool_calls: [],
 				created_at: new Date().toISOString(),
 			};
 			this.messages.push(userMessage);
-
 			const streamingMessageId = `streaming-${Date.now()}`;
 			const streamingMessage: ChatMessage = {
 				id: streamingMessageId,
-				client_id: streamingMessageId,
 				role: 'assistant',
 				content: '',
 				reasoning_content: null,
 				model_id: this.selectedModel.model_id,
-				reasoning_effort: this.reasoningEffort,
-				reasoning_budget_tokens: this.reasoningBudget,
-				input_tokens: null,
-				output_tokens: null,
-				reasoning_tokens: null,
-				input_cost_usd: null,
-				output_cost_usd: null,
-				reasoning_cost_usd: null,
-				total_cost_usd: null,
-				latency_ms: null,
-				reasoning_latency_ms: null,
+				cost_details: {
+					input: null,
+					output: null,
+					reasoning: null,
+				},
+				usage_details: {
+					input_tokens: null,
+					output_tokens: null,
+					reasoning_tokens: null,
+					latency_ms: null,
+					reasoning_latency_ms: null,
+				},
+				reasoning_details: {
+					effort: this.reasoningEffort,
+					budget_tokens: this.reasoningBudget,
+				},
+				tool_calls: [],
 				created_at: new Date().toISOString(),
 			};
 			this.messages.push(streamingMessage);
@@ -419,9 +447,7 @@ export const useChatStore = defineStore('chat', {
 										if (userMsgIndex !== -1) {
 											const userMsg = this.messages[userMsgIndex];
 											if (userMsg) {
-												const clientId = userMsg.client_id;
 												Object.assign(userMsg, data.message);
-												userMsg.client_id = clientId;
 											}
 										}
 										break;
@@ -434,19 +460,39 @@ export const useChatStore = defineStore('chat', {
 											msg.reasoning_content += data.content;
 										}
 										break;
+									case 'tool_call_start':
+										if (msg) {
+											const toolCall = {
+												tool_call_id: data.id,
+												tool_name: data.name,
+												input_args: '',
+											};
+											msg.tool_calls.push(toolCall as any);
+										}
+										break;
+									case 'tool_call_delta': {
+										const toolCall = msg?.tool_calls?.find(tc => tc.tool_call_id === data.id);
+										if (toolCall && typeof toolCall.input_args === 'string') {
+											toolCall.input_args += data.args_delta;
+										}
+										break;
+									}
+									case 'tool_call_end': {
+										break;
+									}
+									case 'tool_result': {
+										break;
+									}
 									case 'tokens':
 										if (msg) {
-											msg.input_tokens = data.input;
-											msg.output_tokens = data.output;
-											msg.reasoning_tokens = data.reasoning || null;
+											msg.usage_details.input_tokens = data.input;
+											msg.usage_details.output_tokens = data.output;
 										}
 										this.contextTokens = data.input + data.output;
 										break;
 									case 'done':
 										if (msg) {
-											const clientId = msg.client_id;
 											Object.assign(msg, data.message);
-											msg.client_id = clientId;
 										}
 										this.isStreaming = false;
 

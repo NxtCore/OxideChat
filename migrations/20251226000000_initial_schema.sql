@@ -320,6 +320,121 @@ INSERT INTO model_access (role_id, can_use, can_configure)
 SELECT id, true, true FROM roles WHERE name = 'admin'
 ON CONFLICT DO NOTHING;
 
+-- ============= Tool Calling Infrastructure =============
+
+-- Tool source types
+CREATE TYPE tool_source_kind AS ENUM (
+    'BUILTIN',       -- Built-in tools (Exa search, etc.)
+    'WASM',          -- Extism WASM plugins  
+    'MCP',           -- MCP server connection
+    'HTTP'           -- HTTP endpoint tools
+);
+
+-- WASM blobs storage for compiled plugins
+CREATE TABLE IF NOT EXISTS wasm_blobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    original_filename VARCHAR(255),
+    compiled_from VARCHAR(50),  -- 'rust', 'javascript', 'wasm' (direct upload)
+    blob BYTEA NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    sha256_hash VARCHAR(64) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Tools table - defines available tools
+CREATE TABLE IF NOT EXISTS tools (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id UUID REFERENCES users(id) ON DELETE CASCADE,  -- NULL = system tool
+    
+    name VARCHAR(100) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    icon VARCHAR(500),
+    
+    source_kind tool_source_kind NOT NULL,
+    source_config JSONB NOT NULL DEFAULT '{}',  -- Kind-specific config
+    
+    -- JSON Schema for tool parameters (passed to LLM)
+    input_schema JSONB NOT NULL,
+    
+    -- Custom settings schema (API keys, user config) - NOT passed to LLM
+    settings_schema JSONB DEFAULT '{}',
+    
+    -- Permissions
+    is_enabled BOOLEAN DEFAULT true,
+    is_public BOOLEAN DEFAULT false,
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(owner_id, name)
+);
+
+-- User-provided settings for tools (API keys, etc.)
+CREATE TABLE IF NOT EXISTS user_tool_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+    settings JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Partial unique index for system-wide settings (user_id IS NULL)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tool_settings_tool_null_user ON user_tool_settings(tool_id)
+WHERE user_id IS NULL;
+
+-- Partial unique index for per-user settings (user_id IS NOT NULL)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tool_settings_user_tool_not_null ON user_tool_settings(user_id, tool_id)
+WHERE user_id IS NOT NULL;
+
+-- MCP Servers - for MCP tool sources (supports stdio and SSE transports)
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    
+    name VARCHAR(100) NOT NULL,
+    transport VARCHAR(50) NOT NULL,  -- 'stdio' or 'sse'
+    connection_config JSONB NOT NULL,  -- {command, args} for stdio, {url, headers} for SSE
+    
+    is_enabled BOOLEAN DEFAULT true,
+    last_health_check TIMESTAMPTZ,
+    health_status VARCHAR(50),
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(owner_id, name)
+);
+
+-- Tool executions - audit log for tool calls
+CREATE TABLE IF NOT EXISTS tool_executions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+    tool_id UUID REFERENCES tools(id) ON DELETE SET NULL,
+    tool_function UUID REFERENCES tool_functions(id) ON DELETE SET NULL,
+    
+    tool_call_id VARCHAR(255) NOT NULL,  -- From LLM
+    input_args JSONB NOT NULL,
+    output JSONB,
+    error TEXT,
+    
+    execution_ms INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Create tool_functions table
+CREATE TABLE IF NOT EXISTS tool_functions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    input_schema JSONB NOT NULL,
+    entrypoint VARCHAR(255),               -- Optional override for WASM/HTTP routing
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(tool_id, name)
+);
+
 
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_i18n_translations_language ON i18n_translations(language);
@@ -368,6 +483,25 @@ CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chats_pinned ON chats(user_id, is_pinned) WHERE is_pinned = true;
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+
+-- Tool indexes
+CREATE INDEX IF NOT EXISTS idx_wasm_blobs_owner ON wasm_blobs(owner_id);
+CREATE INDEX IF NOT EXISTS idx_wasm_blobs_hash ON wasm_blobs(sha256_hash);
+CREATE INDEX IF NOT EXISTS idx_tools_owner ON tools(owner_id);
+CREATE INDEX IF NOT EXISTS idx_tools_source ON tools(source_kind);
+CREATE INDEX IF NOT EXISTS idx_tools_enabled ON tools(is_enabled) WHERE is_enabled = true;
+CREATE INDEX IF NOT EXISTS idx_tools_public ON tools(is_public) WHERE is_public = true;
+CREATE INDEX IF NOT EXISTS idx_user_tool_settings_user ON user_tool_settings(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_tool_settings_tool ON user_tool_settings(tool_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_owner ON mcp_servers(owner_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(is_enabled) WHERE is_enabled = true;
+CREATE INDEX IF NOT EXISTS idx_tool_executions_message ON tool_executions(message_id);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_tool ON tool_executions(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_created ON tool_executions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_function ON tool_executions(tool_function);
+CREATE INDEX IF NOT EXISTS idx_tool_functions_tool ON tool_functions(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_functions_name ON tool_functions(tool_id, name);
+
 
 --- Translations
 INSERT INTO i18n_translations (language, key_path, value) VALUES
@@ -760,9 +894,9 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.empty_state.greeting_evening', 'Good evening'),
     ('en', 'chat.empty_state.desc_1', 'Ask me anything about code, math, or creative writing.'),
     ('en', 'chat.empty_state.desc_2', 'I can help you brainstorm, analyze data, or write content.'),
-    ('en', 'chat.empty_state.desc_3', "Need help with a project? Just describe what you're working on."),
-    ('en', 'chat.empty_state.desc_4', "I'm here to assist with research, explanations, or problem-solving."),
-    ('en', 'chat.empty_state.desc_5', "Start a conversation and let's explore ideas together."),
+    ('en', 'chat.empty_state.desc_3', 'Need help with a project? Just describe what you''re working on.'),
+    ('en', 'chat.empty_state.desc_4', 'I''m here to assist with research, explanations, or problem-solving.'),
+    ('en', 'chat.empty_state.desc_5', 'Start a conversation and let''s explore ideas together.'),
 
     -- Code Preview
     ('en', 'chat.code_preview.title', 'Preview:'),
@@ -805,7 +939,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.model_selector.toggle_favorite', 'Toggle favorite'),
 
     -- Reasoning Selector
-    ('en', 'chat.reasoning_selector.auto', 'Auto'),
+    ('en', 'chat.reasoning_selector.disabled', 'Disabled'),
     ('en', 'chat.reasoning_selector.token_limit', 'Token Limit'),
     ('en', 'chat.reasoning_selector.tokens', 'Tokens'),
     ('en', 'chat.reasoning_selector.none', 'None'),
@@ -902,7 +1036,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.model_selector.toggle_favorite', 'Favorit umschalten'),
 
     -- Reasoning Selector
-    ('de', 'chat.reasoning_selector.auto', 'Auto'),
+    ('de', 'chat.reasoning_selector.disabled', 'Deaktiviert'),
     ('de', 'chat.reasoning_selector.token_limit', 'Token-Limit'),
     ('de', 'chat.reasoning_selector.tokens', 'Tokens'),
     ('de', 'chat.reasoning_selector.none', 'Keine'),
@@ -918,6 +1052,178 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.tool_selector.no_tools_found', 'Keine Tools gefunden'),
 
     -- Streaming Message
-    ('de', 'chat.streaming_message.assistant', 'Assistent')
+    ('de', 'chat.streaming_message.assistant', 'Assistent'),
+
+    -- Message Item
+    ('en', 'chat.message_item.reasoning', 'Reasoning'),
+    ('de', 'chat.message_item.reasoning', 'Reasoning'),
+
+    -- Tool Execution Display
+    ('en', 'chat.tool_execution.tool', 'Tool'),
+    ('en', 'chat.tool_execution.running', 'Running...'),
+    ('en', 'chat.tool_execution.failed', 'Failed'),
+    ('en', 'chat.tool_execution.complete', 'Complete'),
+    ('en', 'chat.tool_execution.arguments', 'Arguments'),
+    ('en', 'chat.tool_execution.output', 'Output'),
+    ('en', 'chat.tool_execution.error', 'Error'),
+    ('en', 'chat.tool_execution.completed_in', 'Completed in {ms}ms'),
+
+    ('de', 'chat.tool_execution.tool', 'Tool'),
+    ('de', 'chat.tool_execution.running', 'Wird ausgeführt...'),
+    ('de', 'chat.tool_execution.failed', 'Fehlgeschlagen'),
+    ('de', 'chat.tool_execution.complete', 'Abgeschlossen'),
+    ('de', 'chat.tool_execution.arguments', 'Argumente'),
+    ('de', 'chat.tool_execution.output', 'Ausgabe'),
+    ('de', 'chat.tool_execution.error', 'Fehler'),
+    ('de', 'chat.tool_execution.completed_in', 'Abgeschlossen in {ms}ms'),
+
+    -- Schema Builder
+    ('en', 'settings.schema_builder.type', 'Type'),
+    ('en', 'settings.schema_builder.default', 'Default'),
+    ('en', 'settings.schema_builder.default_placeholder', 'Default value'),
+    ('en', 'settings.schema_builder.description', 'Description'),
+    ('en', 'settings.schema_builder.description_placeholder', 'Describe this parameter'),
+    ('en', 'settings.schema_builder.options', 'Options (for dropdown)'),
+    ('en', 'settings.schema_builder.options_placeholder', 'option1, option2, option3'),
+    ('en', 'settings.schema_builder.options_hint', 'Comma-separated. Leave empty for free-form input.'),
+    ('en', 'settings.schema_builder.add_property', 'Add Property'),
+    ('en', 'settings.schema_builder.required', 'Required'),
+    ('en', 'settings.schema_builder.secret', 'Secret (e.g. API key)'),
+    ('en', 'settings.schema_builder.json_format', 'JSON Schema format'),
+
+    ('de', 'settings.schema_builder.type', 'Typ'),
+    ('de', 'settings.schema_builder.default', 'Standard'),
+    ('de', 'settings.schema_builder.default_placeholder', 'Standardwert'),
+    ('de', 'settings.schema_builder.description', 'Beschreibung'),
+    ('de', 'settings.schema_builder.description_placeholder', 'Beschreiben Sie diesen Parameter'),
+    ('de', 'settings.schema_builder.options', 'Optionen (für Dropdown)'),
+    ('de', 'settings.schema_builder.options_placeholder', 'Option1, Option2, Option3'),
+    ('de', 'settings.schema_builder.options_hint', 'Kommagetrennt. Leer lassen für freie Eingabe.'),
+    ('de', 'settings.schema_builder.add_property', 'Eigenschaft hinzufügen'),
+    ('de', 'settings.schema_builder.required', 'Erforderlich'),
+    ('de', 'settings.schema_builder.secret', 'Geheim (z.B. API-Schlüssel)'),
+    ('de', 'settings.schema_builder.json_format', 'JSON-Schema-Format'),
+
+    -- Tool Test Dialog
+    ('en', 'settings.tool_test.test', 'Test'),
+    ('en', 'settings.tool_test.description', 'Enter input values to test this tool'),
+    ('en', 'settings.tool_test.select_function', 'Select Function'),
+    ('en', 'settings.tool_test.select_placeholder', 'Select a function...'),
+    ('en', 'settings.tool_test.form', 'Form'),
+    ('en', 'settings.tool_test.no_parameters', 'This tool has no input parameters'),
+    ('en', 'settings.tool_test.array_placeholder', 'Comma-separated values'),
+    ('en', 'settings.tool_test.array_hint', 'Enter values separated by commas'),
+    ('en', 'settings.tool_test.success', 'Success'),
+    ('en', 'settings.tool_test.failed', 'Failed'),
+    ('en', 'settings.tool_test.view_output', 'View output'),
+    ('en', 'settings.tool_test.run_test', 'Run Test'),
+
+    ('de', 'settings.tool_test.test', 'Testen'),
+    ('de', 'settings.tool_test.description', 'Geben Sie Eingabewerte ein, um dieses Tool zu testen'),
+    ('de', 'settings.tool_test.select_function', 'Funktion auswählen'),
+    ('de', 'settings.tool_test.select_placeholder', 'Wählen Sie eine Funktion...'),
+    ('de', 'settings.tool_test.form', 'Formular'),
+    ('de', 'settings.tool_test.no_parameters', 'Dieses Tool hat keine Eingabeparameter'),
+    ('de', 'settings.tool_test.array_placeholder', 'Kommagetrennte Werte'),
+    ('de', 'settings.tool_test.array_hint', 'Geben Sie Werte durch Kommas getrennt ein'),
+    ('de', 'settings.tool_test.success', 'Erfolgreich'),
+    ('de', 'settings.tool_test.failed', 'Fehlgeschlagen'),
+    ('de', 'settings.tool_test.view_output', 'Ausgabe anzeigen'),
+    ('de', 'settings.tool_test.run_test', 'Test ausführen'),
+
+    -- Common
+    ('en', 'common.close', 'Close'),
+    ('de', 'common.close', 'Schließen'),
+
+    -- Tools Settings
+    ('en', 'settings.tabs.tools', 'Tools'),
+    ('en', 'settings.tools.title', 'Tools'),
+    ('en', 'settings.tools.description', 'Manage custom tools that AI models can use during conversations'),
+    ('en', 'settings.tools.add', 'Add Tool'),
+    ('en', 'settings.tools.no_tools', 'No tools yet'),
+    ('en', 'settings.tools.no_tools_description', 'Create custom tools to extend AI capabilities'),
+    ('en', 'settings.tools.create_first', 'Create your first tool'),
+    ('en', 'settings.tools.template', 'Template'),
+    ('en', 'settings.tools.configured', 'Configured'),
+    ('en', 'settings.tools.no_description', 'No description'),
+    ('en', 'settings.tools.configure', 'Configure'),
+    ('en', 'settings.tools.edit', 'Edit Tool'),
+    ('en', 'settings.tools.create', 'Create Tool'),
+    ('en', 'settings.tools.general', 'General'),
+    ('en', 'settings.tools.source', 'Source'),
+    ('en', 'settings.tools.functions', 'Functions'),
+    ('en', 'settings.tools.identifier', 'Identifier'),
+    ('en', 'settings.tools.identifier_placeholder', 'fetch_website'),
+    ('en', 'settings.tools.display_name', 'Display Name'),
+    ('en', 'settings.tools.display_name_placeholder', 'Fetch Website'),
+    ('en', 'settings.tools.description', 'Description'),
+    ('en', 'settings.tools.description_placeholder', 'Fetches content from a URL'),
+    ('en', 'settings.tools.public', 'Public'),
+    ('en', 'settings.tools.soon', 'Soon'),
+    ('en', 'settings.tools.url_placeholder', 'https://api.example.com/{{input.query}}'),
+    ('en', 'settings.tools.headers', 'Headers (JSON)'),
+    ('en', 'settings.tools.headers_placeholder', '{"Authorization": "Bearer {{settings.api_key}}"}'),
+    ('en', 'settings.tools.stdio', 'Stdio (Local Process)'),
+    ('en', 'settings.tools.sse', 'SSE (HTTP)'),
+    ('en', 'settings.tools.command_placeholder', 'Command (e.g. npx)'),
+    ('en', 'settings.tools.args_placeholder', 'Arguments (comma-separated)'),
+    ('en', 'settings.tools.tool_name_placeholder', 'Tool name from server'),
+    ('en', 'settings.tools.settings_schema', 'Settings Schema (optional)'),
+    ('en', 'settings.tools.new', 'New'),
+    ('en', 'settings.tools.name', 'Name'),
+    ('en', 'settings.tools.function_name_placeholder', 'search_web'),
+    ('en', 'settings.tools.entrypoint', 'Entrypoint'),
+    ('en', 'settings.tools.optional', 'Optional'),
+    ('en', 'settings.tools.function_description_placeholder', 'What this function does'),
+    ('en', 'settings.tools.input_schema', 'Input Schema'),
+    ('en', 'settings.tools.remove', 'Remove'),
+    ('en', 'settings.tools.settings', 'Tool Settings'),
+    ('en', 'settings.tools.settings_description', 'Configure your personal settings for {name}'),
+    ('en', 'settings.tools.select_placeholder', 'Select...'),
+
+    ('de', 'settings.tabs.tools', 'Tools'),
+    ('de', 'settings.tools.title', 'Tools'),
+    ('de', 'settings.tools.description', 'Verwalten Sie benutzerdefinierte Tools, die KI-Modelle während Gesprächen verwenden können'),
+    ('de', 'settings.tools.add', 'Tool hinzufügen'),
+    ('de', 'settings.tools.no_tools', 'Noch keine Tools'),
+    ('de', 'settings.tools.no_tools_description', 'Erstellen Sie benutzerdefinierte Tools, um die KI-Fähigkeiten zu erweitern'),
+    ('de', 'settings.tools.create_first', 'Erstellen Sie Ihren ersten Tool'),
+    ('de', 'settings.tools.template', 'Vorlage'),
+    ('de', 'settings.tools.configured', 'Konfiguriert'),
+    ('de', 'settings.tools.no_description', 'Keine Beschreibung'),
+    ('de', 'settings.tools.configure', 'Konfigurieren'),
+    ('de', 'settings.tools.edit', 'Tool bearbeiten'),
+    ('de', 'settings.tools.create', 'Tool erstellen'),
+    ('de', 'settings.tools.general', 'Allgemein'),
+    ('de', 'settings.tools.source', 'Quelle'),
+    ('de', 'settings.tools.functions', 'Funktionen'),
+    ('de', 'settings.tools.identifier', 'Bezeichner'),
+    ('de', 'settings.tools.identifier_placeholder', 'website_aufrufen'),
+    ('de', 'settings.tools.display_name', 'Anzeigename'),
+    ('de', 'settings.tools.display_name_placeholder', 'Website abrufen'),
+    ('de', 'settings.tools.description', 'Beschreibung'),
+    ('de', 'settings.tools.description_placeholder', 'Ruft Inhalte von einer URL ab'),
+    ('de', 'settings.tools.public', 'Öffentlich'),
+    ('de', 'settings.tools.soon', 'Bald'),
+    ('de', 'settings.tools.url_placeholder', 'https://api.example.com/{{input.query}}'),
+    ('de', 'settings.tools.headers', 'Header (JSON)'),
+    ('de', 'settings.tools.headers_placeholder', '{"Authorization": "Bearer {{settings.api_key}}"}'),
+    ('de', 'settings.tools.stdio', 'Stdio (Lokaler Prozess)'),
+    ('de', 'settings.tools.sse', 'SSE (HTTP)'),
+    ('de', 'settings.tools.command_placeholder', 'Befehl (z.B. npx)'),
+    ('de', 'settings.tools.args_placeholder', 'Argumente (kommagetrennt)'),
+    ('de', 'settings.tools.tool_name_placeholder', 'Tool-Name vom Server'),
+    ('de', 'settings.tools.settings_schema', 'Einstellungsschema (optional)'),
+    ('de', 'settings.tools.new', 'Neu'),
+    ('de', 'settings.tools.name', 'Name'),
+    ('de', 'settings.tools.function_name_placeholder', 'web_suchen'),
+    ('de', 'settings.tools.entrypoint', 'Einstiegspunkt'),
+    ('de', 'settings.tools.optional', 'Optional'),
+    ('de', 'settings.tools.function_description_placeholder', 'Was diese Funktion tut'),
+    ('de', 'settings.tools.input_schema', 'Eingabeschema'),
+    ('de', 'settings.tools.remove', 'Entfernen'),
+    ('de', 'settings.tools.settings', 'Tool-Einstellungen'),
+    ('de', 'settings.tools.settings_description', 'Konfigurieren Sie Ihre persönlichen Einstellungen für {name}'),
+    ('de', 'settings.tools.select_placeholder', 'Auswählen...')
 
 ON CONFLICT (language, key_path) DO NOTHING;
