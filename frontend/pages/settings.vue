@@ -60,6 +60,7 @@ const tabs = [
 	{id: 'profile', label: 'settings.tabs.profile', icon: User, permission: 'settings.profile.view'},
 	{id: 'providers', label: 'settings.tabs.providers', icon: Cpu, permission: 'admin.providers.view'},
 	{id: 'tools', label: 'settings.tabs.tools', icon: Cpu, permission: 'admin.tools.view'},
+	{id: 'appearance', label: 'settings.tabs.appearance', icon: Cpu, permission: 'settings.appearance.view'},
 ];
 
 const visibleTabs = computed(() => tabs.filter(tab => store.hasPermission(tab.permission)));

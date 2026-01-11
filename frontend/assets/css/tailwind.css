@@ -111,7 +111,7 @@
 	--card-foreground: rgb(226, 232, 240);
 	--popover: rgb(36, 36, 36);
 	--popover-foreground: rgb(169, 169, 169);
-	--primary: rgb(238, 255, 0);
+	--primary: rgb(0, 238, 255);
 	--primary-foreground: rgb(0, 0, 0);
 	--secondary: rgb(40, 37, 37);
 	--secondary-foreground: rgb(255, 255, 255);
