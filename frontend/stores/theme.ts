@@ -35,6 +35,8 @@ function persistState(state: PersistedThemeState) {
 	try {
 		localStorage.setItem(THEME_STORE_KEY, JSON.stringify(state));
 	} catch {}
+	return;
+}
 
 export const useThemeStore = defineStore('theme', {
 	state: () => {
