@@ -84,8 +84,8 @@ RUN printf '%s\n' \
     '#!/bin/bash' \
     'set -e' \
     '' \
-    '# Start Rust API in background' \
-    './oxidechat &' \
+    '# Start Rust API in background (port 3001 to avoid conflict with nginx)' \
+    'PORT=3001 ./oxidechat &' \
     'API_PID=$!' \
     '' \
     '# Start Nuxt SSR server in background' \
