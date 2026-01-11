@@ -38,6 +38,10 @@ pub fn build_router() -> Router<Arc<AppState>> {
 		.route("/api/v1/admin/tools/{id}/settings", get(admin::tools::get_tool_settings))
 		.route("/api/v1/admin/tools/{id}/settings", put(admin::tools::set_tool_settings))
 		.route("/api/v1/admin/tools/{id}/test", post(admin::tools::test_tool))
+		// Admin Config
+		.route("/api/v1/admin/config", patch(admin::config::update_global_config))
+		// Public Config
+		.route("/api/v1/config", get(admin::config::get_global_config))
 		// Auth
 		.route("/api/v1/auth/setup", post(public::auth::setup))
 		.route("/api/v1/auth/register", post(public::auth::register))

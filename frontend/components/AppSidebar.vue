@@ -2,12 +2,8 @@
 	<ShadSidebar collapsible="icon" class="border-r border-sidebar-border bg-sidebar/50">
 		<ShadSidebarHeader class="border-b border-sidebar-border p-4">
 			<div class="flex items-center gap-3">
-				<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-					<MessageSquare class="h-5 w-5 text-primary-foreground" />
-				</div>
 				<div class="group-data-[collapsible=icon]:hidden">
 					<h2 class="font-semibold text-foreground">OxideChat</h2>
-					<p class="text-xs text-sidebar-foreground">{{ store.getTranslation('sidebar.ai_chat_app') }}</p>
 				</div>
 			</div>
 		</ShadSidebarHeader>

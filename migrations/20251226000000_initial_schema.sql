@@ -69,7 +69,9 @@ CREATE TABLE IF NOT EXISTS app_config (
 
 -- Insert default configuration values
 INSERT INTO app_config (key, value) VALUES
-    ('language', 'en')
+    ('language', 'en'),
+    ('allow_user_providers', 'false'),
+    ('default_theme', '{}'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
 -- Rate limits table for customizable endpoint rate limiting
@@ -275,15 +277,11 @@ CREATE TABLE user_preferences (
     favorite_model_keys JSONB DEFAULT '[]',
     streaming_animation VARCHAR(30) DEFAULT 'fade',
     use_remend BOOLEAN DEFAULT true,
+    theme_css_vars JSONB DEFAULT '{}',
+    custom_theme_urls JSONB DEFAULT '[]',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-
-
-/* Inserts */
-INSERT INTO app_config (key, value) VALUES 
-    ('allow_user_providers', 'false')
-ON CONFLICT (key) DO NOTHING;
 
 INSERT INTO roles (name) VALUES ('admin'), ('user') ON CONFLICT DO NOTHING;
 
@@ -406,6 +404,19 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
     UNIQUE(owner_id, name)
 );
 
+-- Create tool_functions table
+CREATE TABLE IF NOT EXISTS tool_functions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    input_schema JSONB NOT NULL,
+    entrypoint VARCHAR(255),               -- Optional override for WASM/HTTP routing
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(tool_id, name)
+);
+
 -- Tool executions - audit log for tool calls
 CREATE TABLE IF NOT EXISTS tool_executions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -420,19 +431,6 @@ CREATE TABLE IF NOT EXISTS tool_executions (
     
     execution_ms INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Create tool_functions table
-CREATE TABLE IF NOT EXISTS tool_functions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL,
-    description TEXT,
-    input_schema JSONB NOT NULL,
-    entrypoint VARCHAR(255),               -- Optional override for WASM/HTTP routing
-    sort_order INTEGER DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(tool_id, name)
 );
 
 
@@ -698,6 +696,9 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'auth.errors.password_no_special', 'Das Passwort muss mindestens ein Sonderzeichen enthalten'),
     ('de', 'auth.errors.password_requirements_not_met', 'Bitte stellen Sie sicher, dass Ihr Passwort alle Anforderungen erfüllt'),
     
+    ('en', 'error_messages.theme_import_failed', 'Failed to import theme'),
+    ('de', 'error_messages.theme_import_failed', 'Fehler beim Importieren des Themes'),
+    
     -- Password strength indicator labels (English)
     ('en', 'auth.password.min_length', 'At least {min} characters'),
     ('en', 'auth.password.max_length', 'Maximum {max} characters'),
@@ -756,6 +757,49 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.appearance.language_description', 'Select your preferred language'),
     ('en', 'settings.appearance.language_en', 'English'),
     ('en', 'settings.appearance.language_de', 'German'),
+    ('en', 'settings.appearance.themes', 'Themes'),
+    ('en', 'settings.appearance.themes_description', 'Choose from a variety of beautiful themes'),
+    ('en', 'settings.appearance.display_mode', 'Display Mode'),
+    ('en', 'settings.appearance.display_mode_description', 'Select how content appears'),
+    ('en', 'settings.appearance.built_in_themes', 'Built-in Themes'),
+    ('en', 'settings.appearance.custom_themes', 'Custom Themes'),
+    ('en', 'settings.appearance.no_themes_found', 'No themes found'),
+    ('en', 'settings.appearance.try_different_search', 'Try a different search term'),
+    ('en', 'settings.appearance.themes_powered_by', 'Themes powered by'),
+    ('en', 'settings.appearance.search_themes', 'Search themes...'),
+    ('en', 'settings.appearance.random_theme', 'Random theme'),
+    ('en', 'settings.appearance.reset_theme', 'Reset theme'),
+    ('en', 'settings.appearance.import_theme', 'Import Theme'),
+    ('en', 'settings.appearance.loading_themes', 'Loading themes'),
+    ('en', 'settings.theme_imported', 'Theme imported successfully'),
+    ('en', 'settings.theme_deleted', 'Theme deleted'),
+    ('en', 'settings.theme_saved', 'Theme preferences saved'),
+    ('en', 'settings.import_theme', 'Import Theme'),
+    ('en', 'settings.import_theme_description', 'Paste a theme URL from'),
+    ('en', 'settings.theme_url', 'Theme URL'),
+    ('en', 'settings.import', 'Import'),
+
+    ('de', 'settings.appearance.themes', 'Themes'),
+    ('de', 'settings.appearance.themes_description', 'Wählen Sie aus einer Vielzahl von schönen Themes'),
+    ('de', 'settings.appearance.display_mode', 'Anzeigemodus'),
+    ('de', 'settings.appearance.display_mode_description', 'Wählen Sie, wie der Inhalt angezeigt wird'),
+    ('de', 'settings.appearance.built_in_themes', 'Integrierte Themes'),
+    ('de', 'settings.appearance.custom_themes', 'Benutzerdefinierte Themes'),
+    ('de', 'settings.appearance.no_themes_found', 'Keine Themes gefunden'),
+    ('de', 'settings.appearance.try_different_search', 'Versuchen Sie einen anderen Suchbegriff'),
+    ('de', 'settings.appearance.themes_powered_by', 'Themes bereitgestellt von'),
+    ('de', 'settings.appearance.search_themes', 'Themes durchsuchen...'),
+    ('de', 'settings.appearance.random_theme', 'Zufalliges Theme'),
+    ('de', 'settings.appearance.reset_theme', 'Theme zurücksetzen'),
+    ('de', 'settings.appearance.import_theme', 'Theme importieren'),
+    ('de', 'settings.appearance.loading_themes', 'Themes werden geladen'),
+    ('de', 'settings.theme_imported', 'Theme erfolgreich importiert'),
+    ('de', 'settings.theme_deleted', 'Theme gelöscht'),
+    ('de', 'settings.theme_saved', 'Theme-Einstellungen gespeichert'),
+    ('de', 'settings.import_theme', 'Theme importieren'),
+    ('de', 'settings.import_theme_description', 'Fügen Sie eine Theme-URL von'),
+    ('de', 'settings.theme_url', 'Theme-URL'),
+    ('de', 'settings.import', 'Importieren'),
 
     ('de', 'settings.title', 'Einstellungen'),
     ('de', 'settings.description', 'Verwalten Sie Ihre Kontoeinstellungen und Konfiguration.'),
@@ -1224,6 +1268,45 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.tools.remove', 'Entfernen'),
     ('de', 'settings.tools.settings', 'Tool-Einstellungen'),
     ('de', 'settings.tools.settings_description', 'Konfigurieren Sie Ihre persönlichen Einstellungen für {name}'),
-    ('de', 'settings.tools.select_placeholder', 'Auswählen...')
+    ('de', 'settings.tools.select_placeholder', 'Auswählen...'),
 
+        -- Display Mode section (English)
+    ('en', 'settings.appearance.display_mode', 'Display Mode'),
+    ('en', 'settings.appearance.display_mode_description', 'Choose between light and dark mode'),
+    
+    -- Themes section (English)
+    ('en', 'settings.appearance.themes', 'Themes'),
+    ('en', 'settings.appearance.themes_description', 'Select and manage your color themes'),
+    ('en', 'settings.appearance.search_themes', 'Search themes...'),
+    ('en', 'settings.appearance.random_theme', 'Random theme'),
+    ('en', 'settings.appearance.reset_theme', 'Reset theme'),
+    ('en', 'settings.appearance.import_theme', 'Import Theme'),
+    ('en', 'settings.appearance.loading_themes', 'Loading themes...'),
+    ('en', 'settings.appearance.custom_themes', 'My Themes'),
+    ('en', 'settings.appearance.built_in_themes', 'Built-in Themes'),
+    ('en', 'settings.appearance.no_themes_found', 'No themes found'),
+    ('en', 'settings.appearance.try_different_search', 'Try adjusting your search query'),
+    ('en', 'settings.appearance.themes_powered_by', 'Get more themes at'),
+    ('en', 'settings.theme_deleted', 'Theme deleted'),
+    ('en', 'settings.theme_saved', 'Theme preferences saved'),
+
+    -- Display Mode section (German)
+    ('de', 'settings.appearance.display_mode', 'Anzeigemodus'),
+    ('de', 'settings.appearance.display_mode_description', 'Wählen Sie zwischen Hell- und Dunkelmodus'),
+    
+    -- Themes section (German)
+    ('de', 'settings.appearance.themes', 'Themes'),
+    ('de', 'settings.appearance.themes_description', 'Farbthemen auswählen und verwalten'),
+    ('de', 'settings.appearance.search_themes', 'Themes suchen...'),
+    ('de', 'settings.appearance.random_theme', 'Zufälliges Theme'),
+    ('de', 'settings.appearance.reset_theme', 'Theme zurücksetzen'),
+    ('de', 'settings.appearance.import_theme', 'Theme importieren'),
+    ('de', 'settings.appearance.loading_themes', 'Themes werden geladen...'),
+    ('de', 'settings.appearance.custom_themes', 'Meine Themes'),
+    ('de', 'settings.appearance.built_in_themes', 'Eingebaute Themes'),
+    ('de', 'settings.appearance.no_themes_found', 'Keine Themes gefunden'),
+    ('de', 'settings.appearance.try_different_search', 'Versuchen Sie eine andere Suchanfrage'),
+    ('de', 'settings.appearance.themes_powered_by', 'Mehr Themes bei'),
+    ('de', 'settings.theme_deleted', 'Theme gelöscht'),
+    ('de', 'settings.theme_saved', 'Theme-Einstellungen gespeichert')
 ON CONFLICT (language, key_path) DO NOTHING;

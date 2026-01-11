@@ -1,0 +1,59 @@
+//! Global configuration admin routes.
+//!
+//! Admin endpoints for managing instance-wide settings like default theme.
+
+use crate::AppState;
+use crate::config::Config;
+use crate::types::{GlobalConfigResponse, UpdateGlobalConfigRequest};
+use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use axum::{Json, extract::State, response::IntoResponse};
+use std::sync::Arc;
+
+/// GET /api/v1/config
+///
+/// Get global configuration (public endpoint).
+pub async fn get_global_config() -> impl IntoResponse {
+	let default_theme = Config::get().default_theme();
+	let response = GlobalConfigResponse { default_theme };
+	ResponseBuilder::new(ResponseBody::Json(response)).build()
+}
+
+/// PATCH /api/v1/admin/config
+///
+/// Update global configuration (admin only - protected by route).
+pub async fn update_global_config(
+	State(state): State<Arc<AppState>>,
+	Json(req): Json<UpdateGlobalConfigRequest>,
+) -> impl IntoResponse {
+	if let Some(default_theme) = req.default_theme {
+		let theme_json = match serde_json::to_string(&default_theme) {
+			Ok(json) => json,
+			Err(e) => {
+				eprintln!("[CONFIG] Failed to serialize theme: {e}");
+				return ErrorBuilder::new(ErrorCode::InternalError).build();
+			}
+		};
+
+		let result = sqlx::query(
+			r#"
+			INSERT INTO app_config (key, value)
+			VALUES ('default_theme', $1)
+			ON CONFLICT (key) DO UPDATE SET value = $1
+			"#,
+		)
+		.bind(&theme_json)
+		.execute(&state.db)
+		.await;
+
+		if let Err(e) = result {
+			eprintln!("[CONFIG] Failed to update default_theme: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+
+		Config::get().reload(&state.db).await;
+	}
+
+	let default_theme = Config::get().default_theme();
+	let response = GlobalConfigResponse { default_theme };
+	ResponseBuilder::new(ResponseBody::Json(response)).build()
+}

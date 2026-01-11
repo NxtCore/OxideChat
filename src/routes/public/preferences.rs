@@ -30,7 +30,6 @@ pub async fn get_preferences(State(state): State<Arc<AppState>>, cookies: Cookie
 			ResponseBuilder::new(ResponseBody::Json(response)).build()
 		}
 		Ok(None) => {
-			// Return defaults
 			let response = PreferencesResponse::default();
 			ResponseBuilder::new(ResponseBody::Json(response)).build()
 		}
@@ -50,7 +49,6 @@ pub async fn update_preferences(State(state): State<Arc<AppState>>, cookies: Coo
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	// Validate streaming animation if provided
 	if let Some(ref animation) = req.streaming_animation {
 		let valid = matches!(animation.to_lowercase().as_str(), "fade" | "typewriter" | "slide" | "none");
 		if !valid {
@@ -58,7 +56,6 @@ pub async fn update_preferences(State(state): State<Arc<AppState>>, cookies: Coo
 		}
 	}
 
-	// Get existing preferences or create defaults
 	let existing = sqlx::query_as::<_, UserPreferences>("SELECT * FROM user_preferences WHERE user_id = $1")
 		.bind(user.id)
 		.fetch_optional(&state.db)
@@ -66,7 +63,6 @@ pub async fn update_preferences(State(state): State<Arc<AppState>>, cookies: Coo
 
 	let result = match existing {
 		Ok(Some(existing)) => {
-			// Update existing
 			let default_model_key = req.default_model_key.or(existing.default_model_key);
 			let favorite_model_keys = req
 				.favorite_model_keys
@@ -74,12 +70,22 @@ pub async fn update_preferences(State(state): State<Arc<AppState>>, cookies: Coo
 				.unwrap_or(existing.favorite_model_keys);
 			let streaming_animation = req.streaming_animation.unwrap_or(existing.streaming_animation);
 			let use_remend = req.use_remend.unwrap_or(existing.use_remend);
+			let theme_css_vars = req
+				.theme_css_vars
+				.map(|v| serde_json::to_value(v).unwrap_or_default())
+				.unwrap_or(existing.theme_css_vars);
+			let custom_theme_urls = req
+				.custom_theme_urls
+				.map(|urls| serde_json::to_value(urls).unwrap_or_default())
+				.unwrap_or(existing.custom_theme_urls);
 
 			sqlx::query_as::<_, UserPreferences>(
 				r#"
 				UPDATE user_preferences
 				SET default_model_key = $2, favorite_model_keys = $3, 
-					streaming_animation = $4, use_remend = $5, updated_at = NOW()
+					streaming_animation = $4, use_remend = $5,
+					theme_css_vars = $6, custom_theme_urls = $7,
+					updated_at = NOW()
 				WHERE user_id = $1
 				RETURNING *
 				"#,
@@ -89,20 +95,23 @@ pub async fn update_preferences(State(state): State<Arc<AppState>>, cookies: Coo
 			.bind(&favorite_model_keys)
 			.bind(&streaming_animation)
 			.bind(use_remend)
+			.bind(&theme_css_vars)
+			.bind(&custom_theme_urls)
 			.fetch_one(&state.db)
 			.await
 		}
 		Ok(None) => {
-			// Insert new
 			let default_model_key = req.default_model_key;
 			let favorite_model_keys = serde_json::to_value(req.favorite_model_keys.unwrap_or_default()).unwrap_or_default();
 			let streaming_animation = req.streaming_animation.unwrap_or_else(|| "fade".to_string());
 			let use_remend = req.use_remend.unwrap_or(true);
+			let theme_css_vars = serde_json::to_value(req.theme_css_vars.unwrap_or_default()).unwrap_or_default();
+			let custom_theme_urls = serde_json::to_value(req.custom_theme_urls.unwrap_or_default()).unwrap_or_default();
 
 			sqlx::query_as::<_, UserPreferences>(
 				r#"
-				INSERT INTO user_preferences (user_id, default_model_key, favorite_model_keys, streaming_animation, use_remend)
-				VALUES ($1, $2, $3, $4, $5)
+				INSERT INTO user_preferences (user_id, default_model_key, favorite_model_keys, streaming_animation, use_remend, theme_css_vars, custom_theme_urls)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
 				RETURNING *
 				"#,
 			)
@@ -111,6 +120,8 @@ pub async fn update_preferences(State(state): State<Arc<AppState>>, cookies: Coo
 			.bind(&favorite_model_keys)
 			.bind(&streaming_animation)
 			.bind(use_remend)
+			.bind(&theme_css_vars)
+			.bind(&custom_theme_urls)
 			.fetch_one(&state.db)
 			.await
 		}

@@ -187,6 +187,8 @@ pub struct UserPreferences {
 	pub favorite_model_keys: serde_json::Value,
 	pub streaming_animation: String,
 	pub use_remend: bool,
+	pub theme_css_vars: serde_json::Value,
+	pub custom_theme_urls: serde_json::Value,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }
@@ -201,10 +203,22 @@ impl UserPreferences {
 			favorite_model_keys: serde_json::json!([]),
 			streaming_animation: "fade".to_string(),
 			use_remend: true,
+			theme_css_vars: serde_json::json!({}),
+			custom_theme_urls: serde_json::json!([]),
 			created_at: now,
 			updated_at: now,
 		}
 	}
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ThemeCssVars {
+	#[serde(default)]
+	pub theme: std::collections::HashMap<String, String>,
+	#[serde(default)]
+	pub light: std::collections::HashMap<String, String>,
+	#[serde(default)]
+	pub dark: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -272,6 +286,8 @@ pub struct UpdatePreferencesRequest {
 	pub favorite_model_keys: Option<Vec<String>>,
 	pub streaming_animation: Option<String>,
 	pub use_remend: Option<bool>,
+	pub theme_css_vars: Option<ThemeCssVars>,
+	pub custom_theme_urls: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -360,6 +376,8 @@ pub struct PreferencesResponse {
 	pub favorite_model_keys: Vec<String>,
 	pub streaming_animation: String,
 	pub use_remend: bool,
+	pub theme_css_vars: ThemeCssVars,
+	pub custom_theme_urls: Vec<String>,
 }
 
 impl From<UserPreferences> for PreferencesResponse {
@@ -369,6 +387,8 @@ impl From<UserPreferences> for PreferencesResponse {
 			favorite_model_keys: serde_json::from_value(p.favorite_model_keys).unwrap_or_default(),
 			streaming_animation: p.streaming_animation,
 			use_remend: p.use_remend,
+			theme_css_vars: serde_json::from_value(p.theme_css_vars).unwrap_or_default(),
+			custom_theme_urls: serde_json::from_value(p.custom_theme_urls).unwrap_or_default(),
 		}
 	}
 }
@@ -380,6 +400,26 @@ impl Default for PreferencesResponse {
 			favorite_model_keys: Vec::new(),
 			streaming_animation: "fade".to_string(),
 			use_remend: true,
+			theme_css_vars: ThemeCssVars::default(),
+			custom_theme_urls: Vec::new(),
 		}
 	}
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GlobalConfigResponse {
+	pub default_theme: ThemeCssVars,
+}
+
+impl Default for GlobalConfigResponse {
+	fn default() -> Self {
+		Self {
+			default_theme: ThemeCssVars::default(),
+		}
+	}
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateGlobalConfigRequest {
+	pub default_theme: Option<ThemeCssVars>,
 }

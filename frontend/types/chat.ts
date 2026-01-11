@@ -1,5 +1,3 @@
-// Chat system types
-
 export interface Workspace {
 	id: string;
 	name: string;
@@ -76,14 +74,33 @@ export interface ChatWithMessages {
 
 export type StreamingAnimation = 'fade' | 'typewriter' | 'slide' | 'none';
 
+export interface ThemeCssVars {
+	theme: Record<string, string>;
+	light: Record<string, string>;
+	dark: Record<string, string>;
+}
+
 export interface UserPreferences {
 	default_model_key: string | null;
 	favorite_model_keys: string[];
 	streaming_animation: StreamingAnimation;
 	use_remend: boolean;
+	theme_css_vars: ThemeCssVars;
+	custom_theme_urls: string[];
 }
 
-// Request types
+export interface GlobalConfig {
+	default_theme: ThemeCssVars;
+}
+
+export interface FetchedTheme {
+	name: string;
+	preset: {cssVars: ThemeCssVars};
+	url: string;
+	error?: string;
+	type: 'custom' | 'built-in';
+}
+
 export interface CreateWorkspaceRequest {
 	name: string;
 	icon?: string;
@@ -125,9 +142,10 @@ export interface UpdatePreferencesRequest {
 	streaming_animation?: StreamingAnimation;
 	use_remend?: boolean;
 	reasoning_effort?: string | null;
+	theme_css_vars?: ThemeCssVars;
+	custom_theme_urls?: string[];
 }
 
-// Model types (from backend)
 export interface Model {
 	id: string;
 	provider_id: string;
@@ -149,7 +167,6 @@ export interface Model {
 	default_max_tokens: number | null;
 }
 
-// Helper types
 export interface ChatListParams {
 	workspace_id?: string;
 	include_archived?: boolean;
