@@ -1,5 +1,3 @@
-// Chat system types
-
 export interface Workspace {
 	id: string;
 	name: string;
@@ -97,13 +95,12 @@ export interface GlobalConfig {
 
 export interface FetchedTheme {
 	name: string;
-	preset: { cssVars: ThemeCssVars };
+	preset: {cssVars: ThemeCssVars};
 	url: string;
 	error?: string;
 	type: 'custom' | 'built-in';
 }
 
-// Request types
 export interface CreateWorkspaceRequest {
 	name: string;
 	icon?: string;
@@ -149,7 +146,6 @@ export interface UpdatePreferencesRequest {
 	custom_theme_urls?: string[];
 }
 
-// Model types (from backend)
 export interface Model {
 	id: string;
 	provider_id: string;
@@ -171,7 +167,6 @@ export interface Model {
 	default_max_tokens: number | null;
 }
 
-// Helper types
 export interface ChatListParams {
 	workspace_id?: string;
 	include_archived?: boolean;

@@ -26,9 +26,7 @@ function loadPersistedState(): PersistedThemeState | null {
 		if (stored) {
 			return JSON.parse(stored);
 		}
-	} catch {
-		// Ignore parse errors
-	}
+	} catch {}
 	return null;
 }
 
@@ -36,10 +34,7 @@ function persistState(state: PersistedThemeState) {
 	if (typeof window === 'undefined') return;
 	try {
 		localStorage.setItem(THEME_STORE_KEY, JSON.stringify(state));
-	} catch {
-		// Ignore storage errors
-	}
-}
+	} catch {}
 
 export const useThemeStore = defineStore('theme', {
 	state: () => {
