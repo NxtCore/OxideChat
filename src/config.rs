@@ -6,6 +6,7 @@
 //! - Supports reloading configuration at runtime
 
 use crate::i18n::Language;
+use crate::types::ThemeCssVars;
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
@@ -61,6 +62,9 @@ pub struct ConfigValues {
 	/// Default language for the application
 	pub language: Language,
 
+	/// Default theme CSS variables for the instance
+	pub default_theme: ThemeCssVars,
+
 	// OAuth Google configuration
 	pub oauth_google_client_id: Option<String>,
 	pub oauth_google_client_secret: Option<String>,
@@ -74,6 +78,7 @@ impl Default for ConfigValues {
 	fn default() -> Self {
 		Self {
 			language: Language::En,
+			default_theme: ThemeCssVars::default(),
 			oauth_google_client_id: None,
 			oauth_google_client_secret: None,
 			oauth_discord_client_id: None,
@@ -133,6 +138,12 @@ impl Config {
 		self.values.load().language
 	}
 
+	/// Get the default theme.
+	#[must_use]
+	pub fn default_theme(&self) -> ThemeCssVars {
+		self.values.load().default_theme.clone()
+	}
+
 	/// Get current configuration values.
 	#[must_use]
 	pub fn values(&self) -> std::sync::Arc<ConfigValues> {
@@ -186,6 +197,11 @@ impl Config {
 		for row in rows {
 			match row.key.as_str() {
 				"language" => values.language = Language::from_str(&row.value),
+				"default_theme" => {
+					if let Ok(theme) = serde_json::from_str(&row.value) {
+						values.default_theme = theme;
+					}
+				}
 				"oauth_google_client_id" => values.oauth_google_client_id = Some(row.value),
 				"oauth_google_client_secret" => values.oauth_google_client_secret = Some(row.value),
 				"oauth_discord_client_id" => values.oauth_discord_client_id = Some(row.value),

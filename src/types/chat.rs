@@ -221,13 +221,6 @@ pub struct ThemeCssVars {
 	pub dark: std::collections::HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
-pub struct GlobalConfig {
-	pub key: String,
-	pub value: serde_json::Value,
-	pub updated_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkspaceRequest {
 	pub name: String,
