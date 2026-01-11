@@ -68,8 +68,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 app \
     && useradd -u 1000 -g app -s /bin/bash -m app \
-    && mkdir -p /var/cache/nginx /var/log/nginx /run /tmp/nginx \
-    && chown -R app:app /var/cache/nginx /var/log/nginx /run /tmp/nginx
+    && mkdir -p /var/cache/nginx /var/log/nginx /var/lib/nginx /run /tmp/nginx \
+    && chown -R app:app /var/cache/nginx /var/log/nginx /var/lib/nginx /run /tmp/nginx
 
 COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun
 
