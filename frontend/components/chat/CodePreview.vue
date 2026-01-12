@@ -1,21 +1,29 @@
 <template>
-	<Dialog :open="isOpen" @update:open="handleOpenChange">
-		<DialogContent class="max-w-4xl h-[80vh] flex flex-col p-0 gap-0">
-			<DialogHeader class="px-4 py-3 border-b border-border">
+	<ShadDialog :open="isOpen" @update:open="handleOpenChange">
+		<ShadDialogContent class="max-w-4xl h-[80vh] flex flex-col p-0 gap-0" hide-close>
+			<ShadDialogHeader class="px-4 py-3 border-b border-border">
 				<div class="flex items-center justify-between">
-					<DialogTitle class="text-sm font-medium">{{ store.getTranslation('chat.code_preview.title') }} {{ language.toUpperCase() }}</DialogTitle>
-					<Tabs v-model="activeTab">
-						<TabsList class="h-8">
-							<TabsTrigger value="preview" class="h-7 px-3 text-xs">{{ store.getTranslation('chat.code_preview.preview') }}</TabsTrigger>
-							<TabsTrigger value="code" class="h-7 px-3 text-xs">{{ store.getTranslation('chat.code_preview.code') }}</TabsTrigger>
-						</TabsList>
-					</Tabs>
+					<ShadDialogTitle class="text-sm font-medium">{{ store.getTranslation('chat.code_preview.title') }} {{ language.toUpperCase() }}</ShadDialogTitle>
+					<div class="flex items-center gap-3">
+						<ShadTabs v-model="activeTab">
+							<ShadTabsList class="h-8">
+								<ShadTabsTrigger value="preview" class="h-7 px-3 text-xs">{{ store.getTranslation('chat.code_preview.preview') }}</ShadTabsTrigger>
+								<ShadTabsTrigger value="code" class="h-7 px-3 text-xs">{{ store.getTranslation('chat.code_preview.code') }}</ShadTabsTrigger>
+							</ShadTabsList>
+						</ShadTabs>
+
+						<ShadDialogClose as-child>
+							<ShadButton variant="ghost" size="icon" class="h-8 w-8">
+								<X class="size-4" />
+							</ShadButton>
+						</ShadDialogClose>
+					</div>
 				</div>
-			</DialogHeader>
+			</ShadDialogHeader>
 
 			<div class="flex-1 min-h-0 overflow-hidden">
 				<div v-show="activeTab === 'preview'" class="h-full bg-white">
-					<iframe ref="previewFrame" class="w-full h-full border-0" :srcdoc="previewHtml" sandbox="allow-scripts" />
+					<iframe ref="previewFrame" :key="sandbox" class="w-full h-full border-0" :srcdoc="previewHtml" :sandbox="sandbox" />
 				</div>
 
 				<div v-show="activeTab === 'code'" class="h-full overflow-auto p-4 bg-muted/30">
@@ -33,26 +41,29 @@
 				</div>
 			</div>
 
-			<DialogFooter class="px-4 py-3 border-t border-border">
+			<ShadDialogFooter class="px-4 py-3 border-t border-border">
 				<div class="flex items-center justify-between w-full">
-					<span class="text-xs text-muted-foreground"> {{ code.split('\n').length }} lines </span>
+					<div class="flex items-center gap-4">
+						<span class="text-xs text-muted-foreground"> {{ code.split('\n').length }} lines </span>
+						<div class="flex items-center gap-2">
+							<ShadSwitch id="sandbox-toggle" v-model:modelValue="allowUnrestricted" />
+							<ShadLabel for="sandbox-toggle" class="text-[10px] uppercase font-bold text-muted-foreground cursor-pointer">Unrestricted</ShadLabel>
+						</div>
+					</div>
 					<div class="flex gap-2">
 						<ShadButton variant="outline" size="sm" @click="openInNewTab"> Open in Tab </ShadButton>
-						<DialogClose as-child>
+						<ShadDialogClose as-child>
 							<ShadButton size="sm">Close</ShadButton>
-						</DialogClose>
+						</ShadDialogClose>
 					</div>
 				</div>
-			</DialogFooter>
-		</DialogContent>
-	</Dialog>
+			</ShadDialogFooter>
+		</ShadDialogContent>
+	</ShadDialog>
 </template>
 
 <script setup lang="ts">
-import {Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose} from '@/components/ui/dialog';
-import {Tabs, TabsList, TabsTrigger} from '@/components/ui/tabs';
-import {Button as ShadButton} from '@/components/ui/button';
-import {Copy, Check} from 'lucide-vue-next';
+import {Copy, Check, X} from 'lucide-vue-next';
 import {generatePreviewHtml} from '~/composables/useMarkdown';
 import {useMainStore} from '~/stores';
 
@@ -70,7 +81,14 @@ const emit = defineEmits<{
 
 const activeTab = ref<'preview' | 'code'>('preview');
 const copied = ref(false);
-const previewFrame = ref<HTMLIFrameElement | null>(null);
+const allowUnrestricted = ref(false);
+
+const sandbox = computed(() => {
+	if (allowUnrestricted.value) {
+		return 'allow-scripts allow-forms allow-modals allow-popups allow-same-origin';
+	}
+	return 'allow-scripts';
+});
 
 const previewHtml = computed(() => {
 	return generatePreviewHtml(props.code, props.language);

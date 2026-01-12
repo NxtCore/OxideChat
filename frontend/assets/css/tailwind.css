@@ -262,15 +262,15 @@ body {
 	body {
 		@apply bg-background text-foreground;
 	}
+
+	/* Remove backticks from inline code in prose */
+	.prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *))::before,
+	.prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *))::after {
+		content: '' !important;
+	}
 }
 
 /* Shiki theme overrides */
 .shiki {
 	background: transparent !important;
-}
-
-.dark .shiki,
-.dark .shiki span {
-	color: var(--shiki-dark) !important;
-	background-color: transparent !important;
 }

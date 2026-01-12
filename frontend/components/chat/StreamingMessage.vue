@@ -127,22 +127,27 @@ watch(
 function handleCodeBlockClick(event: MouseEvent) {
 	const target = event.target as HTMLElement;
 
-	if (target.classList.contains('code-block-copy-btn')) {
-		const wrapper = target.closest('.code-block-wrapper');
+	// Use closest() to find buttons since clicks on SVG icons inside buttons
+	// will have the SVG as the target, not the button itself
+	const copyBtn = target.closest('.code-block-copy-btn') as HTMLElement | null;
+	const previewBtn = target.closest('.code-block-preview-btn') as HTMLElement | null;
+
+	if (copyBtn) {
+		const wrapper = copyBtn.closest('.code-block-wrapper');
 		const codeEl = wrapper?.querySelector('code');
 		if (codeEl) {
 			navigator.clipboard.writeText(codeEl.textContent || '');
-			target.classList.add('copied');
-			target.innerHTML = ICON_CHECK;
+			copyBtn.classList.add('copied');
+			copyBtn.innerHTML = ICON_CHECK;
 			setTimeout(() => {
-				target.classList.remove('copied');
-				target.innerHTML = ICON_COPY;
+				copyBtn.classList.remove('copied');
+				copyBtn.innerHTML = ICON_COPY;
 			}, 2000);
 		}
 	}
 
-	if (target.classList.contains('code-block-preview-btn')) {
-		const result = extractCodeForPreview(target);
+	if (previewBtn) {
+		const result = extractCodeForPreview(previewBtn);
 		if (result) {
 			previewData.value = result;
 		}

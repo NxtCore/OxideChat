@@ -555,6 +555,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 				let mut pending_tool_calls: HashMap<String, (String, String)> = HashMap::new();
 				let mut tool_results: Vec<(String, String, serde_json::Value, serde_json::Value, Option<String>, i32, Option<Uuid>, Option<Uuid>)> = Vec::new();
 				let mut iteration_content = String::new();
+				let mut completed_tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
 
 				let mut event_count = 0;
 				while let Some(event) = upstream.next().await {
@@ -588,24 +589,29 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 							));
 						}
 						StreamEvent::ToolCallDelta { id, args_delta_json } => {
+							let delta_str = match &args_delta_json {
+								serde_json::Value::String(s) => s.clone(),
+								other => other.to_string(),
+							};
 							if let Some((_, args)) = pending_tool_calls.get_mut(&id) {
-								args.push_str(&args_delta_json.to_string());
+								args.push_str(&delta_str);
 							}
 							yield Ok::<_, Infallible>(Event::default().data(
 								serde_json::to_string(&StreamData::ToolCallDelta {
 									id,
-									args_delta: args_delta_json.to_string()
+									args_delta: delta_str
 								}).unwrap_or_default()
 							));
 						}
-						StreamEvent::ToolCallEnd { id } => {
+						StreamEvent::ToolCallEnd { id, args_json } => {
 							eprintln!("[STREAM] Tool call end: {}", id);
 							yield Ok::<_, Infallible>(Event::default().data(
 								serde_json::to_string(&StreamData::ToolCallEnd { id: id.clone() }).unwrap_or_default()
 							));
 
-							if let Some((tool_name, args_str)) = pending_tool_calls.remove(&id) {
-								let args: serde_json::Value = serde_json::from_str(&args_str).unwrap_or_default();
+							if let Some((tool_name, _)) = pending_tool_calls.remove(&id) {
+								let args = args_json;
+								completed_tool_calls.push((id.clone(), tool_name.clone(), args.clone()));
 								eprintln!("[STREAM] Executing tool: {} with args: {:?}", tool_name, args);
 
 								let exec_start = Instant::now();
@@ -735,10 +741,25 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 							} else {
 								eprintln!("[STREAM] Continuing agentic loop with {} tool results", tool_results.len());
 
+								let mut assistant_parts: Vec<ContentPart> = Vec::new();
 								if !iteration_content.is_empty() {
+									assistant_parts.push(ContentPart::Text(iteration_content.clone()));
+								}
+								for (call_id, tool_name, args) in completed_tool_calls.drain(..) {
+									let arguments = match &args {
+										serde_json::Value::String(s) => s.clone(),
+										other => other.to_string(),
+									};
+									assistant_parts.push(ContentPart::ToolCall {
+										id: call_id,
+										name: tool_name,
+										arguments,
+									});
+								}
+								if !assistant_parts.is_empty() {
 									current_messages.push(OmniMessage {
 										role: Role::Assistant,
-										parts: vec![ContentPart::Text(iteration_content.clone())],
+										parts: assistant_parts,
 										name: None,
 									});
 								}

@@ -481,6 +481,11 @@ export const useChatStore = defineStore('chat', {
 										break;
 									}
 									case 'tool_result': {
+										const toolCall = msg?.tool_calls?.find(tc => tc.tool_call_id === data.id);
+										if (toolCall) {
+											toolCall.output = data.output ? JSON.stringify(data.output) : null;
+											toolCall.error = data.error || null;
+										}
 										break;
 									}
 									case 'tokens':

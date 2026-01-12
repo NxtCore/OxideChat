@@ -31,16 +31,16 @@
 				</div>
 			</Transition>
 
-			<div v-if="!isUser && message.toolCalls && Object.keys(message.toolCalls).length > 0" class="flex flex-col gap-2 mt-2 w-full max-w-3xl">
+			<div v-if="!isUser && message.tool_calls && message.tool_calls.length > 0" class="flex flex-col gap-2 mt-2 w-full max-w-3xl">
 				<ToolExecutionDisplay
-					v-for="(tool, id) in message.toolCalls"
-					:key="id"
-					:id="String(id)"
-					:name="tool.name"
-					:args="tool.args"
+					v-for="tool in message.tool_calls"
+					:key="tool.tool_call_id"
+					:id="tool.tool_call_id"
+					:name="tool.tool_name"
+					:args="tool.input_args"
 					:output="tool.output"
 					:error="tool.error"
-					:is-executing="tool.isExecuting"
+					:is-executing="!tool.output && !tool.error"
 				/>
 			</div>
 
@@ -165,22 +165,25 @@ const renderedReasoning = computed(() => {
 function handleCodeBlockClick(event: MouseEvent) {
 	const target = event.target as HTMLElement;
 
-	if (target.classList.contains('code-block-copy-btn')) {
-		const wrapper = target.closest('.code-block-wrapper');
+	const copyBtn = target.closest('.code-block-copy-btn') as HTMLElement | null;
+	const previewBtn = target.closest('.code-block-preview-btn') as HTMLElement | null;
+
+	if (copyBtn) {
+		const wrapper = copyBtn.closest('.code-block-wrapper');
 		const codeEl = wrapper?.querySelector('code');
 		if (codeEl) {
 			navigator.clipboard.writeText(codeEl.textContent || '');
-			target.classList.add('copied');
-			target.innerHTML = ICON_CHECK;
+			copyBtn.classList.add('copied');
+			copyBtn.innerHTML = ICON_CHECK;
 			setTimeout(() => {
-				target.classList.remove('copied');
-				target.innerHTML = ICON_COPY;
+				copyBtn.classList.remove('copied');
+				copyBtn.innerHTML = ICON_COPY;
 			}, 2000);
 		}
 	}
 
-	if (target.classList.contains('code-block-preview-btn')) {
-		const result = extractCodeForPreview(target);
+	if (previewBtn) {
+		const result = extractCodeForPreview(previewBtn);
 		if (result) {
 			previewData.value = result;
 		}

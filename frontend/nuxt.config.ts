@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineNuxtConfig({
 	compatibilityDate: '2025-12-26',
 	devtools: {enabled: true},
-	modules: ['@pinia/nuxt', 'floating-vue/nuxt', '@nuxt/devtools', 'shadcn-nuxt', 'vue-sonner/nuxt', 'nuxt-charts'],
+	modules: ['@pinia/nuxt', 'floating-vue/nuxt', '@nuxt/devtools', 'shadcn-nuxt', 'vue-sonner/nuxt', 'nuxt-charts', 'nuxt-shiki'],
 	plugins: ['plugins/fetch.ts'],
 	vite: {
 		server: {
@@ -16,9 +16,35 @@ export default defineNuxtConfig({
 		css: true,
 	},
 	shadcn: {
-		theme: 'dark',
 		prefix: 'shad',
 		componentDir: 'components/ui',
+	},
+	shiki: {
+		bundledThemes: ['github-dark', 'github-light'],
+		bundledLangs: [
+			'javascript',
+			'typescript',
+			'python',
+			'rust',
+			'html',
+			'css',
+			'json',
+			'markdown',
+			'bash',
+			'sql',
+			'vue',
+			'jsx',
+			'tsx',
+			'yaml',
+			'toml',
+			'shell',
+			'go',
+			'java',
+			'c',
+			'cpp',
+			'csharp',
+		],
+		defaultTheme: 'github-dark',
 	},
 	css: ['./assets/css/tailwind.css', 'vue-sonner/style.css'],
 });
