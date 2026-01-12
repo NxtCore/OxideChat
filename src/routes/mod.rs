@@ -73,5 +73,8 @@ pub fn build_router() -> Router<Arc<AppState>> {
 		.route("/api/v1/models", get(public::models::list_models))
 		// Tools
 		.route("/api/v1/tools", get(public::tools::list_tools))
+		// Images CDN (public, no auth)
+		.route("/api/images/{id}", get(public::images::serve_image))
+		.route("/api/images", post(public::images::upload_image))
 		.layer(CookieManagerLayer::new())
 }

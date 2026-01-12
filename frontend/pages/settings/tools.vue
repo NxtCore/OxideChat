@@ -457,6 +457,69 @@ const builtinToolTemplates = [
 			},
 		},
 	},
+	{
+		name: 'imagegen',
+		display_name: 'Image Generation',
+		description: 'Generate and edit images using OpenAI, Replicate, or Google APIs',
+		source_kind: 'BUILTIN',
+		icon: Sparkles,
+		source_config: {builtin_id: 'imagegen'},
+		functions: [
+			{
+				name: 'generate',
+				description: 'Generate an image from a text prompt',
+				input_schema: {
+					type: 'object',
+					properties: {
+						prompt: {type: 'string', description: 'The text prompt describing the image to generate'},
+						size: {
+							type: 'string',
+							description: 'Image size',
+							enum: ['1024x1024', '1792x1024', '1024x1792', '512x512', '256x256'],
+							default: '1024x1024',
+						},
+						quality: {
+							type: 'string',
+							description: 'Image quality',
+							enum: ['standard', 'hd'],
+							default: 'standard',
+						},
+					},
+					required: ['prompt'],
+				},
+			},
+			{
+				name: 'edit',
+				description: 'Edit an existing image using a text prompt',
+				input_schema: {
+					type: 'object',
+					properties: {
+						image_url: {type: 'string', description: 'URL of the image to edit'},
+						prompt: {type: 'string', description: 'The text prompt describing the desired edit'},
+					},
+					required: ['image_url', 'prompt'],
+				},
+			},
+		],
+		settings_schema: {
+			type: 'object',
+			required: ['api_key', 'provider'],
+			properties: {
+				api_key: {type: 'string', title: 'API Key', secret: true, description: 'API key for the selected provider'},
+				provider: {
+					type: 'string',
+					title: 'Provider',
+					enum: ['openai', 'replicate', 'google'],
+					description: 'Image generation provider to use',
+				},
+				model: {
+					type: 'string',
+					title: 'Model',
+					description: 'Model to use (optional, defaults: dall-e-3, flux-schnell, imagen-3)',
+				},
+			},
+		},
+	},
 ];
 
 const displayTools = computed(() => {
@@ -717,7 +780,7 @@ async function saveTool() {
 				body_template: httpConfig.body_template || null,
 			};
 		} else if (toolForm.source_kind === 'BUILTIN') {
-			source_config = {builtin_id: builtinConfig.builtin_id};
+			source_config = {builtin_id: displayTools.value.find(t => t.name === toolForm.name)?.source_config.builtin_id || ''};
 		} else if (toolForm.source_kind === 'WASM') {
 			source_config = {
 				wasm_blob_id: wasmConfig.blob_id,

@@ -535,6 +535,7 @@ pub async fn test_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Pat
 		settings: tool_settings.map(|s| s.settings).unwrap_or_default(),
 		timeout_ms: Some(30000),
 		function_name: req.function_name.clone(),
+		db: Some(std::sync::Arc::new(state.db.clone())),
 	};
 
 	let start = std::time::Instant::now();

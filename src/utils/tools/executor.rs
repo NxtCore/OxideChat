@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
+use sqlx::PgPool;
+use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -36,12 +38,26 @@ pub enum ToolError {
 	Internal(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ToolContext {
 	pub user_id: Option<Uuid>,
 	pub settings: Value,
 	pub timeout_ms: Option<u64>,
 	pub function_name: Option<String>,
+	/// Database pool for tools that need storage access (e.g., imagegen)
+	pub db: Option<Arc<PgPool>>,
+}
+
+impl std::fmt::Debug for ToolContext {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("ToolContext")
+			.field("user_id", &self.user_id)
+			.field("settings", &self.settings)
+			.field("timeout_ms", &self.timeout_ms)
+			.field("function_name", &self.function_name)
+			.field("db", &self.db.as_ref().map(|_| "<pool>"))
+			.finish()
+	}
 }
 
 impl Default for ToolContext {
@@ -51,6 +67,7 @@ impl Default for ToolContext {
 			settings: Value::Object(serde_json::Map::new()),
 			timeout_ms: Some(30000),
 			function_name: None,
+			db: None,
 		}
 	}
 }

@@ -220,6 +220,7 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 		settings,
 		timeout_ms: Some(30000),
 		function_name: function_name.map(|s| s.to_string()),
+		db: Some(std::sync::Arc::new(db.clone())),
 	};
 
 	match tool.source_kind {
@@ -298,8 +299,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] Chat verified");
-
 	let model = sqlx::query_as::<_, crate::types::AiModel>("SELECT * FROM models WHERE model_id = $1")
 		.bind(&req.model_key)
 		.fetch_optional(&state.db)
@@ -314,8 +313,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] Model verified");
-
 	let model_config = sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE owner_id = $1 AND stable_key = $2")
 		.bind(user.id)
 		.bind(&req.model_key)
@@ -323,8 +320,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		.await
 		.ok()
 		.flatten();
-
-	eprintln!("[STREAM] Model config: {:?}", model_config.as_ref().map(|mc| &mc.name));
 
 	let reasoning_details = crate::types::ReasoningDetails {
 		effort: req.reasoning_effort.clone(),
@@ -357,8 +352,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] User message saved");
-
 	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 ORDER BY created_at ASC")
 		.bind(chat_id)
 		.fetch_all(&state.db)
@@ -372,8 +365,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] Messages fetched");
-
 	let engine = ai::get();
 	let engine_read = engine.read().await;
 
@@ -386,8 +377,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] Model verified");
-
 	let provider = match engine_read.get_provider(&omni_model.provider_name).await {
 		Some(p) => p,
 		None => {
@@ -396,8 +385,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 			return error_stream("provider_not_found", msg).into_response();
 		}
 	};
-
-	eprintln!("[STREAM] Provider verified");
 
 	let omni_messages: Vec<OmniMessage> = messages
 		.iter()
@@ -439,8 +426,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 				.fetch_all(&state.db)
 				.await;
 
-			eprintln!("[STREAM] Tools query result: {:?}", tools.as_ref().map(|t| t.len()).map_err(|e| e.to_string()));
-
 			if let Ok(tools) = tools {
 				eprintln!("[STREAM] Found {} tools from DB", tools.len());
 				let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
@@ -474,8 +459,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 			}
 		}
 	}
-
-	eprintln!("[STREAM] Chat request: {:?}", ir);
 
 	let omni_messages_for_stream = ir.messages.clone();
 	let ir_for_stream = ir.clone();
@@ -560,7 +543,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 				let mut event_count = 0;
 				while let Some(event) = upstream.next().await {
 					event_count += 1;
-					eprintln!("[STREAM] Event #{}: {:?}", event_count, &event);
 					match event {
 						StreamEvent::TextDelta { content } => {
 							if let Some(start) = reasoning_start.take() {
