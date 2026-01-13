@@ -63,7 +63,7 @@
 			:is-open="showImageModal"
 			:image-url="imageUrl"
 			alt-text="Generated image"
-			:filename="`generated-image-${Date.now()}.png`"
+			:filename="`generated-image-${props.id}.png`"
 			@close="showImageModal = false"
 		/>
 	</div>
@@ -86,7 +86,7 @@ const props = defineProps<{
 	durationMs?: number;
 }>();
 
-const isExpanded = ref(props.isExecuting || false);
+const isExpanded = ref(props.isExecuting ?? false);
 const showImageModal = ref(false);
 
 watchEffect(() => {

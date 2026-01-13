@@ -135,7 +135,6 @@ impl ImageGenExecutor {
 			"prompt": input.prompt,
 			"n": 1,
 			"moderation": "low",
-			"quality": "low" //TODO: Remove later
 		});
 
 		let response = self
@@ -551,15 +550,17 @@ impl ToolExecutor for ImageGenExecutor {
 		// Process image URLs in the result - upload data URIs to CDN
 		if let Some(image_url_val) = result.get("image_url").and_then(|v| v.as_str()) {
 			let processed_url = self.process_image_url(image_url_val.to_string(), ctx).await;
-			let mut result_obj = result.as_object().unwrap().clone();
-			result_obj.insert("image_url".to_string(), Value::String(processed_url));
-			result_obj.insert(
-				"message".to_string(),
-				Value::String(
-					"Image was successfully generated and uploaded to the CDN, you can show the image by using the following markdown: ![]({processed_url}). No other action is needed.".to_string(),
-				),
-			);
-			return Ok(Value::Object(result_obj));
+			if let Some(mut result_obj) = result.as_object().cloned() {
+				result_obj.insert("image_url".to_string(), Value::String(processed_url.clone()));
+				result_obj.insert(
+					"message".to_string(),
+					Value::String(format!(
+						"Image was successfully generated and uploaded to the CDN, you can show the image by using the following markdown: ![]({}). No other action is needed.",
+						processed_url
+					)),
+				);
+				return Ok(Value::Object(result_obj));
+			}
 		}
 
 		Ok(result)

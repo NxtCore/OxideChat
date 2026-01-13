@@ -61,21 +61,21 @@ function handleClose() {
 
 async function handleDownload() {
 	if (!props.imageUrl) return;
+
+	const a = document.createElement('a');
+	a.download = props.filename || `image-${Date.now()}.png`;
+
 	try {
 		const response = await fetch(props.imageUrl);
 		const blob = await response.blob();
 		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
 		a.href = url;
-		a.download = props.filename || `image-${Date.now()}.png`;
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
 		URL.revokeObjectURL(url);
 	} catch (e) {
-		const a = document.createElement('a');
 		a.href = props.imageUrl;
-		a.download = props.filename || `image-${Date.now()}.png`;
 		a.target = '_blank';
 		a.click();
 	}
@@ -84,13 +84,40 @@ async function handleDownload() {
 async function handleCopy() {
 	if (!props.imageUrl) return;
 	try {
-		await navigator.clipboard.writeText(props.imageUrl);
+		const response = await fetch(props.imageUrl);
+		const blob = await response.blob();
+		const imageBitmap = await createImageBitmap(blob);
+
+		const canvas = document.createElement('canvas');
+		canvas.width = imageBitmap.width;
+		canvas.height = imageBitmap.height;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('Failed to get canvas context');
+		ctx.drawImage(imageBitmap, 0, 0);
+
+		const pngBlob = await new Promise<Blob>((resolve, reject) => {
+			canvas.toBlob(potentialBlob => {
+				if (!potentialBlob) {
+					reject(new Error('Failed to convert canvas to blob'));
+					return;
+				}
+				resolve(potentialBlob);
+			}, 'image/png');
+		});
+
+		await navigator.clipboard.write([
+			new ClipboardItem({
+				[pngBlob.type]: pngBlob,
+			}),
+		]);
+
+		imageBitmap.close();
 		copied.value = true;
 		setTimeout(() => {
 			copied.value = false;
 		}, 2000);
 	} catch (e) {
-		console.error('Failed to copy image URL:', e);
+		console.error('Failed to copy image data:', e);
 	}
 }
 
