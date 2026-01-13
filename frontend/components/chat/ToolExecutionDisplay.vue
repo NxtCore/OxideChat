@@ -28,17 +28,16 @@
 				</div>
 
 				<div v-if="imageUrl" class="mb-3">
-					<span class="text-xs font-medium text-muted-foreground mb-1 block">{{ store.getTranslation('chat.tool_execution.generated_image') || 'Generated Image' }}</span>
+					<span class="text-xs font-medium text-muted-foreground mb-1 block">{{
+						store.getTranslation('chat.tool_execution.generated_image') || 'Generated Image'
+					}}</span>
 					<div class="relative group">
-						<img :src="imageUrl" alt="Generated image" class="rounded-lg max-w-full max-h-96 object-contain cursor-pointer" @click="openImageModal" />
-						<div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
-							<button class="p-2 rounded-lg bg-background/80 backdrop-blur-sm hover:bg-background transition-colors" title="Download" @click.stop="downloadImage">
-								<Download class="h-4 w-4" />
-							</button>
-							<button class="p-2 rounded-lg bg-background/80 backdrop-blur-sm hover:bg-background transition-colors" title="Copy URL" @click.stop="copyImageUrl">
-								<Copy class="h-4 w-4" />
-							</button>
-						</div>
+						<img
+							:src="imageUrl"
+							alt="Generated image"
+							class="rounded-lg max-w-full max-h-96 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+							@click="openImageModal"
+						/>
 					</div>
 				</div>
 
@@ -60,33 +59,19 @@
 			</div>
 		</Transition>
 
-		<Teleport to="body">
-			<Transition name="fade">
-				<div v-if="showImageModal && imageUrl" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" @click="showImageModal = false">
-					<div class="relative max-w-[90vw] max-h-[90vh]" @click.stop>
-						<img :src="imageUrl" alt="Generated image" class="max-w-full max-h-[90vh] object-contain rounded-lg" />
-						<button class="absolute top-4 right-4 p-2 rounded-lg bg-background/80 backdrop-blur-sm hover:bg-background transition-colors" @click="showImageModal = false">
-							<X class="h-5 w-5" />
-						</button>
-						<div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-							<button class="px-4 py-2 rounded-lg bg-background/80 backdrop-blur-sm hover:bg-background transition-colors flex items-center gap-2" @click="downloadImage">
-								<Download class="h-4 w-4" />
-								<span class="text-sm">Download</span>
-							</button>
-							<button class="px-4 py-2 rounded-lg bg-background/80 backdrop-blur-sm hover:bg-background transition-colors flex items-center gap-2" @click="copyImageUrl">
-								<Copy class="h-4 w-4" />
-								<span class="text-sm">Copy URL</span>
-							</button>
-						</div>
-					</div>
-				</div>
-			</Transition>
-		</Teleport>
+		<ImagePreview
+			:is-open="showImageModal"
+			:image-url="imageUrl"
+			alt-text="Generated image"
+			:filename="`generated-image-${Date.now()}.png`"
+			@close="showImageModal = false"
+		/>
 	</div>
 </template>
 
 <script setup lang="ts">
-import {Wrench, ChevronDown, Loader2, CheckCircle, AlertCircle, Download, Copy, X} from 'lucide-vue-next';
+import {Wrench, ChevronDown, Loader2, CheckCircle, AlertCircle} from 'lucide-vue-next';
+import ImagePreview from '~/components/ImagePreview.vue';
 import {useMainStore} from '~/stores';
 
 const store = useMainStore();
@@ -101,8 +86,14 @@ const props = defineProps<{
 	durationMs?: number;
 }>();
 
-const isExpanded = ref(true);
+const isExpanded = ref(props.isExecuting || false);
 const showImageModal = ref(false);
+
+watchEffect(() => {
+	if (!props.isExecuting && props.output !== undefined) {
+		isExpanded.value = false;
+	}
+});
 
 const formattedArgs = computed(() => {
 	if (typeof props.args === 'string') {
@@ -141,39 +132,15 @@ function tryParseJson(str: string): any {
 
 function isImageUrl(url: string): boolean {
 	if (url.startsWith('data:image/')) return true;
-	const ext = url.split('?')[0].split('.').pop()?.toLowerCase();
-	return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext || '');
+	const urlWithoutQuery = url.split('?')[0];
+	if (!urlWithoutQuery) return false;
+	const parts = urlWithoutQuery.split('.');
+	const ext = parts[parts.length - 1]?.toLowerCase() || '';
+	return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext);
 }
 
 function openImageModal() {
 	showImageModal.value = true;
-}
-
-async function downloadImage() {
-	if (!imageUrl.value) return;
-	try {
-		const response = await fetch(imageUrl.value);
-		const blob = await response.blob();
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = `generated-image-${Date.now()}.png`;
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
-	} catch (e) {
-		const a = document.createElement('a');
-		a.href = imageUrl.value;
-		a.download = `generated-image-${Date.now()}.png`;
-		a.target = '_blank';
-		a.click();
-	}
-}
-
-function copyImageUrl() {
-	if (!imageUrl.value) return;
-	navigator.clipboard.writeText(imageUrl.value);
 }
 </script>
 

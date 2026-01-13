@@ -13,8 +13,9 @@ import remend from 'remend';
 
 function sanitize(html: string): string {
 	return DOMPurify.sanitize(html, {
-		ADD_ATTR: ['data-language', 'data-previewable', 'title'],
-		ADD_TAGS: ['button'],
+		ADD_ATTR: ['data-language', 'data-previewable', 'title', 'src', 'alt'],
+		ADD_TAGS: ['button', 'img'],
+		ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
 	});
 }
 

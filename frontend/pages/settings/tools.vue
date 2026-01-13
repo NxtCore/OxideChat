@@ -780,7 +780,8 @@ async function saveTool() {
 				body_template: httpConfig.body_template || null,
 			};
 		} else if (toolForm.source_kind === 'BUILTIN') {
-			source_config = {builtin_id: displayTools.value.find(t => t.name === toolForm.name)?.source_config.builtin_id || ''};
+			const builtin = displayTools.value.find(t => t.name === toolForm.name);
+			source_config = {builtin_id: builtin?.source_config?.builtin_id || builtin.name};
 		} else if (toolForm.source_kind === 'WASM') {
 			source_config = {
 				wasm_blob_id: wasmConfig.blob_id,

@@ -15,11 +15,10 @@
 			</TransitionGroup>
 		</div>
 
-
 		<Transition name="fade">
 			<ShadButton
 				v-if="showScrollButton"
-				class="fixed bottom-24 right-8 rounded-full bg-primary p-3 text-primary-foreground shadow-lg transition-all hover:bg-primary/90"
+				class="absolute bottom-36 left-1/2 -translate-x-1/2 rounded-full bg-primary/25 text-primary backdrop-blur-sm hover:bg-background transition-colors"
 				@click="handleScrollButtonClick"
 			>
 				<ArrowDown class="h-4 w-4" />

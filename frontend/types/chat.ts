@@ -47,6 +47,7 @@ export interface ChatMessage {
 	content: string;
 	reasoning_content: string | null;
 	model_id: string | null;
+	content_parts?: Array<{type: string; text?: string; image_id?: string}> | null;
 	cost_details: {
 		input: string | null;
 		output: string | null;

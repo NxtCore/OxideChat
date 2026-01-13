@@ -328,7 +328,7 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		async sendAndStream(chatId: string, content: string): Promise<void> {
+		async sendAndStream(chatId: string, content: string, parts?: any[]): Promise<void> {
 			if (!this.selectedModel) {
 				console.error('No model selected');
 				return;
@@ -395,19 +395,25 @@ export const useChatStore = defineStore('chat', {
 				const config = useRuntimeConfig();
 				const baseUrl = config.public.apiBase || '';
 
+				const body: any = {
+					content,
+					model_key: this.selectedModel.model_id,
+					reasoning_effort: this.reasoningEffort || undefined,
+					reasoning_budget_tokens: this.reasoningBudget || undefined,
+					tools_enabled: this.enabledTools.length > 0 ? this.enabledTools : undefined,
+				};
+
+				if (parts && parts.length > 0) {
+					body.parts = parts;
+				}
+
 				const response = await fetch(`${baseUrl}/api/v1/chats/${chatId}/stream`, {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
 					},
 					credentials: 'include',
-					body: JSON.stringify({
-						content,
-						model_key: this.selectedModel.model_id,
-						reasoning_effort: this.reasoningEffort || undefined,
-						reasoning_budget_tokens: this.reasoningBudget || undefined,
-						tools_enabled: this.enabledTools.length > 0 ? this.enabledTools : undefined,
-					}),
+					body: JSON.stringify(body),
 				});
 
 				if (!response.ok) {
@@ -433,7 +439,7 @@ export const useChatStore = defineStore('chat', {
 
 					for (const line of lines) {
 						if (line.startsWith('data: ')) {
-							const jsonStr = line.slice(6);
+							const jsonStr = line.slice(6).trim();
 							if (!jsonStr) continue;
 
 							try {
@@ -474,7 +480,15 @@ export const useChatStore = defineStore('chat', {
 										const toolCall = msg?.tool_calls?.find(tc => tc.tool_call_id === data.id);
 										if (toolCall && typeof toolCall.input_args === 'string') {
 											toolCall.input_args += data.args_delta;
+										} else {
+											const newToolCall = {
+												tool_call_id: data.id,
+												tool_name: data.name,
+												input_args: data.args_delta,
+											};
+											if (msg) msg.tool_calls.push(newToolCall as any);
 										}
+
 										break;
 									}
 									case 'tool_call_end': {

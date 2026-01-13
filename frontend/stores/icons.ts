@@ -88,7 +88,6 @@ export const useIconsStore = defineStore('icons', {
 					const provider = state.providersMeta[state.providerLookup[normalized]];
 					return {icon: provider.icon, type: provider.type as 'svg' | 'png'};
 				}
-				console.log(normalized);
 				for (const [key, meta] of Object.entries(state.providersMeta)) {
 					if (
 						meta.variants.some(variant => {

@@ -8,7 +8,7 @@
 			{{ description }}
 		</p>
 		<div class="mb-8 w-full max-w-2xl">
-			<ChatComposer @send="onSend($event)" />
+			<ChatComposer @send="onSend" />
 		</div>
 	</div>
 </template>
@@ -20,7 +20,7 @@ import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
 
 const emit = defineEmits<{
-	send: [content: string];
+	send: [content: string, parts?: any[]];
 }>();
 
 const store = useMainStore();
@@ -45,12 +45,8 @@ const description = computed(() => {
 	return placeholders[Math.floor(Math.random() * placeholders.length)];
 });
 
-function handleSend(content: string) {
-	emit('send', content);
-}
-
-function onSend(content: string | undefined) {
-	if (!content) return;
-	handleSend(content);
+function onSend(content: string, parts?: any[]) {
+	if (!content && (!parts || parts.length === 0)) return;
+	emit('send', content, parts);
 }
 </script>
