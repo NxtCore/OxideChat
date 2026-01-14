@@ -212,7 +212,8 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 		}
 	};
 
-	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 ORDER BY created_at ASC")
+	// Only fetch active fork messages
+	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 AND is_active_fork = TRUE ORDER BY created_at ASC")
 		.bind(id)
 		.fetch_all(&state.db)
 		.await;
@@ -228,6 +229,25 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 			};
 
 			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+
+			// Compute sibling counts for each unique parent_id
+			let sibling_counts: HashMap<Option<Uuid>, i64> = if message_ids.is_empty() {
+				HashMap::new()
+			} else {
+				let counts = sqlx::query_as::<_, (Option<Uuid>, i64)>(
+					r#"
+					SELECT parent_id, COUNT(*) as count
+					FROM messages
+					WHERE chat_id = $1
+					GROUP BY parent_id
+					"#,
+				)
+				.bind(id)
+				.fetch_all(&state.db)
+				.await
+				.unwrap_or_default();
+				counts.into_iter().collect()
+			};
 
 			let tool_executions: Vec<(
 				Uuid,
@@ -292,12 +312,15 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 				.into_iter()
 				.map(|m| {
 					let msg_id = m.id;
+					let parent_id = m.parent_id;
 					let mut response: ChatMessageResponse = m.into();
 					if let Some(tools) = executions_by_message.remove(&msg_id) {
 						if !tools.is_empty() {
 							response.tool_calls = Some(tools);
 						}
 					}
+					// Set computed sibling_count
+					response.sibling_count = sibling_counts.get(&parent_id).copied().unwrap_or(1) as i32;
 					response
 				})
 				.collect();

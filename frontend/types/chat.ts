@@ -66,6 +66,10 @@ export interface ChatMessage {
 	};
 	tool_calls: Array<ChatMessageToolCall>;
 	created_at: string;
+	// Fork support
+	parent_id: string | null;
+	fork_index: number;
+	sibling_count: number;
 }
 
 export interface ChatWithMessages {

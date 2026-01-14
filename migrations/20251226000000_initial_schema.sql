@@ -117,15 +117,18 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
     PRIMARY KEY (role_id, permission_id)
 );
-
-CREATE TYPE provider_kind AS ENUM (
-    'OPENAI',
-    'OPENAI_COMPAT',
-    'OPENROUTER',
-    'ANTHROPIC',
-    'GOOGLE',
-    'CUSTOM'
-);
+DO $$ BEGIN
+    CREATE TYPE provider_kind AS ENUM (
+        'OPENAI',
+        'OPENAI_COMPAT',
+        'OPENROUTER',
+        'ANTHROPIC',
+        'GOOGLE',
+        'CUSTOM'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS providers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -332,12 +335,16 @@ ON CONFLICT DO NOTHING;
 -- ============= Tool Calling Infrastructure =============
 
 -- Tool source types
-CREATE TYPE tool_source_kind AS ENUM (
-    'BUILTIN',       -- Built-in tools (Exa search, etc.)
-    'WASM',          -- Extism WASM plugins  
-    'MCP',           -- MCP server connection
-    'HTTP'           -- HTTP endpoint tools
-);
+DO $$ BEGIN
+    CREATE TYPE tool_source_kind AS ENUM (
+        'BUILTIN',       -- Built-in tools (Exa search, etc.)
+        'WASM',          -- Extism WASM plugins  
+        'MCP',           -- MCP server connection
+        'HTTP'           -- HTTP endpoint tools
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- WASM blobs storage for compiled plugins
 CREATE TABLE IF NOT EXISTS wasm_blobs (
@@ -1144,7 +1151,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.image_preview.download', 'Herunterladen'),
     ('de', 'chat.image_preview.copy', 'URL kopieren'),
     ('de', 'chat.image_preview.copied', 'Kopiert!'),
-    ('de', 'chat.tool_execution.generated_image', 'Generiertes Bild');
+    ('de', 'chat.tool_execution.generated_image', 'Generiertes Bild'),
 
 
     -- Schema Builder

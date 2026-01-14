@@ -4,7 +4,7 @@
 
 use crate::AppState;
 use crate::routes::public::auth::get_current_user;
-use crate::types::{ChatMessageResponse, Message, MessageListParams, SendMessageRequest, ToolExecutionResponse};
+use crate::types::{ChatMessageResponse, EditMessageRequest, Message, MessageListParams, SendMessageRequest, SwitchForkRequest, ToolExecutionResponse};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -45,11 +45,12 @@ pub async fn list_messages(
 		_ => {}
 	}
 
+	// Fetch only active fork messages
 	let messages = if let Some(before_id) = params.before {
 		sqlx::query_as::<_, Message>(
 			r#"
 			SELECT * FROM messages
-			WHERE chat_id = $1 AND created_at < (SELECT created_at FROM messages WHERE id = $2)
+			WHERE chat_id = $1 AND is_active_fork = TRUE AND created_at < (SELECT created_at FROM messages WHERE id = $2)
 			ORDER BY created_at DESC
 			"#,
 		)
@@ -61,7 +62,7 @@ pub async fn list_messages(
 		sqlx::query_as::<_, Message>(
 			r#"
 			SELECT * FROM messages
-			WHERE chat_id = $1 AND created_at > (SELECT created_at FROM messages WHERE id = $2)
+			WHERE chat_id = $1 AND is_active_fork = TRUE AND created_at > (SELECT created_at FROM messages WHERE id = $2)
 			ORDER BY created_at ASC
 			"#,
 		)
@@ -73,7 +74,7 @@ pub async fn list_messages(
 		sqlx::query_as::<_, Message>(
 			r#"
 			SELECT * FROM messages
-			WHERE chat_id = $1
+			WHERE chat_id = $1 AND is_active_fork = TRUE
 			ORDER BY created_at ASC
 			"#,
 		)
@@ -85,6 +86,26 @@ pub async fn list_messages(
 	match messages {
 		Ok(messages) => {
 			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+
+			// Compute sibling counts for each unique parent_id
+			let sibling_counts: std::collections::HashMap<Option<Uuid>, i64> = if message_ids.is_empty() {
+				std::collections::HashMap::new()
+			} else {
+				// Query sibling counts
+				let counts = sqlx::query_as::<_, (Option<Uuid>, i64)>(
+					r#"
+					SELECT parent_id, COUNT(*) as count
+					FROM messages
+					WHERE chat_id = $1
+					GROUP BY parent_id
+					"#,
+				)
+				.bind(chat_id)
+				.fetch_all(&state.db)
+				.await
+				.unwrap_or_default();
+				counts.into_iter().collect()
+			};
 
 			let tool_executions = if message_ids.is_empty() {
 				vec![]
@@ -137,9 +158,11 @@ pub async fn list_messages(
 				.into_iter()
 				.map(|m| {
 					let msg_id = m.id;
-					let response: ChatMessageResponse = m.into();
-					let mut response = response;
+					let parent_id = m.parent_id;
+					let mut response: ChatMessageResponse = m.into();
 					response.tool_calls = executions_by_message.remove(&msg_id);
+					// Set computed sibling_count
+					response.sibling_count = sibling_counts.get(&parent_id).copied().unwrap_or(1) as i32;
 					response
 				})
 				.collect();
@@ -213,6 +236,298 @@ pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, 
 		}
 		Err(e) => {
 			eprintln!("[MESSAGES] Failed to save message: {e}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+	}
+}
+
+/// POST /api/v1/chats/:chat_id/messages/:message_id/edit
+///
+/// Edit a message, creating a new fork. The original message remains as a sibling.
+pub async fn edit_message(
+	State(state): State<Arc<AppState>>,
+	cookies: Cookies,
+	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
+	Json(req): Json<EditMessageRequest>,
+) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	// Verify chat ownership
+	let chat_exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM chats WHERE id = $1 AND user_id = $2)")
+		.bind(chat_id)
+		.bind(user.id)
+		.fetch_one(&state.db)
+		.await;
+
+	match chat_exists {
+		Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to validate chat: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+		_ => {}
+	}
+
+	// Get the original message
+	let original = match sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1 AND chat_id = $2")
+		.bind(message_id)
+		.bind(chat_id)
+		.fetch_optional(&state.db)
+		.await
+	{
+		Ok(Some(m)) => m,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to fetch message: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	// Get the next fork_index for siblings with same parent_id
+	let next_fork_index: i32 = sqlx::query_scalar(r#"SELECT COALESCE(MAX(fork_index), 0) + 1 FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2"#)
+		.bind(chat_id)
+		.bind(original.parent_id)
+		.fetch_one(&state.db)
+		.await
+		.unwrap_or(1);
+
+	// Mark all siblings as inactive
+	let _ = sqlx::query(r#"UPDATE messages SET is_active_fork = FALSE WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2"#)
+		.bind(chat_id)
+		.bind(original.parent_id)
+		.execute(&state.db)
+		.await;
+
+	// Create the new forked message
+	let new_message = sqlx::query_as::<_, Message>(
+		r#"
+		INSERT INTO messages (chat_id, role, content, model_id, reasoning_details, usage_details, cost_details, parent_id, fork_index, is_active_fork)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
+		RETURNING *
+		"#,
+	)
+	.bind(chat_id)
+	.bind(&original.role)
+	.bind(&req.content)
+	.bind(original.model_id)
+	.bind(&original.reasoning_details)
+	.bind(&original.usage_details)
+	.bind(&original.cost_details)
+	.bind(original.parent_id)
+	.bind(next_fork_index)
+	.fetch_one(&state.db)
+	.await;
+
+	let _ = sqlx::query("UPDATE chats SET updated_at = NOW() WHERE id = $1")
+		.bind(chat_id)
+		.execute(&state.db)
+		.await;
+
+	match new_message {
+		Ok(msg) => {
+			let mut response: ChatMessageResponse = msg.into();
+			response.sibling_count = next_fork_index;
+			ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
+		}
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to create fork: {e}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+	}
+}
+
+/// POST /api/v1/chats/:chat_id/messages/:message_id/switch-fork
+///
+/// Switch to a different fork at the given message position.
+pub async fn switch_fork(
+	State(state): State<Arc<AppState>>,
+	cookies: Cookies,
+	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
+	Json(req): Json<SwitchForkRequest>,
+) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	// Verify chat ownership
+	let chat_exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM chats WHERE id = $1 AND user_id = $2)")
+		.bind(chat_id)
+		.bind(user.id)
+		.fetch_one(&state.db)
+		.await;
+
+	match chat_exists {
+		Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to validate chat: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+		_ => {}
+	}
+
+	// Get the message to find its parent_id
+	let msg = match sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1 AND chat_id = $2")
+		.bind(message_id)
+		.bind(chat_id)
+		.fetch_optional(&state.db)
+		.await
+	{
+		Ok(Some(m)) => m,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to fetch message: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	// Mark all siblings as inactive
+	let _ = sqlx::query(r#"UPDATE messages SET is_active_fork = FALSE WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2"#)
+		.bind(chat_id)
+		.bind(msg.parent_id)
+		.execute(&state.db)
+		.await;
+
+	// Mark the target fork as active
+	let updated = sqlx::query_as::<_, Message>(
+		r#"
+		UPDATE messages SET is_active_fork = TRUE 
+		WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND fork_index = $3
+		RETURNING *
+		"#,
+	)
+	.bind(chat_id)
+	.bind(msg.parent_id)
+	.bind(req.fork_index)
+	.fetch_optional(&state.db)
+	.await;
+
+	match updated {
+		Ok(Some(msg)) => {
+			let response: ChatMessageResponse = msg.into();
+			ResponseBuilder::new(ResponseBody::Json(response)).build()
+		}
+		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to switch fork: {e}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+	}
+}
+
+/// GET /api/v1/chats/:chat_id/messages/:message_id/siblings
+///
+/// Get all sibling messages (same parent_id) for fork navigation.
+pub async fn get_siblings(State(state): State<Arc<AppState>>, cookies: Cookies, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	// Verify chat ownership
+	let chat_exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM chats WHERE id = $1 AND user_id = $2)")
+		.bind(chat_id)
+		.bind(user.id)
+		.fetch_one(&state.db)
+		.await;
+
+	match chat_exists {
+		Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to validate chat: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+		_ => {}
+	}
+
+	// Get the message to find its parent_id
+	let msg = match sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1 AND chat_id = $2")
+		.bind(message_id)
+		.bind(chat_id)
+		.fetch_optional(&state.db)
+		.await
+	{
+		Ok(Some(m)) => m,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to fetch message: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	// Get all siblings
+	let siblings = sqlx::query_as::<_, Message>(
+		r#"
+		SELECT * FROM messages 
+		WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2
+		ORDER BY fork_index ASC
+		"#,
+	)
+	.bind(chat_id)
+	.bind(msg.parent_id)
+	.fetch_all(&state.db)
+	.await;
+
+	match siblings {
+		Ok(msgs) => {
+			let count = msgs.len() as i32;
+			let responses: Vec<ChatMessageResponse> = msgs
+				.into_iter()
+				.map(|m| {
+					let mut response: ChatMessageResponse = m.into();
+					response.sibling_count = count;
+					response
+				})
+				.collect();
+			ResponseBuilder::new(ResponseBody::Json(responses)).build()
+		}
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to fetch siblings: {e}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+	}
+}
+
+/// DELETE /api/v1/chats/:chat_id/messages/:message_id/fork
+///
+/// Delete a fork and all its descendants.
+pub async fn delete_fork(State(state): State<Arc<AppState>>, cookies: Cookies, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	// Verify chat ownership
+	let chat_exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM chats WHERE id = $1 AND user_id = $2)")
+		.bind(chat_id)
+		.bind(user.id)
+		.fetch_one(&state.db)
+		.await;
+
+	match chat_exists {
+		Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to validate chat: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+		_ => {}
+	}
+
+	// Delete the message (CASCADE will delete descendants via parent_id FK)
+	let result = sqlx::query("DELETE FROM messages WHERE id = $1 AND chat_id = $2")
+		.bind(message_id)
+		.bind(chat_id)
+		.execute(&state.db)
+		.await;
+
+	match result {
+		Ok(r) if r.rows_affected() > 0 => ResponseBuilder::new(ResponseBody::<()>::Empty).status(StatusCode::NO_CONTENT).build(),
+		Ok(_) => ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to delete fork: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}
 	}

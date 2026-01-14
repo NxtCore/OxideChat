@@ -361,6 +361,9 @@ export const useChatStore = defineStore('chat', {
 				},
 				tool_calls: [],
 				created_at: new Date().toISOString(),
+				parent_id: null,
+				fork_index: 1,
+				sibling_count: 1,
 			};
 			this.messages.push(userMessage);
 			const streamingMessageId = `streaming-${Date.now()}`;
@@ -388,6 +391,9 @@ export const useChatStore = defineStore('chat', {
 				},
 				tool_calls: [],
 				created_at: new Date().toISOString(),
+				parent_id: null,
+				fork_index: 1,
+				sibling_count: 1,
 			};
 			this.messages.push(streamingMessage);
 
@@ -654,6 +660,61 @@ export const useChatStore = defineStore('chat', {
 
 		setContextTokens(tokens: number) {
 			this.contextTokens = tokens;
+		},
+
+		// Fork operations
+		async editMessage(chatId: string, messageId: string, content: string): Promise<ChatMessage | null> {
+			try {
+				const {$customFetch} = useNuxtApp();
+				const message = await $customFetch(`/api/v1/chats/${chatId}/messages/${messageId}/edit`, {
+					method: 'POST',
+					body: {content},
+				});
+				const newMsg = message as ChatMessage;
+				// Find the original message index and replace with new one
+				const idx = this.messages.findIndex(m => m.id === messageId);
+				if (idx !== -1) {
+					// Update sibling count on original
+					this.messages[idx].sibling_count = newMsg.sibling_count;
+					// Insert new message right after original
+					this.messages.splice(idx + 1, 0, newMsg);
+				}
+				return newMsg;
+			} catch (e) {
+				console.error('Failed to edit message:', e);
+				return null;
+			}
+		},
+
+		async switchFork(chatId: string, messageId: string, forkIndex: number): Promise<boolean> {
+			try {
+				const {$customFetch} = useNuxtApp();
+				const message = await $customFetch(`/api/v1/chats/${chatId}/messages/${messageId}/switch-fork`, {
+					method: 'POST',
+					body: {fork_index: forkIndex},
+				});
+				// Reload the chat to get correct fork path
+				await this.fetchChat(chatId);
+				return true;
+			} catch (e) {
+				console.error('Failed to switch fork:', e);
+				return false;
+			}
+		},
+
+		async deleteFork(chatId: string, messageId: string): Promise<boolean> {
+			try {
+				const {$customFetch} = useNuxtApp();
+				await $customFetch(`/api/v1/chats/${chatId}/messages/${messageId}/fork`, {
+					method: 'DELETE',
+				});
+				// Remove the message from local state
+				this.messages = this.messages.filter(m => m.id !== messageId);
+				return true;
+			} catch (e) {
+				console.error('Failed to delete fork:', e);
+				return false;
+			}
 		},
 
 		async init() {

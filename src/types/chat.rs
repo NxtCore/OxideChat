@@ -179,6 +179,10 @@ pub struct Message {
 	pub usage_details: sqlx::types::Json<UsageDetails>,
 	pub reasoning_details: sqlx::types::Json<ReasoningDetails>,
 	pub created_at: DateTime<Utc>,
+	// Fork support
+	pub parent_id: Option<Uuid>,
+	pub fork_index: i32,
+	pub is_active_fork: bool,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -282,6 +286,18 @@ pub struct MessageListParams {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct EditMessageRequest {
+	pub content: String,
+	#[serde(default)]
+	pub regenerate: bool, // Whether to trigger AI regeneration after editing
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SwitchForkRequest {
+	pub fork_index: i32,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UpdatePreferencesRequest {
 	pub default_model_key: Option<String>,
 	pub favorite_model_keys: Option<Vec<String>>,
@@ -354,6 +370,11 @@ pub struct ChatMessageResponse {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub tool_calls: Option<Vec<ToolExecutionResponse>>,
 	pub created_at: DateTime<Utc>,
+	// Fork support
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub parent_id: Option<Uuid>,
+	pub fork_index: i32,
+	pub sibling_count: i32,
 }
 
 impl From<Message> for ChatMessageResponse {
@@ -370,6 +391,9 @@ impl From<Message> for ChatMessageResponse {
 			reasoning_details: m.reasoning_details.0,
 			tool_calls: None,
 			created_at: m.created_at,
+			parent_id: m.parent_id,
+			fork_index: m.fork_index,
+			sibling_count: 1, // Default, computed at query time
 		}
 	}
 }
