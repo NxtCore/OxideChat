@@ -14,7 +14,7 @@ import {useRoute} from '#app';
 const chatStore = useChatStore();
 const route = useRoute();
 
-async function handleSendMessage(content: string) {
+async function handleSendMessage(content: string, parts?: any[]) {
 	let chatId = chatStore.activeChat?.id;
 	if (!chatId) {
 		const chat = await chatStore.createChat({
@@ -23,7 +23,7 @@ async function handleSendMessage(content: string) {
 		if (!chat) return;
 		chatId = chat.id;
 	}
-	await chatStore.sendAndStream(chatId, content);
+	await chatStore.sendAndStream(chatId, content, parts);
 }
 
 if (!chatStore.activeChat || chatStore.activeChat.id !== route.params.id) {

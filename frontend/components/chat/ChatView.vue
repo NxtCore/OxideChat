@@ -10,7 +10,7 @@ import ChatEmptyState from './ChatEmptyState.vue';
 
 const chatStore = useChatStore();
 
-async function handleSendMessage(content: string) {
+async function handleSendMessage(content: string, parts?: any[]) {
 	let chatId = chatStore.activeChat?.id;
 
 	if (!chatId) {
@@ -21,6 +21,6 @@ async function handleSendMessage(content: string) {
 		chatId = chat.id;
 	}
 
-	await chatStore.sendAndStream(chatId, content);
+	await chatStore.sendAndStream(chatId, content, parts);
 }
 </script>

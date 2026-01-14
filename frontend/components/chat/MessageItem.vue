@@ -39,9 +39,20 @@
 					:name="tool.tool_name"
 					:args="tool.input_args"
 					:output="tool.output"
-					:error="tool.error"
+					:error="tool.error || undefined"
 					:is-executing="!tool.output && !tool.error"
 				/>
+			</div>
+
+			<div v-if="isUser && attachedImages.length > 0" class="flex gap-2 flex-wrap max-w-3xl mb-2">
+				<div
+					v-for="img in attachedImages"
+					:key="img.image_id"
+					class="rounded-lg overflow-hidden border border-border max-w-xs cursor-pointer hover:opacity-90 transition-opacity"
+					@click="openImagePreview(img.url, `attached-${img.image_id}.png`)"
+				>
+					<img :src="img.url" class="max-h-64 object-contain" :alt="`Attached image ${img.image_id}`" />
+				</div>
 			</div>
 
 			<div
@@ -70,6 +81,7 @@
 			</div>
 
 			<CodePreview v-if="previewData" :code="previewData.code" :language="previewData.language" :is-open="!!previewData" @close="closePreview" />
+			<ImagePreview :is-open="showImagePreview" :image-url="imagePreviewUrl" :filename="imagePreviewFilename" @close="closeImagePreview" />
 		</div>
 	</div>
 </template>
@@ -78,6 +90,7 @@
 import {User, Bot, Brain, ChevronDown} from 'lucide-vue-next';
 import MessageActions from './MessageActions.vue';
 import CodePreview from './CodePreview.vue';
+import ImagePreview from '~/components/ImagePreview.vue';
 import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
@@ -98,10 +111,25 @@ const {renderStreaming, renderComplete} = useMarkdown();
 
 const showReasoning = ref(false);
 const previewData = ref<{code: string; language: string} | null>(null);
+const showImagePreview = ref(false);
+const imagePreviewUrl = ref<string | null>(null);
+const imagePreviewFilename = ref<string | undefined>(undefined);
 
 const isUser = computed(() => props.message.role === 'user');
 const isStreaming = computed(() => props.message.id.startsWith('streaming-'));
 const isStreamingReasoning = computed(() => isStreaming.value && chatStore.isStreaming && !props.message.content);
+
+const attachedImages = computed(() => {
+	if (!props.message.content_parts || !Array.isArray(props.message.content_parts)) {
+		return [];
+	}
+	return props.message.content_parts
+		.filter((part: any) => part.type === 'image' && part.image_id)
+		.map((part: any) => ({
+			image_id: part.image_id,
+			url: `/api/v1/images/${part.image_id}`,
+		}));
+});
 
 const model = computed(() => {
 	if (isUser.value) return null;
@@ -188,10 +216,29 @@ function handleCodeBlockClick(event: MouseEvent) {
 			previewData.value = result;
 		}
 	}
+
+	const imgTag = target.closest('img') as HTMLImageElement | null;
+	if (imgTag && imgTag.src) {
+		const alt = imgTag.alt || 'image';
+		const filename = `${alt.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '')}.png`;
+		openImagePreview(imgTag.src, filename);
+	}
 }
 
 function closePreview() {
 	previewData.value = null;
+}
+
+function openImagePreview(url: string, filename?: string) {
+	imagePreviewUrl.value = url;
+	imagePreviewFilename.value = filename;
+	showImagePreview.value = true;
+}
+
+function closeImagePreview() {
+	showImagePreview.value = false;
+	imagePreviewUrl.value = null;
+	imagePreviewFilename.value = undefined;
 }
 </script>
 
@@ -214,5 +261,14 @@ function closePreview() {
 .expand-enter-to,
 .expand-leave-from {
 	max-height: 500px;
+}
+
+.prose :deep(img) {
+	cursor: pointer;
+	transition: opacity 0.2s;
+}
+
+.prose :deep(img:hover) {
+	opacity: 0.9;
 }
 </style>

@@ -1,6 +1,14 @@
 <template>
 	<div class="flex flex-col gap-2">
-		<div class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none" @click="isExpanded = !isExpanded">
+		<div
+			class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none"
+			@click="
+				() => {
+					userToggled = true;
+					isExpanded = !isExpanded;
+				}
+			"
+		>
 			<Wrench class="h-3.5 w-3.5" />
 			<span class="text-[10px] font-bold uppercase tracking-widest">{{ store.getTranslation('chat.tool_execution.tool') }}: {{ name }}</span>
 			<span v-if="isExecuting" class="flex items-center gap-1 text-xs text-muted-foreground">
@@ -27,7 +35,21 @@
 					</div>
 				</div>
 
-				<div v-if="output !== undefined" class="mb-3">
+				<div v-if="imageUrl" class="mb-3">
+					<span class="text-xs font-medium text-muted-foreground mb-1 block">{{
+						store.getTranslation('chat.tool_execution.generated_image') || 'Generated Image'
+					}}</span>
+					<div class="relative group">
+						<img
+							:src="imageUrl"
+							alt="Generated image"
+							class="rounded-lg max-w-full max-h-96 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+							@click="openImageModal"
+						/>
+					</div>
+				</div>
+
+				<div v-else-if="output !== undefined" class="mb-3">
 					<span class="text-xs font-medium text-muted-foreground mb-1 block">{{ store.getTranslation('chat.tool_execution.output') }}</span>
 					<div class="rounded-md bg-background/50 p-2 text-xs font-mono overflow-x-auto max-h-64 overflow-y-auto">
 						<pre class="whitespace-pre-wrap">{{ formattedOutput }}</pre>
@@ -44,11 +66,20 @@
 				<div v-if="durationMs" class="text-xs text-muted-foreground">{{ store.getTranslation('chat.tool_execution.completed_in', {ms: durationMs}) }}</div>
 			</div>
 		</Transition>
+
+		<ImagePreview
+			:is-open="showImageModal"
+			:image-url="imageUrl"
+			alt-text="Generated image"
+			:filename="`generated-image-${props.id}.png`"
+			@close="showImageModal = false"
+		/>
 	</div>
 </template>
 
 <script setup lang="ts">
 import {Wrench, ChevronDown, Loader2, CheckCircle, AlertCircle} from 'lucide-vue-next';
+import ImagePreview from '~/components/ImagePreview.vue';
 import {useMainStore} from '~/stores';
 
 const store = useMainStore();
@@ -63,7 +94,15 @@ const props = defineProps<{
 	durationMs?: number;
 }>();
 
-const isExpanded = ref(true);
+const isExpanded = ref(props.isExecuting ?? false);
+const showImageModal = ref(false);
+const userToggled = ref(false);
+
+watchEffect(() => {
+	if (!props.isExecuting && props.output !== undefined && !userToggled.value) {
+		isExpanded.value = false;
+	}
+});
 
 const formattedArgs = computed(() => {
 	if (typeof props.args === 'string') {
@@ -82,6 +121,42 @@ const formattedOutput = computed(() => {
 	}
 	return JSON.stringify(props.output, null, 2);
 });
+
+function isValidImageProtocol(url: string): boolean {
+	if (url.startsWith('data:image/')) return true;
+	if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) return true;
+	return false;
+}
+
+const imageUrl = computed(() => {
+	if (!props.output) return null;
+	const out = typeof props.output === 'string' ? tryParseJson(props.output) : props.output;
+	if (out?.image_url && isValidImageProtocol(out.image_url)) return out.image_url;
+	if (out?.image_reference && isValidImageProtocol(out.image_reference)) return out.image_reference;
+	if (out?.url && isImageUrl(out.url)) return out.url;
+	return null;
+});
+
+function tryParseJson(str: string): any {
+	try {
+		return JSON.parse(str);
+	} catch {
+		return null;
+	}
+}
+
+function isImageUrl(url: string): boolean {
+	if (url.startsWith('data:image/')) return true;
+	const urlWithoutQuery = url.split('?')[0];
+	if (!urlWithoutQuery) return false;
+	const parts = urlWithoutQuery.split('.');
+	const ext = parts[parts.length - 1]?.toLowerCase() || '';
+	return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext);
+}
+
+function openImageModal() {
+	showImageModal.value = true;
+}
 </script>
 
 <style scoped>
@@ -102,5 +177,15 @@ const formattedOutput = computed(() => {
 .expand-enter-to,
 .expand-leave-from {
 	max-height: 500px;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+	transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+	opacity: 0;
 }
 </style>

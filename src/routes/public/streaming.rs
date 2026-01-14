@@ -27,10 +27,20 @@ use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
+/// Structured message part (text or image)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum MessagePart {
+	Text { text: String },
+	Image { image_id: String },
+}
+
 /// Request body for sending a message and streaming AI response
 #[derive(Debug, Deserialize)]
 pub struct StreamRequest {
 	pub content: String,
+	#[serde(default)]
+	pub parts: Option<Vec<MessagePart>>,
 	pub model_key: String,
 	pub reasoning_effort: Option<String>,
 	pub reasoning_budget_tokens: Option<u32>,
@@ -152,7 +162,7 @@ fn merge_reasoning_with_priority(
 async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: &str, input: serde_json::Value) -> Result<crate::types::ToolExecutionResult, String> {
 	use crate::types::ToolSourceKind;
 
-	let mut tool: Option<Tool> = None;
+	let mut tool: Option<Tool>;
 	let mut function_name: Option<String> = None;
 	let mut function_id: Option<Uuid> = None;
 
@@ -220,6 +230,7 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 		settings,
 		timeout_ms: Some(30000),
 		function_name: function_name.map(|s| s.to_string()),
+		db: Some(std::sync::Arc::new(db.clone())),
 	};
 
 	match tool.source_kind {
@@ -298,8 +309,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] Chat verified");
-
 	let model = sqlx::query_as::<_, crate::types::AiModel>("SELECT * FROM models WHERE model_id = $1")
 		.bind(&req.model_key)
 		.fetch_optional(&state.db)
@@ -314,8 +323,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] Model verified");
-
 	let model_config = sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE owner_id = $1 AND stable_key = $2")
 		.bind(user.id)
 		.bind(&req.model_key)
@@ -324,8 +331,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		.ok()
 		.flatten();
 
-	eprintln!("[STREAM] Model config: {:?}", model_config.as_ref().map(|mc| &mc.name));
-
 	let reasoning_details = crate::types::ReasoningDetails {
 		effort: req.reasoning_effort.clone(),
 		budget_tokens: req.reasoning_budget_tokens.map(|b| b as i32),
@@ -333,15 +338,18 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 	let usage_details = crate::types::UsageDetails::default();
 	let cost_details = crate::types::CostDetails::default();
 
+	let content_parts_json = req.parts.as_ref().map(|parts| serde_json::to_value(parts).ok()).flatten();
+
 	let user_message = sqlx::query_as::<_, Message>(
 		r#"
-		INSERT INTO messages (chat_id, role, content, model_id, reasoning_details, usage_details, cost_details)
-		VALUES ($1, 'user', $2, $3, $4, $5, $6)
+		INSERT INTO messages (chat_id, role, content, content_parts, model_id, reasoning_details, usage_details, cost_details)
+		VALUES ($1, 'user', $2, $3, $4, $5, $6, $7)
 		RETURNING *
 		"#,
 	)
 	.bind(chat_id)
 	.bind(&req.content)
+	.bind(content_parts_json)
 	.bind(model.id)
 	.bind(sqlx::types::Json(reasoning_details))
 	.bind(sqlx::types::Json(usage_details))
@@ -357,8 +365,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] User message saved");
-
 	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 ORDER BY created_at ASC")
 		.bind(chat_id)
 		.fetch_all(&state.db)
@@ -372,8 +378,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] Messages fetched");
-
 	let engine = ai::get();
 	let engine_read = engine.read().await;
 
@@ -386,8 +390,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] Model verified");
-
 	let provider = match engine_read.get_provider(&omni_model.provider_name).await {
 		Some(p) => p,
 		None => {
@@ -397,17 +399,45 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	eprintln!("[STREAM] Provider verified");
+	let omni_messages: Vec<OmniMessage> = {
+		let mut result = Vec::new();
+		for m in messages.iter().filter(|m| m.role == "user" || m.role == "assistant") {
+			let parts = if let Some(content_parts_json) = &m.content_parts {
+				if let Ok(stored_parts) = serde_json::from_value::<Vec<MessagePart>>(content_parts_json.clone()) {
+					let mut omni_parts = Vec::new();
+					for part in stored_parts {
+						match part {
+							MessagePart::Text { text } => {
+								omni_parts.push(ContentPart::Text(text));
+							}
+							MessagePart::Image { image_id } => {
+								if let Ok(uuid) = uuid::Uuid::parse_str(&image_id) {
+									if let Ok(Some((data, mime))) = crate::utils::images::get_image(&state.db, uuid).await {
+										use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+										let b64 = BASE64.encode(&data);
+										let data_uri = format!("data:{};base64,{}", mime, b64);
+										omni_parts.push(ContentPart::ImageUrl { url: data_uri, mime: Some(mime) });
+									}
+								}
+							}
+						}
+					}
+					omni_parts
+				} else {
+					vec![ContentPart::Text(m.content.clone())]
+				}
+			} else {
+				vec![ContentPart::Text(m.content.clone())]
+			};
 
-	let omni_messages: Vec<OmniMessage> = messages
-		.iter()
-		.filter(|m| m.role == "user" || m.role == "assistant")
-		.map(|m| OmniMessage {
-			role: if m.role == "user" { Role::User } else { Role::Assistant },
-			parts: vec![ContentPart::Text(m.content.clone())],
-			name: None,
-		})
-		.collect();
+			result.push(OmniMessage {
+				role: if m.role == "user" { Role::User } else { Role::Assistant },
+				parts,
+				name: None,
+			});
+		}
+		result
+	};
 
 	eprintln!("[STREAM] Messages built");
 	let mut ir = ChatRequestIR::default();
@@ -438,8 +468,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 				.bind(user.id)
 				.fetch_all(&state.db)
 				.await;
-
-			eprintln!("[STREAM] Tools query result: {:?}", tools.as_ref().map(|t| t.len()).map_err(|e| e.to_string()));
 
 			if let Ok(tools) = tools {
 				eprintln!("[STREAM] Found {} tools from DB", tools.len());
@@ -474,8 +502,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 			}
 		}
 	}
-
-	eprintln!("[STREAM] Chat request: {:?}", ir);
 
 	let omni_messages_for_stream = ir.messages.clone();
 	let ir_for_stream = ir.clone();
@@ -560,7 +586,6 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 				let mut event_count = 0;
 				while let Some(event) = upstream.next().await {
 					event_count += 1;
-					eprintln!("[STREAM] Event #{}: {:?}", event_count, &event);
 					match event {
 						StreamEvent::TextDelta { content } => {
 							if let Some(start) = reasoning_start.take() {
@@ -774,7 +799,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 									current_messages.push(OmniMessage {
 										role: Role::Tool,
 										parts: vec![ContentPart::Text(result_text)],
-										name: Some(format!("{}:{}", tool_name, call_id)),
+										name: Some(call_id.clone()),
 									});
 
 									all_tool_executions.push((call_id, tool_name, args, output, error, exec_ms, tool_id, function_id));

@@ -1,10 +1,10 @@
 [package]
 name = "OxideChat"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A modern, performance and on customization focused AI chat application"
 license = "MIT"
-repository = "https://github.com/yourusername/OxideChat"
+repository = "https://github.com/NxtCore/OxideChat"
 readme = "README.md"
 keywords = ["chat", "axum", "websocket", "postgres"]
 categories = ["web-programming"]
@@ -32,6 +32,7 @@ oauth2 = "5"
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "json",
+    "multipart",
 ] }
 tower-http = { version = "0.5", features = ["cors"] }
 omniference = "0.1"
@@ -46,6 +47,7 @@ sha2 = "0.10"
 base64 = "0.22"
 thiserror = "2"
 async-trait = "0.1"
+infer = "0.16"
 
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }
