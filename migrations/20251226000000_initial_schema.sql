@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS model_access (
 );
 
 -- Workspaces (linked to users)
-CREATE TABLE workspaces (
+CREATE TABLE IF NOT EXISTS workspaces (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
@@ -244,7 +244,7 @@ CREATE TABLE workspaces (
 );
 
 -- Chats (linked to workspaces)
-CREATE TABLE chats (
+CREATE TABLE IF NOT EXISTS chats (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     workspace_id UUID REFERENCES workspaces(id) ON DELETE SET NULL,
@@ -256,7 +256,7 @@ CREATE TABLE chats (
 );
 
 -- Messages
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     role VARCHAR(20) NOT NULL,
@@ -265,13 +265,14 @@ CREATE TABLE messages (
     model_id UUID REFERENCES models(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
+    content_parts JSONB DEFAULT '[]',
     cost_details JSONB DEFAULT '{}',
     usage_details JSONB DEFAULT '{}',
     reasoning_details JSONB DEFAULT '{}'
 );
 
 -- User preferences (streaming animation, default model, etc.)
-CREATE TABLE user_preferences (
+CREATE TABLE IF NOT EXISTS user_preferences (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     default_model_key VARCHAR(255),
     favorite_model_keys JSONB DEFAULT '[]',
@@ -281,6 +282,16 @@ CREATE TABLE user_preferences (
     custom_theme_urls JSONB DEFAULT '[]',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS images (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    data BYTEA,  -- NULL if using file storage
+    file_path VARCHAR(500),  -- Path relative to storage root (for file storage)
+    mime_type VARCHAR(64) NOT NULL DEFAULT 'image/png',
+	size_bytes BIGINT NOT NULL,
+    source VARCHAR(50),  -- 'imagegen', 'upload', etc.
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 INSERT INTO roles (name) VALUES ('admin'), ('user') ON CONFLICT DO NOTHING;
@@ -481,6 +492,9 @@ CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chats_pinned ON chats(user_id, is_pinned) WHERE is_pinned = true;
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_images_user_id ON images(user_id);
+CREATE INDEX IF NOT EXISTS idx_messages_content_parts_gin ON messages USING GIN (content_parts);
 
 -- Tool indexes
 CREATE INDEX IF NOT EXISTS idx_wasm_blobs_owner ON wasm_blobs(owner_id);
@@ -1120,6 +1134,18 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.tool_execution.output', 'Ausgabe'),
     ('de', 'chat.tool_execution.error', 'Fehler'),
     ('de', 'chat.tool_execution.completed_in', 'Abgeschlossen in {ms}ms'),
+
+    -- Image Generation
+    ('en', 'chat.image_preview.download', 'Download'),
+    ('en', 'chat.image_preview.copy', 'Copy URL'),
+    ('en', 'chat.image_preview.copied', 'Copied!'),
+    ('en', 'chat.tool_execution.generated_image', 'Generated Image'),
+    
+    ('de', 'chat.image_preview.download', 'Herunterladen'),
+    ('de', 'chat.image_preview.copy', 'URL kopieren'),
+    ('de', 'chat.image_preview.copied', 'Kopiert!'),
+    ('de', 'chat.tool_execution.generated_image', 'Generiertes Bild');
+
 
     -- Schema Builder
     ('en', 'settings.schema_builder.type', 'Type'),
