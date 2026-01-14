@@ -124,6 +124,9 @@ async function sendMessage() {
 
 	emit('send', message.value.trim(), parts.length > 0 ? parts : undefined);
 	message.value = '';
+	for (const img of attachedImages.value) {
+		URL.revokeObjectURL(img.previewUrl);
+	}
 	attachedImages.value = [];
 	nextTick(() => autoResize());
 }
@@ -167,42 +170,52 @@ async function handlePaste(event: ClipboardEvent) {
 }
 
 async function uploadImage(file: File) {
-	const reader = new FileReader();
-	reader.onload = async e => {
-		const dataUri = e.target?.result as string;
-		const previewUrl = URL.createObjectURL(file);
+	return new Promise(async (resolve, reject) => {
+		const reader = new FileReader();
+		reader.onload = async () => {
+			const dataUri = reader.result as string;
+			const previewUrl = URL.createObjectURL(file);
 
-		try {
-			const config = useRuntimeConfig();
-			const baseUrl = config.public.apiBase || '';
-			const response = await fetch(`${baseUrl}/api/images`, {
-				method: 'POST',
-				headers: {'Content-Type': 'application/json'},
-				credentials: 'include',
-				body: JSON.stringify({data_uri: dataUri}),
-			});
+			try {
+				const config = useRuntimeConfig();
+				const baseUrl = config.public.apiBase || '';
+				const response = await fetch(`${baseUrl}/api/images`, {
+					method: 'POST',
+					headers: {'Content-Type': 'application/json'},
+					credentials: 'include',
+					body: JSON.stringify({data_uri: dataUri}),
+				});
 
-			if (!response.ok) {
-				throw new Error('Upload failed');
+				if (!response.ok) {
+					URL.revokeObjectURL(previewUrl);
+					reject(new Error('Upload failed'));
+					return;
+				}
+
+				const result = await response.json();
+				attachedImages.value.push({
+					id: result.id,
+					previewUrl,
+					file,
+				});
+				resolve(undefined);
+			} catch (error) {
+				URL.revokeObjectURL(previewUrl);
+				reject(error);
 			}
-
-			const result = await response.json();
-			attachedImages.value.push({
-				id: result.id,
-				previewUrl,
-				file,
-			});
-		} catch (error) {
-			console.error('Failed to upload image:', error);
-			URL.revokeObjectURL(previewUrl);
-		}
-	};
-	reader.readAsDataURL(file);
+		};
+		reader.onerror = () => {
+			reject(new Error('Failed to read file'));
+		};
+		reader.readAsDataURL(file);
+	});
 }
 
 function removeImage(index: number) {
 	const img = attachedImages.value[index];
-	URL.revokeObjectURL(img.previewUrl);
+	if (img) {
+		URL.revokeObjectURL(img.previewUrl);
+	}
 	attachedImages.value.splice(index, 1);
 }
 </script>

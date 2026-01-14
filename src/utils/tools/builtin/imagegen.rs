@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use reqwest::Client;
+use reqwest::{Client, header::CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -172,12 +172,24 @@ impl ImageGenExecutor {
 	}
 
 	async fn edit_openai(&self, input: &EditImageInput, api_key: &str, model: &str, ctx: &ToolContext) -> Result<Value, ToolError> {
-		let image_bytes = self.download_image(&input.image_url, ctx).await?;
+		let (image_bytes, mime_type) = self.download_image(&input.image_url, ctx).await?;
+		let file_name = match mime_type.as_str() {
+			"image/png" => "image.png",
+			"image/jpeg" => "image.jpg",
+			"image/webp" => "image.webp",
+			"image/gif" => "image.gif",
+			_ => "image",
+		};
+		let mime_type = if reqwest::multipart::Part::bytes(Vec::new()).mime_str(&mime_type).is_ok() {
+			mime_type
+		} else {
+			"application/octet-stream".to_string()
+		};
 
 		let form = reqwest::multipart::Form::new()
 			.part(
 				"image",
-				reqwest::multipart::Part::bytes(image_bytes).file_name("image.png").mime_str("image/png").unwrap(),
+				reqwest::multipart::Part::bytes(image_bytes).file_name(file_name).mime_str(&mime_type).unwrap(),
 			)
 			.text("prompt", input.prompt.clone())
 			.text("model", model.to_string())
@@ -269,9 +281,9 @@ impl ImageGenExecutor {
 	async fn edit_replicate(&self, input: &EditImageInput, api_key: &str, model: &str, ctx: &ToolContext) -> Result<Value, ToolError> {
 		let url = format!("{REPLICATE_API_BASE}/{model}/predictions");
 
-		let image_bytes = self.download_image(&input.image_url, ctx).await?;
+		let (image_bytes, mime_type) = self.download_image(&input.image_url, ctx).await?;
 		let image_b64 = BASE64.encode(&image_bytes);
-		let image_data_uri = format!("data:image/png;base64,{image_b64}");
+		let image_data_uri = format!("data:{mime_type};base64,{image_b64}");
 
 		let image_param = get_replicate_image_param(model);
 
@@ -331,11 +343,12 @@ impl ImageGenExecutor {
 			"n": 1
 		});
 
-		let url = format!("{GOOGLE_GEMINI_GENERATIONS_URL}?key={api_key}");
+		let url = GOOGLE_GEMINI_GENERATIONS_URL;
 
 		let response = self
 			.client
-			.post(&url)
+			.post(url)
+			.header("x-goog-api-key", api_key)
 			.header("Content-Type", "application/json")
 			.json(&payload)
 			.send()
@@ -369,7 +382,7 @@ impl ImageGenExecutor {
 	async fn edit_google(&self, input: &EditImageInput, api_key: &str, model: &str, ctx: &ToolContext) -> Result<Value, ToolError> {
 		let url = format!("{GOOGLE_GEMINI_CONTENT_URL}/{model}:generateContent");
 
-		let image_bytes = self.download_image(&input.image_url, ctx).await?;
+		let (image_bytes, mime_type) = self.download_image(&input.image_url, ctx).await?;
 		let image_b64 = BASE64.encode(&image_bytes);
 
 		let payload = json!({
@@ -378,7 +391,7 @@ impl ImageGenExecutor {
 					{ "text": input.prompt },
 					{
 						"inline_data": {
-							"mime_type": "image/png",
+							"mime_type": mime_type,
 							"data": image_b64
 						}
 					}
@@ -441,23 +454,32 @@ impl ImageGenExecutor {
 		}))
 	}
 
-	async fn download_image(&self, url: &str, ctx: &ToolContext) -> Result<Vec<u8>, ToolError> {
+	async fn download_image(&self, url: &str, ctx: &ToolContext) -> Result<(Vec<u8>, String), ToolError> {
 		if url.starts_with("data:") {
-			let parts: Vec<&str> = url.splitn(2, ",").collect();
-			if parts.len() != 2 {
-				return Err(ToolError::InvalidInput("Invalid data URL format".to_string()));
-			}
-			return BASE64.decode(parts[1]).map_err(|e| ToolError::InvalidInput(format!("Failed to decode base64: {e}")));
+			let mut parts = url.splitn(2, ',');
+			let meta = parts.next().unwrap_or_default();
+			let data_part = parts.next().ok_or_else(|| ToolError::InvalidInput("Invalid data URL format".to_string()))?;
+			let mime_type = meta
+				.strip_prefix("data:")
+				.and_then(|value| value.split(';').next())
+				.filter(|value| !value.is_empty())
+				.unwrap_or("application/octet-stream")
+				.to_string();
+			let bytes = BASE64
+				.decode(data_part)
+				.map_err(|e| ToolError::InvalidInput(format!("Failed to decode base64: {e}")))?;
+			return Ok((bytes, mime_type));
 		}
 
-		if let Some(id_str) = url.strip_prefix("/api/images/") {
+		if let Some(id_str) = url.strip_prefix("/api/v1/images/") {
 			let db = ctx.db.as_ref().ok_or_else(|| ToolError::Internal("Database not available".to_string()))?;
 			let id = uuid::Uuid::parse_str(id_str).map_err(|e| ToolError::InvalidInput(format!("Invalid image ID: {e}")))?;
-			let (data, _mime) = crate::utils::images::get_image(db, id)
+			let (data, mime) = crate::utils::images::get_image(db, id)
 				.await
 				.map_err(|e| ToolError::Internal(format!("Failed to fetch image: {e}")))?
 				.ok_or_else(|| ToolError::InvalidInput("Image not found".to_string()))?;
-			return Ok(data);
+			let mime_type = if mime.is_empty() { "application/octet-stream".to_string() } else { mime };
+			return Ok((data, mime_type));
 		}
 
 		let response = self
@@ -472,11 +494,23 @@ impl ImageGenExecutor {
 			return Err(ToolError::HttpError(format!("Failed to download image: HTTP {status}")));
 		}
 
-		response
+		let header_mime = response
+			.headers()
+			.get(CONTENT_TYPE)
+			.and_then(|value| value.to_str().ok())
+			.and_then(|value| value.split(';').next())
+			.map(|value| value.to_string());
+
+		let bytes = response
 			.bytes()
 			.await
 			.map(|b| b.to_vec())
-			.map_err(|e| ToolError::HttpError(format!("Failed to read image bytes: {e}")))
+			.map_err(|e| ToolError::HttpError(format!("Failed to read image bytes: {e}")))?;
+
+		let detected_mime = infer::get(&bytes).map(|kind| kind.mime_type().to_string());
+		let mime_type = header_mime.or(detected_mime).unwrap_or_else(|| "application/octet-stream".to_string());
+
+		Ok((bytes, mime_type))
 	}
 }
 

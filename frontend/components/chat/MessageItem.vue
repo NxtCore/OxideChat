@@ -127,7 +127,7 @@ const attachedImages = computed(() => {
 		.filter((part: any) => part.type === 'image' && part.image_id)
 		.map((part: any) => ({
 			image_id: part.image_id,
-			url: `/api/images/${part.image_id}`,
+			url: `/api/v1/images/${part.image_id}`,
 		}));
 });
 
@@ -220,7 +220,7 @@ function handleCodeBlockClick(event: MouseEvent) {
 	const imgTag = target.closest('img') as HTMLImageElement | null;
 	if (imgTag && imgTag.src) {
 		const alt = imgTag.alt || 'image';
-		const filename = alt.includes('image') ? `${alt.replace(/\s+/g, '-')}.png` : 'image.png';
+		const filename = `${alt.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '')}.png`;
 		openImagePreview(imgTag.src, filename);
 	}
 }

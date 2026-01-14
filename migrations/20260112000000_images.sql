@@ -6,8 +6,7 @@ CREATE TABLE IF NOT EXISTS images (
     data BYTEA,  -- NULL if using file storage
     file_path VARCHAR(500),  -- Path relative to storage root (for file storage)
     mime_type VARCHAR(64) NOT NULL DEFAULT 'image/png',
-    size_bytes INTEGER NOT NULL,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+	size_bytes BIGINT NOT NULL,
     source VARCHAR(50),  -- 'imagegen', 'upload', etc.
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

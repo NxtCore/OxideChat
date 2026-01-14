@@ -63,11 +63,13 @@ async function handleDownload() {
 	if (!props.imageUrl) return;
 
 	const a = document.createElement('a');
-	a.download = props.filename || `image-${Date.now()}.png`;
 
 	try {
 		const response = await fetch(props.imageUrl);
+		if (!response.ok) throw new Error(`HTTP ${response.status}`);
 		const blob = await response.blob();
+		const ext = blob.type.split('/')[1] || 'png';
+		a.download = props.filename || `image-${Date.now()}.${ext}`;
 		const url = URL.createObjectURL(blob);
 		a.href = url;
 		document.body.appendChild(a);
@@ -75,6 +77,7 @@ async function handleDownload() {
 		document.body.removeChild(a);
 		URL.revokeObjectURL(url);
 	} catch (e) {
+		a.download = props.filename || `image-${Date.now()}.png`;
 		a.href = props.imageUrl;
 		a.target = '_blank';
 		a.click();
@@ -85,6 +88,7 @@ async function handleCopy() {
 	if (!props.imageUrl) return;
 	try {
 		const response = await fetch(props.imageUrl);
+		if (!response.ok) throw new Error(`HTTP ${response.status}`);
 		const blob = await response.blob();
 		const imageBitmap = await createImageBitmap(blob);
 

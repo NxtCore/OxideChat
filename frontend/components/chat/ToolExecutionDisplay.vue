@@ -1,6 +1,14 @@
 <template>
 	<div class="flex flex-col gap-2">
-		<div class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none" @click="isExpanded = !isExpanded">
+		<div
+			class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none"
+			@click="
+				() => {
+					userToggled = true;
+					isExpanded = !isExpanded;
+				}
+			"
+		>
 			<Wrench class="h-3.5 w-3.5" />
 			<span class="text-[10px] font-bold uppercase tracking-widest">{{ store.getTranslation('chat.tool_execution.tool') }}: {{ name }}</span>
 			<span v-if="isExecuting" class="flex items-center gap-1 text-xs text-muted-foreground">
@@ -88,9 +96,10 @@ const props = defineProps<{
 
 const isExpanded = ref(props.isExecuting ?? false);
 const showImageModal = ref(false);
+const userToggled = ref(false);
 
 watchEffect(() => {
-	if (!props.isExecuting && props.output !== undefined) {
+	if (!props.isExecuting && props.output !== undefined && !userToggled.value) {
 		isExpanded.value = false;
 	}
 });
@@ -113,11 +122,17 @@ const formattedOutput = computed(() => {
 	return JSON.stringify(props.output, null, 2);
 });
 
+function isValidImageProtocol(url: string): boolean {
+	if (url.startsWith('data:image/')) return true;
+	if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) return true;
+	return false;
+}
+
 const imageUrl = computed(() => {
 	if (!props.output) return null;
 	const out = typeof props.output === 'string' ? tryParseJson(props.output) : props.output;
-	if (out?.image_url) return out.image_url;
-	if (out?.image_reference) return out.image_reference;
+	if (out?.image_url && isValidImageProtocol(out.image_url)) return out.image_url;
+	if (out?.image_reference && isValidImageProtocol(out.image_reference)) return out.image_reference;
 	if (out?.url && isImageUrl(out.url)) return out.url;
 	return null;
 });

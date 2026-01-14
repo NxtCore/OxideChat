@@ -781,7 +781,7 @@ async function saveTool() {
 			};
 		} else if (toolForm.source_kind === 'BUILTIN') {
 			const builtin = displayTools.value.find(t => t.name === toolForm.name);
-			source_config = {builtin_id: builtin?.source_config?.builtin_id || builtin.name};
+			source_config = {builtin_id: builtin?.source_config?.builtin_id || builtin?.name || toolForm.name};
 		} else if (toolForm.source_kind === 'WASM') {
 			source_config = {
 				wasm_blob_id: wasmConfig.blob_id,

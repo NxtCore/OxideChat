@@ -47,6 +47,7 @@ sha2 = "0.10"
 base64 = "0.22"
 thiserror = "2"
 async-trait = "0.1"
+infer = "0.16"
 
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }
