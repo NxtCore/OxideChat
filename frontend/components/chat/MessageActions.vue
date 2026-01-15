@@ -1,5 +1,29 @@
 <template>
 	<div class="message-actions flex items-center gap-0.5 rounded-lg border border-border/50 bg-popover/80 backdrop-blur-sm p-0.5 shadow-lg">
+		<!-- Fork Navigator -->
+		<template v-if="siblingCount > 1">
+			<ShadButton
+				variant="ghost"
+				size="icon"
+				class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50"
+				:disabled="currentIndex <= 1"
+				@click="$emit('navigate', 'prev')"
+			>
+				<ChevronLeft class="h-3.5 w-3.5" />
+			</ShadButton>
+			<span class="min-w-[2.5rem] text-center text-xs tabular-nums text-muted-foreground select-none">{{ currentIndex }}/{{ siblingCount }}</span>
+			<ShadButton
+				variant="ghost"
+				size="icon"
+				class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50"
+				:disabled="currentIndex >= siblingCount"
+				@click="$emit('navigate', 'next')"
+			>
+				<ChevronRight class="h-3.5 w-3.5" />
+			</ShadButton>
+			<div class="w-px h-4 bg-border/50 mx-0.5" />
+		</template>
+
 		<ShadTooltip>
 			<ShadTooltipTrigger as-child>
 				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" @click="copyContent">
@@ -101,7 +125,7 @@
 </template>
 
 <script setup lang="ts">
-import {Copy, Check, RefreshCw, Info} from 'lucide-vue-next';
+import {Copy, Check, RefreshCw, Info, ChevronLeft, ChevronRight} from 'lucide-vue-next';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
@@ -112,6 +136,12 @@ const props = defineProps<{
 	message: ChatMessage;
 	canRegenerate?: boolean;
 	modelName?: string;
+	currentIndex?: number;
+	siblingCount?: number;
+}>();
+
+defineEmits<{
+	navigate: [direction: 'prev' | 'next'];
 }>();
 
 const chatStore = useChatStore();

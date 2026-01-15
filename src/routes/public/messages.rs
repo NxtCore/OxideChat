@@ -87,24 +87,25 @@ pub async fn list_messages(
 		Ok(messages) => {
 			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
 
-			// Compute sibling counts for each unique parent_id
-			let sibling_counts: std::collections::HashMap<Option<Uuid>, i64> = if message_ids.is_empty() {
+			// Compute sibling counts for each unique (parent_id, role) pair
+			// This ensures user messages only count user siblings, and assistant messages only count assistant siblings
+			let sibling_counts: std::collections::HashMap<(Option<Uuid>, String), i64> = if message_ids.is_empty() {
 				std::collections::HashMap::new()
 			} else {
-				// Query sibling counts
-				let counts = sqlx::query_as::<_, (Option<Uuid>, i64)>(
+				// Query sibling counts grouped by parent_id and role
+				let counts = sqlx::query_as::<_, (Option<Uuid>, String, i64)>(
 					r#"
-					SELECT parent_id, COUNT(*) as count
+					SELECT parent_id, role, COUNT(*) as count
 					FROM messages
 					WHERE chat_id = $1
-					GROUP BY parent_id
+					GROUP BY parent_id, role
 					"#,
 				)
 				.bind(chat_id)
 				.fetch_all(&state.db)
 				.await
 				.unwrap_or_default();
-				counts.into_iter().collect()
+				counts.into_iter().map(|(p, r, c)| ((p, r), c)).collect()
 			};
 
 			let tool_executions = if message_ids.is_empty() {
@@ -159,10 +160,11 @@ pub async fn list_messages(
 				.map(|m| {
 					let msg_id = m.id;
 					let parent_id = m.parent_id;
+					let role = m.role.clone();
 					let mut response: ChatMessageResponse = m.into();
 					response.tool_calls = executions_by_message.remove(&msg_id);
-					// Set computed sibling_count
-					response.sibling_count = sibling_counts.get(&parent_id).copied().unwrap_or(1) as i32;
+					// Set computed sibling_count based on (parent_id, role) pair
+					response.sibling_count = sibling_counts.get(&(parent_id, role)).copied().unwrap_or(1) as i32;
 					response
 				})
 				.collect();
@@ -294,12 +296,27 @@ pub async fn edit_message(
 		.await
 		.unwrap_or(1);
 
-	// Mark all siblings as inactive
-	let _ = sqlx::query(r#"UPDATE messages SET is_active_fork = FALSE WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2"#)
-		.bind(chat_id)
-		.bind(original.parent_id)
-		.execute(&state.db)
-		.await;
+	// Deactivate all siblings AND their descendants (entire old subtrees)
+	let _ = sqlx::query(
+		r#"
+		WITH RECURSIVE descendants AS (
+			-- Start with all siblings at this level
+			SELECT id FROM messages 
+			WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2
+			UNION ALL
+			-- Recursively get all descendants
+			SELECT m.id FROM messages m
+			INNER JOIN descendants d ON m.parent_id = d.id
+			WHERE m.chat_id = $1
+		)
+		UPDATE messages SET is_active_fork = FALSE 
+		WHERE id IN (SELECT id FROM descendants)
+		"#,
+	)
+	.bind(chat_id)
+	.bind(original.parent_id)
+	.execute(&state.db)
+	.await;
 
 	// Create the new forked message
 	let new_message = sqlx::query_as::<_, Message>(
@@ -342,6 +359,7 @@ pub async fn edit_message(
 /// POST /api/v1/chats/:chat_id/messages/:message_id/switch-fork
 ///
 /// Switch to a different fork at the given message position.
+/// This deactivates the entire old subtree and activates the new subtree.
 pub async fn switch_fork(
 	State(state): State<Arc<AppState>>,
 	cookies: Cookies,
@@ -384,38 +402,68 @@ pub async fn switch_fork(
 		}
 	};
 
-	// Mark all siblings as inactive
-	let _ = sqlx::query(r#"UPDATE messages SET is_active_fork = FALSE WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2"#)
-		.bind(chat_id)
-		.bind(msg.parent_id)
-		.execute(&state.db)
-		.await;
-
-	// Mark the target fork as active
-	let updated = sqlx::query_as::<_, Message>(
+	// Find the currently active sibling and deactivate it + all its descendants
+	let _ = sqlx::query(
 		r#"
-		UPDATE messages SET is_active_fork = TRUE 
-		WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND fork_index = $3
-		RETURNING *
+		WITH RECURSIVE descendants AS (
+			-- Start with the currently active sibling(s) at this level
+			SELECT id FROM messages 
+			WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND is_active_fork = TRUE
+			UNION ALL
+			-- Recursively get all descendants
+			SELECT m.id FROM messages m
+			INNER JOIN descendants d ON m.parent_id = d.id
+			WHERE m.chat_id = $1
+		)
+		UPDATE messages SET is_active_fork = FALSE 
+		WHERE id IN (SELECT id FROM descendants)
 		"#,
 	)
 	.bind(chat_id)
 	.bind(msg.parent_id)
-	.bind(req.fork_index)
-	.fetch_optional(&state.db)
+	.execute(&state.db)
 	.await;
 
-	match updated {
-		Ok(Some(msg)) => {
-			let response: ChatMessageResponse = msg.into();
-			ResponseBuilder::new(ResponseBody::Json(response)).build()
-		}
-		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
+	// Find the target sibling by fork_index
+	let target = sqlx::query_as::<_, Message>(r#"SELECT * FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND fork_index = $3"#)
+		.bind(chat_id)
+		.bind(msg.parent_id)
+		.bind(req.fork_index)
+		.fetch_optional(&state.db)
+		.await;
+
+	let target_msg = match target {
+		Ok(Some(m)) => m,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
 		Err(e) => {
-			eprintln!("[MESSAGES] Failed to switch fork: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
+			eprintln!("[MESSAGES] Failed to find target fork: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
-	}
+	};
+
+	// Activate the target message and all its descendants
+	let _ = sqlx::query(
+		r#"
+		WITH RECURSIVE descendants AS (
+			-- Start with the target message
+			SELECT id FROM messages WHERE id = $1
+			UNION ALL
+			-- Recursively get all descendants, but only follow the first (active) child at each level
+			SELECT m.id FROM messages m
+			INNER JOIN descendants d ON m.parent_id = d.id
+			WHERE m.chat_id = $2 AND m.fork_index = 1
+		)
+		UPDATE messages SET is_active_fork = TRUE 
+		WHERE id IN (SELECT id FROM descendants)
+		"#,
+	)
+	.bind(target_msg.id)
+	.bind(chat_id)
+	.execute(&state.db)
+	.await;
+
+	let response: ChatMessageResponse = target_msg.into();
+	ResponseBuilder::new(ResponseBody::Json(response)).build()
 }
 
 /// GET /api/v1/chats/:chat_id/messages/:message_id/siblings

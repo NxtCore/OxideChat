@@ -230,23 +230,24 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 
 			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
 
-			// Compute sibling counts for each unique parent_id
-			let sibling_counts: HashMap<Option<Uuid>, i64> = if message_ids.is_empty() {
+			// Compute sibling counts for each unique (parent_id, role) pair
+			// This ensures user messages only count user siblings, and assistant messages only count assistant siblings
+			let sibling_counts: HashMap<(Option<Uuid>, String), i64> = if message_ids.is_empty() {
 				HashMap::new()
 			} else {
-				let counts = sqlx::query_as::<_, (Option<Uuid>, i64)>(
+				let counts = sqlx::query_as::<_, (Option<Uuid>, String, i64)>(
 					r#"
-					SELECT parent_id, COUNT(*) as count
+					SELECT parent_id, role, COUNT(*) as count
 					FROM messages
 					WHERE chat_id = $1
-					GROUP BY parent_id
+					GROUP BY parent_id, role
 					"#,
 				)
 				.bind(id)
 				.fetch_all(&state.db)
 				.await
 				.unwrap_or_default();
-				counts.into_iter().collect()
+				counts.into_iter().map(|(p, r, c)| ((p, r), c)).collect()
 			};
 
 			let tool_executions: Vec<(
@@ -313,14 +314,15 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 				.map(|m| {
 					let msg_id = m.id;
 					let parent_id = m.parent_id;
+					let role = m.role.clone();
 					let mut response: ChatMessageResponse = m.into();
 					if let Some(tools) = executions_by_message.remove(&msg_id) {
 						if !tools.is_empty() {
 							response.tool_calls = Some(tools);
 						}
 					}
-					// Set computed sibling_count
-					response.sibling_count = sibling_counts.get(&parent_id).copied().unwrap_or(1) as i32;
+					// Set computed sibling_count based on (parent_id, role) pair
+					response.sibling_count = sibling_counts.get(&(parent_id, role)).copied().unwrap_or(1) as i32;
 					response
 				})
 				.collect();

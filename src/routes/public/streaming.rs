@@ -46,6 +46,9 @@ pub struct StreamRequest {
 	pub reasoning_budget_tokens: Option<u32>,
 	pub tools_enabled: Option<Vec<String>>,
 	pub sampling: Option<Sampling>,
+	/// If true, skip creating a new user message and use existing messages for regeneration
+	#[serde(default)]
+	pub skip_user_message: bool,
 }
 
 /// SSE event data
@@ -340,32 +343,48 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	let content_parts_json = req.parts.as_ref().map(|parts| serde_json::to_value(parts).ok()).flatten();
 
-	let user_message = sqlx::query_as::<_, Message>(
-		r#"
-		INSERT INTO messages (chat_id, role, content, content_parts, model_id, reasoning_details, usage_details, cost_details)
-		VALUES ($1, 'user', $2, $3, $4, $5, $6, $7)
-		RETURNING *
-		"#,
-	)
-	.bind(chat_id)
-	.bind(&req.content)
-	.bind(content_parts_json)
-	.bind(model.id)
-	.bind(sqlx::types::Json(reasoning_details))
-	.bind(sqlx::types::Json(usage_details))
-	.bind(sqlx::types::Json(cost_details))
-	.fetch_one(&state.db)
-	.await;
+	// Get the last active message to use as parent for the new user message
+	let last_active_message_id: Option<Uuid> =
+		sqlx::query_scalar("SELECT id FROM messages WHERE chat_id = $1 AND is_active_fork = TRUE ORDER BY created_at DESC LIMIT 1")
+			.bind(chat_id)
+			.fetch_optional(&state.db)
+			.await
+			.ok()
+			.flatten();
 
-	let user_message = match user_message {
-		Ok(msg) => msg,
-		Err(e) => {
-			eprintln!("[STREAM] Failed to save user message: {e}");
-			return error_stream("save_failed", "Failed to save message").into_response();
+	// Only create user message if not regenerating/skipping
+	let user_message: Option<Message> = if !req.skip_user_message {
+		let msg = sqlx::query_as::<_, Message>(
+			r#"
+			INSERT INTO messages (chat_id, role, content, content_parts, model_id, reasoning_details, usage_details, cost_details, parent_id)
+			VALUES ($1, 'user', $2, $3, $4, $5, $6, $7, $8)
+			RETURNING *
+			"#,
+		)
+		.bind(chat_id)
+		.bind(&req.content)
+		.bind(content_parts_json)
+		.bind(model.id)
+		.bind(sqlx::types::Json(reasoning_details))
+		.bind(sqlx::types::Json(usage_details))
+		.bind(sqlx::types::Json(cost_details))
+		.bind(last_active_message_id)
+		.fetch_one(&state.db)
+		.await;
+
+		match msg {
+			Ok(m) => Some(m),
+			Err(e) => {
+				eprintln!("[STREAM] Failed to save user message: {e}");
+				return error_stream("save_failed", "Failed to save message").into_response();
+			}
 		}
+	} else {
+		None
 	};
 
-	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 ORDER BY created_at ASC")
+	// Only fetch active fork messages for AI context
+	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 AND is_active_fork = TRUE ORDER BY created_at ASC")
 		.bind(chat_id)
 		.fetch_all(&state.db)
 		.await;
@@ -377,6 +396,9 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 			return error_stream("internal_error", "Failed to fetch messages").into_response();
 		}
 	};
+
+	// Determine parent_id for the assistant response (should be the last user message)
+	let assistant_parent_id: Option<Uuid> = user_message.as_ref().map(|m| m.id).or_else(|| messages.last().map(|m| m.id));
 
 	let engine = ai::get();
 	let engine_read = engine.read().await;
@@ -513,10 +535,14 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 	let sse_stream = async_stream::stream! {
 	eprintln!("[STREAM] Stream generator started");
-	let user_message_response: ChatMessageResponse = user_message.into();
-	yield Ok::<_, Infallible>(Event::default().data(
-		serde_json::to_string(&StreamData::UserMessageSaved { message: user_message_response }).unwrap_or_default()
-	));
+
+	// Only emit user message saved event if we actually created one
+	if let Some(ref msg) = user_message {
+		let user_message_response: ChatMessageResponse = msg.clone().into();
+		yield Ok::<_, Infallible>(Event::default().data(
+			serde_json::to_string(&StreamData::UserMessageSaved { message: user_message_response }).unwrap_or_default()
+		));
+	}
 
 	eprintln!("[STREAM] About to start consuming upstream");
 
@@ -705,9 +731,9 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 									r#"
 										INSERT INTO messages (
 											chat_id, role, content, reasoning_content,
-											model_id, reasoning_details, usage_details, cost_details
+											model_id, reasoning_details, usage_details, cost_details, parent_id
 										)
-										VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7)
+										VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8)
 										RETURNING *
 										"#,
 								)
@@ -718,6 +744,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 								.bind(sqlx::types::Json(reasoning_details))
 								.bind(sqlx::types::Json(usage_details))
 								.bind(sqlx::types::Json(cost_details))
+								.bind(assistant_parent_id)
 								.fetch_one(&db)
 								.await;
 

@@ -80,6 +80,31 @@
 					v-if="!isEditing && !isStreaming"
 					class="flex items-center gap-0.5 rounded-lg border border-border/50 bg-popover/80 backdrop-blur-sm p-0.5 shadow-lg opacity-0 transition-opacity group-hover:opacity-100 self-end"
 				>
+					<!-- Fork Navigator for user messages -->
+					<template v-if="message.sibling_count > 1">
+						<ShadButton
+							variant="ghost"
+							size="icon"
+							class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50"
+							:disabled="message.fork_index <= 1"
+							@click="handleForkNavigation('prev')"
+						>
+							<ChevronLeft class="h-3.5 w-3.5" />
+						</ShadButton>
+						<span class="min-w-[2.5rem] text-center text-xs tabular-nums text-muted-foreground select-none"
+							>{{ message.fork_index }}/{{ message.sibling_count }}</span
+						>
+						<ShadButton
+							variant="ghost"
+							size="icon"
+							class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50"
+							:disabled="message.fork_index >= message.sibling_count"
+							@click="handleForkNavigation('next')"
+						>
+							<ChevronRight class="h-3.5 w-3.5" />
+						</ShadButton>
+						<div class="w-px h-4 bg-border/50 mx-0.5" />
+					</template>
 					<ShadTooltip>
 						<ShadTooltipTrigger as-child>
 							<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" @click="startEdit">
@@ -130,18 +155,12 @@
 					:message="message"
 					:model-name="modelDisplayName || undefined"
 					:can-regenerate="isLastAssistantMessage"
+					:current-index="message.fork_index"
+					:sibling-count="message.sibling_count"
 					class="opacity-0 transition-opacity group-hover:opacity-100"
+					@navigate="handleForkNavigation"
 				/>
 			</div>
-
-			<!-- Fork Navigation -->
-			<ForkNavigator
-				v-if="message.sibling_count > 1"
-				:message-id="message.id"
-				:current-index="message.fork_index"
-				:sibling-count="message.sibling_count"
-				@navigate="handleForkNavigation"
-			/>
 
 			<CodePreview v-if="previewData" :code="previewData.code" :language="previewData.language" :is-open="!!previewData" @close="closePreview" />
 			<ImagePreview :is-open="showImagePreview" :image-url="imagePreviewUrl" :filename="imagePreviewFilename" @close="closeImagePreview" />
@@ -150,9 +169,8 @@
 </template>
 
 <script setup lang="ts">
-import {User, Bot, Brain, ChevronDown, Pencil, Copy, Check} from 'lucide-vue-next';
+import {User, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, Pencil, Copy, Check} from 'lucide-vue-next';
 import MessageActions from './MessageActions.vue';
-import ForkNavigator from './ForkNavigator.vue';
 import CodePreview from './CodePreview.vue';
 import ImagePreview from '~/components/ImagePreview.vue';
 import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
@@ -345,10 +363,24 @@ async function saveEdit() {
 		cancelEdit();
 		return;
 	}
-	await chatStore.editMessage(chatStore.activeChat.id, props.message.id, editContent.value);
+
+	const chatId = chatStore.activeChat.id;
+	const newContent = editContent.value;
+
+	// Create the fork with edited content
+	const newMessage = await chatStore.editMessage(chatId, props.message.id, newContent);
 	cancelEdit();
-	// Reload the chat to get the new fork
-	await chatStore.fetchChat(chatStore.activeChat.id);
+
+	if (!newMessage) {
+		return;
+	}
+
+	// Reload the chat to get the new fork path (messages up to the edited message)
+	await chatStore.fetchChat(chatId);
+
+	// Trigger a new generation with the edited message
+	// Pass skipUserMessage=true since the edited message already exists in the database
+	await chatStore.sendAndStream(chatId, newContent, undefined, true);
 }
 </script>
 

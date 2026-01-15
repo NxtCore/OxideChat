@@ -328,7 +328,7 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		async sendAndStream(chatId: string, content: string, parts?: any[]): Promise<void> {
+		async sendAndStream(chatId: string, content: string, parts?: any[], skipUserMessage: boolean = false): Promise<void> {
 			if (!this.selectedModel) {
 				console.error('No model selected');
 				return;
@@ -336,36 +336,42 @@ export const useChatStore = defineStore('chat', {
 
 			this.isStreaming = true;
 
-			const userMessageId = `user-${Date.now()}`;
-			const userMessage: ChatMessage = {
-				id: userMessageId,
-				role: 'user',
-				content,
-				reasoning_content: null,
-				model_id: this.selectedModel.model_id,
-				cost_details: {
-					input: null,
-					output: null,
-					reasoning: null,
-				},
-				usage_details: {
-					input_tokens: null,
-					output_tokens: null,
-					reasoning_tokens: null,
-					latency_ms: null,
-					reasoning_latency_ms: null,
-				},
-				reasoning_details: {
-					effort: this.reasoningEffort,
-					budget_tokens: this.reasoningBudget,
-				},
-				tool_calls: [],
-				created_at: new Date().toISOString(),
-				parent_id: null,
-				fork_index: 1,
-				sibling_count: 1,
-			};
-			this.messages.push(userMessage);
+			let userMessageId: string | null = null;
+
+			// Only create local user message if not skipping (for regeneration after edit)
+			if (!skipUserMessage) {
+				userMessageId = `user-${Date.now()}`;
+				const userMessage: ChatMessage = {
+					id: userMessageId,
+					role: 'user',
+					content,
+					reasoning_content: null,
+					model_id: this.selectedModel.model_id,
+					cost_details: {
+						input: null,
+						output: null,
+						reasoning: null,
+					},
+					usage_details: {
+						input_tokens: null,
+						output_tokens: null,
+						reasoning_tokens: null,
+						latency_ms: null,
+						reasoning_latency_ms: null,
+					},
+					reasoning_details: {
+						effort: this.reasoningEffort,
+						budget_tokens: this.reasoningBudget,
+					},
+					tool_calls: [],
+					created_at: new Date().toISOString(),
+					parent_id: null,
+					fork_index: 1,
+					sibling_count: 1,
+				};
+				this.messages.push(userMessage);
+			}
+
 			const streamingMessageId = `streaming-${Date.now()}`;
 			const streamingMessage: ChatMessage = {
 				id: streamingMessageId,
@@ -407,6 +413,7 @@ export const useChatStore = defineStore('chat', {
 					reasoning_effort: this.reasoningEffort || undefined,
 					reasoning_budget_tokens: this.reasoningBudget || undefined,
 					tools_enabled: this.enabledTools.length > 0 ? this.enabledTools : undefined,
+					skip_user_message: skipUserMessage,
 				};
 
 				if (parts && parts.length > 0) {
@@ -545,7 +552,11 @@ export const useChatStore = defineStore('chat', {
 			} catch (e) {
 				console.error('Failed to stream:', e);
 				this.isStreaming = false;
-				this.messages = this.messages.filter(m => m.id !== userMessageId && m.id !== streamingMessageId);
+				this.messages = this.messages.filter(m => {
+					if (m.id === streamingMessageId) return false;
+					if (userMessageId && m.id === userMessageId) return false;
+					return true;
+				});
 			}
 		},
 
