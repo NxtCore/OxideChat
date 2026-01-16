@@ -56,10 +56,10 @@
 			</div>
 
 			<!-- User message content with edit button -->
-			<div v-if="isUser && (message.content || !isStreaming)" class="flex flex-col gap-2">
+			<div v-if="isUser && (message.content || !isStreaming)" class="flex flex-col gap-2" :class="isUser ? 'items-end' : 'items-start'">
 				<div
 					v-if="!isEditing"
-					class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl rounded-xl bg-muted/50 px-4 py-2 text-foreground"
+					class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl w-fit-content rounded-xl bg-muted/50 px-4 py-2 text-foreground"
 					v-html="renderedContent"
 					@click="handleCodeBlockClick"
 				/>
@@ -131,6 +131,16 @@
 							<p class="text-xs">{{ userCopied ? 'Copied' : 'Copy message' }}</p>
 						</ShadTooltipContent>
 					</ShadTooltip>
+					<ShadTooltip>
+						<ShadTooltipTrigger as-child>
+							<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" @click="handleBranch">
+								<GitBranch class="h-3.5 w-3.5" />
+							</ShadButton>
+						</ShadTooltipTrigger>
+						<ShadTooltipContent side="top" :side-offset="8">
+							<p class="text-xs">Branch to new chat</p>
+						</ShadTooltipContent>
+					</ShadTooltip>
 				</div>
 			</div>
 
@@ -169,7 +179,7 @@
 </template>
 
 <script setup lang="ts">
-import {User, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, Pencil, Copy, Check} from 'lucide-vue-next';
+import {User, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, Pencil, Copy, Check, GitBranch} from 'lucide-vue-next';
 import MessageActions from './MessageActions.vue';
 import CodePreview from './CodePreview.vue';
 import ImagePreview from '~/components/ImagePreview.vue';
@@ -343,6 +353,11 @@ async function copyUserContent() {
 	setTimeout(() => {
 		userCopied.value = false;
 	}, 2000);
+}
+
+async function handleBranch() {
+	if (!chatStore.activeChat) return;
+	await chatStore.branchFromMessage(chatStore.activeChat.id, props.message.id);
 }
 
 function startEdit() {

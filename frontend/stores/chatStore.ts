@@ -37,6 +37,10 @@ interface ChatState {
 	reasoningEffort: string | null;
 	reasoningBudget: number | null;
 	enabledTools: string[];
+
+	// Branch prefill state
+	pendingBranchContent: string | null;
+	pendingBranchParts: any[] | null;
 }
 
 export const useChatStore = defineStore('chat', {
@@ -61,6 +65,9 @@ export const useChatStore = defineStore('chat', {
 		reasoningEffort: null,
 		reasoningBudget: null,
 		enabledTools: [],
+
+		pendingBranchContent: null,
+		pendingBranchParts: null,
 	}),
 
 	getters: {
@@ -726,6 +733,37 @@ export const useChatStore = defineStore('chat', {
 				console.error('Failed to delete fork:', e);
 				return false;
 			}
+		},
+
+		async branchFromMessage(chatId: string, messageId: string): Promise<Chat | null> {
+			try {
+				const router = useRouter();
+				const {$customFetch} = useNuxtApp();
+				const response = await $customFetch(`/api/v1/chats/${chatId}/messages/${messageId}/branch`, {
+					method: 'POST',
+					body: {},
+				});
+				const branchResult = response as {chat: Chat; prefill_content?: string; prefill_parts?: any[]};
+				const newChat = branchResult.chat;
+				this.chats.unshift(newChat);
+
+				// If prefill data, store it for composer
+				if (branchResult.prefill_content || branchResult.prefill_parts) {
+					this.pendingBranchContent = branchResult.prefill_content || null;
+					this.pendingBranchParts = branchResult.prefill_parts || null;
+				}
+
+				router.push(`/chats/${newChat.id}`);
+				return newChat;
+			} catch (e) {
+				console.error('Failed to branch from message:', e);
+				return null;
+			}
+		},
+
+		clearPendingBranch() {
+			this.pendingBranchContent = null;
+			this.pendingBranchParts = null;
 		},
 
 		async init() {

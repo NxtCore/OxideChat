@@ -88,6 +88,28 @@ interface AttachedImage {
 
 const attachedImages = ref<AttachedImage[]>([]);
 
+// Handle pending branch prefill when navigating to a branched chat
+onMounted(() => {
+	if (chatStore.pendingBranchContent) {
+		message.value = chatStore.pendingBranchContent;
+		nextTick(() => autoResize());
+	}
+	if (chatStore.pendingBranchParts) {
+		// Process image parts - load them as attached images
+		for (const part of chatStore.pendingBranchParts) {
+			if (part.type === 'image' && part.image_id) {
+				const config = useRuntimeConfig();
+				const baseUrl = config.public.apiBase || '';
+				attachedImages.value.push({
+					id: part.image_id,
+					previewUrl: `${baseUrl}/api/v1/images/${part.image_id}`,
+				});
+			}
+		}
+	}
+	chatStore.clearPendingBranch();
+});
+
 const supportsImages = computed(() => {
 	return chatStore.selectedModel?.input_modalities?.includes('IMAGE') ?? false;
 });

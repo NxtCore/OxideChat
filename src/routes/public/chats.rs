@@ -32,6 +32,8 @@ async fn build_chat_response(pool: &sqlx::PgPool, chat: Chat) -> Result<ChatResp
 		title: chat.title,
 		is_pinned: chat.is_pinned,
 		is_archived: chat.is_archived,
+		branched_from_chat_id: chat.branched_from_chat_id,
+		branched_from_message_id: chat.branched_from_message_id,
 		message_count: stats.0,
 		last_message_at: stats.1,
 		created_at: chat.created_at,

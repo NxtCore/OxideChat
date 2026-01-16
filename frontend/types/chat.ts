@@ -16,6 +16,8 @@ export interface Chat {
 	title: string | null;
 	is_pinned: boolean;
 	is_archived: boolean;
+	branched_from_chat_id: string | null;
+	branched_from_message_id: string | null;
 	message_count: number;
 	last_message_at: string | null;
 	created_at: string;

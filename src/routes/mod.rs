@@ -74,6 +74,7 @@ pub fn build_router() -> Router<Arc<AppState>> {
 		.route("/api/v1/chats/{chat_id}/messages/{message_id}/switch-fork", post(public::messages::switch_fork))
 		.route("/api/v1/chats/{chat_id}/messages/{message_id}/siblings", get(public::messages::get_siblings))
 		.route("/api/v1/chats/{chat_id}/messages/{message_id}/fork", delete(public::messages::delete_fork))
+		.route("/api/v1/chats/{chat_id}/messages/{message_id}/branch", post(public::messages::branch_from_message))
 		// Models
 		.route("/api/v1/models", get(public::models::list_models))
 		// Tools

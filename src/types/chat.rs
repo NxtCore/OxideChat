@@ -162,6 +162,8 @@ pub struct Chat {
 	pub title: Option<String>,
 	pub is_pinned: bool,
 	pub is_archived: bool,
+	pub branched_from_chat_id: Option<Uuid>,
+	pub branched_from_message_id: Option<Uuid>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }
@@ -343,6 +345,10 @@ pub struct ChatResponse {
 	pub title: Option<String>,
 	pub is_pinned: bool,
 	pub is_archived: bool,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub branched_from_chat_id: Option<Uuid>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub branched_from_message_id: Option<Uuid>,
 	pub message_count: i64,
 	pub last_message_at: Option<DateTime<Utc>>,
 	pub created_at: DateTime<Utc>,
@@ -450,4 +456,19 @@ impl Default for GlobalConfigResponse {
 #[derive(Debug, Deserialize)]
 pub struct UpdateGlobalConfigRequest {
 	pub default_theme: Option<ThemeCssVars>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BranchFromMessageRequest {
+	pub workspace_id: Option<Uuid>,
+	pub title: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BranchResponse {
+	pub chat: ChatResponse,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub prefill_content: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub prefill_parts: Option<serde_json::Value>,
 }

@@ -47,6 +47,17 @@
 			</ShadTooltipContent>
 		</ShadTooltip>
 
+		<ShadTooltip>
+			<ShadTooltipTrigger as-child>
+				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" @click="handleBranch">
+					<GitBranch class="h-3.5 w-3.5" />
+				</ShadButton>
+			</ShadTooltipTrigger>
+			<ShadTooltipContent side="top" :side-offset="8">
+				<p class="text-xs">Branch to new chat</p>
+			</ShadTooltipContent>
+		</ShadTooltip>
+
 		<ShadPopover>
 			<ShadPopoverTrigger as-child>
 				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50">
@@ -125,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import {Copy, Check, RefreshCw, Info, ChevronLeft, ChevronRight} from 'lucide-vue-next';
+import {Copy, Check, RefreshCw, Info, ChevronLeft, ChevronRight, GitBranch} from 'lucide-vue-next';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
@@ -159,6 +170,11 @@ async function copyContent() {
 function regenerate() {
 	// TODO: Implement regeneration
 	console.log('Regenerate message:', props.message.id);
+}
+
+async function handleBranch() {
+	if (!chatStore.activeChat) return;
+	await chatStore.branchFromMessage(chatStore.activeChat.id, props.message.id);
 }
 
 function formatCost(cost: string | null): string {

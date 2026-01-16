@@ -14,11 +14,22 @@
 		<span v-if="chat.message_count > 0" class="shrink-0 text-xs opacity-60">
 			{{ chat.message_count }}
 		</span>
+
+		<ShadTooltip v-if="chat.branched_from_chat_id">
+			<ShadTooltipTrigger as-child>
+				<NuxtLink :to="`/chats/${chat.branched_from_chat_id}`" class="text-muted-foreground hover:text-primary" @click.stop>
+					<GitBranch class="h-3.5 w-3.5" />
+				</NuxtLink>
+			</ShadTooltipTrigger>
+			<ShadTooltipContent side="right">
+				<p class="text-xs">Go to source chat</p>
+			</ShadTooltipContent>
+		</ShadTooltip>
 	</ShadButton>
 </template>
 
 <script setup lang="ts">
-import {MessageSquare, Pin} from 'lucide-vue-next';
+import {MessageSquare, Pin, GitBranch} from 'lucide-vue-next';
 import type {Chat} from '~/types/chat';
 import {useMainStore} from '~/stores';
 

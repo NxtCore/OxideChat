@@ -4,7 +4,10 @@
 
 use crate::AppState;
 use crate::routes::public::auth::get_current_user;
-use crate::types::{ChatMessageResponse, EditMessageRequest, Message, MessageListParams, SendMessageRequest, SwitchForkRequest, ToolExecutionResponse};
+use crate::types::{
+	BranchFromMessageRequest, BranchResponse, Chat, ChatMessageResponse, ChatResponse, EditMessageRequest, Message, MessageListParams, SendMessageRequest,
+	SwitchForkRequest, ToolExecutionResponse,
+};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -579,4 +582,184 @@ pub async fn delete_fork(State(state): State<Arc<AppState>>, cookies: Cookies, P
 			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}
 	}
+}
+
+/// POST /api/v1/chats/:chat_id/messages/:message_id/branch
+///
+/// Create a new chat branched from a specific message.
+/// - For assistant messages: copies all messages up to and including that point
+/// - For user messages: copies all messages BEFORE that message, returns prefill data for composer
+pub async fn branch_from_message(
+	State(state): State<Arc<AppState>>,
+	cookies: Cookies,
+	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
+	Json(req): Json<BranchFromMessageRequest>,
+) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	// Verify chat ownership and get source chat
+	let source_chat = match sqlx::query_as::<_, Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
+		.bind(chat_id)
+		.bind(user.id)
+		.fetch_optional(&state.db)
+		.await
+	{
+		Ok(Some(c)) => c,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to validate chat: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	// Get the source message
+	let source_message = match sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1 AND chat_id = $2")
+		.bind(message_id)
+		.bind(chat_id)
+		.fetch_optional(&state.db)
+		.await
+	{
+		Ok(Some(m)) => m,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to fetch message: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	// Create the new branched chat
+	let new_chat = match sqlx::query_as::<_, Chat>(
+		r#"
+		INSERT INTO chats (user_id, workspace_id, title, branched_from_chat_id, branched_from_message_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING *
+		"#,
+	)
+	.bind(user.id)
+	.bind(req.workspace_id.or(source_chat.workspace_id))
+	.bind(req.title.or(source_chat.title.clone()))
+	.bind(chat_id)
+	.bind(message_id)
+	.fetch_one(&state.db)
+	.await
+	{
+		Ok(c) => c,
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to create branched chat: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	let is_user_message = source_message.role == "user";
+
+	// Get messages to copy (up to the branch point)
+	// For user messages: copy messages BEFORE (not including) the source message
+	// For assistant messages: copy messages up to and including the source message
+	let messages_to_copy = if is_user_message {
+		sqlx::query_as::<_, Message>(
+			r#"
+			SELECT * FROM messages 
+			WHERE chat_id = $1 AND is_active_fork = TRUE AND created_at < $2
+			ORDER BY created_at ASC
+			"#,
+		)
+		.bind(chat_id)
+		.bind(source_message.created_at)
+		.fetch_all(&state.db)
+		.await
+	} else {
+		sqlx::query_as::<_, Message>(
+			r#"
+			SELECT * FROM messages 
+			WHERE chat_id = $1 AND is_active_fork = TRUE AND created_at <= $2
+			ORDER BY created_at ASC
+			"#,
+		)
+		.bind(chat_id)
+		.bind(source_message.created_at)
+		.fetch_all(&state.db)
+		.await
+	};
+
+	let messages_to_copy = match messages_to_copy {
+		Ok(m) => m,
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to fetch messages to copy: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	// Copy messages to new chat with proper parent_id mapping
+	let mut old_to_new_id: std::collections::HashMap<Uuid, Uuid> = std::collections::HashMap::new();
+
+	for msg in &messages_to_copy {
+		let new_parent_id = msg.parent_id.and_then(|pid| old_to_new_id.get(&pid).copied());
+
+		let new_msg = sqlx::query_as::<_, Message>(
+			r#"
+			INSERT INTO messages (chat_id, role, content, content_parts, reasoning_content, model_id, 
+				cost_details, usage_details, reasoning_details, parent_id, fork_index, is_active_fork)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, TRUE)
+			RETURNING *
+			"#,
+		)
+		.bind(new_chat.id)
+		.bind(&msg.role)
+		.bind(&msg.content)
+		.bind(&msg.content_parts)
+		.bind(&msg.reasoning_content)
+		.bind(msg.model_id)
+		.bind(&msg.cost_details)
+		.bind(&msg.usage_details)
+		.bind(&msg.reasoning_details)
+		.bind(new_parent_id)
+		.fetch_one(&state.db)
+		.await;
+
+		match new_msg {
+			Ok(m) => {
+				old_to_new_id.insert(msg.id, m.id);
+			}
+			Err(e) => {
+				eprintln!("[MESSAGES] Failed to copy message: {e}");
+				// Continue with other messages
+			}
+		}
+	}
+
+	// Build response
+	let message_count = messages_to_copy.len() as i64;
+	let last_message_at = messages_to_copy.last().map(|m| m.created_at);
+
+	let chat_response = ChatResponse {
+		id: new_chat.id,
+		workspace_id: new_chat.workspace_id,
+		title: new_chat.title,
+		is_pinned: new_chat.is_pinned,
+		is_archived: new_chat.is_archived,
+		branched_from_chat_id: new_chat.branched_from_chat_id,
+		branched_from_message_id: new_chat.branched_from_message_id,
+		message_count,
+		last_message_at,
+		created_at: new_chat.created_at,
+		updated_at: new_chat.updated_at,
+	};
+
+	// For user messages, return prefill content
+	let (prefill_content, prefill_parts) = if is_user_message {
+		(Some(source_message.content.clone()), source_message.content_parts.clone())
+	} else {
+		(None, None)
+	};
+
+	let response = BranchResponse {
+		chat: chat_response,
+		prefill_content,
+		prefill_parts,
+	};
+
+	ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
 }
