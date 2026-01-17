@@ -2,8 +2,8 @@
 //!
 //! Get and update user preferences for the chat interface.
 
-use crate::AppState;
 use crate::routes::public::auth::get_current_user;
+use crate::types::JobState;
 use crate::types::{PreferencesResponse, UpdatePreferencesRequest, UserPreferences};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{Json, extract::State, response::IntoResponse};
@@ -13,7 +13,7 @@ use tower_cookies::Cookies;
 /// GET /api/v1/users/@me/preferences
 ///
 /// Get user preferences. Returns defaults if no preferences exist.
-pub async fn get_preferences(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+pub async fn get_preferences(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
@@ -43,7 +43,7 @@ pub async fn get_preferences(State(state): State<Arc<AppState>>, cookies: Cookie
 /// PATCH /api/v1/users/@me/preferences
 ///
 /// Update user preferences. Creates if doesn't exist (upsert).
-pub async fn update_preferences(State(state): State<Arc<AppState>>, cookies: Cookies, Json(req): Json<UpdatePreferencesRequest>) -> impl IntoResponse {
+pub async fn update_preferences(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<UpdatePreferencesRequest>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),

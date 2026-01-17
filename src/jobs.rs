@@ -12,7 +12,7 @@ const SESSION_CLEANUP_INTERVAL_SECS: u64 = 3600; // 1 hour
 /// Start the background job scheduler.
 ///
 /// Spawns independent tokio tasks for each scheduled job.
-pub async fn start_job_scheduler(state: Arc<super::AppState>) {
+pub async fn start_job_scheduler(state: Arc<super::JobState>) {
 	println!("[JOBS] Starting job scheduler");
 
 	let handles: Vec<tokio::task::JoinHandle<()>> = vec![tokio::spawn(session_cleanup_job(Arc::clone(&state)))];
@@ -27,7 +27,7 @@ pub async fn start_job_scheduler(state: Arc<super::AppState>) {
 /// Runs every `SESSION_CLEANUP_INTERVAL_SECS` and removes all sessions
 /// where `expires_at < NOW()`. This prevents the sessions table from
 /// accumulating stale entries over time.
-async fn session_cleanup_job(state: Arc<super::AppState>) {
+async fn session_cleanup_job(state: Arc<super::JobState>) {
 	println!("[JOBS] Session cleanup job started");
 
 	loop {

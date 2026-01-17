@@ -116,12 +116,6 @@
 									rows="2"
 								/>
 							</div>
-							<div class="flex items-center justify-between pt-2">
-								<div class="flex items-center gap-2">
-									<Switch v-model:modelValue="toolForm.is_public" />
-									<Label>{{ store.getTranslation('settings.tools.public') }}</Label>
-								</div>
-							</div>
 						</TabsContent>
 
 						<TabsContent value="source" class="space-y-4 mt-0">
@@ -365,7 +359,6 @@ interface Tool {
 	functions: ToolFunction[];
 	settings_schema?: any;
 	is_enabled: boolean;
-	is_public: boolean;
 	has_user_settings?: boolean;
 }
 
@@ -533,7 +526,6 @@ const displayTools = computed(() => {
 				id: `template_${template.name}`,
 				input_schema: template.functions[0]?.input_schema || {},
 				is_enabled: false,
-				is_public: false,
 				is_template: true,
 			});
 		}
@@ -550,7 +542,6 @@ const toolForm = reactive({
 	functions: [] as {id?: string; name: string; description: string; input_schema_json: string; entrypoint: string}[],
 	settings_schema_json: '',
 	is_enabled: true,
-	is_public: false,
 });
 
 const httpConfig = reactive({
@@ -663,7 +654,6 @@ function openCreateDialog() {
 		],
 		settings_schema_json: '',
 		is_enabled: true,
-		is_public: false,
 	});
 	Object.assign(httpConfig, {method: 'GET', url: '', headers_json: '{}', body_template: ''});
 	activeFunctionIdx.value = 0;
@@ -688,7 +678,6 @@ async function configureTemplate(template: any) {
 			})),
 			settings_schema: template.settings_schema,
 			is_enabled: true,
-			is_public: false,
 		};
 
 		const created = (await $customFetch('/api/v1/admin/tools', {method: 'POST', body})) as Tool;
@@ -737,7 +726,6 @@ function openEditDialog(tool: Tool) {
 		functions: funcs,
 		settings_schema_json: tool.settings_schema ? JSON.stringify(tool.settings_schema, null, 2) : '',
 		is_enabled: tool.is_enabled,
-		is_public: tool.is_public,
 	});
 
 	if (tool.source_kind === 'HTTP' && tool.source_config) {
@@ -825,7 +813,6 @@ async function saveTool() {
 			functions,
 			settings_schema: toolForm.settings_schema_json ? JSON.parse(toolForm.settings_schema_json) : null,
 			is_enabled: toolForm.is_enabled,
-			is_public: toolForm.is_public,
 		};
 
 		if (editingTool.value) {

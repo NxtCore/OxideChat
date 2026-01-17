@@ -2,9 +2,9 @@
 //!
 //! Handles OAuth authorization flow for Google and Discord providers.
 
-use crate::AppState;
 use crate::config::OAuthProvider;
 use crate::logging::{AuditLog, EntityType, LogEvent};
+use crate::types::JobState;
 use crate::types::User;
 use crate::types::oauth::{OAuthCallbackParams, OAuthState, OAuthUserInfo};
 use crate::utils::auth::{create_session, initialize_user_defaults};
@@ -22,6 +22,8 @@ const OAUTH_STATE_COOKIE: &str = "oxidechat_oauth_state";
 enum FindOrCreateError {
 	/// An account with this email already exists (requires manual linking)
 	EmailConflict,
+	/// OAuth provider did not return an email
+	MissingEmail,
 	/// Database error during user lookup/creation
 	Database(sqlx::Error),
 }
@@ -91,7 +93,7 @@ pub async fn oauth_init(Path(provider): Path<String>, cookies: Cookies) -> Respo
 /// 4. Finds or creates user account
 /// 5. Links OAuth identity if not already linked
 /// 6. Creates session and redirects to app
-pub async fn oauth_callback(Path(provider): Path<String>, Query(params): Query<OAuthCallbackParams>, State(state): State<Arc<AppState>>, cookies: Cookies) -> Response {
+pub async fn oauth_callback(Path(provider): Path<String>, Query(params): Query<OAuthCallbackParams>, State(state): State<Arc<JobState>>, cookies: Cookies) -> Response {
 	// Parse provider
 	let oauth_provider = match OAuthProvider::from_str(&provider) {
 		Some(p) => p,
@@ -173,6 +175,10 @@ pub async fn oauth_callback(Path(provider): Path<String>, Query(params): Query<O
 			eprintln!("[OAUTH] OAuth email matches existing account - requires manual linking");
 			Redirect::temporary("/auth/error?code=oauth_email_conflict").into_response()
 		}
+		Err(FindOrCreateError::MissingEmail) => {
+			eprintln!("[OAUTH] OAuth provider did not return an email address");
+			Redirect::temporary("/auth/error?code=oauth_user_info_error").into_response()
+		}
 		Err(FindOrCreateError::Database(e)) => {
 			eprintln!("[OAUTH] Failed to find/create user: {e}");
 			AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
@@ -208,7 +214,7 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 		}
 	}
 
-	let email = email.expect("Email should be present after validation");
+	let email = email.ok_or(FindOrCreateError::MissingEmail)?;
 
 	let username = user_info
 		.username

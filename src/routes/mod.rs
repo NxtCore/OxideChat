@@ -3,7 +3,7 @@
 pub mod admin;
 pub mod public;
 
-use crate::AppState;
+use crate::types::JobState;
 use axum::{
 	Router,
 	routing::{delete, get, patch, post, put},
@@ -11,7 +11,7 @@ use axum::{
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 
-pub fn build_router() -> Router<Arc<AppState>> {
+pub fn build_router() -> Router<Arc<JobState>> {
 	Router::new()
 		.route("/api/v1/base", get(public::base::get_base))
 		// Admin i18n
@@ -69,6 +69,12 @@ pub fn build_router() -> Router<Arc<AppState>> {
 		.route("/api/v1/chats/{chat_id}/messages", get(public::messages::list_messages))
 		.route("/api/v1/chats/{chat_id}/messages", post(public::messages::send_message))
 		.route("/api/v1/chats/{chat_id}/stream", post(public::streaming::stream_completion))
+		// Message Forks
+		.route("/api/v1/chats/{chat_id}/messages/{message_id}/edit", post(public::messages::edit_message))
+		.route("/api/v1/chats/{chat_id}/messages/{message_id}/switch-fork", post(public::messages::switch_fork))
+		.route("/api/v1/chats/{chat_id}/messages/{message_id}/siblings", get(public::messages::get_siblings))
+		.route("/api/v1/chats/{chat_id}/messages/{message_id}/fork", delete(public::messages::delete_fork))
+		.route("/api/v1/chats/{chat_id}/messages/{message_id}/branch", post(public::messages::branch_from_message))
 		// Models
 		.route("/api/v1/models", get(public::models::list_models))
 		// Tools

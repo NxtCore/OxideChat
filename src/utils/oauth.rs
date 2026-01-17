@@ -26,6 +26,8 @@ pub enum OAuthError {
 	StateMismatch,
 	/// Email is required but not provided
 	EmailRequired,
+	/// BASE_URL environment variable is missing
+	MissingBaseUrl,
 }
 
 impl std::fmt::Display for OAuthError {
@@ -38,6 +40,7 @@ impl std::fmt::Display for OAuthError {
 			Self::UserInfoError(e) => write!(f, "Failed to fetch user info: {e}"),
 			Self::StateMismatch => write!(f, "CSRF state mismatch"),
 			Self::EmailRequired => write!(f, "Email is required for registration"),
+			Self::MissingBaseUrl => write!(f, "BASE_URL environment variable must be set for OAuth redirect URL"),
 		}
 	}
 }
@@ -96,12 +99,9 @@ pub fn generate_auth_url(provider: OAuthProvider) -> Result<(String, OAuthState)
 
 	let auth_url = AuthUrl::new(config.auth_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 	let token_url = TokenUrl::new(config.token_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
-	let redirect_url = RedirectUrl::new(format!(
-		"{}/api/v1/auth/oauth/{}/callback",
-		env::var("BASE_URL").expect("BASE_URL environment variable must be set for OAuth redirect URL"),
-		provider.as_str()
-	))
-	.map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
+	let base_url = env::var("BASE_URL").map_err(|_| OAuthError::MissingBaseUrl)?;
+	let redirect_url =
+		RedirectUrl::new(format!("{}/api/v1/auth/oauth/{}/callback", base_url, provider.as_str())).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 
 	let client = oauth2::basic::BasicClient::new(ClientId::new(config.client_id))
 		.set_client_secret(ClientSecret::new(config.client_secret))
@@ -138,12 +138,9 @@ pub async fn exchange_code(provider: OAuthProvider, code: &str, state: &OAuthSta
 
 	let auth_url = AuthUrl::new(config.auth_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 	let token_url = TokenUrl::new(config.token_url.to_string()).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
-	let redirect_url = RedirectUrl::new(format!(
-		"{}/api/v1/auth/oauth/{}/callback",
-		env::var("BASE_URL").expect("BASE_URL environment variable must be set for OAuth redirect URL"),
-		provider.as_str()
-	))
-	.map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
+	let base_url = env::var("BASE_URL").map_err(|_| OAuthError::MissingBaseUrl)?;
+	let redirect_url =
+		RedirectUrl::new(format!("{}/api/v1/auth/oauth/{}/callback", base_url, provider.as_str())).map_err(|e| OAuthError::ClientBuildError(e.to_string()))?;
 
 	let client = oauth2::basic::BasicClient::new(ClientId::new(config.client_id))
 		.set_client_secret(ClientSecret::new(config.client_secret))

@@ -186,11 +186,13 @@ impl ImageGenExecutor {
 			"application/octet-stream".to_string()
 		};
 
+		let part = reqwest::multipart::Part::bytes(image_bytes)
+			.file_name(file_name)
+			.mime_str(&mime_type)
+			.map_err(|e| ToolError::ExecutionFailed(format!("Failed to set mime type: {e}")))?;
+
 		let form = reqwest::multipart::Form::new()
-			.part(
-				"image",
-				reqwest::multipart::Part::bytes(image_bytes).file_name(file_name).mime_str(&mime_type).unwrap(),
-			)
+			.part("image", part)
 			.text("prompt", input.prompt.clone())
 			.text("model", model.to_string())
 			.text("n", "1");
@@ -438,7 +440,10 @@ impl ImageGenExecutor {
 			}));
 		}
 
-		let content = candidate.content.as_ref().unwrap();
+		let content = candidate
+			.content
+			.as_ref()
+			.ok_or_else(|| ToolError::ExecutionFailed("No content in response".to_string()))?;
 		let image_data = content
 			.parts
 			.iter()

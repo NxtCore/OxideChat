@@ -37,6 +37,10 @@ interface ChatState {
 	reasoningEffort: string | null;
 	reasoningBudget: number | null;
 	enabledTools: string[];
+
+	// Branch prefill state
+	pendingBranchContent: string | null;
+	pendingBranchParts: any[] | null;
 }
 
 export const useChatStore = defineStore('chat', {
@@ -61,6 +65,9 @@ export const useChatStore = defineStore('chat', {
 		reasoningEffort: null,
 		reasoningBudget: null,
 		enabledTools: [],
+
+		pendingBranchContent: null,
+		pendingBranchParts: null,
 	}),
 
 	getters: {
@@ -328,7 +335,7 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		async sendAndStream(chatId: string, content: string, parts?: any[]): Promise<void> {
+		async sendAndStream(chatId: string, content: string, parts?: any[], skipUserMessage: boolean = false, regenerateFromMessageId?: string): Promise<void> {
 			if (!this.selectedModel) {
 				console.error('No model selected');
 				return;
@@ -336,33 +343,42 @@ export const useChatStore = defineStore('chat', {
 
 			this.isStreaming = true;
 
-			const userMessageId = `user-${Date.now()}`;
-			const userMessage: ChatMessage = {
-				id: userMessageId,
-				role: 'user',
-				content,
-				reasoning_content: null,
-				model_id: this.selectedModel.model_id,
-				cost_details: {
-					input: null,
-					output: null,
-					reasoning: null,
-				},
-				usage_details: {
-					input_tokens: null,
-					output_tokens: null,
-					reasoning_tokens: null,
-					latency_ms: null,
-					reasoning_latency_ms: null,
-				},
-				reasoning_details: {
-					effort: this.reasoningEffort,
-					budget_tokens: this.reasoningBudget,
-				},
-				tool_calls: [],
-				created_at: new Date().toISOString(),
-			};
-			this.messages.push(userMessage);
+			let userMessageId: string | null = null;
+
+			// Only create local user message if not skipping (for regeneration after edit)
+			if (!skipUserMessage) {
+				userMessageId = `user-${Date.now()}`;
+				const userMessage: ChatMessage = {
+					id: userMessageId,
+					role: 'user',
+					content,
+					reasoning_content: null,
+					model_id: this.selectedModel.model_id,
+					cost_details: {
+						input: null,
+						output: null,
+						reasoning: null,
+					},
+					usage_details: {
+						input_tokens: null,
+						output_tokens: null,
+						reasoning_tokens: null,
+						latency_ms: null,
+						reasoning_latency_ms: null,
+					},
+					reasoning_details: {
+						effort: this.reasoningEffort,
+						budget_tokens: this.reasoningBudget,
+					},
+					tool_calls: [],
+					created_at: new Date().toISOString(),
+					parent_id: null,
+					fork_index: 1,
+					sibling_count: 1,
+				};
+				this.messages.push(userMessage);
+			}
+
 			const streamingMessageId = `streaming-${Date.now()}`;
 			const streamingMessage: ChatMessage = {
 				id: streamingMessageId,
@@ -388,6 +404,9 @@ export const useChatStore = defineStore('chat', {
 				},
 				tool_calls: [],
 				created_at: new Date().toISOString(),
+				parent_id: null,
+				fork_index: 1,
+				sibling_count: 1,
 			};
 			this.messages.push(streamingMessage);
 
@@ -401,6 +420,8 @@ export const useChatStore = defineStore('chat', {
 					reasoning_effort: this.reasoningEffort || undefined,
 					reasoning_budget_tokens: this.reasoningBudget || undefined,
 					tools_enabled: this.enabledTools.length > 0 ? this.enabledTools : undefined,
+					skip_user_message: skipUserMessage,
+					regenerate_from_message_id: regenerateFromMessageId,
 				};
 
 				if (parts && parts.length > 0) {
@@ -539,7 +560,11 @@ export const useChatStore = defineStore('chat', {
 			} catch (e) {
 				console.error('Failed to stream:', e);
 				this.isStreaming = false;
-				this.messages = this.messages.filter(m => m.id !== userMessageId && m.id !== streamingMessageId);
+				this.messages = this.messages.filter(m => {
+					if (m.id === streamingMessageId) return false;
+					if (userMessageId && m.id === userMessageId) return false;
+					return true;
+				});
 			}
 		},
 
@@ -654,6 +679,85 @@ export const useChatStore = defineStore('chat', {
 
 		setContextTokens(tokens: number) {
 			this.contextTokens = tokens;
+		},
+
+		// Fork operations
+		async editMessage(chatId: string, messageId: string, content: string): Promise<ChatMessage | null> {
+			try {
+				const {$customFetch} = useNuxtApp();
+				const message = await $customFetch(`/api/v1/chats/${chatId}/messages/${messageId}/edit`, {
+					method: 'POST',
+					body: {content},
+				});
+				const newMsg = message as ChatMessage;
+				await this.fetchChat(chatId);
+				return newMsg;
+			} catch (e) {
+				console.error('Failed to edit message:', e);
+				return null;
+			}
+		},
+
+		async switchFork(chatId: string, messageId: string, forkIndex: number): Promise<boolean> {
+			try {
+				const {$customFetch} = useNuxtApp();
+				const message = await $customFetch(`/api/v1/chats/${chatId}/messages/${messageId}/switch-fork`, {
+					method: 'POST',
+					body: {fork_index: forkIndex},
+				});
+				// Reload the chat to get correct fork path
+				await this.fetchChat(chatId);
+				return true;
+			} catch (e) {
+				console.error('Failed to switch fork:', e);
+				return false;
+			}
+		},
+
+		async deleteFork(chatId: string, messageId: string): Promise<boolean> {
+			try {
+				const {$customFetch} = useNuxtApp();
+				await $customFetch(`/api/v1/chats/${chatId}/messages/${messageId}/fork`, {
+					method: 'DELETE',
+				});
+				// Remove the message from local state
+				this.messages = this.messages.filter(m => m.id !== messageId);
+				return true;
+			} catch (e) {
+				console.error('Failed to delete fork:', e);
+				return false;
+			}
+		},
+
+		async branchFromMessage(chatId: string, messageId: string): Promise<Chat | null> {
+			try {
+				const router = useRouter();
+				const {$customFetch} = useNuxtApp();
+				const response = await $customFetch(`/api/v1/chats/${chatId}/messages/${messageId}/branch`, {
+					method: 'POST',
+					body: {},
+				});
+				const branchResult = response as {chat: Chat; prefill_content?: string; prefill_parts?: any[]};
+				const newChat = branchResult.chat;
+				this.chats.unshift(newChat);
+
+				// If prefill data, store it for composer
+				if (branchResult.prefill_content || branchResult.prefill_parts) {
+					this.pendingBranchContent = branchResult.prefill_content || null;
+					this.pendingBranchParts = branchResult.prefill_parts || null;
+				}
+
+				router.push(`/chats/${newChat.id}`);
+				return newChat;
+			} catch (e) {
+				console.error('Failed to branch from message:', e);
+				return null;
+			}
+		},
+
+		clearPendingBranch() {
+			this.pendingBranchContent = null;
+			this.pendingBranchParts = null;
 		},
 
 		async init() {

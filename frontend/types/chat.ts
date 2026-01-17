@@ -16,6 +16,8 @@ export interface Chat {
 	title: string | null;
 	is_pinned: boolean;
 	is_archived: boolean;
+	branched_from_chat_id: string | null;
+	branched_from_message_id: string | null;
 	message_count: number;
 	last_message_at: string | null;
 	created_at: string;
@@ -66,6 +68,10 @@ export interface ChatMessage {
 	};
 	tool_calls: Array<ChatMessageToolCall>;
 	created_at: string;
+	// Fork support
+	parent_id: string | null;
+	fork_index: number;
+	sibling_count: number;
 }
 
 export interface ChatWithMessages {

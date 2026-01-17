@@ -2,8 +2,8 @@
 //!
 //! Admin endpoints for managing instance-wide settings like default theme.
 
-use crate::AppState;
 use crate::config::Config;
+use crate::types::JobState;
 use crate::types::{GlobalConfigResponse, UpdateGlobalConfigRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{Json, extract::State, response::IntoResponse};
@@ -21,10 +21,7 @@ pub async fn get_global_config() -> impl IntoResponse {
 /// PATCH /api/v1/admin/config
 ///
 /// Update global configuration (admin only - protected by route).
-pub async fn update_global_config(
-	State(state): State<Arc<AppState>>,
-	Json(req): Json<UpdateGlobalConfigRequest>,
-) -> impl IntoResponse {
+pub async fn update_global_config(State(state): State<Arc<JobState>>, Json(req): Json<UpdateGlobalConfigRequest>) -> impl IntoResponse {
 	if let Some(default_theme) = req.default_theme {
 		let theme_json = match serde_json::to_string(&default_theme) {
 			Ok(json) => json,

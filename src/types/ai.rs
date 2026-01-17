@@ -215,6 +215,22 @@ pub struct ModelResponse {
 	pub is_enabled: bool,
 }
 
+/// Model response for the frontend (with flattened provider info)
+#[derive(Debug, Serialize)]
+pub struct PublicModelResponse {
+	pub id: String,
+	pub provider_id: String,
+	pub model_id: String,
+	pub display_name: String,
+	pub capabilities: Vec<String>,
+	pub input_modalities: Vec<String>,
+	pub output_modalities: Vec<String>,
+	pub context_length: Option<u32>,
+	pub max_tokens: Option<u32>,
+	pub provider_name: String,
+	pub provider_kind: String,
+}
+
 impl From<AiModel> for ModelResponse {
 	fn from(m: AiModel) -> Self {
 		Self {
@@ -337,29 +353,29 @@ pub struct ModelConfig {
 	pub name: String,
 	pub description: Option<String>,
 	pub icon: Option<String>,
-	
+
 	pub capabilities: Option<serde_json::Value>,
 	pub input_modalities: Option<serde_json::Value>,
 	pub output_modalities: Option<serde_json::Value>,
 	pub context_length: Option<i32>,
 	pub max_output_tokens: Option<i32>,
-	
+
 	pub system_prompt: Option<String>,
 	pub sampling: serde_json::Value,
-	
+
 	pub enabled_tools: serde_json::Value,
-	
+
 	pub is_public: bool,
 	pub is_featured: bool,
 	pub is_default: bool,
 	pub is_favorite: bool,
 	pub is_hidden: bool,
-	
+
 	pub category: Option<String>,
 	pub tags: serde_json::Value,
 	pub usage_count: i32,
 	pub extra_settings: serde_json::Value,
-	
+
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }

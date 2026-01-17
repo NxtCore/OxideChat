@@ -1,5 +1,5 @@
-use crate::AppState;
 use crate::routes::public::auth::get_current_user;
+use crate::types::JobState;
 use crate::utils::auth::user_to_response;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{extract::State, response::IntoResponse};
@@ -13,7 +13,7 @@ use tower_cookies::Cookies;
 /// # Errors
 ///
 /// Returns 401 if not authenticated.
-pub async fn get_me(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+pub async fn get_me(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),

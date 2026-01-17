@@ -55,10 +55,101 @@
 				</div>
 			</div>
 
+			<!-- User message content with edit button -->
+			<div v-if="isUser && (message.content || !isStreaming)" class="flex flex-col gap-2" :class="isUser ? 'items-end' : 'items-start'">
+				<div
+					v-if="!isEditing"
+					class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl w-fit-content rounded-xl bg-muted/50 px-4 py-2 text-foreground"
+					v-html="renderedContent"
+					@click="handleCodeBlockClick"
+				/>
+				<div v-else class="w-full max-w-3xl">
+					<textarea
+						ref="editTextarea"
+						v-model="editContent"
+						class="w-full min-h-25 rounded-xl bg-muted/50 px-4 py-2 text-foreground border border-border focus:border-primary focus:outline-none resize-none"
+						@keydown.escape="cancelEdit"
+					/>
+					<div class="flex gap-2 mt-2 justify-end">
+						<ShadButton variant="ghost" size="sm" @click="cancelEdit">{{ store.getTranslation('chat.message_item.cancel') }}</ShadButton>
+						<ShadButton size="sm" @click="saveEdit">{{ store.getTranslation('chat.message_item.save_and_fork') }}</ShadButton>
+					</div>
+				</div>
+				<!-- User message action bar (matches assistant style) -->
+				<div
+					v-if="!isEditing && !isStreaming"
+					class="flex items-center gap-0.5 rounded-lg border border-border/50 bg-popover/80 backdrop-blur-sm p-0.5 shadow-lg opacity-0 transition-opacity group-hover:opacity-100 self-end"
+				>
+					<!-- Fork Navigator for user messages -->
+					<template v-if="message.sibling_count > 1">
+						<ShadButton
+							variant="ghost"
+							size="icon"
+							class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50"
+							:disabled="message.fork_index <= 1"
+							@click="handleForkNavigation('prev')"
+						>
+							<ChevronLeft class="h-3.5 w-3.5" />
+						</ShadButton>
+						<span class="min-w-10 text-center text-xs tabular-nums text-muted-foreground select-none"
+							>{{ message.fork_index }}/{{ message.sibling_count }}</span
+						>
+						<ShadButton
+							variant="ghost"
+							size="icon"
+							class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50"
+							:disabled="message.fork_index >= message.sibling_count"
+							@click="handleForkNavigation('next')"
+						>
+							<ChevronRight class="h-3.5 w-3.5" />
+						</ShadButton>
+						<div class="w-px h-4 bg-border/50 mx-0.5" />
+					</template>
+					<ShadTooltip>
+						<ShadTooltipTrigger as-child>
+							<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" @click="startEdit">
+								<Pencil class="h-3.5 w-3.5" />
+							</ShadButton>
+						</ShadTooltipTrigger>
+						<ShadTooltipContent side="top" :side-offset="8">
+							<p class="text-xs">{{ store.getTranslation('chat.message_item.edit_message') }}</p>
+						</ShadTooltipContent>
+					</ShadTooltip>
+					<ShadTooltip>
+						<ShadTooltipTrigger as-child>
+							<ShadButton
+								variant="ghost"
+								size="icon"
+								class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50"
+								@click="copyUserContent"
+							>
+								<Check v-if="userCopied" class="h-3.5 w-3.5 text-primary" />
+								<Copy v-else class="h-3.5 w-3.5" />
+							</ShadButton>
+						</ShadTooltipTrigger>
+						<ShadTooltipContent side="top" :side-offset="8">
+							<p class="text-xs">
+								{{ userCopied ? store.getTranslation('chat.message_item.copied') : store.getTranslation('chat.message_item.copy_message') }}
+							</p>
+						</ShadTooltipContent>
+					</ShadTooltip>
+					<ShadTooltip>
+						<ShadTooltipTrigger as-child>
+							<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" @click="handleBranch">
+								<GitBranch class="h-3.5 w-3.5" />
+							</ShadButton>
+						</ShadTooltipTrigger>
+						<ShadTooltipContent side="top" :side-offset="8">
+							<p class="text-xs">{{ store.getTranslation('chat.message_item.branch_to_new_chat') }}</p>
+						</ShadTooltipContent>
+					</ShadTooltip>
+				</div>
+			</div>
+
+			<!-- Assistant message content -->
 			<div
-				v-if="message.content || !isStreaming"
+				v-else-if="!isUser && (message.content || !isStreaming)"
 				class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl"
-				:class="isUser ? 'rounded-xl bg-muted/50 px-4 py-2 text-foreground' : ''"
 				v-html="renderedContent"
 				@click="handleCodeBlockClick"
 			/>
@@ -75,8 +166,11 @@
 				<MessageActions
 					:message="message"
 					:model-name="modelDisplayName || undefined"
-					:can-regenerate="isLastAssistantMessage"
+					:can-regenerate="true"
+					:current-index="message.fork_index"
+					:sibling-count="message.sibling_count"
 					class="opacity-0 transition-opacity group-hover:opacity-100"
+					@navigate="handleForkNavigation"
 				/>
 			</div>
 
@@ -87,7 +181,7 @@
 </template>
 
 <script setup lang="ts">
-import {User, Bot, Brain, ChevronDown} from 'lucide-vue-next';
+import {User, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, Pencil, Copy, Check, GitBranch} from 'lucide-vue-next';
 import MessageActions from './MessageActions.vue';
 import CodePreview from './CodePreview.vue';
 import ImagePreview from '~/components/ImagePreview.vue';
@@ -114,6 +208,12 @@ const previewData = ref<{code: string; language: string} | null>(null);
 const showImagePreview = ref(false);
 const imagePreviewUrl = ref<string | null>(null);
 const imagePreviewFilename = ref<string | undefined>(undefined);
+
+// Edit state
+const isEditing = ref(false);
+const editContent = ref('');
+const editTextarea = ref<HTMLTextAreaElement | null>(null);
+const userCopied = ref(false);
 
 const isUser = computed(() => props.message.role === 'user');
 const isStreaming = computed(() => props.message.id.startsWith('streaming-'));
@@ -239,6 +339,66 @@ function closeImagePreview() {
 	showImagePreview.value = false;
 	imagePreviewUrl.value = null;
 	imagePreviewFilename.value = undefined;
+}
+
+function handleForkNavigation(direction: 'prev' | 'next') {
+	const forkIndex = Number.isFinite(props.message.fork_index) ? props.message.fork_index : 0;
+	const newIndex = direction === 'prev' ? forkIndex - 1 : forkIndex + 1;
+	if (!chatStore.activeChat) return;
+	if (!Number.isInteger(newIndex) || newIndex < 1) return;
+	chatStore.switchFork(chatStore.activeChat.id, props.message.id, newIndex);
+}
+
+async function copyUserContent() {
+	if (!props.message.content) return;
+	await navigator.clipboard.writeText(props.message.content);
+	userCopied.value = true;
+	setTimeout(() => {
+		userCopied.value = false;
+	}, 2000);
+}
+
+async function handleBranch() {
+	if (!chatStore.activeChat) return;
+	await chatStore.branchFromMessage(chatStore.activeChat.id, props.message.id);
+}
+
+function startEdit() {
+	editContent.value = props.message.content;
+	isEditing.value = true;
+	nextTick(() => {
+		editTextarea.value?.focus();
+	});
+}
+
+function cancelEdit() {
+	isEditing.value = false;
+	editContent.value = '';
+}
+
+async function saveEdit() {
+	if (!chatStore.activeChat || editContent.value === props.message.content) {
+		cancelEdit();
+		return;
+	}
+
+	const chatId = chatStore.activeChat.id;
+	const newContent = editContent.value;
+
+	// Create the fork with edited content
+	const newMessage = await chatStore.editMessage(chatId, props.message.id, newContent);
+	cancelEdit();
+
+	if (!newMessage) {
+		return;
+	}
+
+	// Reload the chat to get the new fork path (messages up to the edited message)
+	await chatStore.fetchChat(chatId);
+
+	// Trigger a new generation with the edited message
+	// Pass skipUserMessage=true since the edited message already exists in the database
+	await chatStore.sendAndStream(chatId, newContent, undefined, true);
 }
 </script>
 

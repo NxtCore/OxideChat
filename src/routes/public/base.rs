@@ -2,8 +2,8 @@
 //!
 //! Returns application base data including translations.
 
-use crate::AppState;
 use crate::i18n::I18n;
+use crate::types::JobState;
 use crate::types::{BaseResponse, CountRow};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::extract::State;
@@ -17,7 +17,7 @@ use std::sync::Arc;
 /// # Errors
 ///
 /// Returns 500 if the database query fails.
-pub async fn get_base(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn get_base(State(state): State<Arc<JobState>>) -> impl IntoResponse {
 	let i18n = I18n::get().all();
 
 	// Check if any users exist (needs_setup = true if no users)

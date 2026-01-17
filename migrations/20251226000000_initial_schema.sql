@@ -117,15 +117,18 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
     PRIMARY KEY (role_id, permission_id)
 );
-
-CREATE TYPE provider_kind AS ENUM (
-    'OPENAI',
-    'OPENAI_COMPAT',
-    'OPENROUTER',
-    'ANTHROPIC',
-    'GOOGLE',
-    'CUSTOM'
-);
+DO $$ BEGIN
+    CREATE TYPE provider_kind AS ENUM (
+        'OPENAI',
+        'OPENAI_COMPAT',
+        'OPENROUTER',
+        'ANTHROPIC',
+        'GOOGLE',
+        'CUSTOM'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS providers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -251,6 +254,8 @@ CREATE TABLE IF NOT EXISTS chats (
     title VARCHAR(255),
     is_pinned BOOLEAN DEFAULT false,
     is_archived BOOLEAN DEFAULT false,
+    branched_from_chat_id UUID REFERENCES chats(id) ON DELETE SET NULL,
+    branched_from_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -263,6 +268,9 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     reasoning_content TEXT, 
     model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+    parent_id UUID REFERENCES messages(id) ON DELETE CASCADE,
+    fork_index INTEGER NOT NULL DEFAULT 1,
+    is_active_fork BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     content_parts JSONB DEFAULT '[]',
@@ -332,12 +340,16 @@ ON CONFLICT DO NOTHING;
 -- ============= Tool Calling Infrastructure =============
 
 -- Tool source types
-CREATE TYPE tool_source_kind AS ENUM (
-    'BUILTIN',       -- Built-in tools (Exa search, etc.)
-    'WASM',          -- Extism WASM plugins  
-    'MCP',           -- MCP server connection
-    'HTTP'           -- HTTP endpoint tools
-);
+DO $$ BEGIN
+    CREATE TYPE tool_source_kind AS ENUM (
+        'BUILTIN',       -- Built-in tools (Exa search, etc.)
+        'WASM',          -- Extism WASM plugins  
+        'MCP',           -- MCP server connection
+        'HTTP'           -- HTTP endpoint tools
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- WASM blobs storage for compiled plugins
 CREATE TABLE IF NOT EXISTS wasm_blobs (
@@ -372,7 +384,6 @@ CREATE TABLE IF NOT EXISTS tools (
     
     -- Permissions
     is_enabled BOOLEAN DEFAULT true,
-    is_public BOOLEAN DEFAULT false,
     
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -490,8 +501,11 @@ CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id);
 CREATE INDEX IF NOT EXISTS idx_chats_workspace ON chats(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chats_pinned ON chats(user_id, is_pinned) WHERE is_pinned = true;
+CREATE INDEX IF NOT EXISTS idx_chats_branched_from ON chats(branched_from_chat_id) WHERE branched_from_chat_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id);
+CREATE INDEX IF NOT EXISTS idx_messages_fork ON messages(parent_id, fork_index);
 CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_images_user_id ON images(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_content_parts_gin ON messages USING GIN (content_parts);
@@ -502,7 +516,6 @@ CREATE INDEX IF NOT EXISTS idx_wasm_blobs_hash ON wasm_blobs(sha256_hash);
 CREATE INDEX IF NOT EXISTS idx_tools_owner ON tools(owner_id);
 CREATE INDEX IF NOT EXISTS idx_tools_source ON tools(source_kind);
 CREATE INDEX IF NOT EXISTS idx_tools_enabled ON tools(is_enabled) WHERE is_enabled = true;
-CREATE INDEX IF NOT EXISTS idx_tools_public ON tools(is_public) WHERE is_public = true;
 CREATE INDEX IF NOT EXISTS idx_user_tool_settings_user ON user_tool_settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_tool_settings_tool ON user_tool_settings(tool_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_servers_owner ON mcp_servers(owner_id);
@@ -987,6 +1000,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.message_actions.response_latency', 'Response latency'),
     ('en', 'chat.message_actions.reasoning_latency', 'Reasoning latency'),
     ('en', 'chat.message_actions.created', 'Created'),
+    ('en', 'chat.message_actions.branch_to_new_chat', 'Branch to new chat'),
 
     -- Model Selector
     ('en', 'chat.model_selector.search_models', 'Search models...'),
@@ -1084,6 +1098,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.message_actions.response_latency', 'Antwortlatenz'),
     ('de', 'chat.message_actions.reasoning_latency', 'Reasoning-Latenz'),
     ('de', 'chat.message_actions.created', 'Erstellt'),
+    ('de', 'chat.message_actions.branch_to_new_chat', 'Neuen Chat abzweigen'),
 
     -- Model Selector
     ('de', 'chat.model_selector.search_models', 'Modelle suchen...'),
@@ -1114,7 +1129,19 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
 
     -- Message Item
     ('en', 'chat.message_item.reasoning', 'Reasoning'),
+    ('en', 'chat.message_item.edit_message', 'Edit message'),
+    ('en', 'chat.message_item.copy_message', 'Copy message'),
+    ('en', 'chat.message_item.copied', 'Copied'),
+    ('en', 'chat.message_item.cancel', 'Cancel'),
+    ('en', 'chat.message_item.save_and_fork', 'Save & Fork'),
+    ('en', 'chat.message_item.branch_to_new_chat', 'Branch to new chat'),
     ('de', 'chat.message_item.reasoning', 'Reasoning'),
+    ('de', 'chat.message_item.edit_message', 'Nachricht bearbeiten'),
+    ('de', 'chat.message_item.copy_message', 'Nachricht kopieren'),
+    ('de', 'chat.message_item.copied', 'Kopiert'),
+    ('de', 'chat.message_item.cancel', 'Abbrechen'),
+    ('de', 'chat.message_item.save_and_fork', 'Speichern & abzweigen'),
+    ('de', 'chat.message_item.branch_to_new_chat', 'Neuen Chat abzweigen'),
 
     -- Tool Execution Display
     ('en', 'chat.tool_execution.tool', 'Tool'),
@@ -1144,7 +1171,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.image_preview.download', 'Herunterladen'),
     ('de', 'chat.image_preview.copy', 'URL kopieren'),
     ('de', 'chat.image_preview.copied', 'Kopiert!'),
-    ('de', 'chat.tool_execution.generated_image', 'Generiertes Bild');
+    ('de', 'chat.tool_execution.generated_image', 'Generiertes Bild'),
 
 
     -- Schema Builder
@@ -1228,7 +1255,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.tools.display_name_placeholder', 'Fetch Website'),
     ('en', 'settings.tools.description', 'Description'),
     ('en', 'settings.tools.description_placeholder', 'Fetches content from a URL'),
-    ('en', 'settings.tools.public', 'Public'),
     ('en', 'settings.tools.soon', 'Soon'),
     ('en', 'settings.tools.url_placeholder', 'https://api.example.com/{{input.query}}'),
     ('en', 'settings.tools.headers', 'Headers (JSON)'),
@@ -1273,7 +1299,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.tools.display_name_placeholder', 'Website abrufen'),
     ('de', 'settings.tools.description', 'Beschreibung'),
     ('de', 'settings.tools.description_placeholder', 'Ruft Inhalte von einer URL ab'),
-    ('de', 'settings.tools.public', 'Öffentlich'),
     ('de', 'settings.tools.soon', 'Bald'),
     ('de', 'settings.tools.url_placeholder', 'https://api.example.com/{{input.query}}'),
     ('de', 'settings.tools.headers', 'Header (JSON)'),

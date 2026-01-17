@@ -2,9 +2,9 @@
 //!
 //! Provides endpoints for managing translations.
 
-use crate::AppState;
 use crate::i18n::I18n;
 use crate::logging::{AuditLog, EntityType, LogEvent};
+use crate::types::JobState;
 use crate::types::{IdRow, Translation, TranslationsResponse, UpsertTranslationRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
@@ -17,7 +17,7 @@ use std::sync::Arc;
 /// GET /api/v1/admin/i18n
 ///
 /// List all translations.
-pub async fn list_translations(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn list_translations(State(state): State<Arc<JobState>>) -> impl IntoResponse {
 	let translations: Vec<Translation> = sqlx::query_as("SELECT id, language, key_path, value, is_override FROM i18n_translations ORDER BY language, key_path")
 		.fetch_all(&state.db)
 		.await
@@ -29,7 +29,7 @@ pub async fn list_translations(State(state): State<Arc<AppState>>) -> impl IntoR
 /// PUT /api/v1/admin/i18n/translations
 ///
 /// Create or update a translation. Reloads translations after change.
-pub async fn upsert_translation(State(state): State<Arc<AppState>>, Json(payload): Json<UpsertTranslationRequest>) -> impl IntoResponse {
+pub async fn upsert_translation(State(state): State<Arc<JobState>>, Json(payload): Json<UpsertTranslationRequest>) -> impl IntoResponse {
 	let result: Result<IdRow, _> = sqlx::query_as(
 		r#"
         INSERT INTO i18n_translations (language, key_path, value, is_override)
@@ -62,7 +62,7 @@ pub async fn upsert_translation(State(state): State<Arc<AppState>>, Json(payload
 /// DELETE /api/v1/admin/i18n/translations/:id
 ///
 /// Delete a translation by ID. Reloads translations after change.
-pub async fn delete_translation(State(state): State<Arc<AppState>>, Path(id): Path<sqlx::types::Uuid>) -> impl IntoResponse {
+pub async fn delete_translation(State(state): State<Arc<JobState>>, Path(id): Path<sqlx::types::Uuid>) -> impl IntoResponse {
 	let result = sqlx::query("DELETE FROM i18n_translations WHERE id = $1").bind(id).execute(&state.db).await;
 
 	match result {

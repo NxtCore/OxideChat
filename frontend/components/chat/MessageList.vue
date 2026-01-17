@@ -1,6 +1,6 @@
 <template>
 	<div ref="containerRef" class="flex-1 overflow-y-auto p-4">
-		<div v-if="loading" class="space-y-4">
+		<div v-if="loading" class="mx-auto max-w-4xl space-y-4">
 			<div v-for="i in 3" :key="i" class="flex gap-3">
 				<div class="h-8 w-8 animate-pulse rounded-full bg-muted" />
 				<div class="flex-1 space-y-2">

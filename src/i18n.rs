@@ -198,7 +198,11 @@ impl I18n {
 					map.insert((*part).to_string(), serde_json::json!({}));
 				}
 			}
-			current = current.get_mut(*part).unwrap();
+			if let Some(next) = current.get_mut(*part) {
+				current = next;
+			} else {
+				return;
+			}
 		}
 
 		// Set the final value

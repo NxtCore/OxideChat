@@ -4,7 +4,8 @@
 //! - GET /api/v1/images/:id - Serve an image by UUID
 //! - POST /api/v1/images - Upload a base64 image (internal use)
 
-use crate::AppState;
+use crate::types::JobState;
+use crate::types::{UploadImageRequest, UploadImageResponse};
 use crate::utils::images::{get_image, image_url, store_from_data_uri};
 use axum::{
 	Json,
@@ -12,34 +13,13 @@ use axum::{
 	http::{HeaderMap, StatusCode, header},
 	response::{IntoResponse, Response},
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
-
-/// Request body for uploading an image
-#[derive(Debug, Deserialize)]
-pub struct UploadImageRequest {
-	/// Base64 data URI (e.g., "data:image/png;base64,...")
-	pub data_uri: String,
-	/// Optional user ID for attribution
-	pub user_id: Option<Uuid>,
-	/// Optional source identifier (e.g., "imagegen")
-	pub source: Option<String>,
-}
-
-/// Response for successful image upload
-#[derive(Debug, Serialize)]
-pub struct UploadImageResponse {
-	pub id: Uuid,
-	pub url: String,
-	pub mime_type: String,
-	pub size_bytes: i64,
-}
 
 /// Upload a base64 image and return its URL
 ///
 /// POST /api/images
-pub async fn upload_image(State(state): State<Arc<AppState>>, Json(req): Json<UploadImageRequest>) -> Result<Json<UploadImageResponse>, (StatusCode, String)> {
+pub async fn upload_image(State(state): State<Arc<JobState>>, Json(req): Json<UploadImageRequest>) -> Result<Json<UploadImageResponse>, (StatusCode, String)> {
 	let stored = store_from_data_uri(&state.db, &req.data_uri, req.user_id, req.source.as_deref())
 		.await
 		.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -55,7 +35,7 @@ pub async fn upload_image(State(state): State<Arc<AppState>>, Json(req): Json<Up
 /// Serve an image by ID
 ///
 /// GET /api/v1/images/:id
-pub async fn serve_image(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Response {
+pub async fn serve_image(State(state): State<Arc<JobState>>, Path(id): Path<Uuid>) -> Response {
 	match get_image(&state.db, id).await {
 		Ok(Some((data, mime_type))) => {
 			let mut headers = HeaderMap::new();

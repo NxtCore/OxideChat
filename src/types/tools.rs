@@ -68,7 +68,6 @@ pub struct Tool {
 	pub input_schema: serde_json::Value,
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
-	pub is_public: bool,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }
@@ -201,8 +200,6 @@ pub struct CreateToolRequest {
 	pub settings_schema: serde_json::Value,
 	#[serde(default = "default_true")]
 	pub is_enabled: bool,
-	#[serde(default)]
-	pub is_public: bool,
 }
 
 fn default_true() -> bool {
@@ -231,7 +228,6 @@ pub struct UpdateToolRequest {
 	pub delete_function_ids: Option<Vec<Uuid>>,
 	pub settings_schema: Option<serde_json::Value>,
 	pub is_enabled: Option<bool>,
-	pub is_public: Option<bool>,
 }
 
 /// Request to upload WASM source or binary
@@ -314,7 +310,6 @@ pub struct ToolResponse {
 	pub functions: Vec<ToolFunctionResponse>,
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
-	pub is_public: bool,
 	pub has_user_settings: bool,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
@@ -334,7 +329,6 @@ impl ToolResponse {
 			functions: functions.into_iter().map(ToolFunctionResponse::from).collect(),
 			settings_schema: t.settings_schema,
 			is_enabled: t.is_enabled,
-			is_public: t.is_public,
 			has_user_settings: false,
 			created_at: t.created_at,
 			updated_at: t.updated_at,
@@ -356,7 +350,6 @@ impl From<Tool> for ToolResponse {
 			functions: vec![],
 			settings_schema: t.settings_schema,
 			is_enabled: t.is_enabled,
-			is_public: t.is_public,
 			has_user_settings: false,
 			created_at: t.created_at,
 			updated_at: t.updated_at,
