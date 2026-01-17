@@ -2,8 +2,8 @@
 //!
 //! CRUD operations for user chats.
 
-use crate::AppState;
 use crate::routes::public::auth::get_current_user;
+use crate::types::JobState;
 use crate::types::{
 	Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, Message, ToolExecutionResponse, UpdateChatRequest,
 };
@@ -19,8 +19,7 @@ use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
-/// Helper to build ChatResponse with message count and last message time
-async fn build_chat_response(pool: &sqlx::PgPool, chat: Chat) -> Result<ChatResponse, sqlx::Error> {
+async fn build_chat_response(pool: &sqlx::PgPool, chat: &Chat) -> Result<ChatResponse, sqlx::Error> {
 	let stats: (i64, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as("SELECT COUNT(*), MAX(created_at) FROM messages WHERE chat_id = $1")
 		.bind(chat.id)
 		.fetch_one(pool)
@@ -29,7 +28,7 @@ async fn build_chat_response(pool: &sqlx::PgPool, chat: Chat) -> Result<ChatResp
 	Ok(ChatResponse {
 		id: chat.id,
 		workspace_id: chat.workspace_id,
-		title: chat.title,
+		title: chat.title.clone(),
 		is_pinned: chat.is_pinned,
 		is_archived: chat.is_archived,
 		branched_from_chat_id: chat.branched_from_chat_id,
@@ -44,10 +43,9 @@ async fn build_chat_response(pool: &sqlx::PgPool, chat: Chat) -> Result<ChatResp
 /// GET /api/v1/chats
 ///
 /// List chats with optional filters.
-pub async fn list_chats(State(state): State<Arc<AppState>>, cookies: Cookies, Query(params): Query<ChatListParams>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+pub async fn list_chats(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ChatListParams>) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	let limit = params.limit.unwrap_or(50).min(100);
@@ -118,7 +116,7 @@ pub async fn list_chats(State(state): State<Arc<AppState>>, cookies: Cookies, Qu
 	match chats {
 		Ok(chats) => {
 			let mut responses = Vec::with_capacity(chats.len());
-			for chat in chats {
+			for chat in &chats {
 				match build_chat_response(&state.db, chat).await {
 					Ok(response) => responses.push(response),
 					Err(e) => {
@@ -139,10 +137,9 @@ pub async fn list_chats(State(state): State<Arc<AppState>>, cookies: Cookies, Qu
 /// POST /api/v1/chats
 ///
 /// Create a new chat.
-pub async fn create_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Json(req): Json<CreateChatRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+pub async fn create_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateChatRequest>) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	if let Some(workspace_id) = req.workspace_id {
@@ -176,7 +173,7 @@ pub async fn create_chat(State(state): State<Arc<AppState>>, cookies: Cookies, J
 	.await;
 
 	match chat {
-		Ok(chat) => match build_chat_response(&state.db, chat).await {
+		Ok(chat) => match build_chat_response(&state.db, &chat).await {
 			Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build(),
 			Err(e) => {
 				eprintln!("[CHATS] Failed to build chat response: {e}");
@@ -193,10 +190,9 @@ pub async fn create_chat(State(state): State<Arc<AppState>>, cookies: Cookies, J
 /// GET /api/v1/chats/:id
 ///
 /// Get a chat with its messages.
-pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+pub async fn get_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	let chat = sqlx::query_as::<_, Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
@@ -222,7 +218,7 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 
 	match messages {
 		Ok(messages) => {
-			let chat_response = match build_chat_response(&state.db, chat).await {
+			let chat_response = match build_chat_response(&state.db, &chat).await {
 				Ok(r) => r,
 				Err(e) => {
 					eprintln!("[CHATS] Failed to build chat response: {e}");
@@ -345,10 +341,9 @@ pub async fn get_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 /// PATCH /api/v1/chats/:id
 ///
 /// Update a chat (rename, pin, archive, move workspace).
-pub async fn update_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateChatRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+pub async fn update_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateChatRequest>) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	// Get existing chat
@@ -407,7 +402,7 @@ pub async fn update_chat(State(state): State<Arc<AppState>>, cookies: Cookies, P
 	.await;
 
 	match chat {
-		Ok(chat) => match build_chat_response(&state.db, chat).await {
+		Ok(chat) => match build_chat_response(&state.db, &chat).await {
 			Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),
 			Err(e) => {
 				eprintln!("[CHATS] Failed to build chat response: {e}");
@@ -424,10 +419,9 @@ pub async fn update_chat(State(state): State<Arc<AppState>>, cookies: Cookies, P
 /// DELETE /api/v1/chats/:id
 ///
 /// Delete a chat and all its messages.
-pub async fn delete_chat(State(state): State<Arc<AppState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+pub async fn delete_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	let result = sqlx::query("DELETE FROM chats WHERE id = $1 AND user_id = $2")

@@ -36,7 +36,7 @@
 
 ### Types Module (`src/types/`)
 
-- All request/response structs live in `src/types/`, not in route files
+- All request/response structs live in `src/types/`, not in the code files files
 - Organized by domain: `i18n.rs`, `base.rs`, etc.
 - `mod.rs` re-exports all types for easy importing: `use crate::types::*;`
 - Each file uses section comments for clarity:

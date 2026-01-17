@@ -2,8 +2,8 @@
 //!
 //! Operations for chat messages.
 
-use crate::AppState;
 use crate::routes::public::auth::get_current_user;
+use crate::types::JobState;
 use crate::types::{
 	BranchFromMessageRequest, BranchResponse, Chat, ChatMessageResponse, ChatResponse, EditMessageRequest, Message, MessageListParams, SendMessageRequest,
 	SwitchForkRequest, ToolExecutionResponse,
@@ -23,14 +23,13 @@ use uuid::Uuid;
 ///
 /// Get messages for a chat (paginated).
 pub async fn list_messages(
-	State(state): State<Arc<AppState>>,
+	State(state): State<Arc<JobState>>,
 	cookies: Cookies,
 	Path(chat_id): Path<Uuid>,
 	Query(params): Query<MessageListParams>,
 ) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	let chat_exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM chats WHERE id = $1 AND user_id = $2)")
@@ -88,7 +87,10 @@ pub async fn list_messages(
 
 	match messages {
 		Ok(messages) => {
-			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+			let mut message_ids = Vec::with_capacity(messages.len());
+			for m in &messages {
+				message_ids.push(m.id);
+			}
 
 			// Compute sibling counts for each unique (parent_id, role) pair
 			// This ensures user messages only count user siblings, and assistant messages only count assistant siblings
@@ -158,19 +160,17 @@ pub async fn list_messages(
 				executions_by_message.entry(message_id).or_default().push(response);
 			}
 
-			let responses: Vec<ChatMessageResponse> = messages
-				.into_iter()
-				.map(|m| {
-					let msg_id = m.id;
-					let parent_id = m.parent_id;
-					let role = m.role.clone();
-					let mut response: ChatMessageResponse = m.into();
-					response.tool_calls = executions_by_message.remove(&msg_id);
-					// Set computed sibling_count based on (parent_id, role) pair
-					response.sibling_count = sibling_counts.get(&(parent_id, role)).copied().unwrap_or(1) as i32;
-					response
-				})
-				.collect();
+			let mut responses = Vec::with_capacity(messages.len());
+			for m in messages {
+				let msg_id = m.id;
+				let parent_id = m.parent_id;
+				let role = m.role.clone();
+				let mut response: ChatMessageResponse = m.into();
+				response.tool_calls = executions_by_message.remove(&msg_id);
+				// Set computed sibling_count based on (parent_id, role) pair
+				response.sibling_count = sibling_counts.get(&(parent_id, role)).copied().unwrap_or(1) as i32;
+				responses.push(response);
+			}
 
 			ResponseBuilder::new(ResponseBody::Json(responses)).build()
 		}
@@ -185,10 +185,9 @@ pub async fn list_messages(
 ///
 /// Send a message. Returns the saved user message immediately.
 /// AI response will be streamed separately via SSE.
-pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, Path(chat_id): Path<Uuid>, Json(req): Json<SendMessageRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+pub async fn send_message(State(state): State<Arc<JobState>>, cookies: Cookies, Path(chat_id): Path<Uuid>, Json(req): Json<SendMessageRequest>) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	let chat = sqlx::query_as::<_, crate::types::Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
@@ -250,14 +249,13 @@ pub async fn send_message(State(state): State<Arc<AppState>>, cookies: Cookies, 
 ///
 /// Edit a message, creating a new fork. The original message remains as a sibling.
 pub async fn edit_message(
-	State(state): State<Arc<AppState>>,
+	State(state): State<Arc<JobState>>,
 	cookies: Cookies,
 	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
 	Json(req): Json<EditMessageRequest>,
 ) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	// Verify chat ownership
@@ -377,14 +375,13 @@ pub async fn edit_message(
 /// Switch to a different fork at the given message position.
 /// This deactivates the entire old subtree and activates the new subtree.
 pub async fn switch_fork(
-	State(state): State<Arc<AppState>>,
+	State(state): State<Arc<JobState>>,
 	cookies: Cookies,
 	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
 	Json(req): Json<SwitchForkRequest>,
 ) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	// Verify chat ownership
@@ -485,10 +482,9 @@ pub async fn switch_fork(
 /// GET /api/v1/chats/:chat_id/messages/:message_id/siblings
 ///
 /// Get all sibling messages (same parent_id) for fork navigation.
-pub async fn get_siblings(State(state): State<Arc<AppState>>, cookies: Cookies, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+pub async fn get_siblings(State(state): State<Arc<JobState>>, cookies: Cookies, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	// Verify chat ownership
@@ -538,14 +534,12 @@ pub async fn get_siblings(State(state): State<Arc<AppState>>, cookies: Cookies, 
 	match siblings {
 		Ok(msgs) => {
 			let count = msgs.len() as i32;
-			let responses: Vec<ChatMessageResponse> = msgs
-				.into_iter()
-				.map(|m| {
-					let mut response: ChatMessageResponse = m.into();
-					response.sibling_count = count;
-					response
-				})
-				.collect();
+			let mut responses = Vec::with_capacity(msgs.len());
+			for m in msgs {
+				let mut response: ChatMessageResponse = m.into();
+				response.sibling_count = count;
+				responses.push(response);
+			}
 			ResponseBuilder::new(ResponseBody::Json(responses)).build()
 		}
 		Err(e) => {
@@ -558,10 +552,9 @@ pub async fn get_siblings(State(state): State<Arc<AppState>>, cookies: Cookies, 
 /// DELETE /api/v1/chats/:chat_id/messages/:message_id/fork
 ///
 /// Delete a fork and all its descendants.
-pub async fn delete_fork(State(state): State<Arc<AppState>>, cookies: Cookies, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+pub async fn delete_fork(State(state): State<Arc<JobState>>, cookies: Cookies, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	// Verify chat ownership
@@ -603,14 +596,13 @@ pub async fn delete_fork(State(state): State<Arc<AppState>>, cookies: Cookies, P
 /// - For assistant messages: copies all messages up to and including that point
 /// - For user messages: copies all messages BEFORE that message, returns prefill data for composer
 pub async fn branch_from_message(
-	State(state): State<Arc<AppState>>,
+	State(state): State<Arc<JobState>>,
 	cookies: Cookies,
 	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
 	Json(req): Json<BranchFromMessageRequest>,
 ) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
 	// Verify chat ownership and get source chat

@@ -3,7 +3,7 @@
 pub mod admin;
 pub mod public;
 
-use crate::AppState;
+use crate::types::JobState;
 use axum::{
 	Router,
 	routing::{delete, get, patch, post, put},
@@ -11,7 +11,7 @@ use axum::{
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 
-pub fn build_router() -> Router<Arc<AppState>> {
+pub fn build_router() -> Router<Arc<JobState>> {
 	Router::new()
 		.route("/api/v1/base", get(public::base::get_base))
 		// Admin i18n

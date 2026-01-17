@@ -335,7 +335,7 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		async sendAndStream(chatId: string, content: string, parts?: any[], skipUserMessage: boolean = false): Promise<void> {
+		async sendAndStream(chatId: string, content: string, parts?: any[], skipUserMessage: boolean = false, regenerateFromMessageId?: string): Promise<void> {
 			if (!this.selectedModel) {
 				console.error('No model selected');
 				return;
@@ -421,6 +421,7 @@ export const useChatStore = defineStore('chat', {
 					reasoning_budget_tokens: this.reasoningBudget || undefined,
 					tools_enabled: this.enabledTools.length > 0 ? this.enabledTools : undefined,
 					skip_user_message: skipUserMessage,
+					regenerate_from_message_id: regenerateFromMessageId,
 				};
 
 				if (parts && parts.length > 0) {

@@ -67,7 +67,7 @@
 					<textarea
 						ref="editTextarea"
 						v-model="editContent"
-						class="w-full min-h-[100px] rounded-xl bg-muted/50 px-4 py-2 text-foreground border border-border focus:border-primary focus:outline-none resize-none"
+						class="w-full min-h-25 rounded-xl bg-muted/50 px-4 py-2 text-foreground border border-border focus:border-primary focus:outline-none resize-none"
 						@keydown.escape="cancelEdit"
 					/>
 					<div class="flex gap-2 mt-2 justify-end">
@@ -91,7 +91,7 @@
 						>
 							<ChevronLeft class="h-3.5 w-3.5" />
 						</ShadButton>
-						<span class="min-w-[2.5rem] text-center text-xs tabular-nums text-muted-foreground select-none"
+						<span class="min-w-10 text-center text-xs tabular-nums text-muted-foreground select-none"
 							>{{ message.fork_index }}/{{ message.sibling_count }}</span
 						>
 						<ShadButton
@@ -166,7 +166,7 @@
 				<MessageActions
 					:message="message"
 					:model-name="modelDisplayName || undefined"
-					:can-regenerate="isLastAssistantMessage"
+					:can-regenerate="true"
 					:current-index="message.fork_index"
 					:sibling-count="message.sibling_count"
 					class="opacity-0 transition-opacity group-hover:opacity-100"

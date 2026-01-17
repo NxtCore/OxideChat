@@ -254,6 +254,8 @@ CREATE TABLE IF NOT EXISTS chats (
     title VARCHAR(255),
     is_pinned BOOLEAN DEFAULT false,
     is_archived BOOLEAN DEFAULT false,
+    branched_from_chat_id UUID REFERENCES chats(id) ON DELETE SET NULL,
+    branched_from_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -266,6 +268,9 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     reasoning_content TEXT, 
     model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+    parent_id UUID REFERENCES messages(id) ON DELETE CASCADE,
+    fork_index INTEGER NOT NULL DEFAULT 1,
+    is_active_fork BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     content_parts JSONB DEFAULT '[]',
@@ -497,8 +502,11 @@ CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id);
 CREATE INDEX IF NOT EXISTS idx_chats_workspace ON chats(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_chats_updated ON chats(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chats_pinned ON chats(user_id, is_pinned) WHERE is_pinned = true;
+CREATE INDEX IF NOT EXISTS idx_chats_branched_from ON chats(branched_from_chat_id) WHERE branched_from_chat_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id);
+CREATE INDEX IF NOT EXISTS idx_messages_fork ON messages(parent_id, fork_index);
 CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_images_user_id ON images(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_content_parts_gin ON messages USING GIN (content_parts);

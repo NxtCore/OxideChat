@@ -25,7 +25,8 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &AiProvider) -> Resul
 		enabled: true,
 	};
 
-	let engine = OF_ENGINE.get().expect("AI engine not initialized").read().await;
+	let engine_arc = OF_ENGINE.get().ok_or_else(|| "AI engine not initialized".to_string())?;
+	let engine = engine_arc.read().await;
 	let engine_service = engine.service();
 	if engine_service.provider_manager().read().await.get_provider(&config.name).is_none() {
 		if let Err(e) = engine_service.register_provider(config.clone()).await {
@@ -53,9 +54,9 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &AiProvider) -> Resul
 	let discovered_ids: HashSet<_> = discovered.iter().map(|m| m.id.as_str()).collect();
 
 	// Prepare bulk operations
-	let mut to_insert = Vec::new();
-	let mut to_update = Vec::new();
-	let mut to_delete = Vec::new();
+	let mut to_insert = Vec::with_capacity(discovered.len());
+	let mut to_update = Vec::with_capacity(discovered.len());
+	let mut to_delete = Vec::with_capacity(existing.len());
 
 	// Categorize operations
 	for model in &discovered {

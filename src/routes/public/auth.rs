@@ -2,10 +2,12 @@
 //!
 //! Handles user setup, registration, login, and logout.
 
-use crate::AppState;
 use crate::logging::{AuditLog, EntityType, LogEvent};
+use crate::types::JobState;
 use crate::types::{AuthResponse, LoginRequest, RegisterRequest, SetupRequest, User};
-use crate::utils::auth::{create_session, hash_password, initialize_user_defaults, user_to_response, users_exist, validate_email, validate_password, validate_username, verify_password};
+use crate::utils::auth::{
+	create_session, hash_password, initialize_user_defaults, user_to_response, users_exist, validate_email, validate_password, validate_username, verify_password,
+};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{Json, extract::State, response::IntoResponse};
 use sqlx::PgPool;
@@ -28,7 +30,7 @@ pub const MIN_USERNAME_LENGTH: usize = 3;
 ///
 /// Returns 400 if setup has already been completed.
 /// Returns 500 on database or hashing errors.
-pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(payload): Json<SetupRequest>) -> impl IntoResponse {
+pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<SetupRequest>) -> impl IntoResponse {
 	// Check if setup already completed
 	match users_exist(&state.db).await {
 		Ok(true) => {
@@ -131,7 +133,7 @@ pub async fn setup(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 ///
 /// Returns 400 if setup not completed or email/username taken.
 /// Returns 500 on database or hashing errors.
-pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json(payload): Json<RegisterRequest>) -> impl IntoResponse {
+pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<RegisterRequest>) -> impl IntoResponse {
 	// Check if setup completed
 	match users_exist(&state.db).await {
 		Ok(false) => {
@@ -249,7 +251,7 @@ pub async fn register(State(state): State<Arc<AppState>>, cookies: Cookies, Json
 ///
 /// Returns 401 if credentials are invalid.
 /// Returns 500 on database errors.
-pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(payload): Json<LoginRequest>) -> impl IntoResponse {
+pub async fn login(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<LoginRequest>) -> impl IntoResponse {
 	// Find user by email
 	let user: User = match sqlx::query_as("SELECT * FROM users WHERE email = $1")
 		.bind(&payload.email)
@@ -268,11 +270,8 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 	};
 
 	// Check if user has a password (local auth)
-	let password_hash = match &user.password_hash {
-		Some(hash) => hash,
-		None => {
-			return ErrorBuilder::new(ErrorCode::ExternalAuthRequired).build();
-		}
+	let Some(password_hash) = &user.password_hash else {
+		return ErrorBuilder::new(ErrorCode::ExternalAuthRequired).build();
 	};
 
 	// Verify password
@@ -314,7 +313,7 @@ pub async fn login(State(state): State<Arc<AppState>>, cookies: Cookies, Json(pa
 /// # Errors
 ///
 /// Returns 500 if the database query fails during session lookup.
-pub async fn logout(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+pub async fn logout(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
 	let mut user_id: Option<Uuid> = None;
 	let mut session_id_to_log: Option<Uuid> = None;
 

@@ -8,14 +8,10 @@ mod tests;
 mod types;
 mod utils;
 
+use crate::types::JobState;
 use axum::{Router, extract::DefaultBodyLimit};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::sync::Arc;
-
-#[derive(Clone)]
-pub struct AppState {
-	pub db: PgPool,
-}
 
 #[tokio::main]
 async fn main() {
@@ -61,7 +57,7 @@ async fn main() {
 	// Initialize AI engine with database providers
 	ai::init(&pool).await;
 
-	let app_state = Arc::new(AppState { db: pool });
+	let app_state = Arc::new(JobState { db: pool });
 
 	tokio::spawn(jobs::start_job_scheduler(app_state.clone()));
 
@@ -74,7 +70,7 @@ async fn main() {
 		std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
 		std::env::var("PORT").unwrap_or_else(|_| "8080".to_string())
 	);
-	let listener = tokio::net::TcpListener::bind(&address).await.unwrap();
+	let listener = tokio::net::TcpListener::bind(&address).await.expect("Failed to bind to address");
 
 	println!("[SERVER] Listening on http://{}", address);
 	axum::serve(listener, app).await.expect("Server error");

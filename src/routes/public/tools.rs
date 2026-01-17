@@ -1,5 +1,5 @@
-use crate::AppState;
 use crate::routes::public::auth::get_current_user;
+use crate::types::JobState;
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
 use crate::utils::auth::has_permission;
@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
-pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),

@@ -2,11 +2,11 @@
 //!
 //! Server-Sent Events (SSE) endpoint for streaming AI chat completions.
 
-use crate::AppState;
 use crate::ai;
 use crate::routes::public::auth::get_current_user;
+use crate::types::JobState;
 use crate::types::ai::ModelConfig;
-use crate::types::{ChatMessageResponse, Message, Tool, ToolFunction, UserToolSettings};
+use crate::types::{ChatMessageResponse, Message, MessagePart, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction, UserToolSettings};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
 	Json,
@@ -22,67 +22,10 @@ use omniference::{
 	stream::StreamEvent,
 	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec},
 };
-use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
 use tower_cookies::Cookies;
 use uuid::Uuid;
-
-/// Structured message part (text or image)
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum MessagePart {
-	Text { text: String },
-	Image { image_id: String },
-}
-
-/// Request body for sending a message and streaming AI response
-#[derive(Debug, Deserialize)]
-pub struct StreamRequest {
-	pub content: String,
-	#[serde(default)]
-	pub parts: Option<Vec<MessagePart>>,
-	pub model_key: String,
-	pub reasoning_effort: Option<String>,
-	pub reasoning_budget_tokens: Option<u32>,
-	pub tools_enabled: Option<Vec<String>>,
-	pub sampling: Option<Sampling>,
-	/// If true, skip creating a new user message and use existing messages for regeneration
-	#[serde(default)]
-	pub skip_user_message: bool,
-}
-
-/// SSE event data
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum StreamData {
-	/// User message saved confirmation
-	UserMessageSaved { message: ChatMessageResponse },
-	/// Text content delta
-	TextDelta { content: String },
-	/// Reasoning text delta (for models that support it)
-	ReasoningDelta { content: String },
-	/// Tool call started
-	ToolCallStart { id: String, name: String },
-	/// Tool call argument delta
-	ToolCallDelta { id: String, args_delta: String },
-	/// Tool call ended (arguments complete)
-	ToolCallEnd { id: String },
-	/// Tool execution result
-	ToolResult {
-		id: String,
-		output: serde_json::Value,
-		error: Option<String>,
-		tool_id: Option<Uuid>,
-		tool_function: Option<Uuid>,
-		tool_name: Option<String>,
-	},
-	/// Token count update
-	Tokens { input: u32, output: u32, reasoning: Option<u32> },
-	/// Error occurred
-	Error { code: String, message: String },
-	/// Stream completed with message info
-	Done { message: ChatMessageResponse },
-}
 
 fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
 	let code = code.into();
@@ -159,6 +102,52 @@ fn merge_reasoning_with_priority(
 		})
 	} else {
 		None
+	}
+}
+
+async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[String]) -> (Vec<ToolSpec>, ToolChoice) {
+	if enabled_tool_ids.is_empty() {
+		return (vec![], ToolChoice::None);
+	}
+
+	let tool_uuids: Vec<Uuid> = enabled_tool_ids.iter().filter_map(|id| Uuid::parse_str(id).ok()).collect();
+	if tool_uuids.is_empty() {
+		return (vec![], ToolChoice::None);
+	}
+
+	let tools = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND (is_public = true OR owner_id = $2)")
+		.bind(&tool_uuids)
+		.bind(user_id)
+		.fetch_all(db)
+		.await
+		.unwrap_or_default();
+
+	if tools.is_empty() {
+		return (vec![], ToolChoice::None);
+	}
+
+	let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
+	let functions: Vec<ToolFunction> = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = ANY($1) ORDER BY sort_order, created_at")
+		.bind(&tool_ids)
+		.fetch_all(db)
+		.await
+		.unwrap_or_default();
+
+	let mut functions_by_tool: HashMap<Uuid, Vec<ToolFunction>> = HashMap::new();
+	for f in functions {
+		functions_by_tool.entry(f.tool_id).or_default().push(f);
+	}
+
+	let mut tool_specs: Vec<ToolSpec> = vec![];
+	for tool in tools {
+		let funcs = functions_by_tool.get(&tool.id).map(|v| v.as_slice()).unwrap_or(&[]);
+		tool_specs.extend(tool.to_tool_specs(funcs));
+	}
+
+	if tool_specs.is_empty() {
+		(vec![], ToolChoice::None)
+	} else {
+		(tool_specs, ToolChoice::Auto)
 	}
 }
 
@@ -289,12 +278,51 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 	}
 }
 
-pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cookies, Path(chat_id): Path<Uuid>, Json(req): Json<StreamRequest>) -> impl IntoResponse {
+async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>) -> Vec<OmniMessage> {
+	let mut result = Vec::with_capacity(messages.len());
+	for m in messages.into_iter().filter(|m| m.role == "user" || m.role == "assistant") {
+		let parts = if let Some(content_parts_json) = m.content_parts {
+			if let Ok(stored_parts) = serde_json::from_value::<Vec<MessagePart>>(content_parts_json) {
+				let mut omni_parts = Vec::new();
+				for part in stored_parts {
+					match part {
+						MessagePart::Text { text } => {
+							omni_parts.push(ContentPart::Text(text));
+						}
+						MessagePart::Image { image_id } => {
+							if let Ok(uuid) = uuid::Uuid::parse_str(&image_id) {
+								if let Ok(Some((data, mime))) = crate::utils::images::get_image(db, uuid).await {
+									use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+									let b64 = BASE64.encode(&data);
+									let data_uri = format!("data:{};base64,{}", mime, b64);
+									omni_parts.push(ContentPart::ImageUrl { url: data_uri, mime: Some(mime) });
+								}
+							}
+						}
+					}
+				}
+				omni_parts
+			} else {
+				vec![ContentPart::Text(m.content)]
+			}
+		} else {
+			vec![ContentPart::Text(m.content)]
+		};
+
+		result.push(OmniMessage {
+			role: if m.role == "user" { Role::User } else { Role::Assistant },
+			parts,
+			name: None,
+		});
+	}
+	result
+}
+
+pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cookies, Path(chat_id): Path<Uuid>, Json(req): Json<StreamRequest>) -> impl IntoResponse {
 	eprint!("[STREAM] Starting stream completion");
 
-	let user = match get_current_user(&state.db, &cookies).await {
-		Some(user) => user,
-		None => return error_stream("not_authenticated", "Authentication required").into_response(),
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return error_stream("not_authenticated", "Authentication required").into_response();
 	};
 
 	let chat = sqlx::query_as::<_, crate::types::Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
@@ -397,8 +425,81 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	// Determine parent_id for the assistant response (should be the last user message)
-	let assistant_parent_id: Option<Uuid> = user_message.as_ref().map(|m| m.id).or_else(|| messages.last().map(|m| m.id));
+	// Handle regeneration fork logic
+	let (assistant_parent_id, assistant_fork_index, messages): (Option<Uuid>, i32, Vec<Message>) = if let Some(ref regen_id) = req.regenerate_from_message_id {
+		// Parse the regenerate message ID
+		let regen_uuid = match Uuid::parse_str(regen_id) {
+			Ok(u) => u,
+			Err(_) => return error_stream("invalid_request", "Invalid regenerate_from_message_id").into_response(),
+		};
+
+		// Fetch the original assistant message to get its parent_id
+		let original_msg = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1 AND chat_id = $2")
+			.bind(regen_uuid)
+			.bind(chat_id)
+			.fetch_optional(&state.db)
+			.await;
+
+		let original = match original_msg {
+			Ok(Some(m)) => m,
+			Ok(None) => return error_stream("not_found", "Original message not found").into_response(),
+			Err(e) => {
+				eprintln!("[STREAM] Failed to fetch original message: {e}");
+				return error_stream("internal_error", "Failed to fetch original message").into_response();
+			}
+		};
+
+		let parent_id = original.parent_id;
+
+		// Get the next fork_index for siblings with same parent_id and role
+		let next_fork_index: i32 = sqlx::query_scalar(
+			r#"SELECT COALESCE(MAX(fork_index), 0) + 1 FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = 'assistant'"#,
+		)
+		.bind(chat_id)
+		.bind(parent_id)
+		.fetch_one(&state.db)
+		.await
+		.unwrap_or(1);
+
+		// Deactivate the old assistant message and all its descendants
+		let _ = sqlx::query(
+			r#"
+			WITH RECURSIVE descendants AS (
+				SELECT id FROM messages 
+				WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = 'assistant' AND is_active_fork = TRUE
+				UNION ALL
+				SELECT m.id FROM messages m
+				INNER JOIN descendants d ON m.parent_id = d.id
+				WHERE m.chat_id = $1
+			)
+			UPDATE messages SET is_active_fork = FALSE 
+			WHERE id IN (SELECT id FROM descendants)
+			"#,
+		)
+		.bind(chat_id)
+		.bind(parent_id)
+		.execute(&state.db)
+		.await;
+
+		// Filter messages to only include up to and including the parent_id
+		// This prevents context from other fork branches being included
+		let filtered_messages: Vec<Message> = if let Some(pid) = parent_id {
+			let parent_idx = messages.iter().position(|m| m.id == pid);
+			match parent_idx {
+				Some(idx) => messages.into_iter().take(idx + 1).collect(),
+				None => messages, // Parent not found in current list, use all
+			}
+		} else {
+			// No parent (regenerating first assistant message), use empty
+			vec![]
+		};
+
+		(parent_id, next_fork_index, filtered_messages)
+	} else {
+		// Normal flow: parent is the last user message or last message
+		let parent = user_message.as_ref().map(|m| m.id).or_else(|| messages.last().map(|m| m.id));
+		(parent, 1, messages)
+	};
 
 	let engine = ai::get();
 	let engine_read = engine.read().await;
@@ -421,46 +522,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 		}
 	};
 
-	let omni_messages: Vec<OmniMessage> = {
-		let mut result = Vec::new();
-		for m in messages.iter().filter(|m| m.role == "user" || m.role == "assistant") {
-			let parts = if let Some(content_parts_json) = &m.content_parts {
-				if let Ok(stored_parts) = serde_json::from_value::<Vec<MessagePart>>(content_parts_json.clone()) {
-					let mut omni_parts = Vec::new();
-					for part in stored_parts {
-						match part {
-							MessagePart::Text { text } => {
-								omni_parts.push(ContentPart::Text(text));
-							}
-							MessagePart::Image { image_id } => {
-								if let Ok(uuid) = uuid::Uuid::parse_str(&image_id) {
-									if let Ok(Some((data, mime))) = crate::utils::images::get_image(&state.db, uuid).await {
-										use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-										let b64 = BASE64.encode(&data);
-										let data_uri = format!("data:{};base64,{}", mime, b64);
-										omni_parts.push(ContentPart::ImageUrl { url: data_uri, mime: Some(mime) });
-									}
-								}
-							}
-						}
-					}
-					omni_parts
-				} else {
-					vec![ContentPart::Text(m.content.clone())]
-				}
-			} else {
-				vec![ContentPart::Text(m.content.clone())]
-			};
-
-			result.push(OmniMessage {
-				role: if m.role == "user" { Role::User } else { Role::Assistant },
-				parts,
-				name: None,
-			});
-		}
-		result
-	};
-
+	let omni_messages = get_omni_messages(&state.db, messages).await;
 	eprintln!("[STREAM] Messages built");
 	let mut ir = ChatRequestIR::default();
 	ir.model.alias = omni_model.id.clone();
@@ -476,52 +538,10 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, model_config.as_ref());
 
 	if let Some(ref enabled_tool_ids) = req.tools_enabled {
-		eprintln!("[STREAM] Tools enabled in request: {:?}", enabled_tool_ids);
-		if !enabled_tool_ids.is_empty() {
-			let tool_uuids: Vec<Uuid> = enabled_tool_ids.iter().filter_map(|id| Uuid::parse_str(id).ok()).collect();
-			eprintln!("[STREAM] Parsed {} UUIDs: {:?}", tool_uuids.len(), tool_uuids);
-
-			if tool_uuids.is_empty() {
-				eprintln!("[STREAM] No valid tool UUIDs found in request");
-			}
-
-			let tools = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND (is_public = true OR owner_id = $2)")
-				.bind(&tool_uuids)
-				.bind(user.id)
-				.fetch_all(&state.db)
-				.await;
-
-			if let Ok(tools) = tools {
-				eprintln!("[STREAM] Found {} tools from DB", tools.len());
-				let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
-
-				let functions: Vec<ToolFunction> = if tool_ids.is_empty() {
-					vec![]
-				} else {
-					sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = ANY($1) ORDER BY sort_order, created_at")
-						.bind(&tool_ids)
-						.fetch_all(&state.db)
-						.await
-						.unwrap_or_default()
-				};
-
-				let mut functions_by_tool: HashMap<Uuid, Vec<ToolFunction>> = HashMap::new();
-				for f in functions {
-					functions_by_tool.entry(f.tool_id).or_default().push(f);
-				}
-
-				let mut tool_specs: Vec<ToolSpec> = vec![];
-				for tool in tools {
-					let funcs = functions_by_tool.get(&tool.id).map(|v| v.as_slice()).unwrap_or(&[]);
-					tool_specs.extend(tool.to_tool_specs(funcs));
-				}
-
-				if !tool_specs.is_empty() {
-					eprintln!("[STREAM] Loaded {} tool specs", tool_specs.len());
-					ir.tools = tool_specs;
-					ir.tool_choice = ToolChoice::Auto;
-				}
-			}
+		let (specs, choice) = resolve_tools(&state.db, user.id, enabled_tool_ids).await;
+		if !specs.is_empty() {
+			ir.tools = specs;
+			ir.tool_choice = choice;
 		}
 	}
 
@@ -558,7 +578,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 	let mut iteration = 0;
 	const MAX_ITERATIONS: usize = 10;
 
-	let mut all_tool_executions: Vec<(String, String, serde_json::Value, serde_json::Value, Option<String>, i32, Option<Uuid>, Option<Uuid>)> = Vec::new();
+	let mut all_tool_executions: Vec<ToolExecutionInternal> = Vec::new();
 
 	let engine = ai::get();
 	let tool_specs = ir_for_stream.tools.clone();
@@ -605,7 +625,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 				tokio::pin!(upstream);
 
 				let mut pending_tool_calls: HashMap<String, (String, String)> = HashMap::new();
-				let mut tool_results: Vec<(String, String, serde_json::Value, serde_json::Value, Option<String>, i32, Option<Uuid>, Option<Uuid>)> = Vec::new();
+				let mut tool_results: Vec<ToolExecutionInternal> = Vec::new();
 				let mut iteration_content = String::new();
 				let mut completed_tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
 
@@ -669,15 +689,24 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 								let tool_result = execute_tool_by_name(&db, user.id, &tool_name, args.clone()).await;
 								let execution_ms = exec_start.elapsed().as_millis() as i32;
 
-								let (output, error, tool_id, tool_function) = match tool_result {
+								let (output, error, tool_id, function_id) = match tool_result {
 									Ok(result) => (result.output, None, Some(result.tool_id), result.function_id),
 									Err(e) => (serde_json::json!({"error": e}), Some(e), None, None),
 								};
 
-								tool_results.push((id.clone(), tool_name.clone(), args, output.clone(), error.clone(), execution_ms, tool_id, tool_function));
+								tool_results.push(ToolExecutionInternal {
+									call_id: id.clone(),
+									tool_name: tool_name.clone(),
+									args,
+									output: output.clone(),
+									error: error.clone(),
+									execution_ms,
+									tool_id,
+									function_id,
+								});
 
 								yield Ok::<_, Infallible>(Event::default().data(
-									serde_json::to_string(&StreamData::ToolResult { id, output, error, tool_id, tool_function, tool_name: Some(tool_name) }).unwrap_or_default()
+									serde_json::to_string(&StreamData::ToolResult { id, output, error, tool_id, tool_function: function_id, tool_name: Some(tool_name) }).unwrap_or_default()
 								));
 							}
 						}
@@ -719,10 +748,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 
 								let reasoning_details = crate::types::ReasoningDetails {
 									effort: reasoning_effort.clone(),
-									budget_tokens: match reasoning_budget_tokens {
-										Some(b) => Some(b as i32),
-										None => None,
-									},
+									budget_tokens: reasoning_budget_tokens.map(|b| b as i32),
 								};
 
 								let cost_details = crate::types::CostDetails::default();
@@ -731,9 +757,9 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 									r#"
 										INSERT INTO messages (
 											chat_id, role, content, reasoning_content,
-											model_id, reasoning_details, usage_details, cost_details, parent_id
+											model_id, reasoning_details, usage_details, cost_details, parent_id, fork_index, is_active_fork
 										)
-										VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8)
+										VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
 										RETURNING *
 										"#,
 								)
@@ -745,6 +771,7 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 								.bind(sqlx::types::Json(usage_details))
 								.bind(sqlx::types::Json(cost_details))
 								.bind(assistant_parent_id)
+							.bind(assistant_fork_index)
 								.fetch_one(&db)
 								.await;
 
@@ -756,18 +783,18 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 								match message {
 									Ok(msg) => {
 									if !all_tool_executions.is_empty() {
-										for (call_id, _tool_name, args, output, error, exec_ms, tool_id, function_id) in &all_tool_executions {
+										for exec in &all_tool_executions {
 											let _ = sqlx::query(
 												"INSERT INTO tool_executions (message_id, tool_call_id, input_args, output, error, execution_ms, tool_id, tool_function) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
 											)
 											.bind(msg.id)
-											.bind(call_id)
-											.bind(args)
-											.bind(output)
-											.bind(error)
-											.bind(exec_ms)
-											.bind(tool_id)
-											.bind(function_id)
+											.bind(&exec.call_id)
+											.bind(&exec.args)
+											.bind(&exec.output)
+											.bind(&exec.error)
+											.bind(exec.execution_ms)
+											.bind(exec.tool_id)
+											.bind(exec.function_id)
 											.execute(&db)
 											.await;
 										}
@@ -816,20 +843,20 @@ pub async fn stream_completion(State(state): State<Arc<AppState>>, cookies: Cook
 									});
 								}
 
-								for (call_id, tool_name, args, output, error, exec_ms, tool_id, function_id) in tool_results.drain(..) {
-									let result_text = if let Some(ref err) = error {
+								for exec in tool_results.drain(..) {
+									let result_text = if let Some(ref err) = exec.error {
 										format!("Error: {}", err)
 									} else {
-										serde_json::to_string(&output).unwrap_or_else(|_| output.to_string())
+										serde_json::to_string(&exec.output).unwrap_or_else(|_| exec.output.to_string())
 									};
 
 									current_messages.push(OmniMessage {
 										role: Role::Tool,
 										parts: vec![ContentPart::Text(result_text)],
-										name: Some(call_id.clone()),
+										name: Some(exec.call_id.clone()),
 									});
 
-									all_tool_executions.push((call_id, tool_name, args, output, error, exec_ms, tool_id, function_id));
+									all_tool_executions.push(exec);
 								}
 
 								continue 'agentic_loop;

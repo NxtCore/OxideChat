@@ -1,5 +1,5 @@
-use crate::AppState;
 use crate::routes::public::auth::get_current_user;
+use crate::types::JobState;
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
 use crate::utils::auth::has_permission;
@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
-pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
@@ -64,7 +64,7 @@ pub async fn list_tools(State(state): State<Arc<AppState>>, cookies: Cookies) ->
 	ResponseBuilder::new(ResponseBody::Json(responses)).build()
 }
 
-pub async fn get_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
+pub async fn get_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
@@ -97,7 +97,7 @@ pub async fn get_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path
 	}
 }
 
-pub async fn create_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Json(req): Json<CreateToolRequest>) -> impl IntoResponse {
+pub async fn create_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateToolRequest>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
@@ -190,7 +190,7 @@ pub async fn create_tool(State(state): State<Arc<AppState>>, cookies: Cookies, J
 		.build()
 }
 
-pub async fn update_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>, Json(req): Json<UpdateToolRequest>) -> impl IntoResponse {
+pub async fn update_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>, Json(req): Json<UpdateToolRequest>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
@@ -316,7 +316,7 @@ pub async fn update_tool(State(state): State<Arc<AppState>>, cookies: Cookies, P
 	ResponseBuilder::new(ResponseBody::Json(ToolResponse::from_tool_with_functions(tool, functions))).build()
 }
 
-pub async fn delete_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
+pub async fn delete_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
@@ -341,7 +341,7 @@ pub async fn delete_tool(State(state): State<Arc<AppState>>, cookies: Cookies, P
 	}
 }
 
-pub async fn get_tool_settings(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
+pub async fn get_tool_settings(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
@@ -368,7 +368,7 @@ pub async fn get_tool_settings(State(state): State<Arc<AppState>>, cookies: Cook
 
 /// PUT /api/v1/admin/tools/:id/settings
 pub async fn set_tool_settings(
-	State(state): State<Arc<AppState>>,
+	State(state): State<Arc<JobState>>,
 	cookies: Cookies,
 	Path(tool_id): Path<Uuid>,
 	Json(req): Json<SetToolSettingsRequest>,
@@ -415,7 +415,7 @@ pub async fn set_tool_settings(
 	}
 }
 
-pub async fn upload_wasm(State(state): State<Arc<AppState>>, cookies: Cookies, Json(req): Json<UploadWasmRequest>) -> impl IntoResponse {
+pub async fn upload_wasm(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<UploadWasmRequest>) -> impl IntoResponse {
 	use base64::Engine;
 
 	let user = match get_current_user(&state.db, &cookies).await {
@@ -499,7 +499,7 @@ pub async fn upload_wasm(State(state): State<Arc<AppState>>, cookies: Cookies, J
 	}
 }
 
-pub async fn test_tool(State(state): State<Arc<AppState>>, cookies: Cookies, Path(tool_id): Path<Uuid>, Json(req): Json<TestToolRequest>) -> impl IntoResponse {
+pub async fn test_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>, Json(req): Json<TestToolRequest>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),

@@ -111,6 +111,30 @@ pub struct ToolExecutionResponse {
 	pub tool_function: Option<Uuid>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ToolExecutionInternal {
+	pub call_id: String,
+	pub tool_name: String,
+	pub args: serde_json::Value,
+	pub output: serde_json::Value,
+	pub error: Option<String>,
+	pub execution_ms: i32,
+	pub tool_id: Option<Uuid>,
+	pub function_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ThemeCssVars {
+	#[serde(default)]
+	pub theme: std::collections::HashMap<String, String>,
+	#[serde(default)]
+	pub light: std::collections::HashMap<String, String>,
+	#[serde(default)]
+	pub dark: std::collections::HashMap<String, String>,
+}
+
+// ============= Internal Types =============
+
 #[derive(Debug, Clone, FromRow)]
 pub struct Workspace {
 	pub id: Uuid,
@@ -136,22 +160,6 @@ pub struct WorkspaceWithCount {
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 	pub chat_count: i64,
-}
-
-impl From<WorkspaceWithCount> for WorkspaceResponse {
-	fn from(ws: WorkspaceWithCount) -> Self {
-		Self {
-			id: ws.id,
-			name: ws.name,
-			icon: ws.icon,
-			color: ws.color,
-			sort_order: ws.sort_order,
-			is_default: ws.is_default,
-			chat_count: ws.chat_count,
-			created_at: ws.created_at,
-			updated_at: ws.updated_at,
-		}
-	}
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -218,15 +226,7 @@ impl UserPreferences {
 	}
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ThemeCssVars {
-	#[serde(default)]
-	pub theme: std::collections::HashMap<String, String>,
-	#[serde(default)]
-	pub light: std::collections::HashMap<String, String>,
-	#[serde(default)]
-	pub dark: std::collections::HashMap<String, String>,
-}
+// ============= Request Types =============
 
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkspaceRequest {
@@ -309,6 +309,45 @@ pub struct UpdatePreferencesRequest {
 	pub custom_theme_urls: Option<Vec<String>>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateGlobalConfigRequest {
+	pub default_theme: Option<ThemeCssVars>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BranchFromMessageRequest {
+	pub workspace_id: Option<Uuid>,
+	pub title: Option<String>,
+}
+
+/// Structured message part (text or image)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum MessagePart {
+	Text { text: String },
+	Image { image_id: String },
+}
+
+/// Request body for sending a message and streaming AI response
+#[derive(Debug, Deserialize)]
+pub struct StreamRequest {
+	pub content: String,
+	#[serde(default)]
+	pub parts: Option<Vec<MessagePart>>,
+	pub model_key: String,
+	pub reasoning_effort: Option<String>,
+	pub reasoning_budget_tokens: Option<u32>,
+	pub tools_enabled: Option<Vec<String>>,
+	pub sampling: Option<omniference::Sampling>,
+	/// If true, skip creating a new user message and use existing messages for regeneration
+	#[serde(default)]
+	pub skip_user_message: bool,
+	/// If set, regenerate from this assistant message (creates a new fork sibling)
+	pub regenerate_from_message_id: Option<String>,
+}
+
+// ============= Response Types =============
+
 #[derive(Debug, Serialize)]
 pub struct WorkspaceResponse {
 	pub id: Uuid,
@@ -332,6 +371,22 @@ impl WorkspaceResponse {
 			sort_order: ws.sort_order,
 			is_default: ws.is_default,
 			chat_count,
+			created_at: ws.created_at,
+			updated_at: ws.updated_at,
+		}
+	}
+}
+
+impl From<WorkspaceWithCount> for WorkspaceResponse {
+	fn from(ws: WorkspaceWithCount) -> Self {
+		Self {
+			id: ws.id,
+			name: ws.name,
+			icon: ws.icon,
+			color: ws.color,
+			sort_order: ws.sort_order,
+			is_default: ws.is_default,
+			chat_count: ws.chat_count,
 			created_at: ws.created_at,
 			updated_at: ws.updated_at,
 		}
@@ -453,17 +508,6 @@ impl Default for GlobalConfigResponse {
 	}
 }
 
-#[derive(Debug, Deserialize)]
-pub struct UpdateGlobalConfigRequest {
-	pub default_theme: Option<ThemeCssVars>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct BranchFromMessageRequest {
-	pub workspace_id: Option<Uuid>,
-	pub title: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 pub struct BranchResponse {
 	pub chat: ChatResponse,
@@ -471,4 +515,37 @@ pub struct BranchResponse {
 	pub prefill_content: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub prefill_parts: Option<serde_json::Value>,
+}
+
+/// SSE event data
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StreamData {
+	/// User message saved confirmation
+	UserMessageSaved { message: ChatMessageResponse },
+	/// Text content delta
+	TextDelta { content: String },
+	/// Reasoning text delta (for models that support it)
+	ReasoningDelta { content: String },
+	/// Tool call started
+	ToolCallStart { id: String, name: String },
+	/// Tool call argument delta
+	ToolCallDelta { id: String, args_delta: String },
+	/// Tool call ended (arguments complete)
+	ToolCallEnd { id: String },
+	/// Tool execution result
+	ToolResult {
+		id: String,
+		output: serde_json::Value,
+		error: Option<String>,
+		tool_id: Option<Uuid>,
+		tool_function: Option<Uuid>,
+		tool_name: Option<String>,
+	},
+	/// Token count update
+	Tokens { input: u32, output: u32, reasoning: Option<u32> },
+	/// Error occurred
+	Error { code: String, message: String },
+	/// Stream completed with message info
+	Done { message: ChatMessageResponse },
 }

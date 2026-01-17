@@ -2,35 +2,18 @@
 //!
 //! Public endpoint for listing available AI models.
 
-use crate::AppState;
 use crate::routes::public::auth::get_current_user;
-use crate::types::{AiModel, ProviderKind};
+use crate::types::JobState;
+use crate::types::{AiModel, ProviderKind, PublicModelResponse};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{extract::State, response::IntoResponse};
-use serde::Serialize;
 use std::sync::Arc;
 use tower_cookies::Cookies;
-
-/// Model response for the frontend
-#[derive(Debug, Serialize)]
-pub struct ModelResponse {
-	pub id: String,
-	pub provider_id: String,
-	pub model_id: String,
-	pub display_name: String,
-	pub capabilities: Vec<String>,
-	pub input_modalities: Vec<String>,
-	pub output_modalities: Vec<String>,
-	pub context_length: Option<u32>,
-	pub max_tokens: Option<u32>,
-	pub provider_name: String,
-	pub provider_kind: String,
-}
 
 /// GET /api/v1/models
 ///
 /// List all available AI models from the database.
-pub async fn list_models(State(state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
 	// Authenticate user
 	let _user = match get_current_user(&state.db, &cookies).await {
 		Some(user) => user,
@@ -72,7 +55,7 @@ pub async fn list_models(State(state): State<Arc<AppState>>, cookies: Cookies) -
 	let provider_map: std::collections::HashMap<uuid::Uuid, (String, ProviderKind)> = providers.into_iter().map(|(id, name, kind)| (id, (name, kind))).collect();
 
 	// Convert to response format
-	let responses: Vec<ModelResponse> = models
+	let responses: Vec<PublicModelResponse> = models
 		.into_iter()
 		.filter_map(|m| {
 			let (provider_name, provider_kind) = provider_map.get(&m.provider_id)?;
@@ -102,7 +85,7 @@ pub async fn list_models(State(state): State<Arc<AppState>>, cookies: Cookies) -
 				vec![]
 			};
 
-			Some(ModelResponse {
+			Some(PublicModelResponse {
 				id: m.id.to_string(),
 				provider_id: m.provider_id.to_string(),
 				model_id: m.model_id.clone(),
