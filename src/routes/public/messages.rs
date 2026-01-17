@@ -348,8 +348,21 @@ pub async fn edit_message(
 
 	match new_message {
 		Ok(msg) => {
+			let sibling_count = sqlx::query_scalar::<_, i64>(r#"SELECT COUNT(*) FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2"#)
+				.bind(chat_id)
+				.bind(msg.parent_id)
+				.fetch_one(&state.db)
+				.await;
+
+			let sibling_count = match sibling_count {
+				Ok(count) => count,
+				Err(e) => {
+					eprintln!("[MESSAGES] Failed to count sibling forks: {e}");
+					return ErrorBuilder::new(ErrorCode::InternalError).build();
+				}
+			};
 			let mut response: ChatMessageResponse = msg.into();
-			response.sibling_count = next_fork_index;
+			response.sibling_count = sibling_count as i32;
 			ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
 		}
 		Err(e) => {
@@ -719,15 +732,14 @@ pub async fn branch_from_message(
 		.fetch_one(&state.db)
 		.await;
 
-		match new_msg {
-			Ok(m) => {
-				old_to_new_id.insert(msg.id, m.id);
-			}
+		let new_msg = match new_msg {
+			Ok(m) => m,
 			Err(e) => {
 				eprintln!("[MESSAGES] Failed to copy message: {e}");
-				// Continue with other messages
+				return ErrorBuilder::new(ErrorCode::InternalError).build();
 			}
-		}
+		};
+		old_to_new_id.insert(msg.id, new_msg.id);
 	}
 
 	// Build response

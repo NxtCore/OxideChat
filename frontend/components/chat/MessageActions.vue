@@ -54,7 +54,7 @@
 				</ShadButton>
 			</ShadTooltipTrigger>
 			<ShadTooltipContent side="top" :side-offset="8">
-				<p class="text-xs">Branch to new chat</p>
+				<p class="text-xs">{{ store.getTranslation('chat.message_actions.branch_to_new_chat') }}</p>
 			</ShadTooltipContent>
 		</ShadTooltip>
 

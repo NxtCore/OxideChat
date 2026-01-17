@@ -8,27 +8,28 @@
 DO $$
 DECLARE
     prev_id UUID := NULL;
-    rec RECORD;
+    outer_rec RECORD;
+    inner_rec RECORD;
 BEGIN
-    FOR rec IN 
+    FOR outer_rec IN 
         SELECT DISTINCT chat_id FROM messages 
         WHERE parent_id IS NULL
         ORDER BY chat_id
     LOOP
         prev_id := NULL;
-        FOR rec IN 
+        FOR inner_rec IN 
             SELECT id FROM messages 
-            WHERE chat_id = rec.chat_id 
+            WHERE chat_id = outer_rec.chat_id 
             ORDER BY created_at ASC
         LOOP
             IF prev_id IS NOT NULL THEN
-                UPDATE messages SET parent_id = prev_id WHERE id = rec.id;
+                UPDATE messages SET parent_id = prev_id WHERE id = inner_rec.id;
             END IF;
-            prev_id := rec.id;
+            prev_id := inner_rec.id;
         END LOOP;
     END LOOP;
 END $$;
 
 -- Step 2: Ensure all messages in the main chain have is_active_fork = TRUE
 -- and fork_index = 1 (since they are the original messages)
-UPDATE messages SET is_active_fork = TRUE, fork_index = 1 WHERE fork_index = 1;
+UPDATE messages SET is_active_fork = TRUE WHERE fork_index = 1;

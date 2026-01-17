@@ -71,8 +71,8 @@
 						@keydown.escape="cancelEdit"
 					/>
 					<div class="flex gap-2 mt-2 justify-end">
-						<ShadButton variant="ghost" size="sm" @click="cancelEdit">Cancel</ShadButton>
-						<ShadButton size="sm" @click="saveEdit">Save & Fork</ShadButton>
+						<ShadButton variant="ghost" size="sm" @click="cancelEdit">{{ store.getTranslation('chat.message_item.cancel') }}</ShadButton>
+						<ShadButton size="sm" @click="saveEdit">{{ store.getTranslation('chat.message_item.save_and_fork') }}</ShadButton>
 					</div>
 				</div>
 				<!-- User message action bar (matches assistant style) -->
@@ -112,7 +112,7 @@
 							</ShadButton>
 						</ShadTooltipTrigger>
 						<ShadTooltipContent side="top" :side-offset="8">
-							<p class="text-xs">Edit message</p>
+							<p class="text-xs">{{ store.getTranslation('chat.message_item.edit_message') }}</p>
 						</ShadTooltipContent>
 					</ShadTooltip>
 					<ShadTooltip>
@@ -128,7 +128,9 @@
 							</ShadButton>
 						</ShadTooltipTrigger>
 						<ShadTooltipContent side="top" :side-offset="8">
-							<p class="text-xs">{{ userCopied ? 'Copied' : 'Copy message' }}</p>
+							<p class="text-xs">
+								{{ userCopied ? store.getTranslation('chat.message_item.copied') : store.getTranslation('chat.message_item.copy_message') }}
+							</p>
 						</ShadTooltipContent>
 					</ShadTooltip>
 					<ShadTooltip>
@@ -138,7 +140,7 @@
 							</ShadButton>
 						</ShadTooltipTrigger>
 						<ShadTooltipContent side="top" :side-offset="8">
-							<p class="text-xs">Branch to new chat</p>
+							<p class="text-xs">{{ store.getTranslation('chat.message_item.branch_to_new_chat') }}</p>
 						</ShadTooltipContent>
 					</ShadTooltip>
 				</div>
@@ -340,10 +342,11 @@ function closeImagePreview() {
 }
 
 function handleForkNavigation(direction: 'prev' | 'next') {
-	const newIndex = direction === 'prev' ? props.message.fork_index - 1 : props.message.fork_index + 1;
-	if (chatStore.activeChat) {
-		chatStore.switchFork(chatStore.activeChat.id, props.message.id, newIndex);
-	}
+	const forkIndex = Number.isFinite(props.message.fork_index) ? props.message.fork_index : 0;
+	const newIndex = direction === 'prev' ? forkIndex - 1 : forkIndex + 1;
+	if (!chatStore.activeChat) return;
+	if (!Number.isInteger(newIndex) || newIndex < 1) return;
+	chatStore.switchFork(chatStore.activeChat.id, props.message.id, newIndex);
 }
 
 async function copyUserContent() {

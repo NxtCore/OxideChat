@@ -689,14 +689,7 @@ export const useChatStore = defineStore('chat', {
 					body: {content},
 				});
 				const newMsg = message as ChatMessage;
-				// Find the original message index and replace with new one
-				const idx = this.messages.findIndex(m => m.id === messageId);
-				if (idx !== -1) {
-					// Update sibling count on original
-					this.messages[idx].sibling_count = newMsg.sibling_count;
-					// Insert new message right after original
-					this.messages.splice(idx + 1, 0, newMsg);
-				}
+				await this.fetchChat(chatId);
 				return newMsg;
 			} catch (e) {
 				console.error('Failed to edit message:', e);

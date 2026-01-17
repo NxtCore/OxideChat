@@ -994,6 +994,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.message_actions.response_latency', 'Response latency'),
     ('en', 'chat.message_actions.reasoning_latency', 'Reasoning latency'),
     ('en', 'chat.message_actions.created', 'Created'),
+    ('en', 'chat.message_actions.branch_to_new_chat', 'Branch to new chat'),
 
     -- Model Selector
     ('en', 'chat.model_selector.search_models', 'Search models...'),
@@ -1091,6 +1092,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.message_actions.response_latency', 'Antwortlatenz'),
     ('de', 'chat.message_actions.reasoning_latency', 'Reasoning-Latenz'),
     ('de', 'chat.message_actions.created', 'Erstellt'),
+    ('de', 'chat.message_actions.branch_to_new_chat', 'Neuen Chat abzweigen'),
 
     -- Model Selector
     ('de', 'chat.model_selector.search_models', 'Modelle suchen...'),
@@ -1121,7 +1123,19 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
 
     -- Message Item
     ('en', 'chat.message_item.reasoning', 'Reasoning'),
+    ('en', 'chat.message_item.edit_message', 'Edit message'),
+    ('en', 'chat.message_item.copy_message', 'Copy message'),
+    ('en', 'chat.message_item.copied', 'Copied'),
+    ('en', 'chat.message_item.cancel', 'Cancel'),
+    ('en', 'chat.message_item.save_and_fork', 'Save & Fork'),
+    ('en', 'chat.message_item.branch_to_new_chat', 'Branch to new chat'),
     ('de', 'chat.message_item.reasoning', 'Reasoning'),
+    ('de', 'chat.message_item.edit_message', 'Nachricht bearbeiten'),
+    ('de', 'chat.message_item.copy_message', 'Nachricht kopieren'),
+    ('de', 'chat.message_item.copied', 'Kopiert'),
+    ('de', 'chat.message_item.cancel', 'Abbrechen'),
+    ('de', 'chat.message_item.save_and_fork', 'Speichern & abzweigen'),
+    ('de', 'chat.message_item.branch_to_new_chat', 'Neuen Chat abzweigen'),
 
     -- Tool Execution Display
     ('en', 'chat.tool_execution.tool', 'Tool'),
