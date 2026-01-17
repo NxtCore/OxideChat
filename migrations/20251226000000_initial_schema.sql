@@ -384,7 +384,6 @@ CREATE TABLE IF NOT EXISTS tools (
     
     -- Permissions
     is_enabled BOOLEAN DEFAULT true,
-    is_public BOOLEAN DEFAULT false,
     
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -517,7 +516,6 @@ CREATE INDEX IF NOT EXISTS idx_wasm_blobs_hash ON wasm_blobs(sha256_hash);
 CREATE INDEX IF NOT EXISTS idx_tools_owner ON tools(owner_id);
 CREATE INDEX IF NOT EXISTS idx_tools_source ON tools(source_kind);
 CREATE INDEX IF NOT EXISTS idx_tools_enabled ON tools(is_enabled) WHERE is_enabled = true;
-CREATE INDEX IF NOT EXISTS idx_tools_public ON tools(is_public) WHERE is_public = true;
 CREATE INDEX IF NOT EXISTS idx_user_tool_settings_user ON user_tool_settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_tool_settings_tool ON user_tool_settings(tool_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_servers_owner ON mcp_servers(owner_id);
@@ -1257,7 +1255,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.tools.display_name_placeholder', 'Fetch Website'),
     ('en', 'settings.tools.description', 'Description'),
     ('en', 'settings.tools.description_placeholder', 'Fetches content from a URL'),
-    ('en', 'settings.tools.public', 'Public'),
     ('en', 'settings.tools.soon', 'Soon'),
     ('en', 'settings.tools.url_placeholder', 'https://api.example.com/{{input.query}}'),
     ('en', 'settings.tools.headers', 'Headers (JSON)'),
@@ -1302,7 +1299,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.tools.display_name_placeholder', 'Website abrufen'),
     ('de', 'settings.tools.description', 'Beschreibung'),
     ('de', 'settings.tools.description_placeholder', 'Ruft Inhalte von einer URL ab'),
-    ('de', 'settings.tools.public', 'Öffentlich'),
     ('de', 'settings.tools.soon', 'Bald'),
     ('de', 'settings.tools.url_placeholder', 'https://api.example.com/{{input.query}}'),
     ('de', 'settings.tools.headers', 'Header (JSON)'),

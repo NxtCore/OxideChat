@@ -115,7 +115,7 @@ async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[Str
 		return (vec![], ToolChoice::None);
 	}
 
-	let tools = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND (is_public = true OR owner_id = $2)")
+	let tools = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND owner_id = $2")
 		.bind(&tool_uuids)
 		.bind(user_id)
 		.fetch_all(db)
@@ -158,7 +158,7 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 	let mut function_name: Option<String> = None;
 	let mut function_id: Option<Uuid> = None;
 
-	tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true AND (is_public = true OR owner_id = $2)")
+	tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true AND owner_id = $2")
 		.bind(full_tool_name)
 		.bind(user_id)
 		.fetch_optional(db)
@@ -171,7 +171,7 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 			let potential_tool_name = &full_tool_name[..*pos];
 			let potential_func_name = &full_tool_name[pos + 1..];
 
-			let found = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true AND (is_public = true OR owner_id = $2)")
+			let found = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true")
 				.bind(potential_tool_name)
 				.bind(user_id)
 				.fetch_optional(db)
