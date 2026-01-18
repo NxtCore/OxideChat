@@ -201,7 +201,7 @@ async function uploadImage(file: File) {
 			try {
 				const config = useRuntimeConfig();
 				const baseUrl = config.public.apiBase || '';
-				const response = await fetch(`${baseUrl}/api/images`, {
+				const response = await fetch(`${baseUrl}/api/v1/images`, {
 					method: 'POST',
 					headers: {'Content-Type': 'application/json'},
 					credentials: 'include',

@@ -105,6 +105,7 @@ fn merge_reasoning_with_priority(
 	}
 }
 
+//TODO: Fix SQL statement in terms of owner_id if owner_id is null, rn it is searched for user meaning it will not find any tools rn as they are global (owner_id == null)
 async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[String]) -> (Vec<ToolSpec>, ToolChoice) {
 	if enabled_tool_ids.is_empty() {
 		return (vec![], ToolChoice::None);
@@ -115,7 +116,7 @@ async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[Str
 		return (vec![], ToolChoice::None);
 	}
 
-	let tools = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND owner_id = $2")
+	let tools = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)")
 		.bind(&tool_uuids)
 		.bind(user_id)
 		.fetch_all(db)
