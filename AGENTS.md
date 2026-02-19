@@ -58,6 +58,14 @@
 - Import types from `crate::types::{...}`
 - Keep handlers thin: validate → delegate → respond
 
+### Data Model Pattern
+
+* **Structure:** Locate domain models and their `impl` blocks in `src/types/` (e.g., `user.rs`).
+* **Logic:** Use associated functions (`::`) for queries/constructors and instance methods (`.`) for operations on specific records.
+* **State:** Pass `&PgPool` explicitly as a parameter; never rely on global database state.
+* **Mapping:** Implement `to_response` methods within the model to handle DTO transformations.
+* **Encapsulation:** Keep all SQL logic and business rules for a type within its dedicated file.
+
 ## Code Quality
 
 - Clippy lints are enforced: `correctness` and `suspicious` are denied, `perf` and `style` are warnings
@@ -92,6 +100,7 @@
 - Frontend should always use customizable Tailwind classes like bg-primary, text-primary, etc. and not use fixed colors
 - Do not add comments to the code itself
 - When writing axum routes, please use the response "module" to create responses
+- NO SQL statements in route handlers, please add a function to the specific type's module for database operations (check if a smilar function already exists)
 
 ## Updating This Document
 

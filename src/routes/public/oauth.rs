@@ -7,7 +7,7 @@ use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::JobState;
 use crate::types::User;
 use crate::types::oauth::{OAuthCallbackParams, OAuthState, OAuthUserInfo};
-use crate::utils::auth::{create_session, initialize_user_defaults};
+use crate::utils::auth::create_session;
 use crate::utils::oauth::{self, OAuthError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use axum::extract::{Path, Query, State};
@@ -225,8 +225,8 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 	let unique_username = make_unique_username(pool, &username).await?;
 
 	let user: User = sqlx::query_as(
-		"INSERT INTO users (email, username, auth_method) 
-		 VALUES ($1, $2, 'oauth') 
+		"INSERT INTO users (email, username, auth_method)
+		 VALUES ($1, $2, 'oauth')
 		 RETURNING *",
 	)
 	.bind(&email)
@@ -235,7 +235,7 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 	.await?;
 
 	sqlx::query(
-		"INSERT INTO user_roles (user_id, role_id) 
+		"INSERT INTO user_roles (user_id, role_id)
 		 SELECT $1, id FROM roles WHERE name = 'user'",
 	)
 	.bind(user.id)
@@ -243,7 +243,7 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 	.await?;
 
 	sqlx::query(
-		"INSERT INTO user_identities (user_id, provider, provider_user_id, provider_data) 
+		"INSERT INTO user_identities (user_id, provider, provider_user_id, provider_data)
 		 VALUES ($1, $2, $3, $4)",
 	)
 	.bind(user.id)
@@ -254,7 +254,7 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 	.await?;
 
 	// Initialize user defaults (preferences + workspace)
-	initialize_user_defaults(pool, &user.id).await?;
+	user.initialize_defaults(pool).await?;
 
 	AuditLog::log(pool, LogEvent::OAuthAccountCreated, Some(user.id), Some(EntityType::User), Some(user.id));
 
