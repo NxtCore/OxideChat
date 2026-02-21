@@ -73,7 +73,13 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.admin_users.delete_error', 'Failed to delete user'),
     ('de', 'settings.admin_users.delete_error', 'Fehler beim Löschen des Benutzers'),
 
+    ('en', 'settings.admin_users.select_roles', 'Select roles'),
+    ('de', 'settings.admin_users.select_roles', 'Rollen auswählen'),
     -- Common
     ('en', 'common.create', 'Create'),
-    ('de', 'common.create', 'Erstellen')
+    ('de', 'common.create', 'Erstellen'),
+    ('en', 'common.next', 'Next'),
+    ('de', 'common.next', 'Nächste'),
+    ('en', 'common.previous', 'Previous'),
+    ('de', 'common.previous', 'Vorherige')
 ON CONFLICT (language, key_path) DO NOTHING;

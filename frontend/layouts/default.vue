@@ -38,7 +38,7 @@ import 'vue-sonner/style.css';
 
 useHead({
 	title: 'OxideChat',
-	link: [{rel: 'icon', type: 'image/png', href: '/favicon.png'}],
+	link: [{rel: 'icon', type: 'image/svg+xml', href: '/light_transparent.svg'}],
 	bodyAttrs: {
 		class: 'dark',
 	},

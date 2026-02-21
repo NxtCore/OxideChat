@@ -65,18 +65,17 @@
 					<ShadButton
 						variant="outline"
 						size="sm"
-						:disabled="user.id === store.auth.user?.id"
+						:disabled="user.id === store.auth.user?.id || !store.hasPermission('admin.users.edit')"
 						:title="user.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
 						@click="openEditDialog(user)"
 					>
 						<Pencil class="h-4 w-4" />
 					</ShadButton>
 					<ShadButton
-						v-if="store.hasPermission('admin.users.edit')"
 						variant="outline"
 						size="sm"
 						class="text-destructive hover:text-destructive"
-						:disabled="user.id === store.auth.user?.id"
+						:disabled="user.id === store.auth.user?.id || !store.hasPermission('admin.users.delete')"
 						:title="user.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
 						@click="openDeleteDialog(user)"
 					>
@@ -119,7 +118,7 @@
 					</div>
 					<div class="space-y-2">
 						<ShadLabel>{{ store.getTranslation('settings.admin_users.field_roles') }}</ShadLabel>
-						<ShadSelect v-model="createForm.roles" multiple>
+						<ShadSelect v-model="createForm.roles" multiple clearable>
 							<ShadSelectTrigger class="w-full">
 								<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.select_roles')" />
 							</ShadSelectTrigger>
@@ -156,7 +155,7 @@
 					</div>
 					<div class="space-y-2">
 						<ShadLabel>{{ store.getTranslation('settings.admin_users.field_roles') }}</ShadLabel>
-						<ShadSelect v-model="editForm.roles" multiple>
+						<ShadSelect v-model="editForm.roles" multiple clearable>
 							<ShadSelectTrigger class="w-full">
 								<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.select_roles')" />
 							</ShadSelectTrigger>

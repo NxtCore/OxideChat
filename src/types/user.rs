@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::types::auth::PermissionNameRow;
 use crate::types::roles::RoleNameRow;
-use crate::types::{CountRow, PaginatedUsersResponse, PreferencesResponse, UserPreferences};
+use crate::types::{CountRow, PaginatedUsersListResponse, PaginatedUsersResponse, PreferencesResponse, UserPreferences};
 
 /// User database row.
 #[derive(Debug, FromRow)]
@@ -33,6 +33,17 @@ pub struct UserResponse {
 	pub roles: Vec<String>,
 	pub permissions: Vec<String>,
 	pub preferences: PreferencesResponse,
+	pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Lightweight user list response
+#[derive(Debug, Serialize)]
+pub struct UserListResponse {
+	pub id: Uuid,
+	pub email: String,
+	pub username: String,
+	pub auth_method: String,
+	pub roles: Vec<String>,
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -282,6 +293,131 @@ impl User {
 		})
 	}
 
+	/// List users with pagination, optional search, and optional role filter.
+	///
+	/// Returns lightweight responses (no permissions/preferences) with batched role queries for performance.
+	/// This avoids the N+1 query problem by fetching all roles in a single query per user group.
+	///
+	/// # Errors
+	///
+	/// Returns `sqlx::Error` if the database query fails.
+	pub async fn list_paginated_light(
+		pool: &sqlx::PgPool,
+		page: i64,
+		per_page: i64,
+		search: Option<&str>,
+		role: Option<&str>,
+	) -> Result<PaginatedUsersListResponse, sqlx::Error> {
+		let offset = (page - 1) * per_page;
+		let search_pattern = search.map(|s| format!("%{s}%"));
+
+		let total = if let Some(role_name) = role {
+			let row: CountRow = sqlx::query_as(
+				r#"
+				SELECT COUNT(DISTINCT u.id) as count
+				FROM users u
+				INNER JOIN user_roles ur ON u.id = ur.user_id
+				INNER JOIN roles r ON ur.role_id = r.id
+				WHERE r.name = $1
+				AND ($2::text IS NULL OR u.email ILIKE $2 OR u.username ILIKE $2)
+				"#,
+			)
+			.bind(role_name)
+			.bind(&search_pattern)
+			.fetch_one(pool)
+			.await?;
+			row.count
+		} else {
+			let row: CountRow = sqlx::query_as("SELECT COUNT(*) as count FROM users WHERE ($1::text IS NULL OR email ILIKE $1 OR username ILIKE $1)")
+				.bind(&search_pattern)
+				.fetch_one(pool)
+				.await?;
+			row.count
+		};
+
+		let users = if let Some(role_name) = role {
+			sqlx::query_as::<_, User>(
+				r#"
+				SELECT DISTINCT u.*
+				FROM users u
+				INNER JOIN user_roles ur ON u.id = ur.user_id
+				INNER JOIN roles r ON ur.role_id = r.id
+				WHERE r.name = $1
+				AND ($2::text IS NULL OR u.email ILIKE $2 OR u.username ILIKE $2)
+				ORDER BY u.created_at DESC
+				LIMIT $3 OFFSET $4
+				"#,
+			)
+			.bind(role_name)
+			.bind(&search_pattern)
+			.bind(per_page)
+			.bind(offset)
+			.fetch_all(pool)
+			.await?
+		} else {
+			sqlx::query_as::<_, User>(
+				r#"
+				SELECT * FROM users
+				WHERE ($1::text IS NULL OR email ILIKE $1 OR username ILIKE $1)
+				ORDER BY created_at DESC
+				LIMIT $2 OFFSET $3
+				"#,
+			)
+			.bind(&search_pattern)
+			.bind(per_page)
+			.bind(offset)
+			.fetch_all(pool)
+			.await?
+		};
+
+		if users.is_empty() {
+			return Ok(PaginatedUsersListResponse {
+				users: Vec::new(),
+				total,
+				page,
+				per_page,
+			});
+		}
+
+		let user_ids: Vec<Uuid> = users.iter().map(|u| u.id).collect();
+
+		let all_roles: Vec<(Uuid, String)> = sqlx::query_as(
+			"SELECT ur.user_id, r.name FROM roles r
+			 INNER JOIN user_roles ur ON r.id = ur.role_id
+			 WHERE ur.user_id = ANY($1)",
+		)
+		.bind(&user_ids)
+		.fetch_all(pool)
+		.await?;
+
+		let mut user_roles_map: std::collections::HashMap<Uuid, Vec<String>> = std::collections::HashMap::new();
+		for (user_id, role_name) in all_roles {
+			user_roles_map.entry(user_id).or_insert_with(Vec::new).push(role_name);
+		}
+
+		let responses: Vec<UserListResponse> = users
+			.into_iter()
+			.map(|u| {
+				let roles = user_roles_map.get(&u.id).cloned().unwrap_or_default();
+				UserListResponse {
+					id: u.id,
+					email: u.email,
+					username: u.username,
+					auth_method: u.auth_method,
+					roles,
+					created_at: u.created_at,
+				}
+			})
+			.collect();
+
+		Ok(PaginatedUsersListResponse {
+			users: responses,
+			total,
+			page,
+			per_page,
+		})
+	}
+
 	/// Check if email already exists (excluding a specific user ID).
 	///
 	/// # Errors
@@ -378,23 +514,28 @@ impl User {
 	///
 	/// # Errors
 	///
-	/// Returns `sqlx::Error` if any database query fails.
+	/// Returns `sqlx::Error` if any database query fails. If an error occurs,
+	/// the transaction is rolled back and the user's roles are left unchanged.
 	pub async fn set_roles(&self, pool: &sqlx::PgPool, role_names: &[String]) -> Result<(), sqlx::Error> {
-		sqlx::query("DELETE FROM user_roles WHERE user_id = $1").bind(self.id).execute(pool).await?;
+		let mut tx = pool.begin().await?;
+
+		sqlx::query("DELETE FROM user_roles WHERE user_id = $1").bind(self.id).execute(&mut *tx).await?;
 
 		for role_name in role_names {
 			sqlx::query(
 				r#"
-				INSERT INTO user_roles (user_id, role_id)
-				SELECT $1, id FROM roles WHERE name = $2
-				ON CONFLICT DO NOTHING
-				"#,
+            INSERT INTO user_roles (user_id, role_id)
+            SELECT $1, id FROM roles WHERE name = $2
+            ON CONFLICT DO NOTHING
+            "#,
 			)
 			.bind(self.id)
 			.bind(role_name)
-			.execute(pool)
+			.execute(&mut *tx)
 			.await?;
 		}
+
+		tx.commit().await?;
 
 		Ok(())
 	}

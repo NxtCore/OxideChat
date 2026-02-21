@@ -143,12 +143,12 @@ export const useMainStore = defineStore('main', {
 		},
 		async setup(email: string, username: string, password: string) {
 			const {$customFetch} = useNuxtApp();
-			const response = await $customFetch<User>('/api/v1/auth/setup', {
+			const response = await $customFetch<{user: User}>('/api/v1/auth/setup', {
 				method: 'POST',
 				body: {email, username, password},
 			});
 			if (response) {
-				this.auth.user = response;
+				this.auth.user = response.user;
 				this.auth.isAuthenticated = true;
 				await this.getBaseData();
 			}
@@ -156,24 +156,24 @@ export const useMainStore = defineStore('main', {
 		},
 		async register(email: string, username: string, password: string) {
 			const {$customFetch} = useNuxtApp();
-			const response = await $customFetch<User>('/api/v1/auth/register', {
+			const response = await $customFetch<{user: User}>('/api/v1/auth/register', {
 				method: 'POST',
 				body: {email, username, password},
 			});
 			if (response) {
-				this.auth.user = response;
+				this.auth.user = response.user;
 				this.auth.isAuthenticated = true;
 			}
 			return response;
 		},
 		async login(email: string, password: string) {
 			const {$customFetch} = useNuxtApp();
-			const response = await $customFetch<User>('/api/v1/auth/login', {
+			const response = await $customFetch<{user: User}>('/api/v1/auth/login', {
 				method: 'POST',
 				body: {email, password},
 			});
 			if (response) {
-				this.auth.user = response;
+				this.auth.user = response.user;
 				this.auth.isAuthenticated = true;
 			}
 			return response;

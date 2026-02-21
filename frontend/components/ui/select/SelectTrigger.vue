@@ -31,15 +31,15 @@ const clearValue = inject<() => void>('selectClear');
 	>
 		<slot />
 		<div class="flex items-center gap-1">
-			<span
+			<button
 				v-if="clearable && hasValue"
-				role="button"
-				tabindex="-1"
+				type="button"
 				class="text-muted-foreground hover:text-foreground cursor-pointer rounded-sm transition-opacity"
+				aria-label="Clear selected value"
 				@pointerdown.stop.prevent="clearValue"
 			>
 				<X class="size-4" />
-			</span>
+			</button>
 			<SelectIcon>
 				<ChevronDown class="size-4 opacity-50" />
 			</SelectIcon>

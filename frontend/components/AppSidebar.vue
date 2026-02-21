@@ -2,6 +2,7 @@
 	<ShadSidebar collapsible="icon" class="border-r border-sidebar-border bg-sidebar/50">
 		<ShadSidebarHeader class="border-b border-sidebar-border p-4">
 			<div class="flex items-center gap-3">
+				<img src="/light_transparent.svg" alt="OxideChat Logo" class="h-6 w-6" />
 				<div class="group-data-[collapsible=icon]:hidden">
 					<h2 class="font-semibold text-foreground">OxideChat</h2>
 				</div>

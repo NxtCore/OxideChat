@@ -16,9 +16,8 @@ use axum::{
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
+use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
 
-const ADMIN_USERS_VIEW: &str = "admin.users.view";
-const ADMIN_USERS_EDIT: &str = "admin.users.edit";
 const DEFAULT_PER_PAGE: i64 = 20;
 const MAX_PER_PAGE: i64 = 100;
 
@@ -38,7 +37,7 @@ pub async fn list_users(State(state): State<Arc<JobState>>, cookies: Cookies, Qu
 	let search = params.search.as_deref();
 	let role = params.role.as_deref();
 
-	match User::list_paginated(&state.db, page, per_page, search, role).await {
+	match User::list_paginated_light(&state.db, page, per_page, search, role).await {
 		Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),
 		Err(e) => {
 			eprintln!("[USERS] Failed to list users: {e}");

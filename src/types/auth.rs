@@ -4,9 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use uuid::Uuid;
 
-use crate::types::{PreferencesResponse, UserResponse};
+use crate::types::{UserListResponse, UserResponse};
 
 /// Request body for initial admin setup.
 #[derive(Debug, Deserialize)]
@@ -78,6 +77,15 @@ pub struct MessageResponse {
 #[derive(Debug, Serialize)]
 pub struct PaginatedUsersResponse {
 	pub users: Vec<UserResponse>,
+	pub total: i64,
+	pub page: i64,
+	pub per_page: i64,
+}
+
+/// Paginated list of users (lightweight - excludes permissions and preferences).
+#[derive(Debug, Serialize)]
+pub struct PaginatedUsersListResponse {
+	pub users: Vec<UserListResponse>,
 	pub total: i64,
 	pub page: i64,
 	pub per_page: i64,
