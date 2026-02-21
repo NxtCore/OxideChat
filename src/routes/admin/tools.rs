@@ -2,7 +2,7 @@ use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
-use crate::utils::auth::has_permission;
+
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use crate::utils::tools::ToolExecutor;
 use axum::{
@@ -22,7 +22,7 @@ pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) ->
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !has_permission(&state.db, &user.id, ADMIN_TOOLS_VIEW).await {
+	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
@@ -70,7 +70,7 @@ pub async fn get_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !has_permission(&state.db, &user.id, ADMIN_TOOLS_VIEW).await {
+	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
@@ -103,7 +103,7 @@ pub async fn create_tool(State(state): State<Arc<JobState>>, cookies: Cookies, J
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !has_permission(&state.db, &user.id, ADMIN_TOOLS_EDIT).await {
+	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
@@ -195,7 +195,7 @@ pub async fn update_tool(State(state): State<Arc<JobState>>, cookies: Cookies, P
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !has_permission(&state.db, &user.id, ADMIN_TOOLS_EDIT).await {
+	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
@@ -319,7 +319,7 @@ pub async fn delete_tool(State(state): State<Arc<JobState>>, cookies: Cookies, P
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !has_permission(&state.db, &user.id, ADMIN_TOOLS_EDIT).await {
+	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
@@ -344,7 +344,7 @@ pub async fn get_tool_settings(State(state): State<Arc<JobState>>, cookies: Cook
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !has_permission(&state.db, &user.id, ADMIN_TOOLS_VIEW).await {
+	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
@@ -375,7 +375,7 @@ pub async fn set_tool_settings(
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !has_permission(&state.db, &user.id, ADMIN_TOOLS_EDIT).await {
+	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
@@ -420,7 +420,7 @@ pub async fn upload_wasm(State(state): State<Arc<JobState>>, cookies: Cookies, J
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !has_permission(&state.db, &user.id, ADMIN_TOOLS_EDIT).await {
+	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
@@ -502,7 +502,7 @@ pub async fn test_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Pat
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !has_permission(&state.db, &user.id, ADMIN_TOOLS_VIEW).await {
+	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 

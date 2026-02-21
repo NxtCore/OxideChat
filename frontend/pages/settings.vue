@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import {User, ArrowLeft, Cpu} from 'lucide-vue-next';
+import {User, ArrowLeft, Cpu, Bot, Package, Users} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 definePageMeta({
@@ -59,7 +59,8 @@ const router = useRouter();
 const tabs = [
 	{id: 'profile', label: 'settings.tabs.profile', icon: User, permission: 'settings.profile.view'},
 	{id: 'providers', label: 'settings.tabs.providers', icon: Cpu, permission: 'admin.providers.view'},
-	{id: 'tools', label: 'settings.tabs.tools', icon: Cpu, permission: 'admin.tools.view'},
+	{id: 'tools', label: 'settings.tabs.tools', icon: Package, permission: 'admin.tools.view'},
+	{id: 'users', label: 'settings.tabs.admin_users', icon: Users, permission: 'admin.users.view'},
 	{id: 'appearance', label: 'settings.tabs.appearance', icon: Cpu, permission: 'settings.appearance.view'},
 ];
 

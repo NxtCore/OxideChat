@@ -30,10 +30,17 @@ pub async fn get_base(State(state): State<Arc<JobState>>) -> impl IntoResponse {
 		}
 	};
 
+	let roles = crate::types::Role::list_all(&state.db).await.unwrap_or_else(|e| {
+		eprintln!("[BASE] Failed to list roles: {e}");
+		vec![]
+	});
+
 	ResponseBuilder::new(ResponseBody::Json(BaseResponse {
 		i18n,
+		language: crate::config::Config::get().language().to_string(),
 		needs_setup,
 		oauth_providers: crate::config::Config::get().get_configured_oauth_providers(),
+		roles,
 	}))
 	.build()
 }

@@ -4,13 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use uuid::Uuid;
 
-use crate::types::PreferencesResponse;
-
-// ============================================================================
-// Request Types
-// ============================================================================
+use crate::types::{UserListResponse, UserResponse};
 
 /// Request body for initial admin setup.
 #[derive(Debug, Deserialize)]
@@ -35,21 +30,35 @@ pub struct LoginRequest {
 	pub password: String,
 }
 
-// ============================================================================
-// Response Types
-// ============================================================================
-
-/// Sanitized user response (no password hash).
-#[derive(Debug, Serialize)]
-pub struct UserResponse {
-	pub id: Uuid,
+/// Request body for admin user creation.
+#[derive(Debug, Deserialize)]
+pub struct CreateAdminUserRequest {
 	pub email: String,
 	pub username: String,
-	pub auth_method: String,
+	pub password: String,
 	pub roles: Vec<String>,
-	pub permissions: Vec<String>,
-	pub preferences: PreferencesResponse,
-	pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Request body for admin user update.
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserRequest {
+	pub username: Option<String>,
+	pub email: Option<String>,
+}
+
+/// Request body for admin-initiated password reset.
+#[derive(Debug, Deserialize)]
+pub struct AdminResetPasswordRequest {
+	pub password: String,
+}
+
+/// Query parameters for listing users.
+#[derive(Debug, Deserialize)]
+pub struct ListUsersQuery {
+	pub page: Option<i64>,
+	pub per_page: Option<i64>,
+	pub search: Option<String>,
+	pub role: Option<String>,
 }
 
 /// Response for successful authentication.
@@ -64,48 +73,22 @@ pub struct MessageResponse {
 	pub message: String,
 }
 
-// ============================================================================
-// Internal Types (DB rows)
-// ============================================================================
-
-/// User database row.
-#[derive(Debug, FromRow)]
-pub struct User {
-	pub id: Uuid,
-	pub email: String,
-	pub username: String,
-	pub password_hash: Option<String>,
-	pub auth_method: String,
-	pub created_at: chrono::DateTime<chrono::Utc>,
-	pub updated_at: chrono::DateTime<chrono::Utc>,
+/// Paginated list of users.
+#[derive(Debug, Serialize)]
+pub struct PaginatedUsersResponse {
+	pub users: Vec<UserResponse>,
+	pub total: i64,
+	pub page: i64,
+	pub per_page: i64,
 }
 
-/// Role database row.
-#[derive(Debug, FromRow)]
-pub struct Role {
-	pub id: Uuid,
-	pub name: String,
-	pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-/// Session database row.
-#[derive(Debug, FromRow)]
-pub struct Session {
-	pub id: Uuid,
-	pub user_id: Uuid,
-	pub expires_at: chrono::DateTime<chrono::Utc>,
-	pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-/// User identity for external auth providers.
-#[derive(Debug, FromRow)]
-pub struct UserIdentity {
-	pub id: Uuid,
-	pub user_id: Uuid,
-	pub provider: String,
-	pub provider_user_id: String,
-	pub provider_data: Option<serde_json::Value>,
-	pub created_at: chrono::DateTime<chrono::Utc>,
+/// Paginated list of users (lightweight - excludes permissions and preferences).
+#[derive(Debug, Serialize)]
+pub struct PaginatedUsersListResponse {
+	pub users: Vec<UserListResponse>,
+	pub total: i64,
+	pub page: i64,
+	pub per_page: i64,
 }
 
 /// Helper for counting rows.
@@ -114,8 +97,8 @@ pub struct CountRow {
 	pub count: i64,
 }
 
-/// Helper for role names query.
+/// Helper for permission names query.
 #[derive(Debug, FromRow)]
-pub struct RoleNameRow {
+pub struct PermissionNameRow {
 	pub name: String,
 }

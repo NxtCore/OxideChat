@@ -58,6 +58,14 @@
 - Import types from `crate::types::{...}`
 - Keep handlers thin: validate → delegate → respond
 
+### Data Model Pattern
+
+* **Structure:** Locate domain models and their `impl` blocks in `src/types/` (e.g., `user.rs`).
+* **Logic:** Use associated functions (`::`) for queries/constructors and instance methods (`.`) for operations on specific records.
+* **State:** Pass `&PgPool` explicitly as a parameter; never rely on global database state.
+* **Mapping:** Implement `to_response` methods within the model to handle DTO transformations.
+* **Encapsulation:** Keep all SQL logic and business rules for a type within its dedicated file.
+
 ## Code Quality
 
 - Clippy lints are enforced: `correctness` and `suspicious` are denied, `perf` and `style` are warnings
@@ -81,6 +89,14 @@
 - Test error cases, not just happy paths
 - Use `Result<(), Error>` return type in tests for cleaner error propagation
 
+## Frontend
+- Use Tailwind classes for styling
+- Use `useMainStore()` for global state management
+- Use Shadcn UI for components (shad-vue)
+- All ShadCN components are prefixed with `Shad`, e.g., `ShadButton` or `ShadSelect`, they are auto injected
+- Use the store.getTranslation() function for translations, always use them, no static strings
+- Use customizable Tailwind classes like bg-primary, text-primary, etc. and not use fixed colors
+
 ## Important Notes
 
 - Always use parameterized queries (`$1`, `$2`) to prevent SQL injection
@@ -89,9 +105,9 @@
 - Database URL must be set in `.env` file as `DATABASE_URL`
 - Migrations run automatically on startup
 - Keep the code as simple as possible so beginners can also understand it
-- Frontend should always use customizable Tailwind classes like bg-primary, text-primary, etc. and not use fixed colors
 - Do not add comments to the code itself
 - When writing axum routes, please use the response "module" to create responses
+- NO SQL statements in route handlers, please add a function to the specific type's module for database operations (check if a smilar function already exists)
 
 ## Updating This Document
 

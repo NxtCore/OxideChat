@@ -21,7 +21,7 @@ interface User {
 	auth_method: string;
 	roles: string[];
 	permissions: string[];
-	preferences: object;
+	preferences: UserPreferences;
 	created_at: string;
 }
 
@@ -31,10 +31,23 @@ interface AuthState {
 	loading: boolean;
 }
 
+interface Role {
+	name: string;
+	id: string;
+	created_at: string;
+}
+
+interface Base {
+	i18n: any;
+	language: string;
+	needs_setup: boolean;
+	oauth_providers: string[];
+	roles: Role[];
+}
 export const useMainStore = defineStore('main', {
 	state: (): {
 		breadcrumbs: BreadcrumbType[];
-		base: any;
+		base: Base | null;
 		initialized: boolean;
 		preferences: UserPreferences | null;
 		auth: AuthState;
@@ -52,6 +65,9 @@ export const useMainStore = defineStore('main', {
 		};
 	},
 	getters: {
+		roles(): Role[] {
+			return this.base?.roles ?? [];
+		},
 		isAdmin(): boolean {
 			return this.auth.user?.roles?.includes('admin') ?? false;
 		},
@@ -66,9 +82,6 @@ export const useMainStore = defineStore('main', {
 				if (userPerms.includes(wildcard)) return true;
 			}
 			return false;
-		},
-		hasAnyPermission(permissions: string[]): boolean {
-			return permissions.some(p => this.hasPermission(p));
 		},
 		getTranslation(name: string, args: {[key: string]: any} = {}, language?: string): string {
 			const lang = language ?? this.base?.language ?? 'en';
@@ -87,7 +100,6 @@ export const useMainStore = defineStore('main', {
 					return name;
 				}
 			}
-
 			return name;
 		},
 		updateBreadcrumbs(breadcrumbs: BreadcrumbType[]) {
@@ -100,7 +112,7 @@ export const useMainStore = defineStore('main', {
 		async getBaseData() {
 			try {
 				const {$customFetch} = useNuxtApp();
-				const base = await $customFetch(`/api/v1/base`);
+				const base = await $customFetch<Base>('/api/v1/base');
 				if (base) {
 					this.base = base;
 				}
@@ -110,13 +122,13 @@ export const useMainStore = defineStore('main', {
 			this.initialized = true;
 		},
 		isOAuthEnabled(provider: string): boolean {
-			return this.base?.oauth_providers.includes(provider);
+			return this.base?.oauth_providers.includes(provider) ?? false;
 		},
 		async getMe() {
 			this.auth.loading = true;
 			try {
 				const {$customFetch} = useNuxtApp();
-				const user = (await $customFetch('/api/v1/users/@me')) as User;
+				const user = await $customFetch<User>('/api/v1/users/@me');
 				if (user) {
 					this.auth.user = user;
 					this.preferences = user.preferences;
@@ -131,12 +143,12 @@ export const useMainStore = defineStore('main', {
 		},
 		async setup(email: string, username: string, password: string) {
 			const {$customFetch} = useNuxtApp();
-			const response = await $customFetch('/api/v1/auth/setup', {
+			const response = await $customFetch<{user: User}>('/api/v1/auth/setup', {
 				method: 'POST',
 				body: {email, username, password},
 			});
-			if (response?.user) {
-				this.auth.user = response.user as User;
+			if (response) {
+				this.auth.user = response.user;
 				this.auth.isAuthenticated = true;
 				await this.getBaseData();
 			}
@@ -144,24 +156,24 @@ export const useMainStore = defineStore('main', {
 		},
 		async register(email: string, username: string, password: string) {
 			const {$customFetch} = useNuxtApp();
-			const response = await $customFetch('/api/v1/auth/register', {
+			const response = await $customFetch<{user: User}>('/api/v1/auth/register', {
 				method: 'POST',
 				body: {email, username, password},
 			});
-			if (response?.user) {
-				this.auth.user = response.user as User;
+			if (response) {
+				this.auth.user = response.user;
 				this.auth.isAuthenticated = true;
 			}
 			return response;
 		},
 		async login(email: string, password: string) {
 			const {$customFetch} = useNuxtApp();
-			const response = await $customFetch('/api/v1/auth/login', {
+			const response = await $customFetch<{user: User}>('/api/v1/auth/login', {
 				method: 'POST',
 				body: {email, password},
 			});
-			if (response?.user) {
-				this.auth.user = response.user as User;
+			if (response) {
+				this.auth.user = response.user;
 				this.auth.isAuthenticated = true;
 			}
 			return response;

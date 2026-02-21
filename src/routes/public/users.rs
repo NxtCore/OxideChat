@@ -1,6 +1,5 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::utils::auth::user_to_response;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{extract::State, response::IntoResponse};
 use std::sync::Arc;
@@ -19,7 +18,7 @@ pub async fn get_me(State(state): State<Arc<JobState>>, cookies: Cookies) -> imp
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	match user_to_response(&state.db, &user).await {
+	match user.to_response(&state.db).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(user_response)).build(),
 		Err(e) => {
 			eprintln!("[USERS] Failed to fetch roles for user {}: {e}", user.id);

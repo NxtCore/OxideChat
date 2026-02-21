@@ -59,17 +59,10 @@ struct ConfigRow {
 /// Configuration values loaded from database
 #[derive(Debug, Clone)]
 pub struct ConfigValues {
-	/// Default language for the application
 	pub language: Language,
-
-	/// Default theme CSS variables for the instance
 	pub default_theme: ThemeCssVars,
-
-	// OAuth Google configuration
 	pub oauth_google_client_id: Option<String>,
 	pub oauth_google_client_secret: Option<String>,
-
-	// OAuth Discord configuration
 	pub oauth_discord_client_id: Option<String>,
 	pub oauth_discord_client_secret: Option<String>,
 }

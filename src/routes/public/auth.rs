@@ -5,9 +5,7 @@
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::JobState;
 use crate::types::{AuthResponse, LoginRequest, RegisterRequest, SetupRequest, User};
-use crate::utils::auth::{
-	create_session, hash_password, initialize_user_defaults, user_to_response, users_exist, validate_email, validate_password, validate_username, verify_password,
-};
+use crate::utils::auth::{create_session, hash_password, validate_email, validate_password, validate_username, verify_password};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{Json, extract::State, response::IntoResponse};
 use sqlx::PgPool;
@@ -32,7 +30,7 @@ pub const MIN_USERNAME_LENGTH: usize = 3;
 /// Returns 500 on database or hashing errors.
 pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<SetupRequest>) -> impl IntoResponse {
 	// Check if setup already completed
-	match users_exist(&state.db).await {
+	match User::any_exist(&state.db).await {
 		Ok(true) => {
 			return ErrorBuilder::new(ErrorCode::SetupCompleted).build();
 		}
@@ -100,7 +98,7 @@ pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 	}
 
 	// Initialize user defaults (preferences + workspace)
-	if let Err(e) = initialize_user_defaults(&state.db, &user.id).await {
+	if let Err(e) = user.initialize_defaults(&state.db).await {
 		eprintln!("[AUTH] Failed to initialize user defaults: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
@@ -114,7 +112,7 @@ pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 	AuditLog::log(&state.db, LogEvent::AdminSetup, Some(user.id), Some(EntityType::User), Some(user.id));
 
 	// Return user response
-	match user_to_response(&state.db, &user).await {
+	match user.to_response(&state.db).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response }))
 			.status(axum::http::StatusCode::CREATED)
 			.build(),
@@ -135,7 +133,7 @@ pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 /// Returns 500 on database or hashing errors.
 pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<RegisterRequest>) -> impl IntoResponse {
 	// Check if setup completed
-	match users_exist(&state.db).await {
+	match User::any_exist(&state.db).await {
 		Ok(false) => {
 			return ErrorBuilder::new(ErrorCode::SetupRequired).build();
 		}
@@ -217,7 +215,7 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 	}
 
 	// Initialize user defaults (preferences + workspace)
-	if let Err(e) = initialize_user_defaults(&state.db, &user.id).await {
+	if let Err(e) = user.initialize_defaults(&state.db).await {
 		eprintln!("[AUTH] Failed to initialize user defaults: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
@@ -232,7 +230,7 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 	AuditLog::log(&state.db, LogEvent::UserRegistered, Some(user.id), Some(EntityType::User), Some(user.id));
 
 	// Return user response
-	match user_to_response(&state.db, &user).await {
+	match user.to_response(&state.db).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response }))
 			.status(axum::http::StatusCode::CREATED)
 			.build(),
@@ -253,11 +251,7 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 /// Returns 500 on database errors.
 pub async fn login(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<LoginRequest>) -> impl IntoResponse {
 	// Find user by email
-	let user: User = match sqlx::query_as("SELECT * FROM users WHERE email = $1")
-		.bind(&payload.email)
-		.fetch_optional(&state.db)
-		.await
-	{
+	let user: User = match User::find_by_email(&state.db, &payload.email).await {
 		Ok(Some(user)) => user,
 		Ok(None) => {
 			AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
@@ -297,7 +291,7 @@ pub async fn login(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 	AuditLog::log(&state.db, LogEvent::UserLogin, Some(user.id), Some(EntityType::Session), None);
 
 	// Return user response
-	match user_to_response(&state.db, &user).await {
+	match user.to_response(&state.db).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
 		Err(e) => {
 			eprintln!("[AUTH] Failed to fetch user roles: {e}");

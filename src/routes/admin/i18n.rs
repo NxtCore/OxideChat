@@ -4,8 +4,10 @@
 
 use crate::i18n::I18n;
 use crate::logging::{AuditLog, EntityType, LogEvent};
+use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
 use crate::types::{IdRow, Translation, TranslationsResponse, UpsertTranslationRequest};
+
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -13,11 +15,24 @@ use axum::{
 	response::IntoResponse,
 };
 use std::sync::Arc;
+use tower_cookies::Cookies;
+
+pub const ADMIN_I18N_VIEW: &str = "admin.i18n.view";
+pub const ADMIN_I18N_EDIT: &str = "admin.i18n.edit";
 
 /// GET /api/v1/admin/i18n
 ///
 /// List all translations.
-pub async fn list_translations(State(state): State<Arc<JobState>>) -> impl IntoResponse {
+pub async fn list_translations(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	if !user.has_permission(&state.db, ADMIN_I18N_VIEW).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+
 	let translations: Vec<Translation> = sqlx::query_as("SELECT id, language, key_path, value, is_override FROM i18n_translations ORDER BY language, key_path")
 		.fetch_all(&state.db)
 		.await
@@ -29,7 +44,16 @@ pub async fn list_translations(State(state): State<Arc<JobState>>) -> impl IntoR
 /// PUT /api/v1/admin/i18n/translations
 ///
 /// Create or update a translation. Reloads translations after change.
-pub async fn upsert_translation(State(state): State<Arc<JobState>>, Json(payload): Json<UpsertTranslationRequest>) -> impl IntoResponse {
+pub async fn upsert_translation(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<UpsertTranslationRequest>) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	if !user.has_permission(&state.db, ADMIN_I18N_EDIT).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+
 	let result: Result<IdRow, _> = sqlx::query_as(
 		r#"
         INSERT INTO i18n_translations (language, key_path, value, is_override)
@@ -62,7 +86,16 @@ pub async fn upsert_translation(State(state): State<Arc<JobState>>, Json(payload
 /// DELETE /api/v1/admin/i18n/translations/:id
 ///
 /// Delete a translation by ID. Reloads translations after change.
-pub async fn delete_translation(State(state): State<Arc<JobState>>, Path(id): Path<sqlx::types::Uuid>) -> impl IntoResponse {
+pub async fn delete_translation(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<sqlx::types::Uuid>) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	if !user.has_permission(&state.db, ADMIN_I18N_EDIT).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+
 	let result = sqlx::query("DELETE FROM i18n_translations WHERE id = $1").bind(id).execute(&state.db).await;
 
 	match result {

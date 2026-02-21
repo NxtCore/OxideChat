@@ -302,7 +302,7 @@ pub async fn edit_message(
 		r#"
 		WITH RECURSIVE descendants AS (
 			-- Start with all siblings at this level
-			SELECT id FROM messages 
+			SELECT id FROM messages
 			WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2
 			UNION ALL
 			-- Recursively get all descendants
@@ -310,7 +310,7 @@ pub async fn edit_message(
 			INNER JOIN descendants d ON m.parent_id = d.id
 			WHERE m.chat_id = $1
 		)
-		UPDATE messages SET is_active_fork = FALSE 
+		UPDATE messages SET is_active_fork = FALSE
 		WHERE id IN (SELECT id FROM descendants)
 		"#,
 	)
@@ -420,7 +420,7 @@ pub async fn switch_fork(
 		r#"
 		WITH RECURSIVE descendants AS (
 			-- Start with the currently active sibling(s) at this level
-			SELECT id FROM messages 
+			SELECT id FROM messages
 			WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND is_active_fork = TRUE
 			UNION ALL
 			-- Recursively get all descendants
@@ -428,7 +428,7 @@ pub async fn switch_fork(
 			INNER JOIN descendants d ON m.parent_id = d.id
 			WHERE m.chat_id = $1
 		)
-		UPDATE messages SET is_active_fork = FALSE 
+		UPDATE messages SET is_active_fork = FALSE
 		WHERE id IN (SELECT id FROM descendants)
 		"#,
 	)
@@ -466,7 +466,7 @@ pub async fn switch_fork(
 			INNER JOIN descendants d ON m.parent_id = d.id
 			WHERE m.chat_id = $2 AND m.fork_index = 1
 		)
-		UPDATE messages SET is_active_fork = TRUE 
+		UPDATE messages SET is_active_fork = TRUE
 		WHERE id IN (SELECT id FROM descendants)
 		"#,
 	)
@@ -521,7 +521,7 @@ pub async fn get_siblings(State(state): State<Arc<JobState>>, cookies: Cookies, 
 	// Get all siblings
 	let siblings = sqlx::query_as::<_, Message>(
 		r#"
-		SELECT * FROM messages 
+		SELECT * FROM messages
 		WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2
 		ORDER BY fork_index ASC
 		"#,
@@ -666,7 +666,7 @@ pub async fn branch_from_message(
 	let messages_to_copy = if is_user_message {
 		sqlx::query_as::<_, Message>(
 			r#"
-			SELECT * FROM messages 
+			SELECT * FROM messages
 			WHERE chat_id = $1 AND is_active_fork = TRUE AND created_at < $2
 			ORDER BY created_at ASC
 			"#,
@@ -678,7 +678,7 @@ pub async fn branch_from_message(
 	} else {
 		sqlx::query_as::<_, Message>(
 			r#"
-			SELECT * FROM messages 
+			SELECT * FROM messages
 			WHERE chat_id = $1 AND is_active_fork = TRUE AND created_at <= $2
 			ORDER BY created_at ASC
 			"#,
@@ -705,7 +705,7 @@ pub async fn branch_from_message(
 
 		let new_msg = sqlx::query_as::<_, Message>(
 			r#"
-			INSERT INTO messages (chat_id, role, content, content_parts, reasoning_content, model_id, 
+			INSERT INTO messages (chat_id, role, content, content_parts, reasoning_content, model_id,
 				cost_details, usage_details, reasoning_details, parent_id, fork_index, is_active_fork)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, TRUE)
 			RETURNING *
