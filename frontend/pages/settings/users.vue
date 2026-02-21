@@ -12,22 +12,15 @@
 		</div>
 
 		<div class="flex flex-row gap-2 mb-4">
-			<Input
-				v-model="searchRaw"
-				type="text"
-				:placeholder="store.getTranslation('settings.admin_users.search_placeholder')"
-				class="flex-1"
-			/>
-			<Select v-model="roleFilter">
-				<SelectTrigger class="w-36">
-					<SelectValue :placeholder="store.getTranslation('settings.admin_users.filter_role')" />
-				</SelectTrigger>
-				<SelectContent>
-					<SelectItem value="all">{{ store.getTranslation('settings.admin_users.role_all') }}</SelectItem>
-					<SelectItem value="admin">{{ store.getTranslation('settings.admin_users.role_admin') }}</SelectItem>
-					<SelectItem value="user">{{ store.getTranslation('settings.admin_users.role_user') }}</SelectItem>
-				</SelectContent>
-			</Select>
+			<ShadInput v-model="searchRaw" type="text" :placeholder="store.getTranslation('settings.admin_users.search_placeholder')" class="flex-1" />
+			<ShadSelect v-model="roleFilter" clearable>
+				<ShadSelectTrigger class="w-36">
+					<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.filter_role')" />
+				</ShadSelectTrigger>
+				<ShadSelectContent>
+					<ShadSelectItem v-for="role in availableRoles" :key="role.id" :value="role.name">{{ role.name }}</ShadSelectItem>
+				</ShadSelectContent>
+			</ShadSelect>
 		</div>
 
 		<div v-if="loading" class="flex items-center justify-center py-12 text-muted-foreground">
@@ -43,26 +36,28 @@
 
 		<div v-else class="space-y-2">
 			<div
-				v-for="u in users"
-				:key="u.id"
+				v-for="user in users"
+				:key="user.id"
 				class="rounded-lg border border-border bg-card px-4 py-3 flex items-center gap-4 transition-all hover:border-border/80"
 			>
 				<div class="flex-1 min-w-0">
 					<div class="flex items-center gap-2 flex-wrap">
-						<span class="font-medium text-foreground">{{ u.username }}</span>
+						<span class="font-medium text-foreground">{{ user.username }}</span>
 						<span
-							v-for="role in u.roles"
+							v-for="role in user.roles"
 							:key="role"
 							class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
 							:class="role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'"
-						>{{ role }}</span>
+						>
+							{{ role }}
+						</span>
 					</div>
 					<div class="flex items-center gap-3 mt-0.5 text-sm text-muted-foreground">
-						<span>{{ u.email }}</span>
+						<span>{{ user.email }}</span>
 						<span class="text-border">·</span>
-						<span>{{ u.auth_method }}</span>
+						<span>{{ user.auth_method }}</span>
 						<span class="text-border">·</span>
-						<span>{{ formatDate(u.created_at) }}</span>
+						<span>{{ formatDate(user.created_at) }}</span>
 					</div>
 				</div>
 
@@ -70,9 +65,9 @@
 					<ShadButton
 						variant="outline"
 						size="sm"
-						:disabled="u.id === store.auth.user?.id"
-						:title="u.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
-						@click="openEditDialog(u)"
+						:disabled="user.id === store.auth.user?.id"
+						:title="user.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
+						@click="openEditDialog(user)"
 					>
 						<Pencil class="h-4 w-4" />
 					</ShadButton>
@@ -81,9 +76,9 @@
 						variant="outline"
 						size="sm"
 						class="text-destructive hover:text-destructive"
-						:disabled="u.id === store.auth.user?.id"
-						:title="u.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
-						@click="openDeleteDialog(u)"
+						:disabled="user.id === store.auth.user?.id"
+						:title="user.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
+						@click="openDeleteDialog(user)"
 					>
 						<Trash2 class="h-4 w-4" />
 					</ShadButton>
@@ -91,124 +86,129 @@
 			</div>
 		</div>
 
-		<div v-if="total > 0" class="flex items-center justify-between mt-4 text-sm text-muted-foreground">
-			<span>{{ paginationLabel }}</span>
-			<div class="flex items-center gap-1">
-				<ShadButton variant="outline" size="sm" :disabled="page <= 1" @click="page--">
-					<ChevronLeft class="h-4 w-4" />
-				</ShadButton>
-				<ShadButton variant="outline" size="sm" :disabled="page >= totalPages" @click="page++">
-					<ChevronRight class="h-4 w-4" />
-				</ShadButton>
-			</div>
+		<div class="flex flex-col w-full mt-6">
+			<ShadPagination :total="total" :items-per-page="perPage" class="justify-start">
+				<ShadPaginationContent>
+					<ShadPaginationPrevious @click="previousPage" :disabled="page === 1" />
+					<ShadPaginationItem v-for="p in visiblePages" :key="p" :is-active="p === page" @click="page = p">
+						{{ p }}
+					</ShadPaginationItem>
+					<ShadPaginationNext @click="nextPage" :disabled="page === totalPages" />
+				</ShadPaginationContent>
+			</ShadPagination>
 		</div>
 
-		<Dialog v-model:open="createOpen">
-			<DialogContent class="sm:max-w-[480px]">
-				<DialogHeader>
-					<DialogTitle>{{ store.getTranslation('settings.admin_users.create_user') }}</DialogTitle>
-					<DialogDescription>{{ store.getTranslation('settings.admin_users.create_user_description') }}</DialogDescription>
-				</DialogHeader>
+		<ShadDialog v-model:open="createOpen">
+			<ShadDialogContent class="sm:max-w-[480px]">
+				<ShadDialogHeader>
+					<ShadDialogTitle>{{ store.getTranslation('settings.admin_users.create_user') }}</ShadDialogTitle>
+					<ShadDialogDescription>{{ store.getTranslation('settings.admin_users.create_user_description') }}</ShadDialogDescription>
+				</ShadDialogHeader>
 				<div class="space-y-4 py-2">
 					<div class="space-y-2">
-						<Label for="create-email">{{ store.getTranslation('settings.admin_users.field_email') }}</Label>
-						<Input id="create-email" v-model="createForm.email" type="email" />
+						<ShadLabel for="create-email">{{ store.getTranslation('settings.admin_users.field_email') }}</ShadLabel>
+						<ShadInput id="create-email" v-model="createForm.email" type="email" />
 					</div>
 					<div class="space-y-2">
-						<Label for="create-username">{{ store.getTranslation('settings.admin_users.field_username') }}</Label>
-						<Input id="create-username" v-model="createForm.username" type="text" />
+						<ShadLabel for="create-username">{{ store.getTranslation('settings.admin_users.field_username') }}</ShadLabel>
+						<ShadInput id="create-username" v-model="createForm.username" type="text" />
 					</div>
 					<div class="space-y-2">
-						<Label for="create-password">{{ store.getTranslation('settings.admin_users.field_password') }}</Label>
-						<Input id="create-password" v-model="createForm.password" type="password" />
+						<ShadLabel for="create-password">{{ store.getTranslation('settings.admin_users.field_password') }}</ShadLabel>
+						<ShadInput id="create-password" v-model="createForm.password" type="password" />
 					</div>
 					<div class="space-y-2">
-						<Label>{{ store.getTranslation('settings.admin_users.field_roles') }}</Label>
-						<div class="flex gap-3">
-							<label v-for="role in availableRoles" :key="role" class="flex items-center gap-2 cursor-pointer">
-								<input type="checkbox" :value="role" v-model="createForm.roles" class="accent-primary" />
-								<span class="text-sm text-foreground">{{ role }}</span>
-							</label>
-						</div>
+						<ShadLabel>{{ store.getTranslation('settings.admin_users.field_roles') }}</ShadLabel>
+						<ShadSelect v-model="createForm.roles" multiple>
+							<ShadSelectTrigger class="w-full">
+								<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.select_roles')" />
+							</ShadSelectTrigger>
+							<ShadSelectContent>
+								<ShadSelectItem v-for="role in availableRoles" :key="role.id" :value="role.name">{{ role.name }}</ShadSelectItem>
+							</ShadSelectContent>
+						</ShadSelect>
 					</div>
 				</div>
-				<DialogFooter>
+				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="createOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton @click="submitCreate" :disabled="saving">
 						<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
 						{{ store.getTranslation('common.create') }}
 					</ShadButton>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+				</ShadDialogFooter>
+			</ShadDialogContent>
+		</ShadDialog>
 
-		<Dialog v-model:open="editOpen">
-			<DialogContent class="sm:max-w-[480px]">
-				<DialogHeader>
-					<DialogTitle>{{ store.getTranslation('settings.admin_users.edit_user') }}</DialogTitle>
-					<DialogDescription>{{ selectedUser?.username }}</DialogDescription>
-				</DialogHeader>
+		<ShadDialog v-model:open="editOpen">
+			<ShadDialogContent class="sm:max-w-[480px]">
+				<ShadDialogHeader>
+					<ShadDialogTitle>{{ store.getTranslation('settings.admin_users.edit_user') }}</ShadDialogTitle>
+					<ShadDialogDescription>{{ selectedUser?.username }}</ShadDialogDescription>
+				</ShadDialogHeader>
 				<div class="space-y-4 py-2">
 					<div class="space-y-2">
-						<Label for="edit-email">{{ store.getTranslation('settings.admin_users.field_email') }}</Label>
-						<Input id="edit-email" v-model="editForm.email" type="email" />
+						<ShadLabel for="edit-email">{{ store.getTranslation('settings.admin_users.field_email') }}</ShadLabel>
+						<ShadInput id="edit-email" v-model="editForm.email" type="email" />
 					</div>
 					<div class="space-y-2">
-						<Label for="edit-username">{{ store.getTranslation('settings.admin_users.field_username') }}</Label>
-						<Input id="edit-username" v-model="editForm.username" type="text" />
+						<ShadLabel for="edit-username">{{ store.getTranslation('settings.admin_users.field_username') }}</ShadLabel>
+						<ShadInput id="edit-username" v-model="editForm.username" type="text" />
 					</div>
 					<div class="space-y-2">
-						<Label>{{ store.getTranslation('settings.admin_users.field_roles') }}</Label>
-						<div class="flex gap-3">
-							<label v-for="role in availableRoles" :key="role" class="flex items-center gap-2 cursor-pointer">
-								<input type="checkbox" :value="role" v-model="editForm.roles" class="accent-primary" />
-								<span class="text-sm text-foreground">{{ role }}</span>
-							</label>
-						</div>
+						<ShadLabel>{{ store.getTranslation('settings.admin_users.field_roles') }}</ShadLabel>
+						<ShadSelect v-model="editForm.roles" multiple>
+							<ShadSelectTrigger class="w-full">
+								<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.select_roles')" />
+							</ShadSelectTrigger>
+							<ShadSelectContent>
+								<ShadSelectItem v-for="role in availableRoles" :key="role.id" :value="role.name">{{ role.name }}</ShadSelectItem>
+							</ShadSelectContent>
+						</ShadSelect>
 					</div>
 					<div v-if="selectedUser?.auth_method === 'local'" class="space-y-2 border-t border-border pt-4">
-						<Label for="edit-password">{{ store.getTranslation('settings.admin_users.reset_password') }}</Label>
-						<Input id="edit-password" v-model="editForm.newPassword" type="password" :placeholder="store.getTranslation('settings.admin_users.reset_password_placeholder')" />
+						<ShadLabel for="edit-password">{{ store.getTranslation('settings.admin_users.reset_password') }}</ShadLabel>
+						<ShadInput
+							id="edit-password"
+							v-model="editForm.newPassword"
+							type="password"
+							:placeholder="store.getTranslation('settings.admin_users.reset_password_placeholder')"
+						/>
 					</div>
 				</div>
-				<DialogFooter>
+				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="editOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton @click="submitEdit" :disabled="saving">
 						<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
 						{{ store.getTranslation('common.save') }}
 					</ShadButton>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+				</ShadDialogFooter>
+			</ShadDialogContent>
+		</ShadDialog>
 
-		<Dialog v-model:open="deleteOpen">
-			<DialogContent class="sm:max-w-[420px]">
-				<DialogHeader>
-					<DialogTitle>{{ store.getTranslation('settings.admin_users.delete_user') }}</DialogTitle>
-					<DialogDescription>
+		<ShadDialog v-model:open="deleteOpen">
+			<ShadDialogContent class="sm:max-w-[420px]">
+				<ShadDialogHeader>
+					<ShadDialogTitle>{{ store.getTranslation('settings.admin_users.delete_user') }}</ShadDialogTitle>
+					<ShadDialogDescription>
 						{{ store.getTranslation('settings.admin_users.delete_confirm').replace('{username}', selectedUser?.username ?? '') }}
-					</DialogDescription>
-				</DialogHeader>
-				<DialogFooter>
+					</ShadDialogDescription>
+				</ShadDialogHeader>
+				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="deleteOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton variant="destructive" @click="submitDelete" :disabled="saving">
 						<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
 						{{ store.getTranslation('common.delete') }}
 					</ShadButton>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+				</ShadDialogFooter>
+			</ShadDialogContent>
+		</ShadDialog>
 	</div>
 </template>
 
 <script setup lang="ts">
 import {ref, reactive, computed, watch, onMounted} from 'vue';
-import {Users, Plus, Pencil, Trash2, Loader2, ChevronLeft, ChevronRight} from 'lucide-vue-next';
+import {Users, Plus, Pencil, Trash2, Loader2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
-import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog';
-import {Input} from '@/components/ui/input';
-import {Label} from '@/components/ui/label';
-import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select';
 
 const {$customFetch} = useNuxtApp();
 const store = useMainStore();
@@ -230,15 +230,13 @@ interface PaginatedUsersResponse {
 	per_page: number;
 }
 
-const availableRoles = ['admin', 'user'];
-
 const users = ref<UserResponse[]>([]);
 const total = ref(0);
 const page = ref(1);
 const perPage = ref(20);
 const searchRaw = ref('');
 const search = ref('');
-const roleFilter = ref('all');
+const roleFilter = ref(null);
 const loading = ref(false);
 const saving = ref(false);
 
@@ -251,12 +249,35 @@ const createForm = reactive({email: '', username: '', password: '', roles: [] as
 const editForm = reactive({email: '', username: '', roles: [] as string[], newPassword: ''});
 
 const totalPages = computed(() => Math.ceil(total.value / perPage.value));
+const availableRoles = computed(() => store.roles);
+const visiblePages = computed(() => {
+	const pages: number[] = [];
+	const maxPages = 5;
+	const halfWindow = Math.floor(maxPages / 2);
+	let start = Math.max(1, page.value - halfWindow);
+	let end = Math.min(totalPages.value, start + maxPages - 1);
 
-const paginationLabel = computed(() => {
-	const start = (page.value - 1) * perPage.value + 1;
-	const end = Math.min(page.value * perPage.value, total.value);
-	return `${start}–${end} / ${total.value}`;
+	if (end - start + 1 < maxPages) {
+		start = Math.max(1, end - maxPages + 1);
+	}
+
+	for (let i = start; i <= end; i++) {
+		pages.push(i);
+	}
+	return pages;
 });
+
+function previousPage() {
+	if (page.value > 1) {
+		page.value--;
+	}
+}
+
+function nextPage() {
+	if (page.value < totalPages.value) {
+		page.value++;
+	}
+}
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 watch(searchRaw, val => {
@@ -267,7 +288,7 @@ watch(searchRaw, val => {
 	}, 300);
 });
 
-watch([roleFilter, page], () => {
+watch([roleFilter, page, perPage], () => {
 	loadUsers();
 });
 
@@ -280,13 +301,14 @@ async function loadUsers() {
 	try {
 		const params: Record<string, string | number> = {page: page.value, per_page: perPage.value};
 		if (search.value) params.search = search.value;
-		if (roleFilter.value !== 'all') params.role = roleFilter.value;
+		if (roleFilter.value) params.role = roleFilter.value;
 
 		const result = await $customFetch<PaginatedUsersResponse>('/api/v1/admin/users', {params});
 		users.value = result.users ?? [];
 		total.value = result.total ?? 0;
 	} catch (e: any) {
-		store.toast(store.getTranslation('settings.admin_users.load_error'), {type: 'error', description: e?.message ?? ''});
+		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
+		store.toast(store.getTranslation('settings.admin_users.load_error'), {type: 'error', description: errorMessage});
 	} finally {
 		loading.value = false;
 	}
@@ -329,7 +351,8 @@ async function submitCreate() {
 		createOpen.value = false;
 		await loadUsers();
 	} catch (e: any) {
-		store.toast(store.getTranslation('settings.admin_users.create_error'), {type: 'error', description: e?.message ?? ''});
+		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
+		store.toast(store.getTranslation('settings.admin_users.create_error'), {type: 'error', description: errorMessage});
 	} finally {
 		saving.value = false;
 	}
@@ -360,7 +383,8 @@ async function submitEdit() {
 		editOpen.value = false;
 		await loadUsers();
 	} catch (e: any) {
-		store.toast(store.getTranslation('settings.admin_users.edit_error'), {type: 'error', description: e?.message ?? ''});
+		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
+		store.toast(store.getTranslation('settings.admin_users.edit_error'), {type: 'error', description: errorMessage});
 	} finally {
 		saving.value = false;
 	}
@@ -375,7 +399,8 @@ async function submitDelete() {
 		deleteOpen.value = false;
 		await loadUsers();
 	} catch (e: any) {
-		store.toast(store.getTranslation('settings.admin_users.delete_error'), {type: 'error', description: e?.message ?? ''});
+		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
+		store.toast(store.getTranslation('settings.admin_users.delete_error'), {type: 'error', description: errorMessage});
 	} finally {
 		saving.value = false;
 	}

@@ -137,7 +137,7 @@ pub async fn create_user(State(state): State<Arc<JobState>>, cookies: Cookies, J
 	}
 
 	for role_name in &req.roles {
-		match User::role_exists(&state.db, role_name).await {
+		match crate::types::Role::exists(&state.db, role_name).await {
 			Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
 			Err(e) => {
 				eprintln!("[USERS] Failed to validate role '{role_name}': {e}");
@@ -292,7 +292,7 @@ pub async fn set_user_roles(State(state): State<Arc<JobState>>, cookies: Cookies
 	};
 
 	for role_name in &req.roles {
-		match User::role_exists(&state.db, role_name).await {
+		match crate::types::Role::exists(&state.db, role_name).await {
 			Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
 			Err(e) => {
 				eprintln!("[USERS] Failed to validate role '{role_name}': {e}");

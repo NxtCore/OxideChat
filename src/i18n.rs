@@ -42,6 +42,12 @@ impl Language {
 			Self::De => "de",
 		}
 	}
+
+	/// Get the language name as a string
+	#[must_use]
+	pub fn to_string(&self) -> String {
+		self.as_str().to_string()
+	}
 }
 
 impl Default for Language {

@@ -3,11 +3,13 @@
 //! This module contains the User struct and its implementation, providing
 //! an OOP-style interface for user-related database operations.
 
+use serde::Serialize;
 use sqlx::FromRow;
 use uuid::Uuid;
 
-use crate::types::auth::{PermissionNameRow, RoleNameRow};
-use crate::types::{CountRow, PaginatedUsersResponse, PreferencesResponse, UserPreferences, UserResponse};
+use crate::types::auth::PermissionNameRow;
+use crate::types::roles::RoleNameRow;
+use crate::types::{CountRow, PaginatedUsersResponse, PreferencesResponse, UserPreferences};
 
 /// User database row.
 #[derive(Debug, FromRow)]
@@ -19,6 +21,19 @@ pub struct User {
 	pub auth_method: String,
 	pub created_at: chrono::DateTime<chrono::Utc>,
 	pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Sanitized user response (no password hash).
+#[derive(Debug, Serialize)]
+pub struct UserResponse {
+	pub id: Uuid,
+	pub email: String,
+	pub username: String,
+	pub auth_method: String,
+	pub roles: Vec<String>,
+	pub permissions: Vec<String>,
+	pub preferences: PreferencesResponse,
+	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl User {
@@ -404,10 +419,6 @@ impl User {
 	///
 	/// Returns `sqlx::Error` if the database query fails.
 	pub async fn role_exists(pool: &sqlx::PgPool, role_name: &str) -> Result<bool, sqlx::Error> {
-		let count: CountRow = sqlx::query_as("SELECT COUNT(*) as count FROM roles WHERE name = $1")
-			.bind(role_name)
-			.fetch_one(pool)
-			.await?;
-		Ok(count.count > 0)
+		crate::types::Role::exists(pool, role_name).await
 	}
 }
