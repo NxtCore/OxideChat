@@ -4,6 +4,7 @@
 
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::routes::public::auth::get_current_user;
+use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
 use crate::types::{AdminResetPasswordRequest, CreateAdminUserRequest, JobState, ListUsersQuery, SetUserRolesRequest, UpdateUserRequest, User};
 use crate::utils::auth::{hash_password, validate_email, validate_password, validate_username};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
@@ -16,7 +17,6 @@ use axum::{
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
-use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
 
 const DEFAULT_PER_PAGE: i64 = 20;
 const MAX_PER_PAGE: i64 = 100;

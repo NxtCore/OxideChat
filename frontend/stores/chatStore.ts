@@ -6,7 +6,7 @@ import type {
 	ChatMessage,
 	ChatWithMessages,
 	UserPreferences,
-	Model,
+	ModelList,
 	CreateWorkspaceRequest,
 	UpdateWorkspaceRequest,
 	CreateChatRequest,
@@ -14,6 +14,7 @@ import type {
 	UpdatePreferencesRequest,
 	ChatListParams,
 	StreamingAnimation,
+	PaginatedResponse,
 } from '~/types/chat';
 
 interface ChatState {
@@ -28,8 +29,8 @@ interface ChatState {
 	messages: ChatMessage[];
 	messagesLoading: boolean;
 
-	models: Model[];
-	selectedModel: Model | null;
+	models: ModelList[];
+	selectedModel: ModelList | null;
 	modelsLoading: boolean;
 
 	isStreaming: boolean;
@@ -92,14 +93,14 @@ export const useChatStore = defineStore('chat', {
 			return this.chats.filter(c => c.is_archived);
 		},
 
-		favoriteModels(): Model[] {
+		favoriteModels(): ModelList[] {
 			const mainStore = useMainStore();
 			return this.models.filter(m => m.is_favorite || mainStore.preferences?.favorite_model_keys.includes(m.model_id));
 		},
 
-		groupedModels(): Record<string, Model[]> {
-			const grouped: Record<string, Model[]> = {};
-			for (const model of this.models.filter(m => !m.is_hidden)) {
+		groupedModels(): Record<string, ModelList[]> {
+			const grouped: Record<string, ModelList[]> = {};
+			for (const model of this.models) {
 				const provider = model.provider_name;
 				if (!grouped[provider]) grouped[provider] = [];
 				grouped[provider].push(model);
@@ -107,13 +108,13 @@ export const useChatStore = defineStore('chat', {
 			return grouped;
 		},
 
-		hasReasoningCapability: state => (model: Model | null) => {
+		hasReasoningCapability: state => (model: ModelList | null) => {
 			if (!model) model = state.selectedModel;
 			if (!model) return false;
 			return model.capabilities.some(c => c.startsWith('REASONING_'));
 		},
 
-		hasToolCapability: state => (model: Model | null) => {
+		hasToolCapability: state => (model: ModelList | null) => {
 			if (!model) model = state.selectedModel;
 			if (!model) return false;
 			return model.capabilities.includes('TOOLS');
@@ -147,7 +148,7 @@ export const useChatStore = defineStore('chat', {
 			return Math.min(100, (this.contextTokens / this.selectedModel.context_length) * 100);
 		},
 
-		isFavoriteModel: state => (model: Model) => {
+		isFavoriteModel: state => (model: ModelList) => {
 			const mainStore = useMainStore();
 			return mainStore.preferences?.favorite_model_keys.includes(model.model_id);
 		},
@@ -600,8 +601,8 @@ export const useChatStore = defineStore('chat', {
 			try {
 				const {$customFetch} = useNuxtApp();
 				const mainStore = useMainStore();
-				const models = await $customFetch('/api/v1/models');
-				this.models = models as Model[];
+				const models = await $customFetch<PaginatedResponse<ModelList>>('/api/v1/models');
+				this.models = models.items;
 
 				if (!this.selectedModel && this.models.length > 0) {
 					const defaultKey = mainStore.preferences?.default_model_key;
@@ -615,7 +616,7 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		setSelectedModel(model: Model | null) {
+		setSelectedModel(model: ModelList | null) {
 			this.selectedModel = model;
 
 			if (!model) {

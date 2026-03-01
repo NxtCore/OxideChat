@@ -46,6 +46,10 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/users/{id}", delete(admin::users::delete_user))
 		.route("/api/v1/admin/users/{id}/roles", put(admin::users::set_user_roles))
 		.route("/api/v1/admin/users/{id}/password", put(admin::users::reset_password))
+		// Admin Models
+		.route("/api/v1/admin/models", get(admin::models::list_models))
+		.route("/api/v1/admin/models/{id}", get(admin::models::get_model))
+		.route("/api/v1/admin/models/{id}", put(admin::models::update_model))
 		// Admin Config
 		.route("/api/v1/admin/config", patch(admin::config::update_global_config))
 		// Public Config

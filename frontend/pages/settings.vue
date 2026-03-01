@@ -4,7 +4,7 @@
 			<div class="mb-8">
 				<button
 					@click="goBack"
-					class="group flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors mb-8 px-3 py-2 rounded-lg"
+					class="group flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors mb-4 px-3 py-2 rounded-lg"
 				>
 					<ArrowLeft class="h-4 w-4 transition-transform group-hover:-translate-x-1" />
 					<span>{{ store.getTranslation('settings.back') }}</span>
@@ -60,6 +60,7 @@ const tabs = [
 	{id: 'profile', label: 'settings.tabs.profile', icon: User, permission: 'settings.profile.view'},
 	{id: 'providers', label: 'settings.tabs.providers', icon: Cpu, permission: 'admin.providers.view'},
 	{id: 'tools', label: 'settings.tabs.tools', icon: Package, permission: 'admin.tools.view'},
+	{id: 'models', label: 'settings.tabs.models', icon: Bot, permission: 'admin.providers.view'},
 	{id: 'users', label: 'settings.tabs.admin_users', icon: Users, permission: 'admin.users.view'},
 	{id: 'appearance', label: 'settings.tabs.appearance', icon: Cpu, permission: 'settings.appearance.view'},
 ];
@@ -68,7 +69,7 @@ const visibleTabs = computed(() => tabs.filter(tab => store.hasPermission(tab.pe
 
 const activeTab = computed(() => {
 	const path = route.path;
-	const match = path.match(/\/settings\/(.+)/);
+	const match = path.match(/\/settings\/([^\/]+)/);
 	return match ? match[1] : 'profile';
 });
 

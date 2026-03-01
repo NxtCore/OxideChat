@@ -202,8 +202,7 @@ CREATE TABLE IF NOT EXISTS model_configs (
     is_featured BOOLEAN DEFAULT false,
     is_default BOOLEAN DEFAULT false,
     is_favorite BOOLEAN DEFAULT false,
-    is_hidden BOOLEAN DEFAULT false,
-    
+
     category VARCHAR(50),
     tags JSONB DEFAULT '[]',
     usage_count INTEGER DEFAULT 0,
@@ -491,6 +490,7 @@ CREATE INDEX IF NOT EXISTS idx_model_configs_favorite ON model_configs(owner_id,
 CREATE INDEX IF NOT EXISTS idx_model_configs_public ON model_configs(is_public) WHERE is_public = true;
 CREATE INDEX IF NOT EXISTS idx_model_configs_featured ON model_configs(is_featured) WHERE is_featured = true;
 CREATE INDEX IF NOT EXISTS idx_model_configs_category ON model_configs(category);
+CREATE UNIQUE INDEX IF NOT EXISTS model_configs_system_unique ON model_configs (model_id) WHERE owner_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_model_access_provider ON model_access(provider_id);
 CREATE INDEX IF NOT EXISTS idx_model_access_model ON model_access(model_id);
 CREATE INDEX IF NOT EXISTS idx_model_access_role ON model_access(role_id);
@@ -533,6 +533,27 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     -- Common
     ('en', 'common.copy_to_clipboard', 'Copied to clipboard'),
     ('de', 'common.copy_to_clipboard', 'In die Zwischenablage kopiert'),
+    ('en', 'common.create', 'Create'),
+    ('de', 'common.create', 'Erstellen'),
+    ('en', 'common.next', 'Next'),
+    ('de', 'common.next', 'Nächste'),
+    ('en', 'common.previous', 'Previous'),
+    ('de', 'common.previous', 'Vorherige'),
+    ('en', 'common.error', 'Error'),
+    ('en', 'common.loading', 'Loading...'),
+    ('en', 'common.user', 'User'),
+    ('de', 'common.error', 'Fehler'),
+    ('de', 'common.loading', 'Wird geladen...'),
+    ('de', 'common.user', 'Benutzer'),
+    ('en', 'common.cancel', 'Cancel'),
+    ('en', 'common.save', 'Save'),
+    ('en', 'common.delete', 'Delete'),
+    ('de', 'common.cancel', 'Abbrechen'),
+    ('de', 'common.save', 'Speichern'),
+    ('de', 'common.delete', 'Löschen'),
+    ('en', 'common.close', 'Close'),
+    ('de', 'common.close', 'Schließen'),
+
     -- Auth errors
     ('en', 'auth.errors.setup_completed', 'Setup has already been completed'),
     ('en', 'auth.errors.setup_required', 'Setup must be completed first'),
@@ -686,14 +707,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'welcome.description', 'Select a chat from the sidebar or start a new conversation'),
     ('de', 'welcome.title', 'Willkommen bei OxideChat'),
     ('de', 'welcome.description', 'Wählen Sie einen Chat aus der Seitenleiste oder beginnen Sie eine neue Konversation'),
-
-    -- Common
-    ('en', 'common.error', 'Error'),
-    ('en', 'common.loading', 'Loading...'),
-    ('en', 'common.user', 'User'),
-    ('de', 'common.error', 'Fehler'),
-    ('de', 'common.loading', 'Wird geladen...'),
-    ('de', 'common.user', 'Benutzer'),
 
     -- Calendar Component (used in DialogCalendar.vue)
     ('en', 'guild.components.dialog_calendar.date.select', 'Select Date'),
@@ -866,14 +879,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.appearance.language_description', 'Wählen Sie Ihre bevorzugte Sprache'),
     ('de', 'settings.appearance.language_en', 'Englisch'),
     ('de', 'settings.appearance.language_de', 'Deutsch'),
-
-    -- Common
-    ('en', 'common.cancel', 'Cancel'),  
-    ('en', 'common.save', 'Save'),
-    ('en', 'common.delete', 'Delete'),
-    ('de', 'common.cancel', 'Abbrechen'),
-    ('de', 'common.save', 'Speichern'),
-    ('de', 'common.delete', 'Löschen'),
 
     -- Providers
     ('en', 'settings.providers.title', 'BYOK AI Providers'),
@@ -1230,10 +1235,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.tool_test.view_output', 'Ausgabe anzeigen'),
     ('de', 'settings.tool_test.run_test', 'Test ausführen'),
 
-    -- Common
-    ('en', 'common.close', 'Close'),
-    ('de', 'common.close', 'Schließen'),
-
     -- Tools Settings
     ('en', 'settings.tabs.tools', 'Tools'),
     ('en', 'settings.tools.title', 'Tools'),
@@ -1361,5 +1362,109 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.appearance.try_different_search', 'Versuchen Sie eine andere Suchanfrage'),
     ('de', 'settings.appearance.themes_powered_by', 'Mehr Themes bei'),
     ('de', 'settings.theme_deleted', 'Theme gelöscht'),
-    ('de', 'settings.theme_saved', 'Theme-Einstellungen gespeichert')
-ON CONFLICT (language, key_path) DO NOTHING;
+    ('de', 'settings.theme_saved', 'Theme-Einstellungen gespeichert'),
+
+    -- Admin Users
+    ('en', 'settings.admin_users.create_user', 'Create User'),
+    ('de', 'settings.admin_users.create_user', 'Benutzer erstellen'),
+    ('en', 'settings.admin_users.search_placeholder', 'Search users...'),
+    ('de', 'settings.admin_users.search_placeholder', 'Benutzer suchen...'),
+    ('en', 'settings.admin_users.filter_role', 'Filter role'),
+    ('de', 'settings.admin_users.filter_role', 'Nach Rolle filtern'),
+    ('en', 'settings.admin_users.role_all', 'All'),
+    ('de', 'settings.admin_users.role_all', 'Alle'),
+    ('en', 'settings.admin_users.no_users', 'No users found'),
+    ('de', 'settings.admin_users.no_users', 'Keine Benutzer gefunden'),
+    ('en', 'settings.admin_users.cannot_modify_self', 'You cannot modify your own account'),
+    ('de', 'settings.admin_users.cannot_modify_self', 'Sie können Ihr eigenes Konto nicht bearbeiten'),
+    ('en', 'settings.admin_users.create_user_description', 'Create a new user with optional roles and password'),
+    ('de', 'settings.admin_users.create_user_description', 'Erstellen Sie einen neuen Benutzer mit optionalen Rollen und Passwort'),
+    ('en', 'settings.admin_users.field_email', 'Email'),
+    ('de', 'settings.admin_users.field_email', 'E-Mail'),
+    ('en', 'settings.admin_users.field_username', 'Username'),
+    ('de', 'settings.admin_users.field_username', 'Benutzername'),
+    ('en', 'settings.admin_users.field_password', 'Password'),
+    ('de', 'settings.admin_users.field_password', 'Passwort'),
+    ('en', 'settings.admin_users.field_roles', 'Roles'),
+    ('de', 'settings.admin_users.field_roles', 'Rollen'),
+    ('en', 'settings.admin_users.edit_user', 'Edit User'),
+    ('de', 'settings.admin_users.edit_user', 'Benutzer bearbeiten'),
+    ('en', 'settings.admin_users.reset_password', 'Reset Password'),
+    ('de', 'settings.admin_users.reset_password', 'Passwort zurücksetzen'),
+    ('en', 'settings.admin_users.reset_password_placeholder', 'New password (leave blank to keep current)'),
+    ('de', 'settings.admin_users.reset_password_placeholder', 'Neues Passwort (leer lassen, um aktuelles zu behalten)'),
+    ('en', 'settings.admin_users.delete_user', 'Delete User'),
+    ('de', 'settings.admin_users.delete_user', 'Benutzer löschen'),
+    ('en', 'settings.admin_users.delete_confirm', 'Are you sure you want to delete {username}? This action cannot be undone.'),
+    ('de', 'settings.admin_users.delete_confirm', 'Möchten Sie {username} wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.'),
+    ('en', 'settings.admin_users.load_error', 'Failed to load users'),
+    ('de', 'settings.admin_users.load_error', 'Benutzer konnten nicht geladen werden'),
+    ('en', 'settings.admin_users.create_success', 'User created'),
+    ('de', 'settings.admin_users.create_success', 'Benutzer erstellt'),
+    ('en', 'settings.admin_users.create_error', 'Failed to create user'),
+    ('de', 'settings.admin_users.create_error', 'Fehler beim Erstellen des Benutzers'),
+    ('en', 'settings.admin_users.edit_success', 'User updated'),
+    ('de', 'settings.admin_users.edit_success', 'Benutzer aktualisiert'),
+    ('en', 'settings.admin_users.edit_error', 'Failed to update user'),
+    ('de', 'settings.admin_users.edit_error', 'Fehler beim Aktualisieren des Benutzers'),
+    ('en', 'settings.admin_users.delete_success', 'User deleted'),
+    ('de', 'settings.admin_users.delete_success', 'Benutzer gelöscht'),
+    ('en', 'settings.admin_users.delete_error', 'Failed to delete user'),
+    ('de', 'settings.admin_users.delete_error', 'Fehler beim Löschen des Benutzers'),
+    ('en', 'settings.admin_users.select_roles', 'Select roles'),
+    ('de', 'settings.admin_users.select_roles', 'Rollen auswählen'),
+
+    -- models
+    ('en', 'settings.tabs.models',  'Models'),
+    ('en', 'settings.models.description', 'Manage and configure available AI models.'),
+    ('en', 'settings.models.search', 'Search models...'),
+    ('en', 'settings.models.no_models', 'No models found.'),
+    ('en', 'settings.models.not_found', 'Model not found.'),
+    ('en', 'settings.models.save_success', 'Model configuration saved successfully.'),
+    ('en', 'settings.models.save_error', 'Failed to save model configuration.'),
+    ('en', 'settings.models.editor.loading', 'Loading model...'),
+    ('en', 'settings.models.editor.general', 'General Configuration'),
+    ('en', 'settings.models.editor.display_name', 'Display Name'),
+    ('en', 'settings.models.editor.is_enabled', 'Enabled'),
+    ('en', 'settings.models.editor.description', 'Description'),
+    ('en', 'settings.models.editor.icon_url', 'Icon URL'),
+    ('en', 'settings.models.editor.system_prompt', 'System Prompt'),
+    ('en', 'settings.models.editor.system_prompt_desc', 'Base system prompt applied to all conversations with this model.'),
+    ('en', 'settings.models.editor.system_prompt_placeholder', 'You are a helpful AI assistant...'),
+    ('en', 'settings.models.editor.sampling', 'Sampling Parameters'),
+    ('en', 'settings.models.editor.sampling_desc', 'Default sampling parameters for this model.'),
+    ('en', 'settings.models.editor.temperature', 'Temperature'),
+    ('en', 'settings.models.editor.top_p', 'Top P'),
+    ('en', 'settings.models.editor.max_tokens', 'Max Tokens'),
+    ('en', 'settings.models.editor.icon_tab_url', 'URL'),
+    ('en', 'settings.models.editor.icon_tab_upload', 'Upload'),
+    ('en', 'settings.models.editor.icon_choose_file', 'Choose Image'),
+    ('en', 'settings.models.editor.icon_upload_hint', 'Upload a local image to use as the model icon.'),
+    ('en', 'settings.models.editor.icon_clear', 'Clear icon'),
+    ('en', 'settings.models.editor.description_tab_write', 'Write'),
+    ('en', 'settings.models.editor.description_tab_preview', 'Preview'),
+    ('en', 'settings.models.editor.description_placeholder', 'Describe this model using markdown...'),
+    ('en', 'settings.models.editor.description_markdown_hint', 'Markdown is supported'),
+    ('en', 'settings.models.editor.description_empty_preview', 'Nothing to preview'),
+    ('en', 'settings.models.editor.unsaved_changes', 'Unsaved changes'),
+    ('en', 'settings.models.editor.unsaved_dialog_title', 'Unsaved Changes'),
+    ('en', 'settings.models.editor.unsaved_dialog_desc', 'You have unsaved changes that will be lost. Are you sure you want to go back?'),
+    ('en', 'settings.models.editor.discard_changes', 'Discard & Go Back'),
+    ('en', 'settings.models.editor.keep_editing', 'Keep Editing'),
+    ('de', 'settings.models.editor.icon_tab_url', 'URL'),
+    ('de', 'settings.models.editor.icon_tab_upload', 'Hochladen'),
+    ('de', 'settings.models.editor.icon_choose_file', 'Bild auswählen'),
+    ('de', 'settings.models.editor.icon_upload_hint', 'Lade ein lokales Bild als Modell-Icon hoch.'),
+    ('de', 'settings.models.editor.icon_clear', 'Icon entfernen'),
+    ('de', 'settings.models.editor.description_tab_write', 'Schreiben'),
+    ('de', 'settings.models.editor.description_tab_preview', 'Vorschau'),
+    ('de', 'settings.models.editor.description_placeholder', 'Beschreibe dieses Modell mit Markdown...'),
+    ('de', 'settings.models.editor.description_markdown_hint', 'Markdown wird unterstützt'),
+    ('de', 'settings.models.editor.description_empty_preview', 'Nichts zum Anzeigen'),
+    ('de', 'settings.models.editor.unsaved_changes', 'Nicht gespeicherte Änderungen'),
+    ('de', 'settings.models.editor.unsaved_dialog_title', 'Nicht gespeicherte Änderungen'),
+    ('de', 'settings.models.editor.unsaved_dialog_desc', 'Du hast nicht gespeicherte Änderungen, die verloren gehen. Möchtest du wirklich zurückgehen?'),
+    ('de', 'settings.models.editor.discard_changes', 'Verwerfen & Zurück'),
+    ('de', 'settings.models.editor.keep_editing', 'Weiter bearbeiten')
+
+    ON CONFLICT (language, key_path) DO NOTHING;

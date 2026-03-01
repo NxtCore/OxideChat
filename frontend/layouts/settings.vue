@@ -35,6 +35,7 @@ import 'vue-sonner/style.css';
 
 useHead({
 	title: 'OxideChat - Settings',
+	link: [{rel: 'icon', type: 'image/svg+xml', href: '/light_transparent.svg'}],
 	bodyAttrs: {
 		class: 'dark', // Force dark mode for now as per preference
 	},
