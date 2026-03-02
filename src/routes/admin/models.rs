@@ -11,7 +11,6 @@ use axum::{
 	extract::{Path, State},
 	response::IntoResponse,
 };
-use serde_json::Value;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -94,20 +93,6 @@ pub async fn update_model(State(state): State<Arc<JobState>>, cookies: Cookies, 
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	};
-
-	if let Some(ref name) = req.display_name {
-		if let Err(e) = Model::update_via_connection(&mut *tx, &id, &[("display_name", &Value::String(name.clone()))]).await {
-			eprintln!("[ADMIN] Failed to update display_name: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	}
-
-	if let Some(enabled) = req.is_enabled {
-		if let Err(e) = Model::update_via_connection(&mut *tx, &id, &[("is_enabled", &Value::Bool(enabled))]).await {
-			eprintln!("[ADMIN] Failed to update is_enabled: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	}
 
 	let model_info: Option<(String, String)> = match sqlx::query_as(format!("SELECT display_name, model_id FROM {} WHERE id = $1", Model::new().table()).as_str())
 		.bind(id)

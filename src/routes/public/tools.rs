@@ -1,17 +1,14 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
+use crate::types::consts::{ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
 
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use crate::utils::tools::ToolExecutor;
 use axum::{
-	Json,
-	extract::{Path, State},
-	http::StatusCode,
+	extract::{State},
 	response::IntoResponse,
 };
-use sha2::{Digest, Sha256};
+use sha2::{Digest};
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;

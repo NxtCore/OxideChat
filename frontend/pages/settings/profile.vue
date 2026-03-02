@@ -1,5 +1,5 @@
 <template>
-	<div class="max-w-2xl">
+	<div class="w-full">
 		<!-- Profile Information Card -->
 		<div class="rounded-lg border border-border bg-card p-6">
 			<div class="mb-4">

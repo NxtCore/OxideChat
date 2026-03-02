@@ -22,7 +22,6 @@ use omniference::{
 	stream::StreamEvent,
 	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec},
 };
-use serde_json::Value;
 use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
 use tower_cookies::Cookies;
 use uuid::Uuid;
