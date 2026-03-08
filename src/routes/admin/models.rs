@@ -18,6 +18,34 @@ use uuid::Uuid;
 const ADMIN_MODELS_VIEW: &str = "admin.providers.view";
 const ADMIN_MODELS_EDIT: &str = "admin.providers.edit";
 
+fn build_extra_settings(base: Option<&serde_json::Value>, reasoning_effort: Option<&str>, reasoning_budget_tokens: Option<u32>) -> Option<serde_json::Value> {
+	let mut map = if let Some(serde_json::Value::Object(obj)) = base {
+		obj.clone()
+	} else {
+		serde_json::Map::new()
+	};
+
+	match reasoning_effort {
+		Some(effort) => {
+			map.insert("reasoning_effort".to_string(), serde_json::Value::String(effort.to_string()));
+		}
+		None => {
+			map.remove("reasoning_effort");
+		}
+	}
+
+	match reasoning_budget_tokens {
+		Some(budget) => {
+			map.insert("reasoning_budget_tokens".to_string(), serde_json::Value::Number(budget.into()));
+		}
+		None => {
+			map.remove("reasoning_budget_tokens");
+		}
+	}
+
+	if map.is_empty() { None } else { Some(serde_json::Value::Object(map)) }
+}
+
 /// GET /api/v1/admin/models
 pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ModelListParams>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
@@ -105,6 +133,8 @@ pub async fn update_model(State(state): State<Arc<JobState>>, cookies: Cookies, 
 	};
 
 	if let Some((m_name, m_id)) = model_info {
+		let extra_settings = build_extra_settings(req.extra_settings.as_ref(), req.reasoning_effort.as_deref(), req.reasoning_budget_tokens);
+
 		if let Err(e) = ModelConfig::upsert_system_config(
 			&mut *tx,
 			&id,
@@ -125,7 +155,7 @@ pub async fn update_model(State(state): State<Arc<JobState>>, cookies: Cookies, 
 			req.is_favorite,
 			req.category.as_deref(),
 			req.tags.as_ref(),
-			req.extra_settings.as_ref(),
+			extra_settings.as_ref(),
 		)
 		.await
 		{

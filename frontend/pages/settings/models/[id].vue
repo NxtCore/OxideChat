@@ -201,6 +201,7 @@
 						</div>
 						<ShadTextarea
 							id="system-prompt"
+							ref="systemPromptTextareaRef"
 							v-model="formData.system_prompt"
 							:placeholder="store.getTranslation('settings.models.editor.system_prompt_placeholder')"
 							rows="12"
@@ -209,6 +210,27 @@
 						<p class="text-xs text-muted-foreground">
 							{{ store.getTranslation('settings.models.editor.system_prompt_hint') }}
 						</p>
+
+						<!-- Variables Reference Panel -->
+						<div class="rounded-lg border border-border bg-muted/30 p-3 space-y-2.5">
+							<p class="text-xs font-semibold text-foreground">
+								{{ store.getTranslation('settings.models.editor.variables_panel_title') }}
+							</p>
+							<p class="text-xs text-muted-foreground">
+								{{ store.getTranslation('settings.models.editor.variables_panel_desc') }}
+							</p>
+							<div class="flex flex-wrap gap-2">
+								<div
+									v-for="v in systemPromptVariables"
+									:key="v.token"
+									class="group flex items-start gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors"
+									@click="insertVariable(v.token)"
+								>
+									<code class="text-xs font-mono text-primary whitespace-nowrap">{{ v.token }}</code>
+									<span class="text-xs text-muted-foreground leading-tight">{{ store.getTranslation(v.descKey) }}</span>
+								</div>
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -255,12 +277,7 @@
 									<span v-if="formData.sampling.temperature !== null" class="text-sm font-mono font-medium text-primary tabular-nums">
 										{{ formData.sampling.temperature.toFixed(2) }}
 									</span>
-									<ShadButton
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6"
-										@click="toggleParam('temperature', 0.7)"
-									>
+									<ShadButton variant="ghost" size="icon" class="h-6 w-6" @click="toggleParam('temperature', 0.7)">
 										<Minus v-if="formData.sampling.temperature !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 										<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
 									</ShadButton>
@@ -300,12 +317,7 @@
 									<span v-if="formData.sampling.max_tokens !== null" class="text-sm font-mono font-medium text-primary tabular-nums">
 										{{ formData.sampling.max_tokens.toLocaleString() }}
 									</span>
-									<ShadButton
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6"
-										@click="toggleParam('max_tokens', 4096)"
-									>
+									<ShadButton variant="ghost" size="icon" class="h-6 w-6" @click="toggleParam('max_tokens', 4096)">
 										<Minus v-if="formData.sampling.max_tokens !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 										<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
 									</ShadButton>
@@ -353,12 +365,7 @@
 									<span v-if="formData.sampling.top_p !== null" class="text-sm font-mono font-medium text-primary tabular-nums">
 										{{ formData.sampling.top_p.toFixed(2) }}
 									</span>
-									<ShadButton
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6"
-										@click="toggleParam('top_p', 1)"
-									>
+									<ShadButton variant="ghost" size="icon" class="h-6 w-6" @click="toggleParam('top_p', 1)">
 										<Minus v-if="formData.sampling.top_p !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 										<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
 									</ShadButton>
@@ -398,12 +405,7 @@
 									<span v-if="formData.sampling.top_k !== null" class="text-sm font-mono font-medium text-primary tabular-nums">
 										{{ formData.sampling.top_k }}
 									</span>
-									<ShadButton
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6"
-										@click="toggleParam('top_k', 40)"
-									>
+									<ShadButton variant="ghost" size="icon" class="h-6 w-6" @click="toggleParam('top_k', 40)">
 										<Minus v-if="formData.sampling.top_k !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 										<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
 									</ShadButton>
@@ -451,12 +453,7 @@
 									<span v-if="formData.sampling.frequency_penalty !== null" class="text-sm font-mono font-medium text-primary tabular-nums">
 										{{ (formData.sampling.frequency_penalty >= 0 ? '+' : '') + formData.sampling.frequency_penalty.toFixed(2) }}
 									</span>
-									<ShadButton
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6"
-										@click="toggleParam('frequency_penalty', 0)"
-									>
+									<ShadButton variant="ghost" size="icon" class="h-6 w-6" @click="toggleParam('frequency_penalty', 0)">
 										<Minus v-if="formData.sampling.frequency_penalty !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 										<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
 									</ShadButton>
@@ -497,12 +494,7 @@
 									<span v-if="formData.sampling.presence_penalty !== null" class="text-sm font-mono font-medium text-primary tabular-nums">
 										{{ (formData.sampling.presence_penalty >= 0 ? '+' : '') + formData.sampling.presence_penalty.toFixed(2) }}
 									</span>
-									<ShadButton
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6"
-										@click="toggleParam('presence_penalty', 0)"
-									>
+									<ShadButton variant="ghost" size="icon" class="h-6 w-6" @click="toggleParam('presence_penalty', 0)">
 										<Minus v-if="formData.sampling.presence_penalty !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 										<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
 									</ShadButton>
@@ -530,11 +522,11 @@
 						<div
 							v-if="hasEffortReasoning"
 							class="rounded-lg border transition-colors"
-							:class="formData.sampling.reasoning_effort !== null ? 'border-border bg-card' : 'border-dashed border-border/50 bg-muted/20'"
+							:class="formData.reasoning_effort !== null ? 'border-border bg-card' : 'border-dashed border-border/50 bg-muted/20'"
 						>
 							<div class="flex items-center justify-between px-3 pt-3 pb-2">
 								<div class="flex items-center gap-1.5">
-									<span class="text-sm font-medium" :class="formData.sampling.reasoning_effort !== null ? 'text-foreground' : 'text-muted-foreground'">
+									<span class="text-sm font-medium" :class="formData.reasoning_effort !== null ? 'text-foreground' : 'text-muted-foreground'">
 										{{ store.getTranslation('settings.models.editor.reasoning_effort') }}
 									</span>
 									<ShadTooltipProvider>
@@ -552,14 +544,14 @@
 									variant="ghost"
 									size="icon"
 									class="h-6 w-6"
-									@click="toggleParam('reasoning_effort', availableEffortLevels[1] ?? availableEffortLevels[0] ?? 'medium')"
+									@click="toggleReasoningEffort(availableEffortLevels[1] ?? availableEffortLevels[0] ?? 'medium')"
 								>
-									<Minus v-if="formData.sampling.reasoning_effort !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+									<Minus v-if="formData.reasoning_effort !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 									<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
 								</ShadButton>
 							</div>
-							<div v-if="formData.sampling.reasoning_effort !== null" class="px-3 pb-3">
-								<ShadSelect v-model="formData.sampling.reasoning_effort">
+							<div v-if="formData.reasoning_effort !== null" class="px-3 pb-3">
+								<ShadSelect v-model="formData.reasoning_effort">
 									<ShadSelectTrigger class="h-8 text-xs w-full">
 										<ShadSelectValue :placeholder="store.getTranslation('settings.models.editor.reasoning_effort_placeholder')" />
 									</ShadSelectTrigger>
@@ -578,11 +570,11 @@
 						<div
 							v-if="hasBudgetReasoning"
 							class="rounded-lg border transition-colors"
-							:class="formData.sampling.reasoning_budget_tokens !== null ? 'border-border bg-card' : 'border-dashed border-border/50 bg-muted/20'"
+							:class="formData.reasoning_budget_tokens !== null ? 'border-border bg-card' : 'border-dashed border-border/50 bg-muted/20'"
 						>
 							<div class="flex items-center justify-between px-3 pt-3 pb-2">
 								<div class="flex items-center gap-1.5">
-									<span class="text-sm font-medium" :class="formData.sampling.reasoning_budget_tokens !== null ? 'text-foreground' : 'text-muted-foreground'">
+									<span class="text-sm font-medium" :class="formData.reasoning_budget_tokens !== null ? 'text-foreground' : 'text-muted-foreground'">
 										{{ store.getTranslation('settings.models.editor.reasoning_budget') }}
 									</span>
 									<ShadTooltipProvider>
@@ -597,21 +589,16 @@
 									</ShadTooltipProvider>
 								</div>
 								<div class="flex items-center gap-2">
-									<span v-if="formData.sampling.reasoning_budget_tokens !== null" class="text-sm font-mono font-medium text-primary tabular-nums">
-										{{ Math.round(formData.sampling.reasoning_budget_tokens / 1024) }}K
+									<span v-if="formData.reasoning_budget_tokens !== null" class="text-sm font-mono font-medium text-primary tabular-nums">
+										{{ Math.round(formData.reasoning_budget_tokens / 1024) }}K
 									</span>
-									<ShadButton
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6"
-										@click="toggleParam('reasoning_budget_tokens', reasoningBudgetRange.min)"
-									>
-										<Minus v-if="formData.sampling.reasoning_budget_tokens !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+									<ShadButton variant="ghost" size="icon" class="h-6 w-6" @click="toggleReasoningBudget(reasoningBudgetRange.min)">
+										<Minus v-if="formData.reasoning_budget_tokens !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 										<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
 									</ShadButton>
 								</div>
 							</div>
-							<div v-if="formData.sampling.reasoning_budget_tokens !== null" class="px-3 pb-3 space-y-2">
+							<div v-if="formData.reasoning_budget_tokens !== null" class="px-3 pb-3 space-y-2">
 								<ShadSlider v-model="reasoningBudgetSlider" :min="reasoningBudgetRange.min" :max="reasoningBudgetRange.max" :step="1024" />
 								<div class="flex justify-between text-[10px] text-muted-foreground">
 									<span>{{ Math.round(reasoningBudgetRange.min / 1024) }}K</span>
@@ -726,7 +713,10 @@
 						>
 							<div class="flex items-center justify-between px-3 py-3">
 								<div class="flex items-center gap-1.5">
-									<span class="text-sm font-medium" :class="formData.sampling.parallel_tool_calls !== null ? 'text-foreground' : 'text-muted-foreground'">
+									<span
+										class="text-sm font-medium"
+										:class="formData.sampling.parallel_tool_calls !== null ? 'text-foreground' : 'text-muted-foreground'"
+									>
 										{{ store.getTranslation('settings.models.editor.parallel_tool_calls') }}
 									</span>
 									<ShadTooltipProvider>
@@ -741,10 +731,7 @@
 									</ShadTooltipProvider>
 								</div>
 								<div class="flex items-center gap-2">
-									<ShadSwitch
-										v-if="formData.sampling.parallel_tool_calls !== null"
-										v-model:model-value="formData.sampling.parallel_tool_calls"
-									/>
+									<ShadSwitch v-if="formData.sampling.parallel_tool_calls !== null" v-model:model-value="formData.sampling.parallel_tool_calls" />
 									<ShadButton variant="ghost" size="icon" class="h-6 w-6" @click="toggleParam('parallel_tool_calls', true)">
 										<Minus v-if="formData.sampling.parallel_tool_calls !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 										<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
@@ -775,10 +762,7 @@
 									</ShadTooltipProvider>
 								</div>
 								<div class="flex items-center gap-2">
-									<ShadSwitch
-										v-if="formData.sampling.logprobs !== null"
-										v-model:model-value="formData.sampling.logprobs"
-									/>
+									<ShadSwitch v-if="formData.sampling.logprobs !== null" v-model:model-value="formData.sampling.logprobs" />
 									<ShadButton variant="ghost" size="icon" class="h-6 w-6" @click="toggleParam('logprobs', false)">
 										<Minus v-if="formData.sampling.logprobs !== null" class="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
 										<Plus v-else class="h-3.5 w-3.5 text-muted-foreground" />
@@ -892,8 +876,6 @@ type SamplingState = {
 	logprobs: boolean | null;
 	top_logprobs: number | null;
 	parallel_tool_calls: boolean | null;
-	reasoning_effort: string | null;
-	reasoning_budget_tokens: number | null;
 };
 
 const formData = reactive({
@@ -914,9 +896,9 @@ const formData = reactive({
 		logprobs: null,
 		top_logprobs: null,
 		parallel_tool_calls: null,
-		reasoning_effort: null,
-		reasoning_budget_tokens: null,
 	} as SamplingState,
+	reasoning_effort: null as string | null,
+	reasoning_budget_tokens: null as number | null,
 });
 
 function makeSlider(key: keyof SamplingState, fallback: number) {
@@ -935,7 +917,13 @@ const topKSlider = makeSlider('top_k', 40);
 const frequencyPenaltySlider = makeSlider('frequency_penalty', 0);
 const presencePenaltySlider = makeSlider('presence_penalty', 0);
 const topLogprobsSlider = makeSlider('top_logprobs', 5);
-const reasoningBudgetSlider = makeSlider('reasoning_budget_tokens', 1024);
+
+const reasoningBudgetSlider = computed({
+	get: () => [formData.reasoning_budget_tokens ?? 1024],
+	set: (val: number[]) => {
+		formData.reasoning_budget_tokens = val[0] ?? null;
+	},
+});
 
 const hasUnsavedChanges = computed(() => JSON.stringify(formData) !== originalData.value);
 
@@ -985,6 +973,22 @@ function toggleParam(key: keyof SamplingState, defaultValue: any) {
 	}
 }
 
+function toggleReasoningEffort(defaultValue: string) {
+	if (formData.reasoning_effort !== null) {
+		formData.reasoning_effort = null;
+	} else {
+		formData.reasoning_effort = defaultValue;
+	}
+}
+
+function toggleReasoningBudget(defaultValue: number) {
+	if (formData.reasoning_budget_tokens !== null) {
+		formData.reasoning_budget_tokens = null;
+	} else {
+		formData.reasoning_budget_tokens = defaultValue;
+	}
+}
+
 function toggleStopSequences() {
 	formData.sampling.stop = formData.sampling.stop !== null ? null : [];
 }
@@ -1001,6 +1005,33 @@ function addStopSequence() {
 
 function removeStopSequence(index: number) {
 	formData.sampling.stop?.splice(index, 1);
+}
+
+const systemPromptVariables = [
+	{token: '{{user_name}}', descKey: 'settings.models.editor.var_user_name'},
+	{token: '{{user_email}}', descKey: 'settings.models.editor.var_user_email'},
+	{token: '{{date}}', descKey: 'settings.models.editor.var_date'},
+	{token: '{{time}}', descKey: 'settings.models.editor.var_time'},
+	{token: '{{datetime}}', descKey: 'settings.models.editor.var_datetime'},
+	{token: '{{model_name}}', descKey: 'settings.models.editor.var_model_name'},
+	{token: '{{model_id}}', descKey: 'settings.models.editor.var_model_id'},
+];
+
+const systemPromptTextareaRef = ref<HTMLTextAreaElement | null>(null);
+
+function insertVariable(token: string) {
+	const el = systemPromptTextareaRef.value;
+	if (el) {
+		const start = el.selectionStart ?? formData.system_prompt.length;
+		const end = el.selectionEnd ?? start;
+		formData.system_prompt = formData.system_prompt.slice(0, start) + token + formData.system_prompt.slice(end);
+		nextTick(() => {
+			el.focus();
+			el.setSelectionRange(start + token.length, start + token.length);
+		});
+	} else {
+		formData.system_prompt = formData.system_prompt + token;
+	}
 }
 
 onMounted(async () => {
@@ -1026,8 +1057,10 @@ function populateForm(data: Record<string, any>) {
 	formData.sampling.logprobs = s.logprobs !== undefined ? s.logprobs : null;
 	formData.sampling.top_logprobs = s.top_logprobs !== undefined ? s.top_logprobs : null;
 	formData.sampling.parallel_tool_calls = s.parallel_tool_calls !== undefined ? s.parallel_tool_calls : null;
-	formData.sampling.reasoning_effort = s.reasoning_effort !== undefined ? s.reasoning_effort : null;
-	formData.sampling.reasoning_budget_tokens = s.reasoning_budget_tokens !== undefined ? s.reasoning_budget_tokens : null;
+
+	const es = data.extra_settings ?? {};
+	formData.reasoning_effort = es.reasoning_effort !== undefined ? es.reasoning_effort : null;
+	formData.reasoning_budget_tokens = es.reasoning_budget_tokens !== undefined ? es.reasoning_budget_tokens : null;
 
 	originalData.value = JSON.stringify(formData);
 }
@@ -1099,8 +1132,6 @@ function buildSamplingPayload(): Record<string, any> | null {
 	if (s.logprobs !== null) payload.logprobs = s.logprobs;
 	if (s.top_logprobs !== null) payload.top_logprobs = s.top_logprobs;
 	if (s.parallel_tool_calls !== null) payload.parallel_tool_calls = s.parallel_tool_calls;
-	if (s.reasoning_effort !== null) payload.reasoning_effort = s.reasoning_effort;
-	if (s.reasoning_budget_tokens !== null) payload.reasoning_budget_tokens = s.reasoning_budget_tokens;
 
 	return Object.keys(payload).length > 0 ? payload : null;
 }
@@ -1118,6 +1149,8 @@ async function saveModel() {
 				sampling: buildSamplingPayload(),
 				icon: formData.icon,
 				description: formData.description,
+				reasoning_effort: formData.reasoning_effort,
+				reasoning_budget_tokens: formData.reasoning_budget_tokens,
 			},
 		});
 

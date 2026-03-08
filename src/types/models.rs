@@ -1,4 +1,5 @@
 use crate::types::BaseType;
+use crate::types::axum::PaginatedResponse;
 use crate::types::models_configs::ModelConfig;
 use crate::types::providers::{Provider, ProviderSlim};
 use chrono::{DateTime, Utc};
@@ -7,7 +8,6 @@ use serde_json::Value;
 use sqlx::Row;
 use sqlx::types::Json;
 use uuid::Uuid;
-use crate::types::axum::PaginatedResponse;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Model {
@@ -60,6 +60,7 @@ pub struct ModelDetailed {
 	pub description: Option<String>,
 	pub system_prompt: Option<String>,
 	pub sampling: Option<Value>,
+	pub extra_settings: Option<Value>,
 	pub is_public: bool,
 	pub is_featured: bool,
 	pub is_default: bool,
@@ -222,10 +223,7 @@ impl Model {
 				}
 			})
 			.collect();
-		Ok(PaginatedResponse {
-			has_more: false,
-			items,
-		})
+		Ok(PaginatedResponse { has_more: false, items })
 	}
 
 	/// List all models for admin with pagination, including system config fields.
@@ -271,9 +269,7 @@ impl Model {
 			]),
 			model_alias = model.alias(),
 			model_table = model.table(),
-			model_config_fields = model_config.aliased_fields_str_from_list(vec![
-				"icon",
-			]),
+			model_config_fields = model_config.aliased_fields_str_from_list(vec!["icon",]),
 			model_config_alias = model_config.alias(),
 			model_config_table = model_config.table(),
 			provider_fields = provider.aliased_fields_str_from_list(vec!["name", "kind", "id"]),
@@ -281,34 +277,39 @@ impl Model {
 			provider_table = provider.table(),
 		);
 
-		let rows = sqlx::query(&query).bind(limit).bind(offset).bind(search_query.as_deref().map(|s| format!("%{}%", s)).unwrap_or("%".to_string())).fetch_all(pool).await?;
+		let rows = sqlx::query(&query)
+			.bind(limit)
+			.bind(offset)
+			.bind(search_query.as_deref().map(|s| format!("%{}%", s)).unwrap_or("%".to_string()))
+			.fetch_all(pool)
+			.await?;
 
 		let has_more = rows.len() > size as usize;
-		let items = rows.into_iter().take(if size <= 0 { usize::MAX } else { size as usize }).map(|row| ModelListAdmin {
-			id: row.get(format!("{}_id", model.alias()).as_str()),
-			model_id: row.get(format!("{}_model_id", model.alias()).as_str()),
-			display_name: row.get(format!("{}_display_name", model.alias()).as_str()),
-			capabilities: row.get::<Json<Vec<String>>, _>(format!("{}_capabilities", model.alias()).as_str()).0,
-			input_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_input_modalities", model.alias()).as_str()).0,
-			output_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_output_modalities", model.alias()).as_str()).0,
-			context_length: row.get::<Option<i32>, _>(format!("{}_context_length", model.alias()).as_str()),
-			max_tokens: row.get::<Option<i32>, _>(format!("{}_max_tokens", model.alias()).as_str()),
-			is_enabled: row.get(format!("{}_is_enabled", model.alias()).as_str()),
-			created_at: row.get(format!("{}_created_at", model.alias()).as_str()),
-			updated_at: row.get(format!("{}_updated_at", model.alias()).as_str()),
-			provider: ProviderSlim {
-				id: row.get(format!("{}_id", provider.alias()).as_str()),
-				name: row.get(format!("{}_name", provider.alias()).as_str()),
-				kind: row.get(format!("{}_kind", provider.alias()).as_str()),
-			},
-			icon: row.get(format!("{}_icon", model_config.alias()).as_str()),
-		})
-		.collect();
+		let items = rows
+			.into_iter()
+			.take(if size <= 0 { usize::MAX } else { size as usize })
+			.map(|row| ModelListAdmin {
+				id: row.get(format!("{}_id", model.alias()).as_str()),
+				model_id: row.get(format!("{}_model_id", model.alias()).as_str()),
+				display_name: row.get(format!("{}_display_name", model.alias()).as_str()),
+				capabilities: row.get::<Json<Vec<String>>, _>(format!("{}_capabilities", model.alias()).as_str()).0,
+				input_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_input_modalities", model.alias()).as_str()).0,
+				output_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_output_modalities", model.alias()).as_str()).0,
+				context_length: row.get::<Option<i32>, _>(format!("{}_context_length", model.alias()).as_str()),
+				max_tokens: row.get::<Option<i32>, _>(format!("{}_max_tokens", model.alias()).as_str()),
+				is_enabled: row.get(format!("{}_is_enabled", model.alias()).as_str()),
+				created_at: row.get(format!("{}_created_at", model.alias()).as_str()),
+				updated_at: row.get(format!("{}_updated_at", model.alias()).as_str()),
+				provider: ProviderSlim {
+					id: row.get(format!("{}_id", provider.alias()).as_str()),
+					name: row.get(format!("{}_name", provider.alias()).as_str()),
+					kind: row.get(format!("{}_kind", provider.alias()).as_str()),
+				},
+				icon: row.get(format!("{}_icon", model_config.alias()).as_str()),
+			})
+			.collect();
 
-		Ok(PaginatedResponse {
-			has_more,
-			items,
-		})
+		Ok(PaginatedResponse { has_more, items })
 	}
 
 	/// Find a single model by ID, joined with its provider and system config.
@@ -353,6 +354,7 @@ impl Model {
 				"description",
 				"system_prompt",
 				"sampling",
+				"extra_settings",
 				"is_public",
 				"is_featured",
 				"is_default",
@@ -393,6 +395,9 @@ impl Model {
 			description: row.get(format!("{}_description", model_config.alias()).as_str()),
 			system_prompt: row.get(format!("{}_system_prompt", model_config.alias()).as_str()),
 			sampling: row.get::<Option<Json<Value>>, _>(format!("{}_sampling", model_config.alias()).as_str()).map(|j| j.0),
+			extra_settings: row
+				.get::<Option<Json<Value>>, _>(format!("{}_extra_settings", model_config.alias()).as_str())
+				.map(|j| j.0),
 			is_public: row.get::<Option<bool>, _>(format!("{}_is_public", model_config.alias()).as_str()).unwrap_or(false),
 			is_featured: row.get::<Option<bool>, _>(format!("{}_is_featured", model_config.alias()).as_str()).unwrap_or(false),
 			is_default: row.get::<Option<bool>, _>(format!("{}_is_default", model_config.alias()).as_str()).unwrap_or(false),

@@ -34,5 +34,6 @@ pub struct AdminModelUpdateBody {
 	pub category: Option<String>,
 	pub tags: Option<Value>,
 	pub extra_settings: Option<Value>,
+	pub reasoning_effort: Option<String>,
+	pub reasoning_budget_tokens: Option<u32>,
 }
-
