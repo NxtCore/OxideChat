@@ -182,8 +182,8 @@ const samplingConfig = [
 ];
 
 const providerIcon = computed(() => {
-	if (!form.value.provider_name) return null;
-	return iconStore.getProviderIcon(form.value.provider_name, form.value.model_id);
+	if (!form.value.provider) return null;
+	return iconStore.getProviderIcon(form.value.provider.name, form.value.model_id);
 });
 
 const isDirty = computed(() => JSON.stringify(form.value) !== originalSnapshot.value);

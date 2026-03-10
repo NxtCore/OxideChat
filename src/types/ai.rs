@@ -2,6 +2,7 @@
 //!
 //! Types for managing AI providers, models, and usage tracking.
 
+use crate::types::models_configs::ModelConfig;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -275,102 +276,6 @@ impl StableModelKey {
 			Some((parts[0].to_string(), parts[1].to_string()))
 		} else {
 			None
-		}
-	}
-}
-
-/// Model configuration database row (user preferences)
-#[derive(Debug, Clone, FromRow)]
-pub struct ModelConfig {
-	pub id: Uuid,
-	pub owner_id: Option<Uuid>,
-	pub model_id: Option<Uuid>,
-	pub stable_key: String,
-	pub name: String,
-	pub description: Option<String>,
-	pub icon: Option<String>,
-
-	pub capabilities: Option<serde_json::Value>,
-	pub input_modalities: Option<serde_json::Value>,
-	pub output_modalities: Option<serde_json::Value>,
-	pub context_length: Option<i32>,
-	pub max_output_tokens: Option<i32>,
-
-	pub system_prompt: Option<String>,
-	pub sampling: serde_json::Value,
-
-	pub enabled_tools: serde_json::Value,
-
-	pub is_public: bool,
-	pub is_featured: bool,
-	pub is_default: bool,
-	pub is_favorite: bool,
-
-	pub category: Option<String>,
-	pub tags: serde_json::Value,
-	pub usage_count: i32,
-	pub extra_settings: serde_json::Value,
-
-	pub created_at: DateTime<Utc>,
-	pub updated_at: DateTime<Utc>,
-}
-
-/// Model config response
-#[derive(Debug, Serialize)]
-pub struct ModelConfigResponse {
-	pub id: Uuid,
-	pub owner_id: Option<Uuid>,
-	pub model_id: Option<Uuid>,
-	pub stable_key: String,
-	pub name: String,
-	pub description: Option<String>,
-	pub icon: Option<String>,
-	pub capabilities: Option<serde_json::Value>,
-	pub input_modalities: Option<serde_json::Value>,
-	pub output_modalities: Option<serde_json::Value>,
-	pub context_length: Option<i32>,
-	pub max_output_tokens: Option<i32>,
-	pub system_prompt: Option<String>,
-	pub sampling: serde_json::Value,
-	pub enabled_tools: serde_json::Value,
-	pub is_public: bool,
-	pub is_featured: bool,
-	pub is_default: bool,
-	pub is_favorite: bool,
-	pub category: Option<String>,
-	pub tags: serde_json::Value,
-	pub usage_count: i32,
-	pub created_at: DateTime<Utc>,
-	pub updated_at: DateTime<Utc>,
-}
-
-impl From<ModelConfig> for ModelConfigResponse {
-	fn from(m: ModelConfig) -> Self {
-		Self {
-			id: m.id,
-			owner_id: m.owner_id,
-			model_id: m.model_id,
-			stable_key: m.stable_key,
-			name: m.name,
-			description: m.description,
-			icon: m.icon,
-			capabilities: m.capabilities,
-			input_modalities: m.input_modalities,
-			output_modalities: m.output_modalities,
-			context_length: m.context_length,
-			max_output_tokens: m.max_output_tokens,
-			system_prompt: m.system_prompt,
-			sampling: m.sampling,
-			enabled_tools: m.enabled_tools,
-			is_public: m.is_public,
-			is_featured: m.is_featured,
-			is_default: m.is_default,
-			is_favorite: m.is_favorite,
-			category: m.category,
-			tags: m.tags,
-			usage_count: m.usage_count,
-			created_at: m.created_at,
-			updated_at: m.updated_at,
 		}
 	}
 }

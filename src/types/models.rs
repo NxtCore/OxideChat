@@ -21,8 +21,8 @@ pub struct Model {
 	pub context_length: Option<i32>,
 	pub max_tokens: Option<i32>,
 	pub is_enabled: bool,
-	pub created_at: chrono::DateTime<chrono::Utc>,
-	pub updated_at: chrono::DateTime<chrono::Utc>,
+	pub created_at: DateTime<Utc>,
+	pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize)]
@@ -37,7 +37,6 @@ pub struct ModelListPublic {
 	pub max_tokens: Option<i32>,
 	pub is_enabled: bool,
 	pub provider: ProviderSlim,
-	pub provider_name: String,
 	pub icon: Option<String>,
 	pub is_favorite: bool,
 }
@@ -128,6 +127,22 @@ impl BaseType for Model {
 }
 
 impl Model {
+	/// Escapes LIKE wildcards in a search string.
+	///
+	/// This function escapes `%`, `_`, and `\` characters by prefixing them with a backslash,
+	/// allowing users to search for literal occurrences of these characters.
+	///
+	/// # Arguments
+	///
+	/// * `s` - The string to escape
+	///
+	/// # Returns
+	///
+	/// A new string with LIKE wildcards escaped.
+	fn escape_like_pattern(s: &str) -> String {
+		s.replace('\\', r"\\").replace('%', r"\%").replace('_', r"\_")
+	}
+
 	/// Create a new model linked to a provider.
 	///
 	/// # Errors
@@ -157,13 +172,18 @@ impl Model {
 	/// # Errors
 	///
 	/// Returns `sqlx::Error` if the database query fails.
-	pub async fn list_paginated(pool: &sqlx::PgPool, page: i64, size: i64) -> Result<PaginatedResponse<ModelListPublic>, sqlx::Error> {
+	pub async fn list_paginated(pool: &sqlx::PgPool, page: i64, size: i64, show_disabled: bool) -> Result<PaginatedResponse<ModelListPublic>, sqlx::Error> {
 		let offset = (page - 1) * size;
 		let limit = if size <= 0 { None } else { Some(size + 1) };
 
 		let model = Model::new();
 		let model_config = ModelConfig::new();
 		let provider = Provider::new();
+		let where_clause = if show_disabled {
+			String::new()
+		} else {
+			format!(r"WHERE {}.is_enabled = true AND {}.is_enabled = true", model.alias(), provider_alias = provider.alias())
+		};
 		let query = format!(
 			r#"
             SELECT {model_fields}, {provider_fields}, {model_config_fields}
@@ -172,6 +192,7 @@ impl Model {
             LEFT JOIN {model_config_table} {model_config_alias}
                 ON {model_config_alias}.model_id = {model_alias}.id
                 AND {model_config_alias}.owner_id IS NULL
+            {where_clause}
             ORDER BY {model_alias}.display_name, {provider_alias}.name
             LIMIT $1 OFFSET $2
             "#,
@@ -194,9 +215,12 @@ impl Model {
 			provider_fields = provider.aliased_fields_str_from_list(vec!["name", "kind", "id"]),
 			provider_alias = provider.alias(),
 			provider_table = provider.table(),
+			where_clause = where_clause,
 		);
 
 		let rows = sqlx::query(&query).bind(limit).bind(offset).fetch_all(pool).await?;
+
+		let has_more = limit.is_some() && rows.len() > size as usize;
 		let items = rows
 			.into_iter()
 			.take(if size <= 0 { usize::MAX } else { size as usize })
@@ -217,13 +241,12 @@ impl Model {
 						name: provider_name.clone(),
 						kind: row.get(format!("{}_kind", provider.alias()).as_str()),
 					},
-					provider_name,
 					icon: row.get(format!("{}_icon", model_config.alias()).as_str()),
 					is_favorite: row.get::<Option<bool>, _>(format!("{}_is_favorite", model_config.alias()).as_str()).unwrap_or(false),
 				}
 			})
 			.collect();
-		Ok(PaginatedResponse { has_more: false, items })
+		Ok(PaginatedResponse { has_more, items })
 	}
 
 	/// List all models for admin with pagination, including system config fields.
@@ -249,7 +272,7 @@ impl Model {
             LEFT JOIN {model_config_table} {model_config_alias}
                 ON {model_config_alias}.model_id = {model_alias}.id
                 AND {model_config_alias}.owner_id IS NULL
-            WHERE {model_alias}.display_name ILIKE $3 OR {provider_alias}.name ILIKE $3
+            WHERE {model_alias}.display_name ILIKE $3 ESCAPE '\' OR {provider_alias}.name ILIKE $3 ESCAPE '\'
             ORDER BY {model_alias}.display_name, {provider_alias}.name
             LIMIT $1 OFFSET $2
             "#,
@@ -280,7 +303,7 @@ impl Model {
 		let rows = sqlx::query(&query)
 			.bind(limit)
 			.bind(offset)
-			.bind(search_query.as_deref().map(|s| format!("%{}%", s)).unwrap_or("%".to_string()))
+			.bind(search_query.as_deref().map(|s| format!("%{}%", Self::escape_like_pattern(s))).unwrap_or("%".to_string()))
 			.fetch_all(pool)
 			.await?;
 
@@ -455,5 +478,26 @@ impl Model {
 			q = q.bind(value);
 		}
 		q.fetch_optional(&mut *conn).await
+	}
+
+	/// Find display_name and model_id by ID.
+	///
+	/// # Errors
+	///
+	/// Returns `sqlx::Error` if the database query fails.
+	pub async fn find_name_and_model_id<'e, E>(executor: E, id: &Uuid) -> Result<Option<(String, String)>, sqlx::Error>
+	where
+		E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+	{
+		sqlx::query_as::<_, (String, String)>(
+			r#"
+            SELECT display_name, model_id
+            FROM models
+            WHERE id = $1
+            "#,
+		)
+		.bind(id)
+		.fetch_optional(executor)
+		.await
 	}
 }

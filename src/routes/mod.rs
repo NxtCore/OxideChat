@@ -49,7 +49,7 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		// Admin Models
 		.route("/api/v1/admin/models", get(admin::models::list_models))
 		.route("/api/v1/admin/models/{id}", get(admin::models::get_model))
-		.route("/api/v1/admin/models/{id}", put(admin::models::update_model))
+		.route("/api/v1/admin/models/{id}", patch(admin::models::patch_model))
 		// Admin Config
 		.route("/api/v1/admin/config", patch(admin::config::update_global_config))
 		// Public Config

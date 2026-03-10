@@ -100,99 +100,96 @@ impl BaseType for ModelConfig {
 	}
 }
 
-impl ModelConfig {
-	/// Insert or update the system-level (owner-less) config for a model.
+/// A typed value that can be written into a `model_configs` column.
+///
+/// Each variant maps to the Postgres type of the column it targets.
+/// Use `Null` to explicitly clear a nullable column.
+/// `JsonMerge` merges a partial JSONB patch into an existing column, removing
+/// any keys whose value is JSON null via `jsonb_strip_nulls`.
+pub enum ConfigValue<'a> {
+	Text(Option<&'a str>),
+	Int(Option<i32>),
+	Bool(bool),
+	Json(Option<&'a Value>),
+	JsonMerge(&'a Value),
+}
+
+impl ConfigValue<'_> {
+	/// Returns the SQL expression fragment for the SET clause.
 	///
-	/// Matches an existing system config by `model_id` where `owner_id IS NULL`.
-	/// If one exists it is updated in-place; otherwise a new row is inserted.
-	/// All optional fields are only applied when `Some`.
+	/// For most variants this is `$N<cast>`; for `JsonMerge` it is the merge
+	/// expression `jsonb_strip_nulls(<col> || $N::JSONB)`.
+	fn set_expr(&self, col: &str, param_idx: usize) -> String {
+		match self {
+			Self::Text(_) => format!("{col} = ${param_idx}::TEXT"),
+			Self::Int(_) => format!("{col} = ${param_idx}::INTEGER"),
+			Self::Bool(_) => format!("{col} = ${param_idx}::BOOLEAN"),
+			Self::Json(_) => format!("{col} = ${param_idx}::JSONB"),
+			Self::JsonMerge(_) => format!("{col} = jsonb_strip_nulls({col} || ${param_idx}::JSONB)"),
+		}
+	}
+}
+
+impl ModelConfig {
+	/// Ensure a system-level (owner-less) config row exists for a model.
+	///
+	/// Inserts a minimal row if none exists yet; does nothing if one is already
+	/// present. Returns the current row either way.
 	///
 	/// # Errors
 	///
 	/// Returns `sqlx::Error` if the database query fails.
-	#[allow(clippy::too_many_arguments)]
-	pub async fn upsert_system_config(
-		conn: &mut sqlx::PgConnection,
-		model_id: &Uuid,
-		stable_key: &str,
-		name: &str,
-		description: Option<&str>,
-		icon: Option<&str>,
-		system_prompt: Option<&str>,
-		sampling: Option<&Value>,
-		input_modalities: Option<&Value>,
-		output_modalities: Option<&Value>,
-		context_length: Option<i32>,
-		max_output_tokens: Option<i32>,
-		enabled_tools: Option<&Value>,
-		is_public: Option<bool>,
-		is_featured: Option<bool>,
-		is_default: Option<bool>,
-		is_favorite: Option<bool>,
-		category: Option<&str>,
-		tags: Option<&Value>,
-		extra_settings: Option<&Value>,
-	) -> Result<Self, sqlx::Error> {
+	pub async fn ensure_system_config(conn: &mut sqlx::PgConnection, model_id: &Uuid, stable_key: &str, name: &str) -> Result<Self, sqlx::Error> {
 		sqlx::query_as::<_, ModelConfig>(
 			r#"
-            INSERT INTO model_configs (
-                owner_id, model_id, stable_key, name,
-                description, icon, system_prompt, sampling,
-                input_modalities, output_modalities, context_length, max_output_tokens,
-                enabled_tools, is_public, is_featured, is_default,
-                is_favorite, category, tags, extra_settings
-            )
-            VALUES (
-                NULL, $1, $2, $3,
-                $4, $5, $6, COALESCE($7, '{}'),
-                $8, $9, $10, $11,
-                COALESCE($12, '[]'), COALESCE($13, false), COALESCE($14, false), COALESCE($15, false),
-                COALESCE($16, false), $17, COALESCE($18, '[]'), COALESCE($19, '{}')
-            )
-            ON CONFLICT (model_id) WHERE owner_id IS NULL
-            DO UPDATE SET
-                stable_key        = EXCLUDED.stable_key,
-                name              = EXCLUDED.name,
-                description       = COALESCE(EXCLUDED.description,       model_configs.description),
-                icon              = COALESCE(EXCLUDED.icon,              model_configs.icon),
-                system_prompt     = COALESCE(EXCLUDED.system_prompt,     model_configs.system_prompt),
-                sampling          = COALESCE(EXCLUDED.sampling,          model_configs.sampling),
-                input_modalities  = COALESCE(EXCLUDED.input_modalities,  model_configs.input_modalities),
-                output_modalities = COALESCE(EXCLUDED.output_modalities, model_configs.output_modalities),
-                context_length    = COALESCE(EXCLUDED.context_length,    model_configs.context_length),
-                max_output_tokens = COALESCE(EXCLUDED.max_output_tokens, model_configs.max_output_tokens),
-                enabled_tools     = COALESCE(EXCLUDED.enabled_tools,     model_configs.enabled_tools),
-                is_public         = COALESCE(EXCLUDED.is_public,         model_configs.is_public),
-                is_featured       = COALESCE(EXCLUDED.is_featured,       model_configs.is_featured),
-                is_default        = COALESCE(EXCLUDED.is_default,        model_configs.is_default),
-                is_favorite       = COALESCE(EXCLUDED.is_favorite,       model_configs.is_favorite),
-                category          = COALESCE(EXCLUDED.category,          model_configs.category),
-                tags              = COALESCE(EXCLUDED.tags,              model_configs.tags),
-                extra_settings    = COALESCE(EXCLUDED.extra_settings,    model_configs.extra_settings),
-                updated_at        = NOW()
+            INSERT INTO model_configs (owner_id, model_id, stable_key, name)
+            VALUES (NULL, $1, $2, $3)
+            ON CONFLICT (model_id) WHERE owner_id IS NULL DO UPDATE
+                SET stable_key = EXCLUDED.stable_key,
+                    name       = EXCLUDED.name,
+                    updated_at = NOW()
             RETURNING *
             "#,
 		)
 		.bind(model_id)
 		.bind(stable_key)
 		.bind(name)
-		.bind(description)
-		.bind(icon)
-		.bind(system_prompt)
-		.bind(sampling)
-		.bind(input_modalities)
-		.bind(output_modalities)
-		.bind(context_length)
-		.bind(max_output_tokens)
-		.bind(enabled_tools)
-		.bind(is_public)
-		.bind(is_featured)
-		.bind(is_default)
-		.bind(is_favorite)
-		.bind(category)
-		.bind(tags)
-		.bind(extra_settings)
 		.fetch_one(conn)
 		.await
+	}
+
+	/// Apply a partial update to the system-level config for a model.
+	///
+	/// Only the columns named in `fields` are written; every other column is
+	/// left untouched.  Pass `ConfigValue::Text(None)` / `ConfigValue::Json(None)`
+	/// / `ConfigValue::Int(None)` to explicitly set a nullable column to NULL.
+	///
+	/// # Errors
+	///
+	/// Returns `sqlx::Error` if the database query fails.
+	pub async fn patch_system_config(conn: &mut sqlx::PgConnection, model_id: &Uuid, fields: &[(&str, ConfigValue<'_>)]) -> Result<Self, sqlx::Error> {
+		let set_clause = fields
+			.iter()
+			.enumerate()
+			.map(|(i, (col, val))| val.set_expr(col, i + 2))
+			.collect::<Vec<_>>()
+			.join(", ");
+
+		let sql = format!(
+			"UPDATE model_configs SET {set_clause}, updated_at = NOW() \
+             WHERE model_id = $1 AND owner_id IS NULL RETURNING *"
+		);
+
+		let mut q = sqlx::query_as::<_, ModelConfig>(&sql).bind(model_id);
+		for (_, val) in fields {
+			q = match val {
+				ConfigValue::Text(v) => q.bind(v),
+				ConfigValue::Int(v) => q.bind(v),
+				ConfigValue::Bool(v) => q.bind(v),
+				ConfigValue::Json(v) => q.bind(v.map(|j| sqlx::types::Json(j))),
+				ConfigValue::JsonMerge(v) => q.bind(sqlx::types::Json(v)),
+			};
+		}
+		q.fetch_one(conn).await
 	}
 }

@@ -132,7 +132,7 @@ watch(
 
 onMounted(async () => {
 	const authResult = await checkAuth();
-	if (!authResult.authenticated) return;
+	if (!authResult?.authenticated) return;
 	await chatStore.init();
 });
 </script>

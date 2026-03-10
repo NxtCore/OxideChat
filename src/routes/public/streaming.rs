@@ -5,7 +5,7 @@
 use crate::ai;
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::ai::ModelConfig;
+use crate::types::models_configs::ModelConfig;
 use crate::types::{ChatMessageResponse, Message, MessagePart, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction, UserToolSettings};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
@@ -60,7 +60,7 @@ fn interpolate_system_prompt(template: &str, user: &crate::types::User, model: &
 /// 2. model_configs (user preferences)
 /// 3. models table (defaults)
 fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>, model: &crate::types::AiModel) -> Sampling {
-	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.clone()).ok());
+	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.0.clone()).ok());
 
 	macro_rules! priority_field {
 		($field:ident) => {

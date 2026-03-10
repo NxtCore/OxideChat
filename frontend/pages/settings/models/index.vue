@@ -48,10 +48,12 @@
 					<div class="flex-1 min-w-0">
 						<div class="flex items-center gap-2">
 							<span class="font-medium text-foreground">{{ model.display_name }}</span>
-							<span v-if="model.is_enabled" class="inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600"
-								>Active</span
-							>
-							<span v-else class="inline-flex items-center rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-600">Disabled</span>
+							<span v-if="model.is_enabled" class="inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600">{{
+								store.getTranslation('settings.models.active')
+							}}</span>
+							<span v-else class="inline-flex items-center rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-600">{{
+								store.getTranslation('settings.models.disabled')
+							}}</span>
 						</div>
 						<div class="text-sm text-muted-foreground truncate">{{ model.provider.name }} &bull; {{ model.model_id }}</div>
 					</div>

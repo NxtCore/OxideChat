@@ -21,7 +21,7 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	let models = match Model::list_paginated(&state.db, params.page.unwrap_or(1), params.size.unwrap_or(0)).await {
+	let models = match Model::list_paginated(&state.db, params.page.unwrap_or(1), params.size.unwrap_or(0), false).await {
 		Ok(m) => m,
 		Err(e) => {
 			eprintln!("[PUBLIC] Failed to list models: {e}");

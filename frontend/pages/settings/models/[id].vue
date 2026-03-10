@@ -21,7 +21,7 @@
 					<h2 class="text-sm font-semibold text-foreground truncate">
 						{{ model ? model.display_name : store.getTranslation('settings.models.editor.loading') }}
 					</h2>
-					<p v-if="model" class="text-xs text-muted-foreground truncate">{{ model.provider_name }} &bull; {{ model.model_id }}</p>
+					<p v-if="model" class="text-xs text-muted-foreground truncate">{{ model.provider.name }} &bull; {{ model.model_id }}</p>
 				</div>
 			</div>
 
@@ -929,7 +929,7 @@ const hasUnsavedChanges = computed(() => JSON.stringify(formData) !== originalDa
 
 const providerIcon = computed(() => {
 	if (!model.value) return null;
-	return iconStore.getProviderIcon(model.value.provider_name, model.value.model_id);
+	return iconStore.getProviderIcon(model.value.provider.name, model.value.model_id);
 });
 
 const modelCapabilities = computed<string[]>(() => model.value?.capabilities ?? []);
@@ -1117,45 +1117,61 @@ function confirmGoBack() {
 	router.push('/settings/models');
 }
 
-function buildSamplingPayload(): Record<string, any> | null {
-	const s = formData.sampling;
-	const payload: Record<string, any> = {};
+function buildPatchPayload(): Record<string, any> {
+	const original = JSON.parse(originalData.value) as typeof formData;
+	const patch: Record<string, any> = {};
 
-	if (s.temperature !== null) payload.temperature = s.temperature;
-	if (s.max_tokens !== null) payload.max_tokens = s.max_tokens;
-	if (s.top_p !== null) payload.top_p = s.top_p;
-	if (s.top_k !== null) payload.top_k = s.top_k;
-	if (s.frequency_penalty !== null) payload.frequency_penalty = s.frequency_penalty;
-	if (s.presence_penalty !== null) payload.presence_penalty = s.presence_penalty;
-	if (s.seed !== null) payload.seed = s.seed;
-	if (s.stop !== null) payload.stop = s.stop;
-	if (s.logprobs !== null) payload.logprobs = s.logprobs;
-	if (s.top_logprobs !== null) payload.top_logprobs = s.top_logprobs;
-	if (s.parallel_tool_calls !== null) payload.parallel_tool_calls = s.parallel_tool_calls;
+	const scalarKeys = ['display_name', 'description', 'is_enabled', 'system_prompt', 'icon', 'reasoning_effort', 'reasoning_budget_tokens'] as const;
+	for (const key of scalarKeys) {
+		const cur = formData[key];
+		const orig = original[key];
+		if (JSON.stringify(cur) !== JSON.stringify(orig)) {
+			patch[key] = cur === '' ? null : cur;
+		}
+	}
 
-	return Object.keys(payload).length > 0 ? payload : null;
+	const samplingKeys = [
+		'temperature',
+		'max_tokens',
+		'top_p',
+		'top_k',
+		'frequency_penalty',
+		'presence_penalty',
+		'seed',
+		'stop',
+		'logprobs',
+		'top_logprobs',
+		'parallel_tool_calls',
+	] as const;
+	const samplingPatch: Record<string, any> = {};
+	for (const key of samplingKeys) {
+		if (JSON.stringify(formData.sampling[key]) !== JSON.stringify(original.sampling[key])) {
+			samplingPatch[key] = formData.sampling[key];
+		}
+	}
+	if (Object.keys(samplingPatch).length > 0) {
+		patch.sampling = samplingPatch;
+	}
+
+	return patch;
 }
 
 async function saveModel() {
 	if (!model.value) return;
 	saving.value = true;
 	try {
+		const patch = buildPatchPayload();
+		if (Object.keys(patch).length === 0) {
+			router.push('/settings/models');
+			return;
+		}
+
 		await $customFetch(`/api/v1/admin/models/${modelId}`, {
-			method: 'PUT',
-			body: {
-				display_name: formData.display_name,
-				is_enabled: formData.is_enabled,
-				system_prompt: formData.system_prompt,
-				sampling: buildSamplingPayload(),
-				icon: formData.icon,
-				description: formData.description,
-				reasoning_effort: formData.reasoning_effort,
-				reasoning_budget_tokens: formData.reasoning_budget_tokens,
-			},
+			method: 'PATCH',
+			body: patch,
 		});
 
 		store.toast(store.getTranslation('settings.models.save_success'), {type: 'success'});
-		router.push('/settings/models');
 	} catch (e) {
 		console.error(e);
 		store.toast(store.getTranslation('settings.models.save_error'), {type: 'error'});
