@@ -2,6 +2,7 @@
 //!
 //! Types for managing AI providers, models, and usage tracking.
 
+use crate::types::models_configs::ModelConfig;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -9,72 +10,7 @@ use uuid::Uuid;
 
 // Re-export omniference types for convenience
 pub use omniference::types::ProviderKind as OmniProviderKind;
-
-/// Provider kind enum matching the database enum
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "provider_kind", rename_all = "SCREAMING_SNAKE_CASE")]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ProviderKind {
-	Openai,
-	OpenaiCompat,
-	Openrouter,
-	Anthropic,
-	Google,
-	Custom,
-}
-
-impl ProviderKind {
-	/// Convert to omniference ProviderKind
-	#[must_use]
-	pub fn to_omni_kind(&self) -> OmniProviderKind {
-		match self {
-			Self::Openai => OmniProviderKind::OpenAI,
-			Self::OpenaiCompat => OmniProviderKind::OpenAICompat,
-			Self::Anthropic => OmniProviderKind::Anthropic,
-			Self::Google => OmniProviderKind::Google,
-			Self::Openrouter => OmniProviderKind::OpenRouter,
-			Self::Custom => OmniProviderKind::Custom("CUSTOM".to_string()),
-		}
-	}
-
-	/// Convert from omniference ProviderKind
-	#[must_use]
-	pub fn from_omni_kind(kind: &OmniProviderKind) -> Self {
-		match kind {
-			OmniProviderKind::OpenAI => Self::Openai,
-			OmniProviderKind::OpenAICompat => Self::OpenaiCompat,
-			OmniProviderKind::Anthropic => Self::Anthropic,
-			OmniProviderKind::Google => Self::Google,
-			OmniProviderKind::OpenRouter => Self::Openrouter,
-			OmniProviderKind::Custom(_) => Self::Custom,
-		}
-	}
-
-	#[must_use]
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			Self::Openai => "OPENAI",
-			Self::OpenaiCompat => "OPENAI_COMPAT",
-			Self::Openrouter => "OPENROUTER",
-			Self::Anthropic => "ANTHROPIC",
-			Self::Google => "GOOGLE",
-			Self::Custom => "CUSTOM",
-		}
-	}
-
-	#[must_use]
-	pub fn from_str(s: &str) -> Option<Self> {
-		match s {
-			"OPENAI" => Some(Self::Openai),
-			"OPENAI_COMPAT" => Some(Self::OpenaiCompat),
-			"OPENROUTER" => Some(Self::Openrouter),
-			"ANTHROPIC" => Some(Self::Anthropic),
-			"GOOGLE" => Some(Self::Google),
-			"CUSTOM" => Some(Self::Custom),
-			_ => None,
-		}
-	}
-}
+use crate::types::providers::ProviderKind;
 
 /// AI Provider database row
 #[derive(Debug, Clone, FromRow)]
@@ -229,6 +165,7 @@ pub struct PublicModelResponse {
 	pub max_tokens: Option<u32>,
 	pub provider_name: String,
 	pub provider_kind: String,
+	pub icon: Option<String>,
 }
 
 impl From<AiModel> for ModelResponse {
@@ -343,105 +280,6 @@ impl StableModelKey {
 	}
 }
 
-/// Model configuration database row (user preferences)
-#[derive(Debug, Clone, FromRow)]
-pub struct ModelConfig {
-	pub id: Uuid,
-	pub owner_id: Option<Uuid>,
-	pub model_id: Option<Uuid>,
-	pub stable_key: String,
-	pub name: String,
-	pub description: Option<String>,
-	pub icon: Option<String>,
-
-	pub capabilities: Option<serde_json::Value>,
-	pub input_modalities: Option<serde_json::Value>,
-	pub output_modalities: Option<serde_json::Value>,
-	pub context_length: Option<i32>,
-	pub max_output_tokens: Option<i32>,
-
-	pub system_prompt: Option<String>,
-	pub sampling: serde_json::Value,
-
-	pub enabled_tools: serde_json::Value,
-
-	pub is_public: bool,
-	pub is_featured: bool,
-	pub is_default: bool,
-	pub is_favorite: bool,
-	pub is_hidden: bool,
-
-	pub category: Option<String>,
-	pub tags: serde_json::Value,
-	pub usage_count: i32,
-	pub extra_settings: serde_json::Value,
-
-	pub created_at: DateTime<Utc>,
-	pub updated_at: DateTime<Utc>,
-}
-
-/// Model config response
-#[derive(Debug, Serialize)]
-pub struct ModelConfigResponse {
-	pub id: Uuid,
-	pub owner_id: Option<Uuid>,
-	pub model_id: Option<Uuid>,
-	pub stable_key: String,
-	pub name: String,
-	pub description: Option<String>,
-	pub icon: Option<String>,
-	pub capabilities: Option<serde_json::Value>,
-	pub input_modalities: Option<serde_json::Value>,
-	pub output_modalities: Option<serde_json::Value>,
-	pub context_length: Option<i32>,
-	pub max_output_tokens: Option<i32>,
-	pub system_prompt: Option<String>,
-	pub sampling: serde_json::Value,
-	pub enabled_tools: serde_json::Value,
-	pub is_public: bool,
-	pub is_featured: bool,
-	pub is_default: bool,
-	pub is_favorite: bool,
-	pub is_hidden: bool,
-	pub category: Option<String>,
-	pub tags: serde_json::Value,
-	pub usage_count: i32,
-	pub created_at: DateTime<Utc>,
-	pub updated_at: DateTime<Utc>,
-}
-
-impl From<ModelConfig> for ModelConfigResponse {
-	fn from(m: ModelConfig) -> Self {
-		Self {
-			id: m.id,
-			owner_id: m.owner_id,
-			model_id: m.model_id,
-			stable_key: m.stable_key,
-			name: m.name,
-			description: m.description,
-			icon: m.icon,
-			capabilities: m.capabilities,
-			input_modalities: m.input_modalities,
-			output_modalities: m.output_modalities,
-			context_length: m.context_length,
-			max_output_tokens: m.max_output_tokens,
-			system_prompt: m.system_prompt,
-			sampling: m.sampling,
-			enabled_tools: m.enabled_tools,
-			is_public: m.is_public,
-			is_featured: m.is_featured,
-			is_default: m.is_default,
-			is_favorite: m.is_favorite,
-			is_hidden: m.is_hidden,
-			category: m.category,
-			tags: m.tags,
-			usage_count: m.usage_count,
-			created_at: m.created_at,
-			updated_at: m.updated_at,
-		}
-	}
-}
-
 /// Request to update model config
 #[derive(Debug, Deserialize)]
 pub struct UpdateModelConfigRequest {
@@ -454,7 +292,6 @@ pub struct UpdateModelConfigRequest {
 	pub default_frequency_penalty: Option<f32>,
 	pub default_presence_penalty: Option<f32>,
 	pub is_favorite: Option<bool>,
-	pub is_hidden: Option<bool>,
 	pub extra_settings: Option<serde_json::Value>,
 }
 
@@ -629,7 +466,6 @@ pub struct ModelWithMetadata {
 	pub user_display_name: Option<String>,
 	pub user_icon_override: Option<String>,
 	pub is_favorite: bool,
-	pub is_hidden: bool,
 	pub default_temperature: Option<f32>,
 	pub default_max_tokens: Option<i32>,
 }

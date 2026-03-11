@@ -52,7 +52,7 @@ onMounted(() => {
 </script>
 
 <template>
-	<div class="max-w-4xl lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
+	<div class="w-full lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
 		<div class="flex flex-row items-center justify-between mb-6">
 			<div>
 				<h2 class="text-lg font-semibold text-foreground">{{ mainStore.getTranslation('settings.appearance.title') }}</h2>
@@ -126,7 +126,13 @@ onMounted(() => {
 							/>
 						</div>
 					</div>
-					<Button variant="outline" size="icon" @click="themeStore.randomizeTheme" :disabled="themeStore.isLoadingThemes" :title="mainStore.getTranslation('settings.appearance.random_theme')">
+					<Button
+						variant="outline"
+						size="icon"
+						@click="themeStore.randomizeTheme"
+						:disabled="themeStore.isLoadingThemes"
+						:title="mainStore.getTranslation('settings.appearance.random_theme')"
+					>
 						<Shuffle class="h-4 w-4" />
 					</Button>
 					<Button variant="outline" size="icon" @click="themeStore.resetTheme" :title="mainStore.getTranslation('settings.appearance.reset_theme')">
@@ -178,7 +184,10 @@ onMounted(() => {
 						</div>
 					</div>
 
-					<div v-if="filteredBuiltInThemes.length === 0 && filteredCustomThemes.length === 0 && searchQuery" class="flex flex-col items-center justify-center py-12 text-center">
+					<div
+						v-if="filteredBuiltInThemes.length === 0 && filteredCustomThemes.length === 0 && searchQuery"
+						class="flex flex-col items-center justify-center py-12 text-center"
+					>
 						<Search class="mb-3 h-8 w-8 text-muted-foreground" />
 						<h4 class="font-medium text-foreground">{{ mainStore.getTranslation('settings.appearance.no_themes_found') }}</h4>
 						<p class="mt-1 text-sm text-muted-foreground">{{ mainStore.getTranslation('settings.appearance.try_different_search') }}</p>
@@ -187,7 +196,12 @@ onMounted(() => {
 
 				<div class="flex items-center justify-center gap-1 border-t border-border/50 pt-6 text-sm text-muted-foreground">
 					{{ mainStore.getTranslation('settings.appearance.themes_powered_by') }}
-					<a href="https://tweakcn.com" target="_blank" rel="noopener noreferrer" class="ml-1 inline-flex items-center font-medium text-primary hover:underline">
+					<a
+						href="https://tweakcn.com"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="ml-1 inline-flex items-center font-medium text-primary hover:underline"
+					>
 						tweakcn.com
 						<ExternalLink class="ml-1 h-3 w-3" />
 					</a>

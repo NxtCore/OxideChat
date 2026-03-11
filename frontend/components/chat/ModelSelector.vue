@@ -2,16 +2,21 @@
 	<Popover v-model:open="isOpen">
 		<PopoverTrigger as-child>
 			<button :class="cn('flex items-center gap-2 px-2 py-1 rounded-md hover:bg-accent transition-colors', props.class)">
-				<div
-					v-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name, chatStore.selectedModel?.model_id)?.type === 'svg'"
-					class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-					v-html="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name, chatStore.selectedModel?.model_id)?.icon"
+				<img
+					v-if="chatStore.selectedModel?.icon"
+					:src="chatStore.selectedModel?.icon"
+					class="h-4 w-4 mt-0.5 flex items-center justify-center rounded-md bg-muted overflow-hidden"
 				/>
 				<div
-					v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name, chatStore.selectedModel?.model_id)?.type === 'png'"
+					v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.type === 'svg'"
+					class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
+					v-html="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.icon"
+				/>
+				<div
+					v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.type === 'png'"
 					class="h-4 w-4 flex items-center justify-center"
 				>
-					<img :src="iconStore.getProviderIcon(chatStore.selectedModel?.provider_name, chatStore.selectedModel?.model_id)?.icon" alt="Provider icon" />
+					<img :src="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.icon" alt="Provider icon" />
 				</div>
 				<span class="max-w-37.5 truncate text-xs font-medium">
 					{{ chatStore.selectedModel?.display_name || store.getTranslation('chat.model_selector.select_model') }}
@@ -43,16 +48,17 @@
 							@click="selectModel(model)"
 						>
 							<div class="flex items-start gap-3">
+								<img v-if="model.icon" :src="model.icon" class="h-5 w-5 mt-0.5 flex items-center justify-center rounded-md bg-muted overflow-hidden" />
 								<div
-									v-if="iconStore.getProviderIcon(model.provider_name, model?.model_id)?.type === 'svg'"
+									v-else-if="iconStore.getProviderIcon(model.provider.name, model?.model_id)?.type === 'svg'"
 									class="h-5 w-5 mt-0.5 flex items-center justify-center text-muted-foreground [&>svg]:h-full [&>svg]:w-full"
-									v-html="iconStore.getProviderIcon(model.provider_name, model?.model_id)?.icon"
+									v-html="iconStore.getProviderIcon(model.provider.name, model?.model_id)?.icon"
 								/>
 								<div
-									v-else-if="iconStore.getProviderIcon(model.provider_name, model?.model_id)?.type === 'png'"
+									v-else-if="iconStore.getProviderIcon(model.provider.name, model?.model_id)?.type === 'png'"
 									class="h-5 w-5 mt-0.5 flex items-center justify-center"
 								>
-									<img :src="iconStore.getProviderIcon(model.provider_name, model?.model_id)?.icon" alt="Provider icon" />
+									<img :src="iconStore.getProviderIcon(model.provider.name, model?.model_id)?.icon" alt="Provider icon" />
 								</div>
 								<Bot v-else class="h-5 w-5 mt-0.5 text-muted-foreground" />
 
@@ -69,7 +75,7 @@
 										</span>
 									</div>
 									<p class="text-xs text-muted-foreground mt-0.5 truncate">
-										{{ getModelDescription(model) }}
+										{{ model.model_id }}
 									</p>
 								</div>
 
@@ -169,7 +175,7 @@ const selectedProvider = ref<string>('favorites');
 const availableProviders = computed(() => {
 	const providers = new Set<string>();
 	for (const model of chatStore.models) {
-		providers.add(model.provider_name);
+		providers.add(model.provider.name);
 	}
 	return Array.from(providers).sort();
 });
@@ -181,7 +187,7 @@ const displayedModels = computed(() => {
 	if (selectedProvider.value === 'favorites') {
 		models = chatStore.favoriteModels;
 	} else {
-		models = chatStore.models.filter(m => m.provider_name === selectedProvider.value);
+		models = chatStore.models.filter(m => m.provider.name === selectedProvider.value);
 	}
 
 	if (query) {
@@ -199,13 +205,6 @@ function getDisplayCapabilities(model: Model): string[] {
 		caps.push(`${Math.round(model.context_length / 1000)}k`);
 	}
 	return caps;
-}
-
-function getModelDescription(model: Model): string {
-	if (model.provider_display_name) {
-		return `${model.provider_display_name}'s ${model.display_name.split(' ').slice(-1)[0]} model`;
-	}
-	return model.model_id;
 }
 
 function selectModel(model: Model) {

@@ -16,6 +16,7 @@ use tokio::sync::RwLock;
 
 use crate::types::AiProvider;
 use crate::utils::encryption::decrypt_api_key;
+use crate::utils::providers::sync_provider_models;
 
 /// Someone kill me for this name please
 pub static OF_ENGINE: std::sync::OnceLock<Arc<RwLock<OmniferenceEngine>>> = std::sync::OnceLock::new();

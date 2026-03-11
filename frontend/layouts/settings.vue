@@ -15,7 +15,7 @@
 			<path d="M21 12a9 9 0 1 1-6.219-8.56" />
 		</svg>
 	</div>
-	<div v-else class="container mx-auto flex max-w-6xl flex-1 flex-col p-3 pb-6 lg:max-h-dvh lg:overflow-y-hidden lg:p-6">
+	<div v-else class="container mx-auto flex max-w-12xl flex-1 flex-col p-3 pb-6 lg:max-h-dvh lg:overflow-y-hidden lg:p-6">
 		<slot />
 	</div>
 	<ShadToaster
@@ -35,6 +35,7 @@ import 'vue-sonner/style.css';
 
 useHead({
 	title: 'OxideChat - Settings',
+	link: [{rel: 'icon', type: 'image/svg+xml', href: '/light_transparent.svg'}],
 	bodyAttrs: {
 		class: 'dark', // Force dark mode for now as per preference
 	},

@@ -5,7 +5,7 @@
 use crate::ai;
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::ai::ModelConfig;
+use crate::types::models_configs::ModelConfig;
 use crate::types::{ChatMessageResponse, Message, MessagePart, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction, UserToolSettings};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
@@ -22,7 +22,6 @@ use omniference::{
 	stream::StreamEvent,
 	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec},
 };
-use serde_json::Value;
 use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -34,12 +33,34 @@ fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl
 	Sse::new(futures_util::stream::once(async move { Ok::<_, Infallible>(Event::default().data(data)) })).keep_alive(KeepAlive::default())
 }
 
+/// Interpolate `{{variable}}` placeholders in a system prompt string.
+///
+/// Supported variables:
+/// - `{{user_name}}` — the username of the authenticated user
+/// - `{{user_email}}` — the email address of the authenticated user
+/// - `{{date}}` — current UTC date (YYYY-MM-DD)
+/// - `{{time}}` — current UTC time (HH:MM)
+/// - `{{datetime}}` — current UTC date and time (YYYY-MM-DD HH:MM)
+/// - `{{model_name}}` — display name of the model being used
+/// - `{{model_id}}` — the model's identifier string
+fn interpolate_system_prompt(template: &str, user: &crate::types::User, model: &crate::types::AiModel) -> String {
+	let now = chrono::Utc::now();
+	template
+		.replace("{{user_name}}", &user.username)
+		.replace("{{user_email}}", &user.email)
+		.replace("{{date}}", &now.format("%Y-%m-%d").to_string())
+		.replace("{{time}}", &now.format("%H:%M").to_string())
+		.replace("{{datetime}}", &now.format("%Y-%m-%d %H:%M").to_string())
+		.replace("{{model_name}}", &model.display_name)
+		.replace("{{model_id}}", &model.model_id)
+}
+
 /// Merge sampling options with priority order:
 /// 1. Request-level (highest priority)
 /// 2. model_configs (user preferences)
 /// 3. models table (defaults)
 fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>, model: &crate::types::AiModel) -> Sampling {
-	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.clone()).ok());
+	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.0.clone()).ok());
 
 	macro_rules! priority_field {
 		($field:ident) => {
@@ -355,8 +376,15 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	};
 
-	let model_config = sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE owner_id = $1 AND stable_key = $2")
+	let user_model_config = sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE owner_id = $1 AND stable_key = $2")
 		.bind(user.id)
+		.bind(&req.model_key)
+		.fetch_optional(&state.db)
+		.await
+		.ok()
+		.flatten();
+
+	let system_model_config = sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE owner_id IS NULL AND stable_key = $1")
 		.bind(&req.model_key)
 		.fetch_optional(&state.db)
 		.await
@@ -535,8 +563,21 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	ir.stream = true;
 	ir.metadata.insert("user_id".to_string(), user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), chat_id.to_string());
-	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), model_config.as_ref(), &model);
-	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, model_config.as_ref());
+	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), user_model_config.as_ref(), &model);
+	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, system_model_config.as_ref());
+
+	let system_prompt_text = system_model_config.as_ref().and_then(|mc| mc.system_prompt.as_deref()).unwrap_or("");
+	if !system_prompt_text.is_empty() {
+		let interpolated = interpolate_system_prompt(system_prompt_text, &user, &model);
+		ir.messages.insert(
+			0,
+			OmniMessage {
+				role: Role::System,
+				parts: vec![ContentPart::Text(interpolated)],
+				name: None,
+			},
+		);
+	}
 
 	if let Some(ref enabled_tool_ids) = req.tools_enabled {
 		let (specs, choice) = resolve_tools(&state.db, user.id, enabled_tool_ids).await;

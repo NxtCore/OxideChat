@@ -59,13 +59,21 @@ const checkAuth = async () => {
 
 		if (store.base?.needs_setup) {
 			if (route.path !== '/auth/setup') {
-				return router.push('/auth/setup');
+				await router.push('/auth/setup');
+				return {
+					authenticated: false,
+				};
 			}
-			return;
+			return {
+				authenticated: false,
+			};
 		}
 
 		if (route.path === '/auth/setup') {
-			return router.push('/auth/login');
+			await router.push('/auth/login');
+			return {
+				authenticated: false,
+			};
 		}
 
 		if (!store.auth.user && !store.auth.isAuthenticated) {
@@ -80,18 +88,38 @@ const checkAuth = async () => {
 		const isAuthPage = route.path.startsWith('/auth');
 
 		if (store.auth.isAuthenticated && isAuthPage) {
-			return router.push('/');
+			await router.push('/');
+			return {
+				authenticated: false,
+			};
 		}
 
 		if (!store.auth.isAuthenticated && !isAuthPage) {
-			return router.push('/auth/login');
+			await router.push('/auth/login');
+			return {
+				authenticated: false,
+			};
 		}
+		if (!store.auth.isAuthenticated && isAuthPage) {
+			return {
+				authenticated: false,
+			};
+		}
+		return {
+			authenticated: true,
+		};
 	} catch (error) {
 		console.error('Auth check error:', error);
 		const isAuthPage = route.path.startsWith('/auth');
 		if (!isAuthPage) {
-			return router.push('/auth/login');
+			await router.push('/auth/login');
+			return {
+				authenticated: false,
+			};
 		}
+		return {
+			authenticated: false,
+		};
 	}
 };
 
@@ -103,7 +131,8 @@ watch(
 );
 
 onMounted(async () => {
-	await checkAuth();
+	const authResult = await checkAuth();
+	if (!authResult?.authenticated) return;
 	await chatStore.init();
 });
 </script>

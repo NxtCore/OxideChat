@@ -1,3 +1,8 @@
+export interface PaginatedResponse<T> {
+	has_more: boolean;
+	items: T[];
+}
+
 export interface Workspace {
 	id: string;
 	name: string;
@@ -153,25 +158,45 @@ export interface UpdatePreferencesRequest {
 	custom_theme_urls?: string[];
 }
 
-export interface Model {
+export interface ModelList {
+	id: string;
+	model_id: string;
+	display_name: string;
+	capabilities: string[];
+	input_modalities: string[];
+	output_modalities: string[];
+	context_length: number | null;
+	max_tokens: number | null;
+	is_enabled: boolean;
+	provider: {
+		id: string;
+		name: string;
+		kind: string;
+	};
+	provider_name: string;
+	icon: string | null;
+	is_favorite: boolean;
+}
+
+export interface ModelListAdmin {
 	id: string;
 	provider_id: string;
 	model_id: string;
 	display_name: string;
 	capabilities: string[];
+	input_modalities: string[];
+	output_modalities: string[];
 	context_length: number | null;
 	max_tokens: number | null;
-	provider_name: string;
-	provider_kind: string;
-	provider_display_name: string;
-	provider_icon_svg: string | null;
-	provider_brand_color: string | null;
-	user_display_name: string | null;
-	user_icon_override: string | null;
-	is_favorite: boolean;
-	is_hidden: boolean;
-	default_temperature: number | null;
-	default_max_tokens: number | null;
+	is_enabled: boolean;
+	created_at: string;
+	updated_at: string;
+	provider: {
+		id: string;
+		name: string;
+		kind: string;
+	};
+	icon: string | null;
 }
 
 export interface ChatListParams {
@@ -179,10 +204,4 @@ export interface ChatListParams {
 	include_archived?: boolean;
 	limit?: number;
 	offset?: number;
-}
-
-export interface MessageListParams {
-	limit?: number;
-	before?: string;
-	after?: string;
 }

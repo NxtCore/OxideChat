@@ -168,6 +168,7 @@ export const useMainStore = defineStore('main', {
 		},
 		async login(email: string, password: string) {
 			const {$customFetch} = useNuxtApp();
+			const chatStore = useChatStore();
 			const response = await $customFetch<{user: User}>('/api/v1/auth/login', {
 				method: 'POST',
 				body: {email, password},
@@ -175,6 +176,7 @@ export const useMainStore = defineStore('main', {
 			if (response) {
 				this.auth.user = response.user;
 				this.auth.isAuthenticated = true;
+				await chatStore.init();
 			}
 			return response;
 		},

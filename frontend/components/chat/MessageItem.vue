@@ -254,10 +254,10 @@ const isLastAssistantMessage = computed(() => {
 
 const providerIcon = computed(() => {
 	if (!model.value) return null;
-	if (model.value.provider_icon_svg) {
-		return {type: 'svg' as const, icon: model.value.provider_icon_svg};
+	if (model.value.icon) {
+		return {type: 'svg' as const, icon: model.value.icon};
 	}
-	return iconStore.getProviderIcon(model.value.provider_name);
+	return iconStore.getProviderIcon(model.value.provider.name, model.value.model_id);
 });
 
 watch(

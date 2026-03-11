@@ -1,5 +1,5 @@
 <template>
-	<div class="max-w-4xl lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
+	<div class="w-full lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
 		<div class="flex flex-row items-center justify-between mb-6">
 			<div>
 				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.tabs.admin_users') }}</h2>
