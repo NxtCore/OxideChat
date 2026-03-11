@@ -136,7 +136,10 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, cookies: Cookies, P
 	let model_info: Option<(String, String)> = match Model::find_name_and_model_id(&mut *tx, &id).await {
 		Ok(Some(r)) => Some(r),
 		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(_) => None,
+		Err(e) => {
+			eprintln!("[ADMIN] Failed to fetch model info: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
 	};
 
 	let mut model_fields: Vec<(&str, Value)> = Vec::new();

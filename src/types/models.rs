@@ -182,7 +182,7 @@ impl Model {
 		let where_clause = if show_disabled {
 			String::new()
 		} else {
-			format!(r"WHERE {}.is_enabled = true AND {}.is_enabled = true", model.alias(), provider_alias = provider.alias())
+			format!(r"WHERE {}.is_enabled = true AND {}.is_enabled = true", model.alias(), provider.alias())
 		};
 		let query = format!(
 			r#"
