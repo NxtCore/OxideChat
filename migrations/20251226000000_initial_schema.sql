@@ -1016,6 +1016,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.model_selector.tool_calling', 'Tool calling'),
     ('en', 'chat.model_selector.reasoning_capable', 'Reasoning capable'),
     ('en', 'chat.model_selector.toggle_favorite', 'Toggle favorite'),
+    ('en', 'chat.model_selector.vision_capable', 'Vision capable'),
 
     -- Reasoning Selector
     ('en', 'chat.reasoning_selector.disabled', 'Disabled'),
@@ -1114,6 +1115,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.model_selector.tool_calling', 'Tool-Aufruf'),
     ('de', 'chat.model_selector.reasoning_capable', 'Reasoning-fähig'),
     ('de', 'chat.model_selector.toggle_favorite', 'Favorit umschalten'),
+    ('de', 'chat.model_selector.vision_capable', 'Vision-fähig'),
+
 
     -- Reasoning Selector
     ('de', 'chat.reasoning_selector.disabled', 'Deaktiviert'),

@@ -228,8 +228,6 @@ pub async fn get_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path
 
 			let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
 
-			// Compute sibling counts for each unique (parent_id, role) pair
-			// This ensures user messages only count user siblings, and assistant messages only count assistant siblings
 			let sibling_counts: HashMap<(Option<Uuid>, String), i64> = if message_ids.is_empty() {
 				HashMap::new()
 			} else {

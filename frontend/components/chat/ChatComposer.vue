@@ -88,14 +88,12 @@ interface AttachedImage {
 
 const attachedImages = ref<AttachedImage[]>([]);
 
-// Handle pending branch prefill when navigating to a branched chat
 onMounted(() => {
 	if (chatStore.pendingBranchContent) {
 		message.value = chatStore.pendingBranchContent;
 		nextTick(() => autoResize());
 	}
 	if (chatStore.pendingBranchParts) {
-		// Process image parts - load them as attached images
 		for (const part of chatStore.pendingBranchParts) {
 			if (part.type === 'image' && part.image_id) {
 				const config = useRuntimeConfig();

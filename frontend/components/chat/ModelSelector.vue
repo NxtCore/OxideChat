@@ -101,6 +101,16 @@
 												<p>{{ store.getTranslation('chat.model_selector.reasoning_capable') }}</p>
 											</TooltipContent>
 										</Tooltip>
+										<Tooltip v-if="chatStore.hasVisionCapability(model)">
+											<TooltipTrigger as-child>
+												<button class="p-1 text-muted-foreground">
+													<Eye class="h-4 w-4" />
+												</button>
+											</TooltipTrigger>
+											<TooltipContent>
+												<p>{{ store.getTranslation('chat.model_selector.vision_capable') }}</p>
+											</TooltipContent>
+										</Tooltip>
 									</div>
 									<Tooltip>
 										<TooltipTrigger as-child>
@@ -153,7 +163,7 @@
 </template>
 
 <script setup lang="ts">
-import {Bot, Star, ChevronDown, Search, Filter, Wrench, Sparkles} from 'lucide-vue-next';
+import {Bot, Star, ChevronDown, Search, Filter, Wrench, Sparkles, Eye} from 'lucide-vue-next';
 import type {Model} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
@@ -171,6 +181,7 @@ const store = useMainStore();
 const search = ref('');
 const isOpen = ref(false);
 const selectedProvider = ref<string>('favorites');
+const activeChatId = computed(() => chatStore.activeChat?.id);
 
 const availableProviders = computed(() => {
 	const providers = new Set<string>();
@@ -199,9 +210,7 @@ const displayedModels = computed(() => {
 
 function getDisplayCapabilities(model: Model): string[] {
 	const caps: string[] = [];
-	if (model.capabilities.includes('vision')) caps.push('👁');
-	if (model.capabilities.includes('tools')) caps.push('🔧');
-	if (model.context_length && model.context_length >= 100000) {
+	if (model.context_length) {
 		caps.push(`${Math.round(model.context_length / 1000)}k`);
 	}
 	return caps;
@@ -217,7 +226,7 @@ function toggleFavorite(model: Model) {
 }
 
 watch(
-	() => chatStore.activeChat?.id,
+	() => [chatStore.activeChat?.id, chatStore.models.length],
 	(newVal, oldVal) => {
 		if (oldVal !== newVal && newVal && chatStore.messages.length > 0) {
 			const last_llm_message = chatStore.messages.findLast(m => m.role === 'assistant');

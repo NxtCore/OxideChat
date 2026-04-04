@@ -4,7 +4,7 @@
 
 use crate::ai;
 use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{CostDetails, JobState};
 use crate::types::models_configs::ModelConfig;
 use crate::types::{ChatMessageResponse, Message, MessagePart, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction, UserToolSettings};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
@@ -615,6 +615,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	let mut reasoning_tokens: u32 = 0;
 	let mut reasoning_start: Option<Instant> = None;
 	let mut reasoning_latency_ms: Option<i32> = None;
+	let mut cost_details = CostDetails::default();
 
 	let mut current_messages = omni_messages_for_stream;
 	let mut iteration = 0;
@@ -775,6 +776,15 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 								serde_json::to_string(&StreamData::Error { code, message }).unwrap_or_default()
 							));
 						}
+						StreamEvent::Cost { cost } => {
+							cost_details.input = cost.prompt;
+							cost_details.output = cost.completion;
+							cost_details.reasoning = cost.reasoning;
+							cost_details.total = Some(cost.total);
+							yield Ok::<_, Infallible>(Event::default().data(
+								serde_json::to_string(&StreamData::Usage { cost_details }).unwrap_or_default()
+							)); 
+						}
 						StreamEvent::Done => {
 							eprintln!("[STREAM] Stream done, tool_results: {}", tool_results.len());
 							if tool_results.is_empty() {
@@ -792,8 +802,6 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									effort: reasoning_effort.clone(),
 									budget_tokens: reasoning_budget_tokens.map(|b| b as i32),
 								};
-
-								let cost_details = crate::types::CostDetails::default();
 
 								let message = sqlx::query_as::<_, Message>(
 									r#"

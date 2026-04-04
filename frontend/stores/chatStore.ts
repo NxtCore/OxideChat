@@ -120,6 +120,12 @@ export const useChatStore = defineStore('chat', {
 			return model.capabilities.includes('TOOLS');
 		},
 
+		hasVisionCapability: state => (model: ModelList | null) => {
+			if (!model) model = state.selectedModel;
+			if (!model) return false;
+			return model.input_modalities.includes('IMAGE');
+		},
+
 		availableReasoningEfforts(): string[] {
 			if (!this.selectedModel) return [];
 			return this.selectedModel.capabilities.filter(c => c.startsWith('REASONING_EFFORT_')).map(c => c.replace('REASONING_EFFORT_', ''));
@@ -263,7 +269,6 @@ export const useChatStore = defineStore('chat', {
 				const {$customFetch} = useNuxtApp();
 				const data = await $customFetch(`/api/v1/chats/${id}`);
 				const chatWithMessages = data as ChatWithMessages;
-				this.activeChat = chatWithMessages.chat;
 				this.messages = chatWithMessages.messages.map(msg => {
 					const rawMsg = msg as any;
 					if (rawMsg.tool_calls && Array.isArray(rawMsg.tool_calls)) {
@@ -281,6 +286,7 @@ export const useChatStore = defineStore('chat', {
 					}
 					return msg;
 				});
+				this.activeChat = chatWithMessages.chat;
 				const lastAssistantMessage = this.messages.findLast(m => m.role === 'assistant');
 				if (lastAssistantMessage)
 					this.setContextTokens((lastAssistantMessage.usage_details?.input_tokens || 0) + (lastAssistantMessage.usage_details?.output_tokens || 0));
@@ -528,8 +534,14 @@ export const useChatStore = defineStore('chat', {
 										if (msg) {
 											msg.usage_details.input_tokens = data.input;
 											msg.usage_details.output_tokens = data.output;
+											msg.usage_details.reasoning_tokens = data.reasoning;
 										}
 										this.contextTokens = data.input + data.output;
+										break;
+									case 'cost':
+										if (msg) {
+											Object.assign(msg.cost_details, data.cost_details);
+										}
 										break;
 									case 'done':
 										if (msg) {

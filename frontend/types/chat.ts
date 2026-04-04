@@ -59,6 +59,7 @@ export interface ChatMessage {
 		input: string | null;
 		output: string | null;
 		reasoning: string | null;
+		total: string | null;
 	};
 	usage_details: {
 		input_tokens: number | null;

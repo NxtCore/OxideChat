@@ -79,15 +79,15 @@
 					<div class="space-y-1">
 						<div class="flex justify-between text-xs">
 							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.input_tokens') }}</span>
-							<span class="text-foreground">{{ message.cost_details.input?.toLocaleString() || '-' }}</span>
+							<span class="text-foreground">{{ message.usage_details.input_tokens?.toLocaleString() || '-' }}</span>
 						</div>
 						<div class="flex justify-between text-xs">
 							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.output_tokens') }}</span>
-							<span class="text-foreground">{{ message.cost_details.output?.toLocaleString() || '-' }}</span>
+							<span class="text-foreground">{{ message.usage_details.output_tokens?.toLocaleString() || '-' }}</span>
 						</div>
-						<div v-if="message.cost_details.reasoning" class="flex justify-between text-xs">
+						<div v-if="message.usage_details.reasoning_tokens" class="flex justify-between text-xs">
 							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.reasoning_tokens') }}</span>
-							<span class="text-foreground">{{ message.cost_details.reasoning?.toLocaleString() }}</span>
+							<span class="text-foreground">{{ message.usage_details.reasoning_tokens?.toLocaleString() }}</span>
 						</div>
 					</div>
 
@@ -108,15 +108,7 @@
 						</div>
 						<div class="flex justify-between text-xs font-medium">
 							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.total_cost') }}</span>
-							<span class="text-primary">{{
-								formatCost(
-									(
-										(parseFloat(message.cost_details.input || '0') || 0) +
-										(parseFloat(message.cost_details.output || '0') || 0) +
-										(parseFloat(message.cost_details.reasoning || '0') || 0)
-									).toString()
-								)
-							}}</span>
+							<span class="text-primary">{{ formatCost(message.cost_details.total) }}</span>
 						</div>
 					</div>
 

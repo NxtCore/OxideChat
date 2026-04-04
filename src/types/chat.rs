@@ -62,14 +62,16 @@ impl MessageRole {
 	}
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct CostDetails {
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub input: Option<Decimal>,
+	pub input: Option<f64>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub output: Option<Decimal>,
+	pub output: Option<f64>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub reasoning: Option<Decimal>,
+	pub reasoning: Option<f64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub total: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -544,6 +546,8 @@ pub enum StreamData {
 	},
 	/// Token count update
 	Tokens { input: u32, output: u32, reasoning: Option<u32> },
+	/// Usage details
+	Usage { cost_details: CostDetails },
 	/// Error occurred
 	Error { code: String, message: String },
 	/// Stream completed with message info
