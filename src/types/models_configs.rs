@@ -34,13 +34,16 @@ pub struct ModelConfig {
 }
 
 impl BaseType for ModelConfig {
+	const TABLE: &'static str = "model_configs";
+	const ALIAS: &'static str = "mc";
+
 	fn new() -> Self {
 		Self {
 			id: Uuid::new_v4(),
 			owner_id: Option::None,
 			model_id: Uuid::new_v4(),
-			stable_key: "".to_string(),
-			name: "".to_string(),
+			stable_key: String::new(),
+			name: String::new(),
 			description: None,
 			icon: None,
 			capabilities: None,
@@ -63,14 +66,9 @@ impl BaseType for ModelConfig {
 			updated_at: chrono::Utc::now(),
 		}
 	}
-	fn table(&self) -> &str {
-		"model_configs"
-	}
-	fn alias(&self) -> &str {
-		"mc"
-	}
-	fn sql_fields(&self) -> Vec<&str> {
-		vec![
+
+	fn sql_fields() -> &'static [&'static str] {
+		&[
 			"id",
 			"owner_id",
 			"model_id",
@@ -103,10 +101,9 @@ impl BaseType for ModelConfig {
 /// A typed value that can be written into a `model_configs` column.
 ///
 /// Each variant maps to the Postgres type of the column it targets.
-/// Use `Null` to explicitly clear a nullable column.
 /// `JsonMerge` merges a partial JSONB patch into an existing column, removing
 /// any keys whose value is JSON null via `jsonb_strip_nulls`.
-pub enum ConfigValue<'a> {
+enum ConfigValue<'a> {
 	Text(Option<&'a str>),
 	Int(Option<i32>),
 	Bool(bool),
@@ -126,6 +123,52 @@ impl ConfigValue<'_> {
 			Self::Bool(_) => format!("{col} = ${param_idx}::BOOLEAN"),
 			Self::Json(_) => format!("{col} = ${param_idx}::JSONB"),
 			Self::JsonMerge(_) => format!("{col} = jsonb_strip_nulls({col} || ${param_idx}::JSONB)"),
+		}
+	}
+}
+
+/// A type-safe update field for `model_configs`.
+///
+/// The route layer can express which model config fields changed without
+/// passing raw SQL column names around.
+pub enum ModelConfigPatchField<'a> {
+	Description(Option<&'a str>),
+	Icon(Option<&'a str>),
+	SystemPrompt(Option<&'a str>),
+	SamplingMerge(&'a Value),
+	InputModalities(Option<&'a Value>),
+	OutputModalities(Option<&'a Value>),
+	ContextLength(Option<i32>),
+	MaxOutputTokens(Option<i32>),
+	EnabledTools(Option<&'a Value>),
+	IsPublic(bool),
+	IsFeatured(bool),
+	IsDefault(bool),
+	IsFavorite(bool),
+	Category(Option<&'a str>),
+	Tags(Option<&'a Value>),
+	ExtraSettings(Option<&'a Value>),
+}
+
+impl<'a> ModelConfigPatchField<'a> {
+	fn column_and_value(&self) -> (&'static str, ConfigValue<'a>) {
+		match self {
+			Self::Description(v) => ("description", ConfigValue::Text(*v)),
+			Self::Icon(v) => ("icon", ConfigValue::Text(*v)),
+			Self::SystemPrompt(v) => ("system_prompt", ConfigValue::Text(*v)),
+			Self::SamplingMerge(v) => ("sampling", ConfigValue::JsonMerge(*v)),
+			Self::InputModalities(v) => ("input_modalities", ConfigValue::Json(*v)),
+			Self::OutputModalities(v) => ("output_modalities", ConfigValue::Json(*v)),
+			Self::ContextLength(v) => ("context_length", ConfigValue::Int(*v)),
+			Self::MaxOutputTokens(v) => ("max_output_tokens", ConfigValue::Int(*v)),
+			Self::EnabledTools(v) => ("enabled_tools", ConfigValue::Json(*v)),
+			Self::IsPublic(v) => ("is_public", ConfigValue::Bool(*v)),
+			Self::IsFeatured(v) => ("is_featured", ConfigValue::Bool(*v)),
+			Self::IsDefault(v) => ("is_default", ConfigValue::Bool(*v)),
+			Self::IsFavorite(v) => ("is_favorite", ConfigValue::Bool(*v)),
+			Self::Category(v) => ("category", ConfigValue::Text(*v)),
+			Self::Tags(v) => ("tags", ConfigValue::Json(*v)),
+			Self::ExtraSettings(v) => ("extra_settings", ConfigValue::Json(*v)),
 		}
 	}
 }
@@ -160,18 +203,28 @@ impl ModelConfig {
 
 	/// Apply a partial update to the system-level config for a model.
 	///
-	/// Only the columns named in `fields` are written; every other column is
-	/// left untouched.  Pass `ConfigValue::Text(None)` / `ConfigValue::Json(None)`
-	/// / `ConfigValue::Int(None)` to explicitly set a nullable column to NULL.
+	/// Only the given fields are written; every other column is left untouched.
+	/// `None` inside a nullable field variant explicitly sets that column to
+	/// NULL. If `fields` is empty, the current config row is returned unchanged.
 	///
 	/// # Errors
 	///
 	/// Returns `sqlx::Error` if the database query fails.
-	pub async fn patch_system_config(conn: &mut sqlx::PgConnection, model_id: &Uuid, fields: &[(&str, ConfigValue<'_>)]) -> Result<Self, sqlx::Error> {
+	pub async fn patch_system_config(conn: &mut sqlx::PgConnection, model_id: &Uuid, fields: &[ModelConfigPatchField<'_>]) -> Result<Self, sqlx::Error> {
+		if fields.is_empty() {
+			return sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE model_id = $1 AND owner_id IS NULL")
+				.bind(model_id)
+				.fetch_one(conn)
+				.await;
+		}
+
 		let set_clause = fields
 			.iter()
 			.enumerate()
-			.map(|(i, (col, val))| val.set_expr(col, i + 2))
+			.map(|(i, field)| {
+				let (col, val) = field.column_and_value();
+				val.set_expr(col, i + 2)
+			})
 			.collect::<Vec<_>>()
 			.join(", ");
 
@@ -181,7 +234,8 @@ impl ModelConfig {
 		);
 
 		let mut q = sqlx::query_as::<_, ModelConfig>(&sql).bind(model_id);
-		for (_, val) in fields {
+		for field in fields {
+			let (_, val) = field.column_and_value();
 			q = match val {
 				ConfigValue::Text(v) => q.bind(v),
 				ConfigValue::Int(v) => q.bind(v),

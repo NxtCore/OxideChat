@@ -3,37 +3,43 @@
 //! This module contains all request/response DTOs and domain types.
 
 pub trait BaseType {
+    const TABLE: &'static str;
+    const ALIAS: &'static str;
+
     fn new() -> Self;
-    fn table(&self) -> &str;
-    fn alias(&self) -> &str;
-    fn sql_fields(&self) -> Vec<&str>;
-    fn aliased_fields(&self) -> Vec<String> {
-        self.sql_fields()
+    fn sql_fields() -> &'static [&'static str];
+
+    fn aliased_fields() -> Vec<String> {
+        Self::sql_fields()
             .iter()
-            .map(|f| format!("{}.{} AS {}_{}", self.alias(), f, self.alias(), f))
+            .map(|f| format!("{}.{} AS {}_{}", Self::ALIAS, f, Self::ALIAS, f))
             .collect()
     }
-    fn aliased_fields_from_list(&self, fields: Vec<&str>) -> Vec<String> {
+
+    fn aliased_fields_from_list(fields: &[&str]) -> Vec<String> {
+        let sql_fields = Self::sql_fields();
         let invalid_fields: Vec<String> = fields
             .iter()
-            .filter(|f| !self.sql_fields().contains(*f))
+            .filter(|f| !sql_fields.contains(*f))
             .map(|f| f.to_string())
             .collect();
 
         if !invalid_fields.is_empty() {
-            panic!("Invalid fields for {}: {:?}", self.table(), invalid_fields);
+            panic!("Invalid fields for {}: {:?}", Self::TABLE, invalid_fields);
         }
 
         fields
             .iter()
-            .map(|f| format!("{}.{} AS {}_{}", self.alias(), f, self.alias(), f))
+            .map(|f| format!("{}.{} AS {}_{}", Self::ALIAS, f, Self::ALIAS, f))
             .collect()
     }
-    fn aliased_fields_str(&self) -> String {
-        self.aliased_fields().join(", ")
+
+    fn aliased_fields_str() -> String {
+        Self::aliased_fields().join(", ")
     }
-    fn aliased_fields_str_from_list(&self, fields: Vec<&str>) -> String {
-        self.aliased_fields_from_list(fields).join(", ")
+
+    fn aliased_fields_str_from_list(fields: &[&str]) -> String {
+        Self::aliased_fields_from_list(fields).join(", ")
     }
 }
 

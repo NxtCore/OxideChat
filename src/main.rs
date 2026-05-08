@@ -10,7 +10,7 @@ mod utils;
 
 use crate::types::JobState;
 use axum::{Router, extract::DefaultBodyLimit};
-use sqlx::{postgres::PgPoolOptions};
+use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 
 #[tokio::main]

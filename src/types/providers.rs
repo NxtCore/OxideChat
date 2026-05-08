@@ -91,13 +91,16 @@ pub struct ProviderSlim {
 }
 
 impl BaseType for Provider {
+    const TABLE: &'static str = "providers";
+    const ALIAS: &'static str = "p";
+
     fn new() -> Self {
         Self {
             id: Uuid::new_v4(),
             owner_id: None,
             kind: ProviderKind::Openai,
-            name: "OpenAI".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
+            name: String::from("OpenAI"),
+            base_url: String::from("https://api.openai.com/v1"),
             api_key: None,
             extra_headers: Json(serde_json::Value::Null),
             is_enabled: true,
@@ -105,14 +108,9 @@ impl BaseType for Provider {
             updated_at: chrono::Utc::now(),
         }
     }
-    fn table(&self) -> &str {
-        "providers"
-    }
-    fn alias(&self) -> &str {
-        "p"
-    }
-    fn sql_fields(&self) -> Vec<&str> {
-        vec![
+
+    fn sql_fields() -> &'static [&'static str] {
+        &[
             "id",
             "owner_id",
             "kind",

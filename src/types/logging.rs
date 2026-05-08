@@ -1,20 +1,12 @@
-//! Logging-related types.
-//!
-//! Database row structs and response types for audit log queries.
-
+use crate::types::BaseType;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::FromRow;
 use uuid::Uuid;
 
-// ============================================================================
-// Internal Types (DB rows)
-// ============================================================================
-
-/// Database row for audit logs.
 #[derive(Debug, FromRow)]
-pub struct AuditLogRow {
+pub struct AuditLog {
 	pub id: Uuid,
 	pub event: String,
 	pub actor_id: Option<Uuid>,
@@ -26,11 +18,6 @@ pub struct AuditLogRow {
 	pub created_at: DateTime<Utc>,
 }
 
-// ============================================================================
-// Response Types
-// ============================================================================
-
-/// Response for admin audit log viewing.
 #[derive(Debug, Serialize)]
 pub struct AuditLogResponse {
 	pub id: Uuid,
@@ -44,8 +31,8 @@ pub struct AuditLogResponse {
 	pub created_at: DateTime<Utc>,
 }
 
-impl From<AuditLogRow> for AuditLogResponse {
-	fn from(row: AuditLogRow) -> Self {
+impl From<AuditLog> for AuditLogResponse {
+	fn from(row: AuditLog) -> Self {
 		Self {
 			id: row.id,
 			event: row.event,
@@ -57,5 +44,94 @@ impl From<AuditLogRow> for AuditLogResponse {
 			metadata: row.metadata,
 			created_at: row.created_at,
 		}
+	}
+}
+
+impl BaseType for AuditLog {
+	const TABLE: &'static str = "audit_logs";
+	const ALIAS: &'static str = "al";
+
+	fn new() -> Self {
+		Self {
+			id: Uuid::new_v4(),
+			event: String::new(),
+			actor_id: None,
+			target_type: None,
+			target_id: None,
+			resource_type: None,
+			resource_id: None,
+			metadata: None,
+			created_at: Utc::now(),
+		}
+	}
+
+	fn sql_fields() -> &'static [&'static str] {
+		&[
+			"id", "event", "actor_id", "target_type", "target_id",
+			"resource_type", "resource_id", "metadata", "created_at",
+		]
+	}
+}
+
+impl AuditLog {
+	pub async fn create(
+		pool: &sqlx::PgPool,
+		event: &str,
+		actor_id: Option<&Uuid>,
+		target_type: Option<&str>,
+		target_id: Option<&Uuid>,
+		resource_type: Option<&str>,
+		resource_id: Option<&Uuid>,
+		metadata: Option<&Value>,
+	) -> Result<Self, sqlx::Error> {
+		sqlx::query_as::<_, AuditLog>(
+			r#"
+			INSERT INTO audit_logs (event, actor_id, target_type, target_id, resource_type, resource_id, metadata)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING *
+			"#,
+		)
+		.bind(event)
+		.bind(actor_id)
+		.bind(target_type)
+		.bind(target_id)
+		.bind(resource_type)
+		.bind(resource_id)
+		.bind(metadata)
+		.fetch_one(pool)
+		.await
+	}
+
+	pub async fn list_paginated(
+		pool: &sqlx::PgPool,
+		limit: i64,
+		offset: i64,
+		event_filter: Option<&str>,
+		actor_filter: Option<&Uuid>,
+	) -> Result<(Vec<AuditLog>, i64), sqlx::Error> {
+		let count: (i64,) = sqlx::query_as(
+			"SELECT COUNT(*) FROM audit_logs WHERE ($1::text IS NULL OR event = $1) AND ($2::uuid IS NULL OR actor_id = $2)",
+		)
+		.bind(event_filter)
+		.bind(actor_filter)
+		.fetch_one(pool)
+		.await?;
+
+		let rows = sqlx::query_as::<_, AuditLog>(
+			r#"
+			SELECT * FROM audit_logs
+			WHERE ($1::text IS NULL OR event = $1) AND ($2::uuid IS NULL OR actor_id = $2)
+			ORDER BY created_at DESC
+			LIMIT $3 OFFSET $4
+			"#,
+		)
+		.bind(event_filter)
+		.bind(actor_filter)
+		.bind(limit)
+		.bind(offset)
+		.fetch_all(pool)
+		.await?;
+
+		Ok((rows, count.0))
 	}
 }

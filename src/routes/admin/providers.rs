@@ -25,6 +25,7 @@ use omniference::{
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
+use crate::types::providers::ProviderKind;
 
 pub const ADMIN_PROVIDERS_VIEW: &str = "admin.providers.view";
 pub const ADMIN_PROVIDERS_EDIT: &str = "admin.providers.edit";

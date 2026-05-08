@@ -1,8 +1,8 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
 use crate::types::axum::{AdminModelPatchBody, ModelListParams};
-use crate::types::models::Model;
-use crate::types::models_configs::{ConfigValue, ModelConfig};
+use crate::types::models::{Model, ModelPatchField};
+use crate::types::models_configs::{ModelConfig, ModelConfigPatchField};
 use crate::utils::images::{image_url, is_data_uri, store_from_data_uri};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::extract::Query;
@@ -68,7 +68,7 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let models = match Model::list_paginated_admin(&state.db, params.page.unwrap_or(1), params.size.unwrap_or(0), params.query.clone()).await {
+	let models = match Model::list_paginated_admin(&state.db, params.page.unwrap_or(1), params.size.unwrap_or(0), params.query).await {
 		Ok(m) => m,
 		Err(e) => {
 			eprintln!("[ADMIN] Failed to list models: {e}");
@@ -142,17 +142,16 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, cookies: Cookies, P
 		}
 	};
 
-	let mut model_fields: Vec<(&str, Value)> = Vec::new();
+	let mut model_fields: Vec<ModelPatchField<'_>> = Vec::new();
 	if let Some(ref name) = req.display_name {
-		model_fields.push(("display_name", Value::String(name.clone())));
+		model_fields.push(ModelPatchField::DisplayName(name));
 	}
 	if let Some(enabled) = req.is_enabled {
-		model_fields.push(("is_enabled", Value::Bool(enabled)));
+		model_fields.push(ModelPatchField::IsEnabled(enabled));
 	}
 
 	if !model_fields.is_empty() {
-		let pairs: Vec<(&str, &Value)> = model_fields.iter().map(|(k, v)| (*k, v)).collect();
-		if let Err(e) = Model::update_via_connection(&mut *tx, &id, &pairs).await {
+		if let Err(e) = Model::patch_via_connection(&mut *tx, &id, &model_fields).await {
 			eprintln!("[ADMIN] Failed to update model: {e}");
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
@@ -170,55 +169,55 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, cookies: Cookies, P
 			req.reasoning_budget_tokens.as_ref().map(|v| *v),
 		);
 
-		let mut config_fields: Vec<(&str, ConfigValue<'_>)> = Vec::new();
+		let mut config_fields: Vec<ModelConfigPatchField<'_>> = Vec::new();
 
 		if let Some(ref v) = req.description {
-			config_fields.push(("description", ConfigValue::Text(v.as_deref())));
+			config_fields.push(ModelConfigPatchField::Description(v.as_deref()));
 		}
 		if let Some(ref v) = icon {
-			config_fields.push(("icon", ConfigValue::Text(v.as_deref())));
+			config_fields.push(ModelConfigPatchField::Icon(v.as_deref()));
 		}
 		if let Some(ref v) = req.system_prompt {
-			config_fields.push(("system_prompt", ConfigValue::Text(v.as_deref())));
+			config_fields.push(ModelConfigPatchField::SystemPrompt(v.as_deref()));
 		}
 		if let Some(Some(ref v)) = req.sampling {
-			config_fields.push(("sampling", ConfigValue::JsonMerge(v)));
+			config_fields.push(ModelConfigPatchField::SamplingMerge(v));
 		}
 		if let Some(ref v) = req.input_modalities {
-			config_fields.push(("input_modalities", ConfigValue::Json(v.as_ref())));
+			config_fields.push(ModelConfigPatchField::InputModalities(v.as_ref()));
 		}
 		if let Some(ref v) = req.output_modalities {
-			config_fields.push(("output_modalities", ConfigValue::Json(v.as_ref())));
+			config_fields.push(ModelConfigPatchField::OutputModalities(v.as_ref()));
 		}
 		if let Some(v) = req.context_length {
-			config_fields.push(("context_length", ConfigValue::Int(v)));
+			config_fields.push(ModelConfigPatchField::ContextLength(v));
 		}
 		if let Some(v) = req.max_output_tokens {
-			config_fields.push(("max_output_tokens", ConfigValue::Int(v)));
+			config_fields.push(ModelConfigPatchField::MaxOutputTokens(v));
 		}
 		if let Some(ref v) = req.enabled_tools {
-			config_fields.push(("enabled_tools", ConfigValue::Json(v.as_ref())));
+			config_fields.push(ModelConfigPatchField::EnabledTools(v.as_ref()));
 		}
 		if let Some(v) = req.is_public {
-			config_fields.push(("is_public", ConfigValue::Bool(v)));
+			config_fields.push(ModelConfigPatchField::IsPublic(v));
 		}
 		if let Some(v) = req.is_featured {
-			config_fields.push(("is_featured", ConfigValue::Bool(v)));
+			config_fields.push(ModelConfigPatchField::IsFeatured(v));
 		}
 		if let Some(v) = req.is_default {
-			config_fields.push(("is_default", ConfigValue::Bool(v)));
+			config_fields.push(ModelConfigPatchField::IsDefault(v));
 		}
 		if let Some(v) = req.is_favorite {
-			config_fields.push(("is_favorite", ConfigValue::Bool(v)));
+			config_fields.push(ModelConfigPatchField::IsFavorite(v));
 		}
 		if let Some(ref v) = req.category {
-			config_fields.push(("category", ConfigValue::Text(v.as_deref())));
+			config_fields.push(ModelConfigPatchField::Category(v.as_deref()));
 		}
 		if let Some(ref v) = req.tags {
-			config_fields.push(("tags", ConfigValue::Json(v.as_ref())));
+			config_fields.push(ModelConfigPatchField::Tags(v.as_ref()));
 		}
 		if let Some(ref v) = extra_settings {
-			config_fields.push(("extra_settings", ConfigValue::Json(Some(v))));
+			config_fields.push(ModelConfigPatchField::ExtraSettings(Some(v)));
 		}
 
 		if !config_fields.is_empty() {

@@ -29,6 +29,10 @@ pub async fn init(pool: &PgPool) {
 		.fetch_all(pool)
 		.await
 		.unwrap_or_default();
+	if providers.is_empty() {
+		println!("[AI] No providers found in the database.");
+		return;
+	}
 
 	let provider_count = providers.len();
 	let mut engine_write = engine.write().await;

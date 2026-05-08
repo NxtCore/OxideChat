@@ -86,12 +86,15 @@ pub struct ModelListAdmin {
 }
 
 impl BaseType for Model {
+	const TABLE: &'static str = "models";
+	const ALIAS: &'static str = "m";
+
 	fn new() -> Self {
 		Self {
 			id: Uuid::new_v4(),
 			provider_id: Uuid::new_v4(),
-			model_id: "".to_string(),
-			display_name: "".to_string(),
+			model_id: String::new(),
+			display_name: String::new(),
 			capabilities: Json(vec![]),
 			input_modalities: Json(vec![]),
 			output_modalities: Json(vec![]),
@@ -102,14 +105,9 @@ impl BaseType for Model {
 			updated_at: chrono::Utc::now(),
 		}
 	}
-	fn table(&self) -> &str {
-		"models"
-	}
-	fn alias(&self) -> &str {
-		"m"
-	}
-	fn sql_fields(&self) -> Vec<&str> {
-		vec![
+
+	fn sql_fields() -> &'static [&'static str] {
+		&[
 			"id",
 			"provider_id",
 			"model_id",
@@ -126,28 +124,39 @@ impl BaseType for Model {
 	}
 }
 
+enum ConfigValue<'a> {
+	Text(Option<&'a str>),
+	Bool(bool),
+}
+
+impl ConfigValue<'_> {
+	fn set_expr(&self, col: &str, param_idx: usize) -> String {
+		match self {
+			Self::Text(_) => format!("{col} = ${param_idx}::TEXT"),
+			Self::Bool(_) => format!("{col} = ${param_idx}::BOOLEAN"),
+		}
+	}
+}
+
+pub enum ModelPatchField<'a> {
+	DisplayName(&'a str),
+	IsEnabled(bool),
+}
+
+impl<'a> ModelPatchField<'a> {
+	fn column_and_value(&self) -> (&'static str, ConfigValue<'a>) {
+		match self {
+			Self::DisplayName(v) => ("display_name", ConfigValue::Text(Some(v))),
+			Self::IsEnabled(v) => ("is_enabled", ConfigValue::Bool(*v)),
+		}
+	}
+}
+
 impl Model {
-	/// Escapes LIKE wildcards in a search string.
-	///
-	/// This function escapes `%`, `_`, and `\` characters by prefixing them with a backslash,
-	/// allowing users to search for literal occurrences of these characters.
-	///
-	/// # Arguments
-	///
-	/// * `s` - The string to escape
-	///
-	/// # Returns
-	///
-	/// A new string with LIKE wildcards escaped.
 	fn escape_like_pattern(s: &str) -> String {
 		s.replace('\\', r"\\").replace('%', r"\%").replace('_', r"\_")
 	}
 
-	/// Create a new model linked to a provider.
-	///
-	/// # Errors
-	///
-	/// Returns `sqlx::Error` if the database query fails.
 	pub async fn create(pool: &sqlx::PgPool, provider_id: &Uuid, model_id: &str, display_name: &str) -> Result<Self, sqlx::Error> {
 		sqlx::query_as::<_, Model>(
 			r#"
@@ -176,14 +185,27 @@ impl Model {
 		let offset = (page - 1) * size;
 		let limit = if size <= 0 { None } else { Some(size + 1) };
 
-		let model = Model::new();
-		let model_config = ModelConfig::new();
-		let provider = Provider::new();
 		let where_clause = if show_disabled {
 			String::new()
 		} else {
-			format!(r"WHERE {}.is_enabled = true AND {}.is_enabled = true", model.alias(), provider.alias())
+			format!("WHERE {}.is_enabled = true AND {}.is_enabled = true", Model::ALIAS, Provider::ALIAS)
 		};
+
+		let model_fields = Model::aliased_fields_str_from_list(&[
+			"id",
+			"model_id",
+			"display_name",
+			"capabilities",
+			"input_modalities",
+			"output_modalities",
+			"context_length",
+			"max_tokens",
+			"is_enabled",
+		]);
+
+		let provider_fields = Provider::aliased_fields_str_from_list(&["name", "kind", "id"]);
+		let model_config_fields = ModelConfig::aliased_fields_str_from_list(&["icon", "is_favorite"]);
+
 		let query = format!(
 			r#"
             SELECT {model_fields}, {provider_fields}, {model_config_fields}
@@ -196,26 +218,12 @@ impl Model {
             ORDER BY {model_alias}.display_name, {provider_alias}.name
             LIMIT $1 OFFSET $2
             "#,
-			model_fields = model.aliased_fields_str_from_list(vec![
-				"id",
-				"model_id",
-				"display_name",
-				"capabilities",
-				"input_modalities",
-				"output_modalities",
-				"context_length",
-				"max_tokens",
-				"is_enabled"
-			]),
-			model_alias = model.alias(),
-			model_table = model.table(),
-			model_config_fields = model_config.aliased_fields_str_from_list(vec!["icon", "is_favorite"]),
-			model_config_alias = model_config.alias(),
-			model_config_table = model_config.table(),
-			provider_fields = provider.aliased_fields_str_from_list(vec!["name", "kind", "id"]),
-			provider_alias = provider.alias(),
-			provider_table = provider.table(),
-			where_clause = where_clause,
+			model_alias = Model::ALIAS,
+			model_table = Model::TABLE,
+			model_config_alias = ModelConfig::ALIAS,
+			model_config_table = ModelConfig::TABLE,
+			provider_alias = Provider::ALIAS,
+			provider_table = Provider::TABLE,
 		);
 
 		let rows = sqlx::query(&query).bind(limit).bind(offset).fetch_all(pool).await?;
@@ -225,27 +233,28 @@ impl Model {
 			.into_iter()
 			.take(if size <= 0 { usize::MAX } else { size as usize })
 			.map(|row| {
-				let provider_name: String = row.get(format!("{}_name", provider.alias()).as_str());
+				let provider_name: String = row.get("p_name");
 				ModelListPublic {
-					id: row.get(format!("{}_id", model.alias()).as_str()),
-					model_id: row.get(format!("{}_model_id", model.alias()).as_str()),
-					display_name: row.get(format!("{}_display_name", model.alias()).as_str()),
-					capabilities: row.get::<Json<Vec<String>>, _>(format!("{}_capabilities", model.alias()).as_str()).0,
-					input_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_input_modalities", model.alias()).as_str()).0,
-					output_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_output_modalities", model.alias()).as_str()).0,
-					context_length: row.get::<Option<i32>, _>(format!("{}_context_length", model.alias()).as_str()),
-					max_tokens: row.get::<Option<i32>, _>(format!("{}_max_tokens", model.alias()).as_str()),
-					is_enabled: row.get(format!("{}_is_enabled", model.alias()).as_str()),
+					id: row.get("m_id"),
+					model_id: row.get("m_model_id"),
+					display_name: row.get("m_display_name"),
+					capabilities: row.get::<Json<Vec<String>>, _>("m_capabilities").0,
+					input_modalities: row.get::<Json<Vec<String>>, _>("m_input_modalities").0,
+					output_modalities: row.get::<Json<Vec<String>>, _>("m_output_modalities").0,
+					context_length: row.get("m_context_length"),
+					max_tokens: row.get("m_max_tokens"),
+					is_enabled: row.get("m_is_enabled"),
 					provider: ProviderSlim {
-						id: row.get(format!("{}_id", provider.alias()).as_str()),
+						id: row.get("p_id"),
 						name: provider_name.clone(),
-						kind: row.get(format!("{}_kind", provider.alias()).as_str()),
+						kind: row.get("p_kind"),
 					},
-					icon: row.get(format!("{}_icon", model_config.alias()).as_str()),
-					is_favorite: row.get::<Option<bool>, _>(format!("{}_is_favorite", model_config.alias()).as_str()).unwrap_or(false),
+					icon: row.get("mc_icon"),
+					is_favorite: row.get::<Option<bool>, _>("mc_is_favorite").unwrap_or(false),
 				}
 			})
 			.collect();
+
 		Ok(PaginatedResponse { has_more, items })
 	}
 
@@ -261,9 +270,24 @@ impl Model {
 		let offset = (page - 1) * size;
 		let limit = if size <= 0 { None } else { Some(size + 1) };
 
-		let model = Model::new();
-		let model_config = ModelConfig::new();
-		let provider = Provider::new();
+		let model_fields = Model::aliased_fields_str_from_list(&[
+			"id",
+			"provider_id",
+			"model_id",
+			"display_name",
+			"capabilities",
+			"input_modalities",
+			"output_modalities",
+			"context_length",
+			"max_tokens",
+			"is_enabled",
+			"created_at",
+			"updated_at",
+		]);
+
+		let provider_fields = Provider::aliased_fields_str_from_list(&["name", "kind", "id"]);
+		let model_config_fields = ModelConfig::aliased_fields_str_from_list(&["icon"]);
+
 		let query = format!(
 			r#"
             SELECT {model_fields}, {provider_fields}, {model_config_fields}
@@ -276,59 +300,43 @@ impl Model {
             ORDER BY {model_alias}.display_name, {provider_alias}.name
             LIMIT $1 OFFSET $2
             "#,
-			model_fields = model.aliased_fields_str_from_list(vec![
-				"id",
-				"provider_id",
-				"model_id",
-				"display_name",
-				"capabilities",
-				"input_modalities",
-				"output_modalities",
-				"context_length",
-				"max_tokens",
-				"is_enabled",
-				"created_at",
-				"updated_at"
-			]),
-			model_alias = model.alias(),
-			model_table = model.table(),
-			model_config_fields = model_config.aliased_fields_str_from_list(vec!["icon",]),
-			model_config_alias = model_config.alias(),
-			model_config_table = model_config.table(),
-			provider_fields = provider.aliased_fields_str_from_list(vec!["name", "kind", "id"]),
-			provider_alias = provider.alias(),
-			provider_table = provider.table(),
+			model_alias = Model::ALIAS,
+			model_table = Model::TABLE,
+			model_config_alias = ModelConfig::ALIAS,
+			model_config_table = ModelConfig::TABLE,
+			provider_alias = Provider::ALIAS,
+			provider_table = Provider::TABLE,
 		);
 
 		let rows = sqlx::query(&query)
 			.bind(limit)
 			.bind(offset)
-			.bind(search_query.as_deref().map(|s| format!("%{}%", Self::escape_like_pattern(s))).unwrap_or("%".to_string()))
+			.bind(search_query.as_deref().map(|s| format!("%{}%", Self::escape_like_pattern(s))).unwrap_or_else(|| "%".to_string()))
 			.fetch_all(pool)
 			.await?;
 
-		let has_more = rows.len() > size as usize;
+		let has_more = limit.is_some() && rows.len() > size as usize;
 		let items = rows
 			.into_iter()
 			.take(if size <= 0 { usize::MAX } else { size as usize })
 			.map(|row| ModelListAdmin {
-				id: row.get(format!("{}_id", model.alias()).as_str()),
-				model_id: row.get(format!("{}_model_id", model.alias()).as_str()),
-				display_name: row.get(format!("{}_display_name", model.alias()).as_str()),
-				capabilities: row.get::<Json<Vec<String>>, _>(format!("{}_capabilities", model.alias()).as_str()).0,
-				input_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_input_modalities", model.alias()).as_str()).0,
-				output_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_output_modalities", model.alias()).as_str()).0,
-				context_length: row.get::<Option<i32>, _>(format!("{}_context_length", model.alias()).as_str()),
-				max_tokens: row.get::<Option<i32>, _>(format!("{}_max_tokens", model.alias()).as_str()),
-				is_enabled: row.get(format!("{}_is_enabled", model.alias()).as_str()),
-				created_at: row.get(format!("{}_created_at", model.alias()).as_str()),
-				updated_at: row.get(format!("{}_updated_at", model.alias()).as_str()),
+				id: row.get("m_id"),
+				model_id: row.get("m_model_id"),
+				display_name: row.get("m_display_name"),
+				capabilities: row.get::<Json<Vec<String>>, _>("m_capabilities").0,
+				input_modalities: row.get::<Json<Vec<String>>, _>("m_input_modalities").0,
+				output_modalities: row.get::<Json<Vec<String>>, _>("m_output_modalities").0,
+				context_length: row.get("m_context_length"),
+				max_tokens: row.get("m_max_tokens"),
+				is_enabled: row.get("m_is_enabled"),
+				created_at: row.get("m_created_at"),
+				updated_at: row.get("m_updated_at"),
 				provider: ProviderSlim {
-					id: row.get(format!("{}_id", provider.alias()).as_str()),
-					name: row.get(format!("{}_name", provider.alias()).as_str()),
-					kind: row.get(format!("{}_kind", provider.alias()).as_str()),
+					id: row.get("p_id"),
+					name: row.get("p_name"),
+					kind: row.get("p_kind"),
 				},
-				icon: row.get(format!("{}_icon", model_config.alias()).as_str()),
+				icon: row.get("mc_icon"),
 			})
 			.collect();
 
@@ -343,9 +351,36 @@ impl Model {
 	///
 	/// Returns `sqlx::Error` if the database query fails.
 	pub async fn find_by_id_with_config(pool: &sqlx::PgPool, id: &Uuid) -> Result<Option<ModelDetailed>, sqlx::Error> {
-		let model = Model::new();
-		let model_config = ModelConfig::new();
-		let provider = Provider::new();
+		let model_fields = Model::aliased_fields_str_from_list(&[
+			"id",
+			"provider_id",
+			"model_id",
+			"display_name",
+			"capabilities",
+			"input_modalities",
+			"output_modalities",
+			"context_length",
+			"max_tokens",
+			"is_enabled",
+			"created_at",
+			"updated_at",
+		]);
+
+		let provider_fields = Provider::aliased_fields_str_from_list(&["name", "kind", "id"]);
+		let model_config_fields = ModelConfig::aliased_fields_str_from_list(&[
+			"icon",
+			"description",
+			"system_prompt",
+			"sampling",
+			"extra_settings",
+			"is_public",
+			"is_featured",
+			"is_default",
+			"is_favorite",
+			"category",
+			"tags",
+		]);
+
 		let query = format!(
 			r#"
             SELECT {model_fields}, {provider_fields}, {model_config_fields}
@@ -356,40 +391,12 @@ impl Model {
                 AND {model_config_alias}.owner_id IS NULL
             WHERE {model_alias}.id = $1
             "#,
-			model_fields = model.aliased_fields_str_from_list(vec![
-				"id",
-				"provider_id",
-				"model_id",
-				"display_name",
-				"capabilities",
-				"input_modalities",
-				"output_modalities",
-				"context_length",
-				"max_tokens",
-				"is_enabled",
-				"created_at",
-				"updated_at"
-			]),
-			model_alias = model.alias(),
-			model_table = model.table(),
-			model_config_fields = model_config.aliased_fields_str_from_list(vec![
-				"icon",
-				"description",
-				"system_prompt",
-				"sampling",
-				"extra_settings",
-				"is_public",
-				"is_featured",
-				"is_default",
-				"is_favorite",
-				"category",
-				"tags"
-			]),
-			model_config_alias = model_config.alias(),
-			model_config_table = model_config.table(),
-			provider_fields = provider.aliased_fields_str_from_list(vec!["name", "kind", "id"]),
-			provider_alias = provider.alias(),
-			provider_table = provider.table(),
+			model_alias = Model::ALIAS,
+			model_table = Model::TABLE,
+			model_config_alias = ModelConfig::ALIAS,
+			model_config_table = ModelConfig::TABLE,
+			provider_alias = Provider::ALIAS,
+			provider_table = Provider::TABLE,
 		);
 
 		let row = match sqlx::query(&query).bind(id).fetch_optional(pool).await? {
@@ -398,36 +405,36 @@ impl Model {
 		};
 
 		Ok(Some(ModelDetailed {
-			id: row.get(format!("{}_id", model.alias()).as_str()),
-			model_id: row.get(format!("{}_model_id", model.alias()).as_str()),
-			display_name: row.get(format!("{}_display_name", model.alias()).as_str()),
-			capabilities: row.get::<Json<Vec<String>>, _>(format!("{}_capabilities", model.alias()).as_str()).0,
-			input_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_input_modalities", model.alias()).as_str()).0,
-			output_modalities: row.get::<Json<Vec<String>>, _>(format!("{}_output_modalities", model.alias()).as_str()).0,
-			context_length: row.get::<Option<i32>, _>(format!("{}_context_length", model.alias()).as_str()),
-			max_tokens: row.get::<Option<i32>, _>(format!("{}_max_tokens", model.alias()).as_str()),
-			is_enabled: row.get(format!("{}_is_enabled", model.alias()).as_str()),
-			created_at: row.get(format!("{}_created_at", model.alias()).as_str()),
-			updated_at: row.get(format!("{}_updated_at", model.alias()).as_str()),
+			id: row.get("m_id"),
+			model_id: row.get("m_model_id"),
+			display_name: row.get("m_display_name"),
+			capabilities: row.get::<Json<Vec<String>>, _>("m_capabilities").0,
+			input_modalities: row.get::<Json<Vec<String>>, _>("m_input_modalities").0,
+			output_modalities: row.get::<Json<Vec<String>>, _>("m_output_modalities").0,
+			context_length: row.get("m_context_length"),
+			max_tokens: row.get("m_max_tokens"),
+			is_enabled: row.get("m_is_enabled"),
+			created_at: row.get("m_created_at"),
+			updated_at: row.get("m_updated_at"),
 			provider: ProviderSlim {
-				id: row.get(format!("{}_id", provider.alias()).as_str()),
-				name: row.get(format!("{}_name", provider.alias()).as_str()),
-				kind: row.get(format!("{}_kind", provider.alias()).as_str()),
+				id: row.get("p_id"),
+				name: row.get("p_name"),
+				kind: row.get("p_kind"),
 			},
-			icon: row.get(format!("{}_icon", model_config.alias()).as_str()),
-			description: row.get(format!("{}_description", model_config.alias()).as_str()),
-			system_prompt: row.get(format!("{}_system_prompt", model_config.alias()).as_str()),
-			sampling: row.get::<Option<Json<Value>>, _>(format!("{}_sampling", model_config.alias()).as_str()).map(|j| j.0),
+			icon: row.get("mc_icon"),
+			description: row.get("mc_description"),
+			system_prompt: row.get("mc_system_prompt"),
+			sampling: row.get::<Option<Json<Value>>, _>("mc_sampling").map(|j| j.0),
 			extra_settings: row
-				.get::<Option<Json<Value>>, _>(format!("{}_extra_settings", model_config.alias()).as_str())
+				.get::<Option<Json<Value>>, _>("mc_extra_settings")
 				.map(|j| j.0),
-			is_public: row.get::<Option<bool>, _>(format!("{}_is_public", model_config.alias()).as_str()).unwrap_or(false),
-			is_featured: row.get::<Option<bool>, _>(format!("{}_is_featured", model_config.alias()).as_str()).unwrap_or(false),
-			is_default: row.get::<Option<bool>, _>(format!("{}_is_default", model_config.alias()).as_str()).unwrap_or(false),
-			is_favorite: row.get::<Option<bool>, _>(format!("{}_is_favorite", model_config.alias()).as_str()).unwrap_or(false),
-			category: row.get(format!("{}_category", model_config.alias()).as_str()),
+			is_public: row.get::<Option<bool>, _>("mc_is_public").unwrap_or(false),
+			is_featured: row.get::<Option<bool>, _>("mc_is_featured").unwrap_or(false),
+			is_default: row.get::<Option<bool>, _>("mc_is_default").unwrap_or(false),
+			is_favorite: row.get::<Option<bool>, _>("mc_is_favorite").unwrap_or(false),
+			category: row.get("mc_category"),
 			tags: row
-				.get::<Option<Json<Vec<String>>>, _>(format!("{}_tags", model_config.alias()).as_str())
+				.get::<Option<Json<Vec<String>>>, _>("mc_tags")
 				.map(|j| j.0)
 				.unwrap_or_default(),
 		}))
@@ -446,36 +453,43 @@ impl Model {
 		.await
 	}
 
-	pub async fn update(pool: &sqlx::PgPool, id: &Uuid, fields: &[(&str, &str)]) -> Result<Option<Model>, sqlx::Error> {
-		let set_clause = fields
-			.iter()
-			.enumerate()
-			.map(|(i, (field, _))| format!("{} = ${}", field, i + 2))
-			.collect::<Vec<_>>()
-			.join(", ");
-
-		let query = format!("UPDATE models SET {}, updated_at = NOW() WHERE id = $1 RETURNING *", set_clause);
-
-		let mut q = sqlx::query_as::<_, Model>(&query).bind(id);
-		for (_, value) in fields {
-			q = q.bind(value);
+	/// Apply a partial update to a model row.
+	///
+	/// Each field in `fields` sets exactly one column; columns not listed are
+	/// left untouched. `updated_at` is bumped automatically.
+	///
+	/// # Errors
+	///
+	/// Returns `sqlx::Error` if the database query fails.
+	pub async fn patch_via_connection(conn: &mut sqlx::PgConnection, id: &Uuid, fields: &[ModelPatchField<'_>]) -> Result<Option<Model>, sqlx::Error> {
+		if fields.is_empty() {
+			return sqlx::query_as::<_, Model>("SELECT * FROM models WHERE id = $1")
+				.bind(id)
+				.fetch_optional(&mut *conn)
+				.await;
 		}
-		q.fetch_optional(pool).await
-	}
 
-	pub async fn update_via_connection(conn: &mut sqlx::PgConnection, id: &Uuid, fields: &[(&str, &Value)]) -> Result<Option<Model>, sqlx::Error> {
 		let set_clause = fields
 			.iter()
 			.enumerate()
-			.map(|(i, (field, _))| format!("{} = ${}", field, i + 2))
+			.map(|(i, field)| {
+				let (col, val) = field.column_and_value();
+				val.set_expr(col, i + 2)
+			})
 			.collect::<Vec<_>>()
 			.join(", ");
 
-		let query = format!("UPDATE models SET {}, updated_at = NOW() WHERE id = $1 RETURNING *", set_clause);
+		let sql = format!(
+			"UPDATE models SET {set_clause}, updated_at = NOW() WHERE id = $1 RETURNING *"
+		);
 
-		let mut q = sqlx::query_as::<_, Model>(&query).bind(id);
-		for (_, value) in fields {
-			q = q.bind(value);
+		let mut q = sqlx::query_as::<_, Model>(&sql).bind(id);
+		for field in fields {
+			let (_, val) = field.column_and_value();
+			q = match val {
+				ConfigValue::Text(v) => q.bind(v),
+				ConfigValue::Bool(v) => q.bind(v),
+			};
 		}
 		q.fetch_optional(&mut *conn).await
 	}

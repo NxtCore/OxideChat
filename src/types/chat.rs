@@ -218,7 +218,7 @@ impl UserPreferences {
 			user_id,
 			default_model_key: None,
 			favorite_model_keys: serde_json::json!([]),
-			streaming_animation: "fade".to_string(),
+			streaming_animation: String::from("fade"),
 			use_remend: true,
 			theme_css_vars: serde_json::json!({}),
 			custom_theme_urls: serde_json::json!([]),
@@ -552,4 +552,597 @@ pub enum StreamData {
 	Error { code: String, message: String },
 	/// Stream completed with message info
 	Done { message: ChatMessageResponse },
+}
+
+impl crate::types::BaseType for Workspace {
+	const TABLE: &'static str = "workspaces";
+	const ALIAS: &'static str = "w";
+
+	fn new() -> Self {
+		Self {
+			id: Uuid::new_v4(),
+			user_id: Uuid::new_v4(),
+			name: String::new(),
+			icon: None,
+			color: None,
+			sort_order: 0,
+			is_default: false,
+			created_at: Utc::now(),
+			updated_at: Utc::now(),
+		}
+	}
+
+	fn sql_fields() -> &'static [&'static str] {
+		&[
+			"id", "user_id", "name", "icon", "color",
+			"sort_order", "is_default", "created_at", "updated_at",
+		]
+	}
+}
+
+impl Workspace {
+	pub async fn list_by_user_with_count(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<Vec<WorkspaceWithCount>, sqlx::Error> {
+		sqlx::query_as::<_, WorkspaceWithCount>(
+			r#"
+			SELECT w.*, COALESCE(c.chat_count, 0) AS chat_count
+			FROM workspaces w
+			LEFT JOIN (
+				SELECT workspace_id, COUNT(*) AS chat_count
+				FROM chats
+				WHERE user_id = $1
+				GROUP BY workspace_id
+			) c ON w.id = c.workspace_id
+			WHERE w.user_id = $1
+			ORDER BY w.sort_order, w.name
+			"#,
+		)
+		.bind(user_id)
+		.fetch_all(pool)
+		.await
+	}
+
+	pub async fn find_by_id_and_user(pool: &sqlx::PgPool, id: &Uuid, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Workspace>("SELECT * FROM workspaces WHERE id = $1 AND user_id = $2")
+			.bind(id)
+			.bind(user_id)
+			.fetch_optional(pool)
+			.await
+	}
+
+	pub async fn create(pool: &sqlx::PgPool, user_id: &Uuid, name: &str, icon: Option<&str>, color: Option<&str>, is_default: bool) -> Result<Self, sqlx::Error> {
+		sqlx::query_as::<_, Workspace>(
+			r#"
+			INSERT INTO workspaces (user_id, name, icon, color, is_default)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING *
+			"#,
+		)
+		.bind(user_id)
+		.bind(name)
+		.bind(icon)
+		.bind(color)
+		.bind(is_default)
+		.fetch_one(pool)
+		.await
+	}
+
+	pub async fn clear_default_for_user(pool: &sqlx::PgPool, user_id: &Uuid, exclude_id: Option<&Uuid>) -> Result<u64, sqlx::Error> {
+		let result = if let Some(exclude) = exclude_id {
+			sqlx::query("UPDATE workspaces SET is_default = false WHERE user_id = $1 AND id != $2")
+				.bind(user_id)
+				.bind(exclude)
+				.execute(pool)
+				.await?
+		} else {
+			sqlx::query("UPDATE workspaces SET is_default = false WHERE user_id = $1")
+				.bind(user_id)
+				.execute(pool)
+				.await?
+		};
+		Ok(result.rows_affected())
+	}
+
+	pub async fn update(
+		pool: &sqlx::PgPool,
+		id: &Uuid,
+		user_id: &Uuid,
+		name: Option<&str>,
+		icon: Option<&str>,
+		color: Option<&str>,
+		sort_order: Option<i32>,
+		is_default: Option<bool>,
+	) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Workspace>(
+			r#"
+			UPDATE workspaces
+			SET name = COALESCE($3, name),
+			    icon = COALESCE($4, icon),
+			    color = COALESCE($5, color),
+			    sort_order = COALESCE($6, sort_order),
+			    is_default = COALESCE($7, is_default),
+			    updated_at = NOW()
+			WHERE id = $1 AND user_id = $2
+			RETURNING *
+			"#,
+		)
+		.bind(id)
+		.bind(user_id)
+		.bind(name)
+		.bind(icon)
+		.bind(color)
+		.bind(sort_order)
+		.bind(is_default)
+		.fetch_optional(pool)
+		.await
+	}
+
+	pub async fn delete(pool: &sqlx::PgPool, id: &Uuid, user_id: &Uuid) -> Result<bool, sqlx::Error> {
+		let result = sqlx::query("DELETE FROM workspaces WHERE id = $1 AND user_id = $2")
+			.bind(id)
+			.bind(user_id)
+			.execute(pool)
+			.await?;
+		Ok(result.rows_affected() > 0)
+	}
+}
+
+impl crate::types::BaseType for Chat {
+	const TABLE: &'static str = "chats";
+	const ALIAS: &'static str = "c";
+
+	fn new() -> Self {
+		Self {
+			id: Uuid::new_v4(),
+			user_id: Uuid::new_v4(),
+			workspace_id: None,
+			title: None,
+			is_pinned: false,
+			is_archived: false,
+			branched_from_chat_id: None,
+			branched_from_message_id: None,
+			created_at: Utc::now(),
+			updated_at: Utc::now(),
+		}
+	}
+
+	fn sql_fields() -> &'static [&'static str] {
+		&[
+			"id", "user_id", "workspace_id", "title", "is_pinned", "is_archived",
+			"branched_from_chat_id", "branched_from_message_id", "created_at", "updated_at",
+		]
+	}
+}
+
+impl Chat {
+	pub async fn list_by_user(
+		pool: &sqlx::PgPool,
+		user_id: &Uuid,
+		workspace_id: Option<&Uuid>,
+		include_archived: bool,
+		limit: i64,
+		offset: i64,
+	) -> Result<Vec<Self>, sqlx::Error> {
+		if include_archived {
+			if let Some(ws_id) = workspace_id {
+				sqlx::query_as::<_, Chat>(
+					"SELECT * FROM chats WHERE user_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC LIMIT $3 OFFSET $4",
+				)
+				.bind(user_id)
+				.bind(ws_id)
+				.bind(limit)
+				.bind(offset)
+				.fetch_all(pool)
+				.await
+			} else {
+				sqlx::query_as::<_, Chat>(
+					"SELECT * FROM chats WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
+				)
+				.bind(user_id)
+				.bind(limit)
+				.bind(offset)
+				.fetch_all(pool)
+				.await
+			}
+		} else if let Some(ws_id) = workspace_id {
+			sqlx::query_as::<_, Chat>(
+				"SELECT * FROM chats WHERE user_id = $1 AND workspace_id = $2 AND is_archived = false ORDER BY updated_at DESC LIMIT $3 OFFSET $4",
+			)
+			.bind(user_id)
+			.bind(ws_id)
+			.bind(limit)
+			.bind(offset)
+			.fetch_all(pool)
+			.await
+		} else {
+			sqlx::query_as::<_, Chat>(
+				"SELECT * FROM chats WHERE user_id = $1 AND is_archived = false ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
+			)
+			.bind(user_id)
+			.bind(limit)
+			.bind(offset)
+			.fetch_all(pool)
+			.await
+		}
+	}
+
+	pub async fn find_by_id_and_user(pool: &sqlx::PgPool, id: &Uuid, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
+			.bind(id)
+			.bind(user_id)
+			.fetch_optional(pool)
+			.await
+	}
+
+	pub async fn create(pool: &sqlx::PgPool, user_id: &Uuid, workspace_id: Option<&Uuid>, title: Option<&str>) -> Result<Self, sqlx::Error> {
+		sqlx::query_as::<_, Chat>(
+			r#"
+			INSERT INTO chats (user_id, workspace_id, title)
+			VALUES ($1, $2, $3)
+			RETURNING *
+			"#,
+		)
+		.bind(user_id)
+		.bind(workspace_id)
+		.bind(title)
+		.fetch_one(pool)
+		.await
+	}
+
+	pub async fn update(
+		pool: &sqlx::PgPool,
+		id: &Uuid,
+		user_id: &Uuid,
+		title: Option<&str>,
+		workspace_id: Option<&Uuid>,
+		is_pinned: Option<bool>,
+		is_archived: Option<bool>,
+	) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Chat>(
+			r#"
+			UPDATE chats
+			SET title = COALESCE($3, title),
+			    workspace_id = COALESCE($4, workspace_id),
+			    is_pinned = COALESCE($5, is_pinned),
+			    is_archived = COALESCE($6, is_archived),
+			    updated_at = NOW()
+			WHERE id = $1 AND user_id = $2
+			RETURNING *
+			"#,
+		)
+		.bind(id)
+		.bind(user_id)
+		.bind(title)
+		.bind(workspace_id)
+		.bind(is_pinned)
+		.bind(is_archived)
+		.fetch_optional(pool)
+		.await
+	}
+
+	pub async fn touch(pool: &sqlx::PgPool, id: &Uuid) -> Result<(), sqlx::Error> {
+		sqlx::query("UPDATE chats SET updated_at = NOW() WHERE id = $1")
+			.bind(id)
+			.execute(pool)
+			.await?;
+		Ok(())
+	}
+
+	pub async fn delete(pool: &sqlx::PgPool, id: &Uuid, user_id: &Uuid) -> Result<bool, sqlx::Error> {
+		let result = sqlx::query("DELETE FROM chats WHERE id = $1 AND user_id = $2")
+			.bind(id)
+			.bind(user_id)
+			.execute(pool)
+			.await?;
+		Ok(result.rows_affected() > 0)
+	}
+
+	pub async fn verify_workspace_belongs_to_user(pool: &sqlx::PgPool, workspace_id: &Uuid, user_id: &Uuid) -> Result<bool, sqlx::Error> {
+		let exists: Option<(i32,)> = sqlx::query_as(
+			"SELECT 1 FROM workspaces WHERE id = $1 AND user_id = $2",
+		)
+		.bind(workspace_id)
+		.bind(user_id)
+		.fetch_optional(pool)
+		.await?;
+		Ok(exists.is_some())
+	}
+
+	pub async fn message_stats(pool: &sqlx::PgPool, chat_id: &Uuid) -> Result<(i64, Option<DateTime<Utc>>), sqlx::Error> {
+		let row: (i64, Option<DateTime<Utc>>) = sqlx::query_as(
+			"SELECT COUNT(*), MAX(created_at) FROM messages WHERE chat_id = $1",
+		)
+		.bind(chat_id)
+		.fetch_one(pool)
+		.await?;
+		Ok(row)
+	}
+}
+
+impl crate::types::BaseType for Message {
+	const TABLE: &'static str = "messages";
+	const ALIAS: &'static str = "msg";
+
+	fn new() -> Self {
+		Self {
+			id: Uuid::new_v4(),
+			chat_id: Uuid::new_v4(),
+			role: String::from("user"),
+			content: String::new(),
+			content_parts: None,
+			reasoning_content: None,
+			model_id: None,
+			cost_details: sqlx::types::Json(CostDetails::default()),
+			usage_details: sqlx::types::Json(UsageDetails::default()),
+			reasoning_details: sqlx::types::Json(ReasoningDetails::default()),
+			parent_id: None,
+			fork_index: 1,
+			is_active_fork: true,
+			created_at: Utc::now(),
+		}
+	}
+
+	fn sql_fields() -> &'static [&'static str] {
+		&[
+			"id", "chat_id", "role", "content", "reasoning_content",
+			"model_id", "parent_id", "fork_index", "is_active_fork",
+			"created_at", "content_parts", "cost_details", "usage_details", "reasoning_details",
+		]
+	}
+}
+
+impl Message {
+	pub async fn list_by_chat(
+		pool: &sqlx::PgPool,
+		chat_id: &Uuid,
+		limit: Option<i32>,
+		before: Option<&Uuid>,
+		after: Option<&Uuid>,
+	) -> Result<Vec<Self>, sqlx::Error> {
+		if let Some(before_id) = before {
+			let created_at: Option<DateTime<Utc>> = sqlx::query_scalar(
+				"SELECT created_at FROM messages WHERE id = $1",
+			)
+			.bind(before_id)
+			.fetch_optional(pool)
+			.await?;
+			if let Some(ts) = created_at {
+				return sqlx::query_as::<_, Message>(
+					"SELECT * FROM messages WHERE chat_id = $1 AND is_active_fork = true AND created_at < $2 ORDER BY created_at DESC LIMIT $3",
+				)
+				.bind(chat_id)
+				.bind(ts)
+				.bind(limit)
+				.fetch_all(pool)
+				.await;
+			}
+		}
+		if let Some(after_id) = after {
+			let created_at: Option<DateTime<Utc>> = sqlx::query_scalar(
+				"SELECT created_at FROM messages WHERE id = $1",
+			)
+			.bind(after_id)
+			.fetch_optional(pool)
+			.await?;
+			if let Some(ts) = created_at {
+				return sqlx::query_as::<_, Message>(
+					"SELECT * FROM messages WHERE chat_id = $1 AND is_active_fork = true AND created_at > $2 ORDER BY created_at ASC LIMIT $3",
+				)
+				.bind(chat_id)
+				.bind(ts)
+				.bind(limit)
+				.fetch_all(pool)
+				.await;
+			}
+		}
+		sqlx::query_as::<_, Message>(
+			"SELECT * FROM messages WHERE chat_id = $1 AND is_active_fork = true ORDER BY created_at ASC",
+		)
+		.bind(chat_id)
+		.fetch_all(pool)
+		.await
+	}
+
+	pub async fn list_active_by_chat(pool: &sqlx::PgPool, chat_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Message>(
+			"SELECT * FROM messages WHERE chat_id = $1 AND is_active_fork = true ORDER BY created_at ASC",
+		)
+		.bind(chat_id)
+		.fetch_all(pool)
+		.await
+	}
+
+	pub async fn find_by_id_and_chat(pool: &sqlx::PgPool, id: &Uuid, chat_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1 AND chat_id = $2")
+			.bind(id)
+			.bind(chat_id)
+			.fetch_optional(pool)
+			.await
+	}
+
+	pub async fn create(
+		conn: &mut sqlx::PgConnection,
+		chat_id: &Uuid,
+		role: &str,
+		content: &str,
+		reasoning_content: Option<&str>,
+		model_id: Option<&Uuid>,
+		parent_id: Option<&Uuid>,
+		fork_index: i32,
+		content_parts: Option<&serde_json::Value>,
+		cost_details: Option<&CostDetails>,
+		usage_details: Option<&UsageDetails>,
+		reasoning_details: Option<&ReasoningDetails>,
+	) -> Result<Self, sqlx::Error> {
+		sqlx::query_as::<_, Message>(
+			r#"
+			INSERT INTO messages (chat_id, role, content, reasoning_content, model_id,
+			                     parent_id, fork_index, content_parts,
+			                     cost_details, usage_details, reasoning_details)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			RETURNING *
+			"#,
+		)
+		.bind(chat_id)
+		.bind(role)
+		.bind(content)
+		.bind(reasoning_content)
+		.bind(model_id)
+		.bind(parent_id)
+		.bind(fork_index)
+		.bind(content_parts)
+		.bind(cost_details.map(sqlx::types::Json))
+		.bind(usage_details.map(sqlx::types::Json))
+		.bind(reasoning_details.map(sqlx::types::Json))
+		.fetch_one(conn)
+		.await
+	}
+
+	pub async fn next_fork_index(conn: &mut sqlx::PgConnection, chat_id: &Uuid, parent_id: Option<&Uuid>) -> Result<i32, sqlx::Error> {
+		let row: (Option<i32>,) = sqlx::query_as(
+			"SELECT COALESCE(MAX(fork_index), 0) + 1 FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2",
+		)
+		.bind(chat_id)
+		.bind(parent_id)
+		.fetch_one(conn)
+		.await?;
+		Ok(row.0.unwrap_or(1))
+	}
+
+	pub async fn deactivate_subtree(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, message_id: &Uuid) -> Result<u64, sqlx::Error> {
+		let result = sqlx::query(
+			r#"
+			WITH RECURSIVE descendants AS (
+				SELECT id FROM messages WHERE id = $1
+				UNION
+				SELECT m.id FROM messages m INNER JOIN descendants d ON m.parent_id = d.id
+			)
+			UPDATE messages SET is_active_fork = false WHERE id IN (SELECT id FROM descendants)
+			"#,
+		)
+		.bind(message_id)
+		.execute(&mut **tx)
+		.await?;
+		Ok(result.rows_affected())
+	}
+
+	pub async fn activate_subtree(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, message_id: &Uuid) -> Result<u64, sqlx::Error> {
+		let result = sqlx::query(
+			r#"
+			WITH RECURSIVE descendants AS (
+				SELECT id FROM messages WHERE id = $1
+				UNION
+				SELECT m.id FROM messages m INNER JOIN descendants d ON m.parent_id = d.id
+			)
+			UPDATE messages SET is_active_fork = true WHERE id IN (SELECT id FROM descendants)
+			"#,
+		)
+		.bind(message_id)
+		.execute(&mut **tx)
+		.await?;
+		Ok(result.rows_affected())
+	}
+
+	pub async fn sibling_count(pool: &sqlx::PgPool, chat_id: &Uuid, parent_id: Option<&Uuid>, role: &str) -> Result<i64, sqlx::Error> {
+		let row: (i64,) = sqlx::query_as(
+			"SELECT COUNT(*) FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = $3",
+		)
+		.bind(chat_id)
+		.bind(parent_id)
+		.bind(role)
+		.fetch_one(pool)
+		.await?;
+		Ok(row.0)
+	}
+
+	pub async fn count_by_chat_and_parent(pool: &sqlx::PgPool, chat_id: &Uuid, parent_id: Option<&Uuid>) -> Result<i64, sqlx::Error> {
+		let row: (i64,) = sqlx::query_as(
+			"SELECT COUNT(*) FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2",
+		)
+		.bind(chat_id)
+		.bind(parent_id)
+		.fetch_one(pool)
+		.await?;
+		Ok(row.0)
+	}
+
+	pub async fn siblings(
+		pool: &sqlx::PgPool,
+		chat_id: &Uuid,
+		parent_id: Option<&Uuid>,
+	) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Message>(
+			"SELECT * FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 ORDER BY fork_index",
+		)
+		.bind(chat_id)
+		.bind(parent_id)
+		.fetch_all(pool)
+		.await
+	}
+
+	pub async fn delete(pool: &sqlx::PgPool, id: &Uuid, chat_id: &Uuid) -> Result<bool, sqlx::Error> {
+		let result = sqlx::query("DELETE FROM messages WHERE id = $1 AND chat_id = $2")
+			.bind(id)
+			.bind(chat_id)
+			.execute(pool)
+			.await?;
+		Ok(result.rows_affected() > 0)
+	}
+}
+
+impl crate::types::BaseType for UserPreferences {
+	const TABLE: &'static str = "user_preferences";
+	const ALIAS: &'static str = "up";
+
+	fn new() -> Self {
+		Self::default_for(Uuid::new_v4())
+	}
+
+	fn sql_fields() -> &'static [&'static str] {
+		&[
+			"user_id", "default_model_key", "favorite_model_keys",
+			"streaming_animation", "use_remend", "theme_css_vars",
+			"custom_theme_urls", "created_at", "updated_at",
+		]
+	}
+}
+
+impl UserPreferences {
+	pub async fn find_by_user_id(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, UserPreferences>("SELECT * FROM user_preferences WHERE user_id = $1")
+			.bind(user_id)
+			.fetch_optional(pool)
+			.await
+	}
+
+	pub async fn upsert(pool: &sqlx::PgPool, user_id: &Uuid, prefs: &UpdatePreferencesRequest) -> Result<Self, sqlx::Error> {
+		fn json_or_null<T: serde::Serialize>(v: &Option<T>) -> serde_json::Value {
+			v.as_ref().map(|x| serde_json::to_value(x).unwrap_or(serde_json::Value::Null)).unwrap_or(serde_json::Value::Null)
+		}
+
+		sqlx::query_as::<_, UserPreferences>(
+			r#"
+			INSERT INTO user_preferences (user_id, default_model_key, favorite_model_keys,
+			                              streaming_animation, use_remend, theme_css_vars, custom_theme_urls)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT (user_id) DO UPDATE
+				SET default_model_key = COALESCE($2, user_preferences.default_model_key),
+				    favorite_model_keys = CASE WHEN $3::jsonb = 'null'::jsonb THEN user_preferences.favorite_model_keys ELSE $3::jsonb END,
+				    streaming_animation = COALESCE($4, user_preferences.streaming_animation),
+				    use_remend = COALESCE($5, user_preferences.use_remend),
+				    theme_css_vars = CASE WHEN $6::jsonb = 'null'::jsonb THEN user_preferences.theme_css_vars ELSE $6::jsonb END,
+				    custom_theme_urls = CASE WHEN $7::jsonb = 'null'::jsonb THEN user_preferences.custom_theme_urls ELSE $7::jsonb END,
+				    updated_at = NOW()
+			RETURNING *
+			"#,
+		)
+		.bind(user_id)
+		.bind(&prefs.default_model_key)
+		.bind(json_or_null(&prefs.favorite_model_keys))
+		.bind(&prefs.streaming_animation)
+		.bind(prefs.use_remend)
+		.bind(json_or_null(&prefs.theme_css_vars))
+		.bind(json_or_null(&prefs.custom_theme_urls))
+		.fetch_one(pool)
+		.await
+	}
 }
