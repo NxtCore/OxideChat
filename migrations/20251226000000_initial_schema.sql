@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS models (
     provider_id UUID NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
     model_id VARCHAR(255) NOT NULL,  -- The model ID used by the provider
     display_name VARCHAR(255) NOT NULL,
-    capabilities JSONB DEFAULT '{}',  -- streaming, tools, vision, etc.
+    capabilities JSONB DEFAULT '[]',  -- streaming, tools, vision, etc.
     input_modalities JSONB DEFAULT '["text"]',  
     output_modalities JSONB DEFAULT '["text"]', 
     context_length INTEGER,
