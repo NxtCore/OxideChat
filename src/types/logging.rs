@@ -47,31 +47,7 @@ impl From<AuditLog> for AuditLogResponse {
 	}
 }
 
-impl BaseType for AuditLog {
-	const TABLE: &'static str = "audit_logs";
-	const ALIAS: &'static str = "al";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			event: String::new(),
-			actor_id: None,
-			target_type: None,
-			target_id: None,
-			resource_type: None,
-			resource_id: None,
-			metadata: None,
-			created_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "event", "actor_id", "target_type", "target_id",
-			"resource_type", "resource_id", "metadata", "created_at",
-		]
-	}
-}
+impl BaseType for AuditLog {}
 
 impl AuditLog {
 	pub async fn create(

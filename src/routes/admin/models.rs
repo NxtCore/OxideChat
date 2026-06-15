@@ -1,7 +1,6 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::axum::{AdminModelPatchBody, ModelListParams};
-use crate::types::models::{Model, ModelPatchField};
+use crate::types::models::{AdminModelPatchBody, Model, ModelListParams};
 use crate::types::models_configs::{ModelConfig, ModelConfigPatchField};
 use crate::utils::images::{image_url, is_data_uri, store_from_data_uri};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
@@ -68,7 +67,7 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let models = match Model::list_paginated_admin(&state.db, params.page.unwrap_or(1), params.size.unwrap_or(0), params.query).await {
+	let models = match Model::list_for_admin(&state.db, params.page.unwrap_or(1), params.size.unwrap_or(0), params.query).await {
 		Ok(m) => m,
 		Err(e) => {
 			eprintln!("[ADMIN] Failed to list models: {e}");
@@ -90,7 +89,7 @@ pub async fn get_model(State(state): State<Arc<JobState>>, cookies: Cookies, Pat
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let row = match Model::find_by_id_with_config(&state.db, &id).await {
+	let row = match Model::find_for_admin(&state.db, &id).await {
 		Ok(Some(r)) => r,
 		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
 		Err(e) => {
@@ -133,8 +132,19 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, cookies: Cookies, P
 		}
 	};
 
-	let model_info: Option<(String, String)> = match Model::find_name_and_model_id(&mut *tx, &id).await {
-		Ok(Some(r)) => Some(r),
+	if req.display_name.is_some() || req.is_enabled.is_some() {
+		match Model::patch(&mut *tx, &id, req.display_name.as_deref(), req.is_enabled).await {
+			Ok(Some(_)) => {}
+			Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+			Err(e) => {
+				eprintln!("[ADMIN] Failed to update model: {e}");
+				return ErrorBuilder::new(ErrorCode::InternalError).build();
+			}
+		}
+	}
+
+	let model_info = match Model::find_name_and_model_id(&mut *tx, &id).await {
+		Ok(Some(r)) => r,
 		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
 		Err(e) => {
 			eprintln!("[ADMIN] Failed to fetch model info: {e}");
@@ -142,89 +152,73 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, cookies: Cookies, P
 		}
 	};
 
-	let mut model_fields: Vec<ModelPatchField<'_>> = Vec::new();
-	if let Some(ref name) = req.display_name {
-		model_fields.push(ModelPatchField::DisplayName(name));
-	}
-	if let Some(enabled) = req.is_enabled {
-		model_fields.push(ModelPatchField::IsEnabled(enabled));
+	let (m_name, m_id) = model_info;
+	if let Err(e) = ModelConfig::ensure_system_config(&mut *tx, &id, &m_id, &m_name).await {
+		eprintln!("[ADMIN] Failed to ensure model config: {e}");
+		return ErrorBuilder::new(ErrorCode::InternalError).build();
 	}
 
-	if !model_fields.is_empty() {
-		if let Err(e) = Model::patch_via_connection(&mut *tx, &id, &model_fields).await {
-			eprintln!("[ADMIN] Failed to update model: {e}");
+	let extra_settings = build_extra_settings(
+		req.extra_settings.as_ref().and_then(|v| v.as_ref()),
+		req.reasoning_effort.as_ref().map(|v| v.as_deref()),
+		req.reasoning_budget_tokens.as_ref().map(|v| *v),
+	);
+
+	let mut config_fields: Vec<ModelConfigPatchField<'_>> = Vec::new();
+
+	if let Some(ref v) = req.description {
+		config_fields.push(ModelConfigPatchField::Description(v.as_deref()));
+	}
+	if let Some(ref v) = icon {
+		config_fields.push(ModelConfigPatchField::Icon(v.as_deref()));
+	}
+	if let Some(ref v) = req.system_prompt {
+		config_fields.push(ModelConfigPatchField::SystemPrompt(v.as_deref()));
+	}
+	if let Some(Some(ref v)) = req.sampling {
+		config_fields.push(ModelConfigPatchField::SamplingMerge(v));
+	}
+	if let Some(ref v) = req.input_modalities {
+		config_fields.push(ModelConfigPatchField::InputModalities(v.as_ref()));
+	}
+	if let Some(ref v) = req.output_modalities {
+		config_fields.push(ModelConfigPatchField::OutputModalities(v.as_ref()));
+	}
+	if let Some(v) = req.context_length {
+		config_fields.push(ModelConfigPatchField::ContextLength(v));
+	}
+	if let Some(v) = req.max_output_tokens {
+		config_fields.push(ModelConfigPatchField::MaxOutputTokens(v));
+	}
+	if let Some(ref v) = req.enabled_tools {
+		config_fields.push(ModelConfigPatchField::EnabledTools(v.as_ref()));
+	}
+	if let Some(v) = req.is_public {
+		config_fields.push(ModelConfigPatchField::IsPublic(v));
+	}
+	if let Some(v) = req.is_featured {
+		config_fields.push(ModelConfigPatchField::IsFeatured(v));
+	}
+	if let Some(v) = req.is_default {
+		config_fields.push(ModelConfigPatchField::IsDefault(v));
+	}
+	if let Some(v) = req.is_favorite {
+		config_fields.push(ModelConfigPatchField::IsFavorite(v));
+	}
+	if let Some(ref v) = req.category {
+		config_fields.push(ModelConfigPatchField::Category(v.as_deref()));
+	}
+	if let Some(ref v) = req.tags {
+		config_fields.push(ModelConfigPatchField::Tags(v.as_ref()));
+	}
+	if let Some(ref v) = extra_settings {
+		config_fields.push(ModelConfigPatchField::ExtraSettings(Some(v)));
+	}
+
+	if !config_fields.is_empty() {
+		if let Err(e) = ModelConfig::patch_system_config(&mut *tx, &id, &config_fields).await {
+			eprintln!("[ADMIN] Failed to patch model config: {e}");
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	}
-
-	if let Some((m_name, m_id)) = model_info {
-		if let Err(e) = ModelConfig::ensure_system_config(&mut *tx, &id, &m_id, &m_name).await {
-			eprintln!("[ADMIN] Failed to ensure model config: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-
-		let extra_settings = build_extra_settings(
-			req.extra_settings.as_ref().and_then(|v| v.as_ref()),
-			req.reasoning_effort.as_ref().map(|v| v.as_deref()),
-			req.reasoning_budget_tokens.as_ref().map(|v| *v),
-		);
-
-		let mut config_fields: Vec<ModelConfigPatchField<'_>> = Vec::new();
-
-		if let Some(ref v) = req.description {
-			config_fields.push(ModelConfigPatchField::Description(v.as_deref()));
-		}
-		if let Some(ref v) = icon {
-			config_fields.push(ModelConfigPatchField::Icon(v.as_deref()));
-		}
-		if let Some(ref v) = req.system_prompt {
-			config_fields.push(ModelConfigPatchField::SystemPrompt(v.as_deref()));
-		}
-		if let Some(Some(ref v)) = req.sampling {
-			config_fields.push(ModelConfigPatchField::SamplingMerge(v));
-		}
-		if let Some(ref v) = req.input_modalities {
-			config_fields.push(ModelConfigPatchField::InputModalities(v.as_ref()));
-		}
-		if let Some(ref v) = req.output_modalities {
-			config_fields.push(ModelConfigPatchField::OutputModalities(v.as_ref()));
-		}
-		if let Some(v) = req.context_length {
-			config_fields.push(ModelConfigPatchField::ContextLength(v));
-		}
-		if let Some(v) = req.max_output_tokens {
-			config_fields.push(ModelConfigPatchField::MaxOutputTokens(v));
-		}
-		if let Some(ref v) = req.enabled_tools {
-			config_fields.push(ModelConfigPatchField::EnabledTools(v.as_ref()));
-		}
-		if let Some(v) = req.is_public {
-			config_fields.push(ModelConfigPatchField::IsPublic(v));
-		}
-		if let Some(v) = req.is_featured {
-			config_fields.push(ModelConfigPatchField::IsFeatured(v));
-		}
-		if let Some(v) = req.is_default {
-			config_fields.push(ModelConfigPatchField::IsDefault(v));
-		}
-		if let Some(v) = req.is_favorite {
-			config_fields.push(ModelConfigPatchField::IsFavorite(v));
-		}
-		if let Some(ref v) = req.category {
-			config_fields.push(ModelConfigPatchField::Category(v.as_deref()));
-		}
-		if let Some(ref v) = req.tags {
-			config_fields.push(ModelConfigPatchField::Tags(v.as_ref()));
-		}
-		if let Some(ref v) = extra_settings {
-			config_fields.push(ModelConfigPatchField::ExtraSettings(Some(v)));
-		}
-
-		if !config_fields.is_empty() {
-			if let Err(e) = ModelConfig::patch_system_config(&mut *tx, &id, &config_fields).await {
-				eprintln!("[ADMIN] Failed to patch model config: {e}");
-				return ErrorBuilder::new(ErrorCode::InternalError).build();
-			}
 		}
 	}
 

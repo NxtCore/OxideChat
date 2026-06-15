@@ -9,23 +9,7 @@ pub struct Session {
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for Session {
-	const TABLE: &'static str = "sessions";
-	const ALIAS: &'static str = "s";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			user_id: Uuid::new_v4(),
-			expires_at: chrono::Utc::now(),
-			created_at: chrono::Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&["id", "user_id", "expires_at", "created_at"]
-	}
-}
+impl BaseType for Session {}
 
 impl Session {
 	pub async fn create(pool: &sqlx::PgPool, user_id: &Uuid, expires_at: &chrono::DateTime<chrono::Utc>) -> Result<Self, sqlx::Error> {

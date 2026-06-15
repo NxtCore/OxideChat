@@ -13,25 +13,7 @@ pub struct UserIdentity {
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for UserIdentity {
-	const TABLE: &'static str = "user_identities";
-	const ALIAS: &'static str = "ui";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			user_id: Uuid::new_v4(),
-			provider: String::new(),
-			provider_user_id: String::new(),
-			provider_data: None,
-			created_at: chrono::Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&["id", "user_id", "provider", "provider_user_id", "provider_data", "created_at"]
-	}
-}
+impl BaseType for UserIdentity {}
 
 impl UserIdentity {
 	pub async fn find_by_provider(pool: &sqlx::PgPool, provider: &str, provider_user_id: &str) -> Result<Option<Uuid>, sqlx::Error> {

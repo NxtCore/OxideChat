@@ -507,40 +507,7 @@ impl ModelCapabilities {
 	}
 }
 
-impl crate::types::BaseType for AiProvider {
-	const TABLE: &'static str = "providers";
-	const ALIAS: &'static str = "p";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			owner_id: None,
-			kind: ProviderKind::Openai,
-			name: String::new(),
-			base_url: String::new(),
-			api_key: None,
-			extra_headers: serde_json::Value::Null,
-			is_enabled: true,
-			created_at: Utc::now(),
-			updated_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id",
-			"owner_id",
-			"kind",
-			"name",
-			"base_url",
-			"api_key",
-			"extra_headers",
-			"is_enabled",
-			"created_at",
-			"updated_at",
-		]
-	}
-}
+impl crate::types::BaseType for AiProvider {}
 
 impl AiProvider {
 	pub async fn list_system(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
@@ -634,43 +601,4 @@ impl AiModel {
 	}
 }
 
-impl crate::types::BaseType for AiUsage {
-	const TABLE: &'static str = "usage";
-	const ALIAS: &'static str = "u";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			user_id: None,
-			provider_id: None,
-			model_id: None,
-			request_type: String::new(),
-			input_tokens: None,
-			output_tokens: None,
-			total_tokens: None,
-			latency_ms: None,
-			success: None,
-			error_message: None,
-			metadata: serde_json::Value::Null,
-			created_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id",
-			"user_id",
-			"provider_id",
-			"model_id",
-			"request_type",
-			"input_tokens",
-			"output_tokens",
-			"total_tokens",
-			"latency_ms",
-			"success",
-			"error_message",
-			"metadata",
-			"created_at",
-		]
-	}
-}
+impl crate::types::BaseType for AiUsage {}

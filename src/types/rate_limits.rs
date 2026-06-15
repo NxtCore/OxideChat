@@ -12,34 +12,7 @@ pub struct RateLimit {
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for RateLimit {
-	const TABLE: &'static str = "rate_limits";
-	const ALIAS: &'static str = "rl";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			endpoint_pattern: String::new(),
-			requests_per_window: 0,
-			window_seconds: 0,
-			scope: String::from("ip"),
-			enabled: true,
-			created_at: chrono::Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id",
-			"endpoint_pattern",
-			"requests_per_window",
-			"window_seconds",
-			"scope",
-			"enabled",
-			"created_at",
-		]
-	}
-}
+impl BaseType for RateLimit {}
 
 impl RateLimit {
 	pub async fn find_by_endpoint(pool: &sqlx::PgPool, endpoint_pattern: &str) -> Result<Option<Self>, sqlx::Error> {

@@ -90,40 +90,7 @@ pub struct ProviderSlim {
     pub kind: ProviderKind,
 }
 
-impl BaseType for Provider {
-    const TABLE: &'static str = "providers";
-    const ALIAS: &'static str = "p";
-
-    fn new() -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            owner_id: None,
-            kind: ProviderKind::Openai,
-            name: String::from("OpenAI"),
-            base_url: String::from("https://api.openai.com/v1"),
-            api_key: None,
-            extra_headers: Json(serde_json::Value::Null),
-            is_enabled: true,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }
-    }
-
-    fn sql_fields() -> &'static [&'static str] {
-        &[
-            "id",
-            "owner_id",
-            "kind",
-            "name",
-            "base_url",
-            "api_key",
-            "extra_headers",
-            "is_enabled",
-            "created_at",
-            "updated_at",
-        ]
-    }
-}
+impl BaseType for Provider {}
 
 impl Provider {
     pub async fn list_paginated(pool: &sqlx::PgPool, page: i64, per_page: i64) -> Result<Vec<Provider>, sqlx::Error> {

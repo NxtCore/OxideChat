@@ -9,23 +9,7 @@ pub struct AppConfig {
 	pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for AppConfig {
-	const TABLE: &'static str = "app_config";
-	const ALIAS: &'static str = "ac";
-
-	fn new() -> Self {
-		Self {
-			key: String::new(),
-			value: String::new(),
-			created_at: chrono::Utc::now(),
-			updated_at: chrono::Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&["key", "value", "created_at", "updated_at"]
-	}
-}
+impl BaseType for AppConfig {}
 
 impl AppConfig {
 	pub async fn get(pool: &sqlx::PgPool, key: &str) -> Result<Option<String>, sqlx::Error> {

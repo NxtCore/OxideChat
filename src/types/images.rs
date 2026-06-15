@@ -13,26 +13,7 @@ pub struct Image {
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for Image {
-	const TABLE: &'static str = "images";
-	const ALIAS: &'static str = "img";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			data: None,
-			file_path: None,
-			mime_type: String::from("image/png"),
-			size_bytes: 0,
-			source: None,
-			created_at: chrono::Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&["id", "data", "file_path", "mime_type", "size_bytes", "source", "created_at"]
-	}
-}
+impl BaseType for Image {}
 
 impl Image {
 	pub async fn create_from_bytes(

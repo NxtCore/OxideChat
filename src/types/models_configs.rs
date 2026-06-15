@@ -1,7 +1,7 @@
 use crate::types::BaseType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::types::Json;
+use sqlx::{Postgres, QueryBuilder, types::Json};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -33,70 +33,7 @@ pub struct ModelConfig {
 	pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for ModelConfig {
-	const TABLE: &'static str = "model_configs";
-	const ALIAS: &'static str = "mc";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			owner_id: Option::None,
-			model_id: Uuid::new_v4(),
-			stable_key: String::new(),
-			name: String::new(),
-			description: None,
-			icon: None,
-			capabilities: None,
-			input_modalities: None,
-			output_modalities: None,
-			context_length: None,
-			max_output_tokens: None,
-			system_prompt: None,
-			sampling: Json(Value::Object(serde_json::Map::new())),
-			enabled_tools: Json(vec![]),
-			is_public: false,
-			is_featured: false,
-			is_default: false,
-			is_favorite: false,
-			category: None,
-			tags: Json(vec![]),
-			usage_count: 0,
-			extra_settings: Json(Value::Object(serde_json::Map::new())),
-			created_at: chrono::Utc::now(),
-			updated_at: chrono::Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id",
-			"owner_id",
-			"model_id",
-			"stable_key",
-			"name",
-			"description",
-			"icon",
-			"capabilities",
-			"input_modalities",
-			"output_modalities",
-			"context_length",
-			"max_output_tokens",
-			"system_prompt",
-			"sampling",
-			"enabled_tools",
-			"is_public",
-			"is_featured",
-			"is_default",
-			"is_favorite",
-			"category",
-			"tags",
-			"usage_count",
-			"extra_settings",
-			"created_at",
-			"updated_at",
-		]
-	}
-}
+impl BaseType for ModelConfig {}
 
 /// A typed value that can be written into a `model_configs` column.
 ///
@@ -109,22 +46,6 @@ enum ConfigValue<'a> {
 	Bool(bool),
 	Json(Option<&'a Value>),
 	JsonMerge(&'a Value),
-}
-
-impl ConfigValue<'_> {
-	/// Returns the SQL expression fragment for the SET clause.
-	///
-	/// For most variants this is `$N<cast>`; for `JsonMerge` it is the merge
-	/// expression `jsonb_strip_nulls(<col> || $N::JSONB)`.
-	fn set_expr(&self, col: &str, param_idx: usize) -> String {
-		match self {
-			Self::Text(_) => format!("{col} = ${param_idx}::TEXT"),
-			Self::Int(_) => format!("{col} = ${param_idx}::INTEGER"),
-			Self::Bool(_) => format!("{col} = ${param_idx}::BOOLEAN"),
-			Self::Json(_) => format!("{col} = ${param_idx}::JSONB"),
-			Self::JsonMerge(_) => format!("{col} = jsonb_strip_nulls({col} || ${param_idx}::JSONB)"),
-		}
-	}
 }
 
 /// A type-safe update field for `model_configs`.
@@ -218,32 +139,38 @@ impl ModelConfig {
 				.await;
 		}
 
-		let set_clause = fields
-			.iter()
-			.enumerate()
-			.map(|(i, field)| {
-				let (col, val) = field.column_and_value();
-				val.set_expr(col, i + 2)
-			})
-			.collect::<Vec<_>>()
-			.join(", ");
+		let mut q = QueryBuilder::<Postgres>::new("UPDATE model_configs SET ");
+		let mut separated = q.separated(", ");
 
-		let sql = format!(
-			"UPDATE model_configs SET {set_clause}, updated_at = NOW() \
-             WHERE model_id = $1 AND owner_id IS NULL RETURNING *"
-		);
-
-		let mut q = sqlx::query_as::<_, ModelConfig>(&sql).bind(model_id);
 		for field in fields {
-			let (_, val) = field.column_and_value();
-			q = match val {
-				ConfigValue::Text(v) => q.bind(v),
-				ConfigValue::Int(v) => q.bind(v),
-				ConfigValue::Bool(v) => q.bind(v),
-				ConfigValue::Json(v) => q.bind(v.map(|j| sqlx::types::Json(j))),
-				ConfigValue::JsonMerge(v) => q.bind(sqlx::types::Json(v)),
+			let (col, val) = field.column_and_value();
+			match val {
+				ConfigValue::Text(v) => {
+					separated.push(format!("{col} = ")).push_bind_unseparated(v).push_unseparated("::TEXT");
+				}
+				ConfigValue::Int(v) => {
+					separated.push(format!("{col} = ")).push_bind_unseparated(v).push_unseparated("::INTEGER");
+				}
+				ConfigValue::Bool(v) => {
+					separated.push(format!("{col} = ")).push_bind_unseparated(v).push_unseparated("::BOOLEAN");
+				}
+				ConfigValue::Json(v) => {
+					separated.push(format!("{col} = ")).push_bind_unseparated(v.map(Json)).push_unseparated("::JSONB");
+				}
+				ConfigValue::JsonMerge(v) => {
+					separated
+						.push(format!("{col} = jsonb_strip_nulls({col} || "))
+						.push_bind_unseparated(Json(v))
+						.push_unseparated("::JSONB)");
+				}
 			};
 		}
-		q.fetch_one(conn).await
+
+		drop(separated);
+		q.push(", updated_at = NOW() WHERE model_id = ");
+		q.push_bind(model_id);
+		q.push(" AND owner_id IS NULL RETURNING *");
+
+		q.build_query_as::<ModelConfig>().fetch_one(conn).await
 	}
 }

@@ -20,36 +20,7 @@ pub struct Usage {
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for Usage {
-	const TABLE: &'static str = "usage";
-	const ALIAS: &'static str = "u";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			user_id: None,
-			provider_id: None,
-			model_id: None,
-			request_type: String::new(),
-			input_tokens: None,
-			output_tokens: None,
-			total_tokens: None,
-			latency_ms: None,
-			success: None,
-			error_message: None,
-			metadata: Json(Value::Object(serde_json::Map::new())),
-			created_at: chrono::Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "user_id", "provider_id", "model_id", "request_type",
-			"input_tokens", "output_tokens", "total_tokens", "latency_ms",
-			"success", "error_message", "metadata", "created_at",
-		]
-	}
-}
+impl BaseType for Usage {}
 
 impl Usage {
 	pub async fn create(

@@ -13,29 +13,7 @@ pub struct Translation {
 	pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for Translation {
-	const TABLE: &'static str = "i18n_translations";
-	const ALIAS: &'static str = "i18n";
-
-	fn new() -> Self {
-		Self {
-			id: sqlx::types::Uuid::new_v4(),
-			language: String::new(),
-			key_path: String::new(),
-			value: String::new(),
-			is_override: false,
-			created_at: chrono::Utc::now(),
-			updated_at: chrono::Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "language", "key_path", "value", "is_override",
-			"created_at", "updated_at",
-		]
-	}
-}
+impl BaseType for Translation {}
 
 impl Translation {
 	pub async fn list_all(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {

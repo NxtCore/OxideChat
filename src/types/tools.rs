@@ -481,30 +481,7 @@ impl Tool {
 	}
 }
 
-impl crate::types::BaseType for WasmBlob {
-	const TABLE: &'static str = "wasm_blobs";
-	const ALIAS: &'static str = "wb";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			owner_id: None,
-			original_filename: None,
-			compiled_from: None,
-			blob: Vec::new(),
-			size_bytes: 0,
-			sha256_hash: String::new(),
-			created_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "owner_id", "original_filename", "compiled_from",
-			"blob", "size_bytes", "sha256_hash", "created_at",
-		]
-	}
-}
+impl crate::types::BaseType for WasmBlob {}
 
 impl WasmBlob {
 	pub async fn find_by_hash(pool: &sqlx::PgPool, sha256_hash: &str, owner_id: Option<&Uuid>) -> Result<Option<Uuid>, sqlx::Error> {
@@ -559,36 +536,7 @@ impl WasmBlob {
 	}
 }
 
-impl crate::types::BaseType for Tool {
-	const TABLE: &'static str = "tools";
-	const ALIAS: &'static str = "t";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			owner_id: None,
-			name: String::new(),
-			display_name: String::new(),
-			description: None,
-			icon: None,
-			source_kind: ToolSourceKind::Builtin,
-			source_config: serde_json::Value::Null,
-			input_schema: serde_json::Value::Null,
-			settings_schema: serde_json::Value::Null,
-			is_enabled: true,
-			created_at: Utc::now(),
-			updated_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "owner_id", "name", "display_name", "description", "icon",
-			"source_kind", "source_config", "input_schema", "settings_schema",
-			"is_enabled", "created_at", "updated_at",
-		]
-	}
-}
+impl crate::types::BaseType for Tool {}
 
 impl Tool {
 	pub async fn list_system(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
@@ -686,30 +634,7 @@ impl Tool {
 	}
 }
 
-impl crate::types::BaseType for ToolFunction {
-	const TABLE: &'static str = "tool_functions";
-	const ALIAS: &'static str = "tf";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			tool_id: Uuid::new_v4(),
-			name: String::new(),
-			description: None,
-			input_schema: serde_json::Value::Null,
-			entrypoint: None,
-			sort_order: 0,
-			created_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "tool_id", "name", "description", "input_schema",
-			"entrypoint", "sort_order", "created_at",
-		]
-	}
-}
+impl crate::types::BaseType for ToolFunction {}
 
 impl ToolFunction {
 	pub async fn list_by_tool(pool: &sqlx::PgPool, tool_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
@@ -803,27 +728,7 @@ impl ToolFunction {
 	}
 }
 
-impl crate::types::BaseType for UserToolSettings {
-	const TABLE: &'static str = "user_tool_settings";
-	const ALIAS: &'static str = "uts";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			user_id: None,
-			tool_id: Uuid::new_v4(),
-			settings: serde_json::Value::Null,
-			created_at: Utc::now(),
-			updated_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "user_id", "tool_id", "settings", "created_at", "updated_at",
-		]
-	}
-}
+impl crate::types::BaseType for UserToolSettings {}
 
 impl UserToolSettings {
 	pub async fn find_by_tool_system(pool: &sqlx::PgPool, tool_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
@@ -877,33 +782,7 @@ impl UserToolSettings {
 	}
 }
 
-impl crate::types::BaseType for McpServer {
-	const TABLE: &'static str = "mcp_servers";
-	const ALIAS: &'static str = "mcp";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			owner_id: None,
-			name: String::new(),
-			transport: String::from("stdio"),
-			connection_config: serde_json::Value::Null,
-			is_enabled: true,
-			last_health_check: None,
-			health_status: None,
-			created_at: Utc::now(),
-			updated_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "owner_id", "name", "transport", "connection_config",
-			"is_enabled", "last_health_check", "health_status",
-			"created_at", "updated_at",
-		]
-	}
-}
+impl crate::types::BaseType for McpServer {}
 
 impl McpServer {
 	pub async fn list_system(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
@@ -913,31 +792,7 @@ impl McpServer {
 	}
 }
 
-impl crate::types::BaseType for ToolExecution {
-	const TABLE: &'static str = "tool_executions";
-	const ALIAS: &'static str = "te";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			message_id: None,
-			tool_id: None,
-			tool_call_id: String::new(),
-			input_args: serde_json::Value::Null,
-			output: None,
-			error: None,
-			execution_ms: None,
-			created_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "message_id", "tool_id", "tool_call_id",
-			"input_args", "output", "error", "execution_ms", "created_at",
-		]
-	}
-}
+impl crate::types::BaseType for ToolExecution {}
 
 impl ToolExecution {
 	pub async fn create(

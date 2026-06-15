@@ -13,30 +13,7 @@ pub struct ModelAccess {
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for ModelAccess {
-	const TABLE: &'static str = "model_access";
-	const ALIAS: &'static str = "ma";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			provider_id: None,
-			model_id: None,
-			role_id: None,
-			user_id: None,
-			can_use: false,
-			can_configure: false,
-			created_at: chrono::Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "provider_id", "model_id", "role_id", "user_id",
-			"can_use", "can_configure", "created_at",
-		]
-	}
-}
+impl BaseType for ModelAccess {}
 
 impl ModelAccess {
 	pub async fn find_by_user(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {

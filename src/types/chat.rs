@@ -554,31 +554,7 @@ pub enum StreamData {
 	Done { message: ChatMessageResponse },
 }
 
-impl crate::types::BaseType for Workspace {
-	const TABLE: &'static str = "workspaces";
-	const ALIAS: &'static str = "w";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			user_id: Uuid::new_v4(),
-			name: String::new(),
-			icon: None,
-			color: None,
-			sort_order: 0,
-			is_default: false,
-			created_at: Utc::now(),
-			updated_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "user_id", "name", "icon", "color",
-			"sort_order", "is_default", "created_at", "updated_at",
-		]
-	}
-}
+impl crate::types::BaseType for Workspace {}
 
 impl Workspace {
 	pub async fn list_by_user_with_count(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<Vec<WorkspaceWithCount>, sqlx::Error> {
@@ -686,32 +662,7 @@ impl Workspace {
 	}
 }
 
-impl crate::types::BaseType for Chat {
-	const TABLE: &'static str = "chats";
-	const ALIAS: &'static str = "c";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			user_id: Uuid::new_v4(),
-			workspace_id: None,
-			title: None,
-			is_pinned: false,
-			is_archived: false,
-			branched_from_chat_id: None,
-			branched_from_message_id: None,
-			created_at: Utc::now(),
-			updated_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "user_id", "workspace_id", "title", "is_pinned", "is_archived",
-			"branched_from_chat_id", "branched_from_message_id", "created_at", "updated_at",
-		]
-	}
-}
+impl crate::types::BaseType for Chat {}
 
 impl Chat {
 	pub async fn list_by_user(
@@ -858,37 +809,7 @@ impl Chat {
 	}
 }
 
-impl crate::types::BaseType for Message {
-	const TABLE: &'static str = "messages";
-	const ALIAS: &'static str = "msg";
-
-	fn new() -> Self {
-		Self {
-			id: Uuid::new_v4(),
-			chat_id: Uuid::new_v4(),
-			role: String::from("user"),
-			content: String::new(),
-			content_parts: None,
-			reasoning_content: None,
-			model_id: None,
-			cost_details: sqlx::types::Json(CostDetails::default()),
-			usage_details: sqlx::types::Json(UsageDetails::default()),
-			reasoning_details: sqlx::types::Json(ReasoningDetails::default()),
-			parent_id: None,
-			fork_index: 1,
-			is_active_fork: true,
-			created_at: Utc::now(),
-		}
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"id", "chat_id", "role", "content", "reasoning_content",
-			"model_id", "parent_id", "fork_index", "is_active_fork",
-			"created_at", "content_parts", "cost_details", "usage_details", "reasoning_details",
-		]
-	}
-}
+impl crate::types::BaseType for Message {}
 
 impl Message {
 	pub async fn list_by_chat(
@@ -1089,22 +1010,7 @@ impl Message {
 	}
 }
 
-impl crate::types::BaseType for UserPreferences {
-	const TABLE: &'static str = "user_preferences";
-	const ALIAS: &'static str = "up";
-
-	fn new() -> Self {
-		Self::default_for(Uuid::new_v4())
-	}
-
-	fn sql_fields() -> &'static [&'static str] {
-		&[
-			"user_id", "default_model_key", "favorite_model_keys",
-			"streaming_animation", "use_remend", "theme_css_vars",
-			"custom_theme_urls", "created_at", "updated_at",
-		]
-	}
-}
+impl crate::types::BaseType for UserPreferences {}
 
 impl UserPreferences {
 	pub async fn find_by_user_id(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {

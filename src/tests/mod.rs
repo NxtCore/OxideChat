@@ -3,4 +3,5 @@ pub mod base;
 pub mod config;
 pub mod i18n;
 pub mod logging;
+pub mod models;
 pub mod response;

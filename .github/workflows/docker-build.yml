@@ -4,9 +4,52 @@ on:
     push:
         branches: [master]
         tags: ['v*']
+    pull_request:
+        branches: [master]
     workflow_dispatch:
 
 jobs:
+    sqlx:
+        name: SQLx Checked Build
+        runs-on: ubuntu-24.04
+        services:
+            postgres:
+                image: postgres:16
+                env:
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: postgres
+                    POSTGRES_DB: oxidechat
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd "pg_isready -U postgres -d oxidechat"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+        env:
+            DATABASE_URL: postgres://postgres:postgres@localhost:5432/oxidechat
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Cache cargo
+              uses: Swatinem/rust-cache@v2
+
+            - name: Install SQLx CLI
+              run: cargo install sqlx-cli --version 0.8.6 --no-default-features --features postgres --locked
+
+            - name: Run migrations
+              run: cargo sqlx migrate run
+
+            - name: Check SQLx metadata
+              run: cargo sqlx prepare --check
+
+            - name: Build
+              run: cargo build
+
     init:
         name: Init Build Metadata
         runs-on: blacksmith-2vcpu-ubuntu-2404

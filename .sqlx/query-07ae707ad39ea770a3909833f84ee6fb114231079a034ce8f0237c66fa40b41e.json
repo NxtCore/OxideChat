@@ -1,0 +1,140 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n\t\t\tSELECT\n\t\t\t\tid,\n\t\t\t\tprovider_id,\n\t\t\t\tmodel_id,\n\t\t\t\tdisplay_name,\n\t\t\t\tCOALESCE(capabilities, '[]'::jsonb) AS \"capabilities!: Json<Vec<String>>\",\n\t\t\t\tCOALESCE(input_modalities, '[]'::jsonb) AS \"input_modalities!: Json<Vec<String>>\",\n\t\t\t\tCOALESCE(output_modalities, '[]'::jsonb) AS \"output_modalities!: Json<Vec<String>>\",\n\t\t\t\tcontext_length,\n\t\t\t\tmax_tokens,\n\t\t\t\tCOALESCE(is_enabled, false) AS \"is_enabled!\",\n\t\t\t\tcreated_at,\n\t\t\t\tupdated_at\n\t\t\tFROM models\n\t\t\tWHERE id = $1\n\t\t\t",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "provider_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "model_id",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "model_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "capabilities!: Json<Vec<String>>",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "input_modalities!: Json<Vec<String>>",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "output_modalities!: Json<Vec<String>>",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "context_length",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "context_length"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "max_tokens",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "max_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "is_enabled!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      true,
+      true,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "07ae707ad39ea770a3909833f84ee6fb114231079a034ce8f0237c66fa40b41e"
+}
