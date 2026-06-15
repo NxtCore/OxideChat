@@ -8,23 +8,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-/// AI Model database row
-#[derive(Debug, Clone, FromRow)]
-pub struct AiModel {
-	pub id: Uuid,
-	pub provider_id: Uuid,
-	pub model_id: String,
-	pub display_name: String,
-	pub capabilities: serde_json::Value,
-	pub input_modalities: serde_json::Value,
-	pub output_modalities: serde_json::Value,
-	pub context_length: Option<i32>,
-	pub max_tokens: Option<i32>,
-	pub is_enabled: bool,
-	pub created_at: DateTime<Utc>,
-	pub updated_at: DateTime<Utc>,
-}
-
 /// AI Usage tracking database row
 #[derive(Debug, Clone, FromRow)]
 pub struct AiUsage {
@@ -77,23 +60,6 @@ pub struct PublicModelResponse {
 	pub provider_name: String,
 	pub provider_kind: String,
 	pub icon: Option<String>,
-}
-
-impl From<AiModel> for ModelResponse {
-	fn from(m: AiModel) -> Self {
-		Self {
-			id: m.id,
-			provider_id: m.provider_id,
-			model_id: m.model_id,
-			display_name: m.display_name,
-			capabilities: m.capabilities,
-			input_modalities: m.input_modalities,
-			output_modalities: m.output_modalities,
-			context_length: m.context_length,
-			max_tokens: m.max_tokens,
-			is_enabled: m.is_enabled,
-		}
-	}
 }
 
 // ============= Provider Metadata (Icons, Display Names) =============

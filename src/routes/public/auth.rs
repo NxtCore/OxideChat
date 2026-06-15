@@ -1,6 +1,3 @@
-//! Authentication route handlers.
-//!
-//! Handles user setup, registration, login, and logout.
 
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::JobState;
@@ -21,19 +18,9 @@ pub const MAX_USERNAME_LENGTH: usize = 32;
 pub const MIN_USERNAME_LENGTH: usize = 3;
 
 /// POST /api/v1/auth/setup
-///
-/// Create the first admin user. Fails if any users already exist.
-///
-/// # Errors
-///
-/// Returns 400 if setup has already been completed.
-/// Returns 500 on database or hashing errors.
 pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<SetupRequest>) -> impl IntoResponse {
-	// Check if setup already completed
 	match User::any_exist(&state.db).await {
-		Ok(true) => {
-			return ErrorBuilder::new(ErrorCode::SetupCompleted).build();
-		}
+		Ok(true) => return ErrorBuilder::new(ErrorCode::SetupCompleted).build(),
 		Err(e) => {
 			eprintln!("[AUTH] Database error checking users: {e}");
 			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
@@ -41,22 +28,16 @@ pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 		_ => {}
 	}
 
-	// Validate email
 	if !validate_email(&payload.email) {
 		return ErrorBuilder::new(ErrorCode::InvalidEmail).build();
 	}
-
-	// Validate username
 	if let Err(code) = validate_username(&payload.username) {
 		return ErrorBuilder::new(code).build();
 	}
-
-	// Validate password
 	if let Err(code) = validate_password(&payload.password) {
 		return ErrorBuilder::new(code).build();
 	}
 
-	// Hash password
 	let password_hash = match hash_password(&payload.password) {
 		Ok(hash) => hash,
 		Err(e) => {
@@ -65,45 +46,24 @@ pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 		}
 	};
 
-	// Create user
-	let user: User = match sqlx::query_as(
-		"INSERT INTO users (email, username, password_hash, auth_method)
-         VALUES ($1, $2, $3, 'local')
-         RETURNING *",
-	)
-	.bind(&payload.email)
-	.bind(&payload.username)
-	.bind(&password_hash)
-	.fetch_one(&state.db)
-	.await
-	{
-		Ok(user) => user,
+	let user = match User::create(&state.db, &payload.email, &payload.username, &password_hash).await {
+		Ok(u) => u,
 		Err(e) => {
 			eprintln!("[AUTH] Failed to create user: {e}");
 			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 		}
 	};
 
-	// Assign admin role
-	if let Err(e) = sqlx::query(
-		"INSERT INTO user_roles (user_id, role_id)
-         SELECT $1, id FROM roles WHERE name = 'admin'",
-	)
-	.bind(user.id)
-	.execute(&state.db)
-	.await
-	{
+	if let Err(e) = user.assign_role(&state.db, "admin").await {
 		eprintln!("[AUTH] Failed to assign admin role: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
-	// Initialize user defaults (preferences + workspace)
 	if let Err(e) = user.initialize_defaults(&state.db).await {
 		eprintln!("[AUTH] Failed to initialize user defaults: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
-	// Create session
 	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
 		eprintln!("[AUTH] Failed to create session: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
@@ -111,7 +71,6 @@ pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 
 	AuditLog::log(&state.db, LogEvent::AdminSetup, Some(user.id), Some(EntityType::User), Some(user.id));
 
-	// Return user response
 	match user.to_response(&state.db).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response }))
 			.status(axum::http::StatusCode::CREATED)
@@ -124,19 +83,9 @@ pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 }
 
 /// POST /api/v1/auth/register
-///
-/// Register a new user. Requires setup to be completed first.
-///
-/// # Errors
-///
-/// Returns 400 if setup not completed or email/username taken.
-/// Returns 500 on database or hashing errors.
 pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<RegisterRequest>) -> impl IntoResponse {
-	// Check if setup completed
 	match User::any_exist(&state.db).await {
-		Ok(false) => {
-			return ErrorBuilder::new(ErrorCode::SetupRequired).build();
-		}
+		Ok(false) => return ErrorBuilder::new(ErrorCode::SetupRequired).build(),
 		Err(e) => {
 			eprintln!("[AUTH] Database error checking users: {e}");
 			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
@@ -144,22 +93,16 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 		_ => {}
 	}
 
-	// Validate email
 	if !validate_email(&payload.email) {
 		return ErrorBuilder::new(ErrorCode::InvalidEmail).build();
 	}
-
-	// Validate username
 	if let Err(code) = validate_username(&payload.username) {
 		return ErrorBuilder::new(code).build();
 	}
-
-	// Validate password
 	if let Err(code) = validate_password(&payload.password) {
 		return ErrorBuilder::new(code).build();
 	}
 
-	// Hash password
 	let password_hash = match hash_password(&payload.password) {
 		Ok(hash) => hash,
 		Err(e) => {
@@ -168,29 +111,16 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 		}
 	};
 
-	// Create user
-	let user: User = match sqlx::query_as(
-		"INSERT INTO users (email, username, password_hash, auth_method)
-         VALUES ($1, $2, $3, 'local')
-         RETURNING *",
-	)
-	.bind(&payload.email)
-	.bind(&payload.username)
-	.bind(&password_hash)
-	.fetch_one(&state.db)
-	.await
-	{
-		Ok(user) => user,
+	let user = match User::create(&state.db, &payload.email, &payload.username, &password_hash).await {
+		Ok(u) => u,
 		Err(e) => {
 			let error_string = e.to_string();
 			let code = if error_string.contains("duplicate key") {
-				// Parse constraint name to distinguish email vs username conflicts
 				if error_string.contains("users_email_key") {
 					ErrorCode::EmailTaken
 				} else if error_string.contains("users_username_key") {
 					ErrorCode::UsernameTaken
 				} else {
-					// Fallback if constraint name can't be determined
 					ErrorCode::EmailOrUsernameTaken
 				}
 			} else {
@@ -201,35 +131,23 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 		}
 	};
 
-	// Assign user role
-	if let Err(e) = sqlx::query(
-		"INSERT INTO user_roles (user_id, role_id)
-         SELECT $1, id FROM roles WHERE name = 'user'",
-	)
-	.bind(user.id)
-	.execute(&state.db)
-	.await
-	{
+	if let Err(e) = user.assign_role(&state.db, "user").await {
 		eprintln!("[AUTH] Failed to assign user role: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
-	// Initialize user defaults (preferences + workspace)
 	if let Err(e) = user.initialize_defaults(&state.db).await {
 		eprintln!("[AUTH] Failed to initialize user defaults: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
-	// Create session
 	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
 		eprintln!("[AUTH] Failed to create session: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
-	// Log user registration
 	AuditLog::log(&state.db, LogEvent::UserRegistered, Some(user.id), Some(EntityType::User), Some(user.id));
 
-	// Return user response
 	match user.to_response(&state.db).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response }))
 			.status(axum::http::StatusCode::CREATED)
@@ -242,16 +160,8 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 }
 
 /// POST /api/v1/auth/login
-///
-/// Authenticate a user with email and password.
-///
-/// # Errors
-///
-/// Returns 401 if credentials are invalid.
-/// Returns 500 on database errors.
 pub async fn login(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<LoginRequest>) -> impl IntoResponse {
-	// Find user by email
-	let user: User = match User::find_by_email(&state.db, &payload.email).await {
+	let user = match User::find_by_email(&state.db, &payload.email).await {
 		Ok(Some(user)) => user,
 		Ok(None) => {
 			AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
@@ -263,12 +173,10 @@ pub async fn login(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 		}
 	};
 
-	// Check if user has a password (local auth)
 	let Some(password_hash) = &user.password_hash else {
 		return ErrorBuilder::new(ErrorCode::ExternalAuthRequired).build();
 	};
 
-	// Verify password
 	match verify_password(&payload.password, password_hash) {
 		Ok(true) => {}
 		Ok(false) => {
@@ -281,16 +189,13 @@ pub async fn login(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 		}
 	}
 
-	// Create session
 	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
 		eprintln!("[AUTH] Failed to create session: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 	}
 
-	// Log successful login
 	AuditLog::log(&state.db, LogEvent::UserLogin, Some(user.id), Some(EntityType::Session), None);
 
-	// Return user response
 	match user.to_response(&state.db).await {
 		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
 		Err(e) => {
@@ -301,12 +206,6 @@ pub async fn login(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 }
 
 /// POST /api/v1/auth/logout
-///
-/// Invalidate the current session.
-///
-/// # Errors
-///
-/// Returns 500 if the database query fails during session lookup.
 pub async fn logout(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
 	let mut user_id: Option<Uuid> = None;
 	let mut session_id_to_log: Option<Uuid> = None;
@@ -314,25 +213,20 @@ pub async fn logout(State(state): State<Arc<JobState>>, cookies: Cookies) -> imp
 	if let Some(session_cookie) = cookies.get(SESSION_COOKIE_NAME) {
 		if let Ok(session_id) = Uuid::parse_str(session_cookie.value()) {
 			session_id_to_log = Some(session_id);
-			// Get user_id before deleting session - cancel logout if this fails
+
 			match sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM sessions WHERE id = $1")
 				.bind(session_id)
 				.fetch_optional(&state.db)
 				.await
 			{
-				Ok(Some(uid)) => {
-					user_id = Some(uid);
-				}
-				Ok(None) => {
-					// Session doesn't exist, just clear the cookie
-				}
+				Ok(Some(uid)) => user_id = Some(uid),
+				Ok(None) => {}
 				Err(e) => {
 					eprintln!("[AUTH] Database error during logout session lookup: {e}");
 					return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 				}
 			}
 
-			// Only proceed to delete session and log if we got this far
 			if let Err(e) = sqlx::query("DELETE FROM sessions WHERE id = $1").bind(session_id).execute(&state.db).await {
 				eprintln!("[AUTH] Database error deleting session: {e}");
 				return ErrorBuilder::new(ErrorCode::DatabaseError).build();
@@ -342,7 +236,6 @@ pub async fn logout(State(state): State<Arc<JobState>>, cookies: Cookies) -> imp
 
 	cookies.remove(Cookie::from(SESSION_COOKIE_NAME));
 
-	// Log logout event
 	AuditLog::log(&state.db, LogEvent::UserLogout, user_id, Some(EntityType::Session), session_id_to_log);
 
 	ResponseBuilder::new(ResponseBody::Json(serde_json::json!({
@@ -352,21 +245,8 @@ pub async fn logout(State(state): State<Arc<JobState>>, cookies: Cookies) -> imp
 }
 
 /// Get the current user from the session cookie.
-///
-/// Returns None if no valid session exists.
 pub async fn get_current_user(pool: &PgPool, cookies: &Cookies) -> Option<User> {
 	let session_cookie = cookies.get(SESSION_COOKIE_NAME)?;
 	let session_id = Uuid::parse_str(session_cookie.value()).ok()?;
-
-	let user: User = sqlx::query_as(
-		"SELECT u.* FROM users u
-         INNER JOIN sessions s ON u.id = s.user_id
-         WHERE s.id = $1 AND s.expires_at > NOW()",
-	)
-	.bind(session_id)
-	.fetch_optional(pool)
-	.await
-	.ok()??;
-
-	Some(user)
+	User::find_by_session(pool, &session_id).await.ok()?
 }

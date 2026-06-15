@@ -6,6 +6,7 @@ use crate::ai;
 use crate::routes::public::auth::get_current_user;
 use crate::types::{CostDetails, JobState};
 use crate::types::models_configs::ModelConfig;
+use crate::types::models::Model;
 use crate::types::{ChatMessageResponse, Message, MessagePart, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction, UserToolSettings};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
@@ -43,7 +44,7 @@ fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl
 /// - `{{datetime}}` — current UTC date and time (YYYY-MM-DD HH:MM)
 /// - `{{model_name}}` — display name of the model being used
 /// - `{{model_id}}` — the model's identifier string
-fn interpolate_system_prompt(template: &str, user: &crate::types::User, model: &crate::types::AiModel) -> String {
+fn interpolate_system_prompt(template: &str, user: &crate::types::User, model: &Model) -> String {
 	let now = chrono::Utc::now();
 	template
 		.replace("{{user_name}}", &user.username)
@@ -59,7 +60,7 @@ fn interpolate_system_prompt(template: &str, user: &crate::types::User, model: &
 /// 1. Request-level (highest priority)
 /// 2. model_configs (user preferences)
 /// 3. models table (defaults)
-fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>, model: &crate::types::AiModel) -> Sampling {
+fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>, model: &Model) -> Sampling {
 	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.0.clone()).ok());
 
 	macro_rules! priority_field {
@@ -362,7 +363,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	};
 
-	let model = sqlx::query_as::<_, crate::types::AiModel>("SELECT * FROM models WHERE model_id = $1")
+	let model = sqlx::query_as::<_, Model>("SELECT * FROM models WHERE model_id = $1")
 		.bind(&req.model_key)
 		.fetch_optional(&state.db)
 		.await;

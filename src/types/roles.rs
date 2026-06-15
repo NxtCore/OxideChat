@@ -1,14 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::types::CountRow;
 
-/// Request body for setting a user's full role list.
-#[derive(Debug, Deserialize)]
-pub struct SetUserRolesRequest {
-	pub roles: Vec<String>,
-}
 /// Role database row.
 #[derive(Debug, Serialize, FromRow)]
 pub struct Role {
@@ -17,12 +12,6 @@ pub struct Role {
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Helper for role names query.
-#[derive(Debug, FromRow)]
-pub struct RoleNameRow {
-	pub name: String,
-}
- 
 impl Role {
 	/// Check if a role name exists in the database.
 	///
