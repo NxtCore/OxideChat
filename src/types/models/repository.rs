@@ -1,10 +1,11 @@
 use super::rows::{ModelDetailedRow, ModelListAdminRow, ModelListPublicRow};
-use super::{Model, ModelDetailed, ModelListAdmin, ModelListPublic, ModelViewer};
+use super::{Model, ModelDetailed, ModelListAdmin, ModelListPublic, ModelSyncInput, ModelSyncSummary, ModelViewer};
 use crate::types::BaseType;
 use crate::types::axum::PaginatedResponse;
-use crate::types::providers::ProviderKind;
+use crate::types::providers::{ProviderKind, ProviderModelResponse};
 use serde_json::Value;
 use sqlx::types::Json;
+use std::collections::{BTreeMap, HashSet};
 use uuid::Uuid;
 
 impl Model {
@@ -221,6 +222,182 @@ impl Model {
 		)
 		.fetch_optional(pool)
 		.await
+	}
+
+	pub async fn list_by_provider_for_admin(pool: &sqlx::PgPool, provider_id: &Uuid) -> Result<Vec<ProviderModelResponse>, sqlx::Error> {
+		let models = sqlx::query_as::<_, Model>(
+			r#"
+			SELECT
+				id,
+				provider_id,
+				model_id,
+				display_name,
+				COALESCE(capabilities, '[]'::jsonb) AS capabilities,
+				COALESCE(input_modalities, '[]'::jsonb) AS input_modalities,
+				COALESCE(output_modalities, '[]'::jsonb) AS output_modalities,
+				context_length,
+				max_tokens,
+				COALESCE(is_enabled, false) AS is_enabled,
+				created_at,
+				updated_at
+			FROM models
+			WHERE provider_id = $1
+			ORDER BY display_name
+			"#,
+		)
+		.bind(provider_id)
+		.fetch_all(pool)
+		.await?;
+
+		Ok(models
+			.into_iter()
+			.map(|model| ProviderModelResponse {
+				id: model.id,
+				provider_id: model.provider_id,
+				model_id: model.model_id,
+				display_name: model.display_name,
+				capabilities: model.capabilities.0,
+				input_modalities: model.input_modalities.0,
+				output_modalities: model.output_modalities.0,
+				context_length: model.context_length,
+				max_tokens: model.max_tokens,
+				is_enabled: model.is_enabled,
+			})
+			.collect())
+	}
+
+	pub async fn sync_provider_models(pool: &sqlx::PgPool, provider_id: &Uuid, discovered: &[ModelSyncInput]) -> Result<ModelSyncSummary, sqlx::Error> {
+		let existing = Self::list_raw_by_provider(pool, provider_id).await?;
+		let existing_map: BTreeMap<_, _> = existing.iter().map(|model| (model.model_id.as_str(), model)).collect();
+		let discovered_ids: HashSet<_> = discovered.iter().map(|model| model.model_id.as_str()).collect();
+
+		let mut to_insert = Vec::with_capacity(discovered.len());
+		let mut to_update = Vec::with_capacity(discovered.len());
+		let mut to_delete = Vec::with_capacity(existing.len());
+
+		for model in discovered {
+			if existing_map.contains_key(model.model_id.as_str()) {
+				to_update.push(model);
+			} else {
+				to_insert.push(model);
+			}
+		}
+
+		for model in &existing {
+			if !discovered_ids.contains(model.model_id.as_str()) {
+				to_delete.push(model.id);
+			}
+		}
+
+		let added = Self::bulk_insert_sync_models(pool, &to_insert).await?;
+		let updated = Self::bulk_update_sync_models(pool, &to_update).await?;
+		let removed = Self::bulk_delete(pool, &to_delete).await?;
+
+		Ok(ModelSyncSummary { added, updated, removed })
+	}
+
+	async fn list_raw_by_provider(pool: &sqlx::PgPool, provider_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Self>(
+			r#"
+			SELECT
+				id,
+				provider_id,
+				model_id,
+				display_name,
+				COALESCE(capabilities, '[]'::jsonb) AS capabilities,
+				COALESCE(input_modalities, '[]'::jsonb) AS input_modalities,
+				COALESCE(output_modalities, '[]'::jsonb) AS output_modalities,
+				context_length,
+				max_tokens,
+				COALESCE(is_enabled, false) AS is_enabled,
+				created_at,
+				updated_at
+			FROM models
+			WHERE provider_id = $1
+			"#,
+		)
+		.bind(provider_id)
+		.fetch_all(pool)
+		.await
+	}
+
+	async fn bulk_insert_sync_models(pool: &sqlx::PgPool, items: &[&ModelSyncInput]) -> Result<usize, sqlx::Error> {
+		if items.is_empty() {
+			return Ok(0);
+		}
+
+		let mut query_builder = sqlx::QueryBuilder::new(
+			"INSERT INTO models (provider_id, model_id, display_name, capabilities, input_modalities, output_modalities, context_length, max_tokens) ",
+		);
+
+		query_builder.push_values(items, |mut builder, item| {
+			builder
+				.push_bind(item.provider_id)
+				.push_bind(&item.model_id)
+				.push_bind(&item.display_name)
+				.push_bind(&item.capabilities)
+				.push_bind(&item.input_modalities)
+				.push_bind(&item.output_modalities)
+				.push_bind(item.context_length)
+				.push_bind(item.max_tokens);
+		});
+
+		query_builder.build().execute(pool).await?;
+		Ok(items.len())
+	}
+
+	async fn bulk_update_sync_models(pool: &sqlx::PgPool, items: &[&ModelSyncInput]) -> Result<usize, sqlx::Error> {
+		if items.is_empty() {
+			return Ok(0);
+		}
+
+		let provider_ids: Vec<Uuid> = items.iter().map(|item| item.provider_id).collect();
+		let model_ids: Vec<&str> = items.iter().map(|item| item.model_id.as_str()).collect();
+		let display_names: Vec<&str> = items.iter().map(|item| item.display_name.as_str()).collect();
+		let capabilities: Vec<&Value> = items.iter().map(|item| &item.capabilities).collect();
+		let input_modalities: Vec<&Value> = items.iter().map(|item| &item.input_modalities).collect();
+		let output_modalities: Vec<&Value> = items.iter().map(|item| &item.output_modalities).collect();
+		let context_lengths: Vec<Option<i32>> = items.iter().map(|item| item.context_length).collect();
+		let max_tokens: Vec<Option<i32>> = items.iter().map(|item| item.max_tokens).collect();
+
+		sqlx::query(
+			r#"
+			UPDATE models AS m SET
+				display_name = u.display_name,
+				capabilities = u.capabilities,
+				input_modalities = u.input_modalities,
+				output_modalities = u.output_modalities,
+				context_length = u.context_length,
+				max_tokens = u.max_tokens,
+				updated_at = NOW()
+			FROM (
+				SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::jsonb[], $5::jsonb[], $6::jsonb[], $7::int[], $8::int[])
+				AS t(provider_id, model_id, display_name, capabilities, input_modalities, output_modalities, context_length, max_tokens)
+			) AS u
+			WHERE m.provider_id = u.provider_id AND m.model_id = u.model_id
+			"#,
+		)
+		.bind(&provider_ids)
+		.bind(&model_ids)
+		.bind(&display_names)
+		.bind(&capabilities)
+		.bind(&input_modalities)
+		.bind(&output_modalities)
+		.bind(&context_lengths)
+		.bind(&max_tokens)
+		.execute(pool)
+		.await?;
+
+		Ok(items.len())
+	}
+
+	async fn bulk_delete(pool: &sqlx::PgPool, ids: &[Uuid]) -> Result<usize, sqlx::Error> {
+		if ids.is_empty() {
+			return Ok(0);
+		}
+
+		sqlx::query("DELETE FROM models WHERE id = ANY($1)").bind(ids).execute(pool).await?;
+		Ok(ids.len())
 	}
 
 	pub async fn find_name_and_model_id<'e, E>(executor: E, id: &Uuid) -> Result<Option<(String, String)>, sqlx::Error>

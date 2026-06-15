@@ -2,30 +2,11 @@
 //!
 //! Types for managing AI providers, models, and usage tracking.
 
-use crate::types::models_configs::ModelConfig;
+use crate::types::providers::ProviderKind;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
-
-// Re-export omniference types for convenience
-use crate::types::providers::ProviderKind;
-pub use omniference::types::ProviderKind as OmniProviderKind;
-
-/// AI Provider database row
-#[derive(Debug, Clone, FromRow)]
-pub struct AiProvider {
-	pub id: Uuid,
-	pub owner_id: Option<Uuid>,
-	pub kind: ProviderKind,
-	pub name: String,
-	pub base_url: String,
-	pub api_key: Option<String>,
-	pub extra_headers: serde_json::Value,
-	pub is_enabled: bool,
-	pub created_at: DateTime<Utc>,
-	pub updated_at: DateTime<Utc>,
-}
 
 /// AI Model database row
 #[derive(Debug, Clone, FromRow)]
@@ -64,77 +45,7 @@ pub struct AiUsage {
 
 // ============= Request DTOs =============
 
-/// Request to create a new AI provider
-#[derive(Debug, Deserialize)]
-pub struct CreateProviderRequest {
-	pub kind: ProviderKind,
-	pub name: String,
-	pub base_url: String,
-	pub api_key: Option<String>,
-	#[serde(default)]
-	pub extra_headers: serde_json::Value,
-	#[serde(default = "default_true")]
-	pub is_enabled: bool,
-}
-
-fn default_true() -> bool {
-	true
-}
-
-/// Request to update an existing AI provider
-#[derive(Debug, Deserialize)]
-pub struct UpdateProviderRequest {
-	pub kind: Option<ProviderKind>,
-	pub name: Option<String>,
-	pub base_url: Option<String>,
-	pub api_key: Option<String>,
-	pub extra_headers: Option<serde_json::Value>,
-	pub is_enabled: Option<bool>,
-}
-
-/// Request to test provider connection
-#[derive(Debug, Deserialize)]
-pub struct TestProviderRequest {
-	pub kind: ProviderKind,
-	pub base_url: String,
-	pub api_key: Option<String>,
-	#[serde(default)]
-	pub extra_headers: serde_json::Value,
-}
-
 // ============= Response DTOs =============
-
-/// Provider response (hides sensitive data)
-#[derive(Debug, Serialize)]
-pub struct ProviderResponse {
-	pub id: Uuid,
-	pub owner_id: Option<Uuid>,
-	pub kind: ProviderKind,
-	pub name: String,
-	pub base_url: String,
-	pub has_api_key: bool,
-	pub extra_headers: serde_json::Value,
-	pub is_enabled: bool,
-	pub created_at: DateTime<Utc>,
-	pub updated_at: DateTime<Utc>,
-}
-
-impl From<AiProvider> for ProviderResponse {
-	fn from(p: AiProvider) -> Self {
-		Self {
-			id: p.id,
-			owner_id: p.owner_id,
-			kind: p.kind,
-			name: p.name,
-			base_url: p.base_url,
-			has_api_key: p.api_key.is_some(),
-			extra_headers: p.extra_headers,
-			is_enabled: p.is_enabled,
-			created_at: p.created_at,
-			updated_at: p.updated_at,
-		}
-	}
-}
 
 /// Model response
 #[derive(Debug, Serialize)]
@@ -183,24 +94,6 @@ impl From<AiModel> for ModelResponse {
 			is_enabled: m.is_enabled,
 		}
 	}
-}
-
-/// Provider test result
-#[derive(Debug, Serialize)]
-pub struct TestProviderResponse {
-	pub success: bool,
-	pub models_found: usize,
-	pub message: String,
-}
-
-/// Provider sync result
-#[derive(Debug, Serialize)]
-pub struct SyncProviderResponse {
-	pub success: bool,
-	pub models_added: usize,
-	pub models_updated: usize,
-	pub models_removed: usize,
-	pub message: String,
 }
 
 // ============= Provider Metadata (Icons, Display Names) =============
@@ -504,100 +397,6 @@ impl ModelCapabilities {
 			"TOOLS" => Some(Self::Tools),
 			_ => None,
 		}
-	}
-}
-
-impl crate::types::BaseType for AiProvider {}
-
-impl AiProvider {
-	pub async fn list_system(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE owner_id IS NULL ORDER BY name")
-			.fetch_all(pool)
-			.await
-	}
-
-	pub async fn find_by_id_system(pool: &sqlx::PgPool, id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE id = $1 AND owner_id IS NULL")
-			.bind(id)
-			.fetch_optional(pool)
-			.await
-	}
-
-	pub async fn create(
-		pool: &sqlx::PgPool,
-		owner_id: Option<&Uuid>,
-		kind: &ProviderKind,
-		name: &str,
-		base_url: &str,
-		api_key: Option<&str>,
-		extra_headers: Option<&serde_json::Value>,
-		is_enabled: bool,
-	) -> Result<Self, sqlx::Error> {
-		sqlx::query_as::<_, AiProvider>(
-			r#"
-			INSERT INTO providers (owner_id, kind, name, base_url, api_key, extra_headers, is_enabled)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			RETURNING *
-			"#,
-		)
-		.bind(owner_id)
-		.bind(kind)
-		.bind(name)
-		.bind(base_url)
-		.bind(api_key)
-		.bind(extra_headers)
-		.bind(is_enabled)
-		.fetch_one(pool)
-		.await
-	}
-
-	pub async fn update(
-		pool: &sqlx::PgPool,
-		id: &Uuid,
-		kind: Option<&ProviderKind>,
-		name: Option<&str>,
-		base_url: Option<&str>,
-		api_key: Option<&str>,
-		extra_headers: Option<&serde_json::Value>,
-		is_enabled: Option<bool>,
-	) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as::<_, AiProvider>(
-			r#"
-			UPDATE providers
-			SET kind = COALESCE($2, kind),
-			    name = COALESCE($3, name),
-			    base_url = COALESCE($4, base_url),
-			    api_key = COALESCE($5, api_key),
-			    extra_headers = COALESCE($6, extra_headers),
-			    is_enabled = COALESCE($7, is_enabled),
-			    updated_at = NOW()
-			WHERE id = $1
-			RETURNING *
-			"#,
-		)
-		.bind(id)
-		.bind(kind)
-		.bind(name)
-		.bind(base_url)
-		.bind(api_key)
-		.bind(extra_headers)
-		.bind(is_enabled)
-		.fetch_optional(pool)
-		.await
-	}
-
-	pub async fn delete(pool: &sqlx::PgPool, id: &Uuid) -> Result<bool, sqlx::Error> {
-		let result = sqlx::query("DELETE FROM providers WHERE id = $1").bind(id).execute(pool).await?;
-		Ok(result.rows_affected() > 0)
-	}
-}
-
-impl AiModel {
-	pub async fn list_by_provider(pool: &sqlx::PgPool, provider_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, AiModel>("SELECT * FROM models WHERE provider_id = $1 ORDER BY display_name")
-			.bind(provider_id)
-			.fetch_all(pool)
-			.await
 	}
 }
 

@@ -14,9 +14,8 @@ use sqlx::PgPool;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 
-use crate::types::AiProvider;
+use crate::types::providers::Provider;
 use crate::utils::encryption::decrypt_api_key;
-use crate::utils::providers::sync_provider_models;
 
 /// Someone kill me for this name please
 pub static OF_ENGINE: std::sync::OnceLock<Arc<RwLock<OmniferenceEngine>>> = std::sync::OnceLock::new();
@@ -25,10 +24,7 @@ pub static OF_ENGINE: std::sync::OnceLock<Arc<RwLock<OmniferenceEngine>>> = std:
 pub async fn init(pool: &PgPool) {
 	let engine = Arc::new(RwLock::new(OmniferenceEngine::new()));
 
-	let providers = sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE owner_id IS NULL AND is_enabled = true")
-		.fetch_all(pool)
-		.await
-		.unwrap_or_default();
+	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
 	if providers.is_empty() {
 		println!("[AI] No providers found in the database.");
 		return;
@@ -60,10 +56,7 @@ pub fn get() -> Arc<RwLock<OmniferenceEngine>> {
 
 /// Reload providers from the database
 pub async fn reload_providers(pool: &PgPool) {
-	let providers = sqlx::query_as::<_, AiProvider>("SELECT * FROM providers WHERE owner_id IS NULL AND is_enabled = true")
-		.fetch_all(pool)
-		.await
-		.unwrap_or_default();
+	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
 
 	let provider_count = providers.len();
 
@@ -83,9 +76,9 @@ pub async fn reload_providers(pool: &PgPool) {
 }
 
 /// Convert a database provider to omniference config
-pub fn provider_to_config(provider: &AiProvider) -> ProviderConfig {
+pub fn provider_to_config(provider: &Provider) -> ProviderConfig {
 	let api_key = provider.api_key.as_ref().map(|k| decrypt_api_key(k));
-	let extra_headers = parse_extra_headers(&provider.extra_headers);
+	let extra_headers = parse_extra_headers(&provider.extra_headers.0);
 
 	ProviderConfig {
 		name: provider.name.clone(),

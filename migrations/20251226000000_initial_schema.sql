@@ -150,8 +150,8 @@ CREATE TABLE IF NOT EXISTS models (
     model_id VARCHAR(255) NOT NULL,  -- The model ID used by the provider
     display_name VARCHAR(255) NOT NULL,
     capabilities JSONB DEFAULT '[]',  -- streaming, tools, vision, etc.
-    input_modalities JSONB DEFAULT '["text"]',  
-    output_modalities JSONB DEFAULT '["text"]', 
+    input_modalities JSONB DEFAULT '["text"]',
+    output_modalities JSONB DEFAULT '["text"]',
     context_length INTEGER,
     max_tokens INTEGER,
     is_enabled BOOLEAN DEFAULT true,
@@ -178,26 +178,26 @@ CREATE TABLE IF NOT EXISTS usage (
 
 CREATE TABLE IF NOT EXISTS model_configs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_id UUID REFERENCES users(id) ON DELETE CASCADE, 
-    
+    owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
+
     model_id UUID REFERENCES models(id) ON DELETE SET NULL,
     stable_key VARCHAR(255) NOT NULL,
-    
+
     name VARCHAR(100) NOT NULL,
     description TEXT,
     icon VARCHAR(500),
-    
+
     capabilities JSONB,
     input_modalities JSONB,
     output_modalities JSONB,
     context_length INTEGER,
     max_output_tokens INTEGER,
-    
+
     system_prompt TEXT,
     sampling JSONB DEFAULT '{}',
-    
+
     enabled_tools JSONB DEFAULT '[]',
-    
+
     is_public BOOLEAN DEFAULT false,
     is_featured BOOLEAN DEFAULT false,
     is_default BOOLEAN DEFAULT false,
@@ -207,7 +207,7 @@ CREATE TABLE IF NOT EXISTS model_configs (
     tags JSONB DEFAULT '[]',
     usage_count INTEGER DEFAULT 0,
     extra_settings JSONB DEFAULT '{}',
-    
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(owner_id, model_id)
@@ -215,13 +215,13 @@ CREATE TABLE IF NOT EXISTS model_configs (
 
 CREATE TABLE IF NOT EXISTS model_access (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    
+
     provider_id UUID REFERENCES providers(id) ON DELETE CASCADE,
     model_id UUID REFERENCES models(id) ON DELETE CASCADE,
-    
+
     role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    
+
     can_use BOOLEAN DEFAULT false,
     can_configure BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -245,6 +245,25 @@ CREATE TABLE IF NOT EXISTS workspaces (
     UNIQUE(user_id, name)
 );
 
+-- Messages
+CREATE TABLE IF NOT EXISTS messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL,
+    content TEXT NOT NULL,
+    reasoning_content TEXT,
+    model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+    parent_id UUID REFERENCES messages(id) ON DELETE CASCADE,
+    fork_index INTEGER NOT NULL DEFAULT 1,
+    is_active_fork BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    content_parts JSONB DEFAULT '[]',
+    cost_details JSONB DEFAULT '{}',
+    usage_details JSONB DEFAULT '{}',
+    reasoning_details JSONB DEFAULT '{}'
+);
+
 -- Chats (linked to workspaces)
 CREATE TABLE IF NOT EXISTS chats (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -257,25 +276,6 @@ CREATE TABLE IF NOT EXISTS chats (
     branched_from_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Messages
-CREATE TABLE IF NOT EXISTS messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    role VARCHAR(20) NOT NULL,
-    content TEXT NOT NULL,
-    reasoning_content TEXT, 
-    model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-    parent_id UUID REFERENCES messages(id) ON DELETE CASCADE,
-    fork_index INTEGER NOT NULL DEFAULT 1,
-    is_active_fork BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    content_parts JSONB DEFAULT '[]',
-    cost_details JSONB DEFAULT '{}',
-    usage_details JSONB DEFAULT '{}',
-    reasoning_details JSONB DEFAULT '{}'
 );
 
 -- User preferences (streaming animation, default model, etc.)
@@ -342,7 +342,7 @@ ON CONFLICT DO NOTHING;
 DO $$ BEGIN
     CREATE TYPE tool_source_kind AS ENUM (
         'BUILTIN',       -- Built-in tools (Exa search, etc.)
-        'WASM',          -- Extism WASM plugins  
+        'WASM',          -- Extism WASM plugins
         'MCP',           -- MCP server connection
         'HTTP'           -- HTTP endpoint tools
     );
@@ -366,24 +366,24 @@ CREATE TABLE IF NOT EXISTS wasm_blobs (
 CREATE TABLE IF NOT EXISTS tools (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id UUID REFERENCES users(id) ON DELETE CASCADE,  -- NULL = system tool
-    
+
     name VARCHAR(100) NOT NULL,
     display_name VARCHAR(255) NOT NULL,
     description TEXT,
     icon VARCHAR(500),
-    
+
     source_kind tool_source_kind NOT NULL,
     source_config JSONB NOT NULL DEFAULT '{}',  -- Kind-specific config
-    
+
     -- JSON Schema for tool parameters (passed to LLM)
     input_schema JSONB NOT NULL,
-    
+
     -- Custom settings schema (API keys, user config) - NOT passed to LLM
     settings_schema JSONB DEFAULT '{}',
-    
+
     -- Permissions
     is_enabled BOOLEAN DEFAULT true,
-    
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(owner_id, name)
@@ -411,15 +411,15 @@ WHERE user_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS mcp_servers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    
+
     name VARCHAR(100) NOT NULL,
     transport VARCHAR(50) NOT NULL,  -- 'stdio' or 'sse'
     connection_config JSONB NOT NULL,  -- {command, args} for stdio, {url, headers} for SSE
-    
+
     is_enabled BOOLEAN DEFAULT true,
     last_health_check TIMESTAMPTZ,
     health_status VARCHAR(50),
-    
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(owner_id, name)
@@ -444,12 +444,12 @@ CREATE TABLE IF NOT EXISTS tool_executions (
     message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
     tool_id UUID REFERENCES tools(id) ON DELETE SET NULL,
     tool_function UUID REFERENCES tool_functions(id) ON DELETE SET NULL,
-    
+
     tool_call_id VARCHAR(255) NOT NULL,  -- From LLM
     input_args JSONB NOT NULL,
     output JSONB,
     error TEXT,
-    
+
     execution_ms INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -720,14 +720,14 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'guild.components.dialog_calendar.time.select', 'Uhrzeit auswählen'),
     ('de', 'guild.components.dialog_calendar.reset', 'Zurücksetzen'),
     ('de', 'guild.components.dialog_calendar.ok', 'OK'),
- 
+
     ('en', 'auth.errors.password_too_long', 'Password must be at most 128 characters'),
     ('en', 'auth.errors.password_no_uppercase', 'Password must contain at least one uppercase letter'),
     ('en', 'auth.errors.password_no_lowercase', 'Password must contain at least one lowercase letter'),
     ('en', 'auth.errors.password_no_digit', 'Password must contain at least one number'),
     ('en', 'auth.errors.password_no_special', 'Password must contain at least one special character'),
     ('en', 'auth.errors.password_requirements_not_met', 'Please ensure your password meets all requirements'),
-    
+
     -- Password validation error messages (German)
     ('de', 'auth.errors.password_too_long', 'Das Passwort darf maximal 128 Zeichen haben'),
     ('de', 'auth.errors.password_no_uppercase', 'Das Passwort muss mindestens einen Großbuchstaben enthalten'),
@@ -735,10 +735,10 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'auth.errors.password_no_digit', 'Das Passwort muss mindestens eine Zahl enthalten'),
     ('de', 'auth.errors.password_no_special', 'Das Passwort muss mindestens ein Sonderzeichen enthalten'),
     ('de', 'auth.errors.password_requirements_not_met', 'Bitte stellen Sie sicher, dass Ihr Passwort alle Anforderungen erfüllt'),
-    
+
     ('en', 'error_messages.theme_import_failed', 'Failed to import theme'),
     ('de', 'error_messages.theme_import_failed', 'Fehler beim Importieren des Themes'),
-    
+
     -- Password strength indicator labels (English)
     ('en', 'auth.password.min_length', 'At least {min} characters'),
     ('en', 'auth.password.max_length', 'Maximum {max} characters'),
@@ -749,7 +749,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'auth.password.strength_weak', 'Weak'),
     ('en', 'auth.password.strength_fair', 'Fair'),
     ('en', 'auth.password.strength_good', 'Good'),
-    
+
     -- Password strength indicator labels (German)
     ('de', 'auth.password.min_length', 'Mindestens {min} Zeichen'),
     ('de', 'auth.password.max_length', 'Maximal {max} Zeichen'),
@@ -1177,7 +1177,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.image_preview.copy', 'Copy URL'),
     ('en', 'chat.image_preview.copied', 'Copied!'),
     ('en', 'chat.tool_execution.generated_image', 'Generated Image'),
-    
+
     ('de', 'chat.image_preview.download', 'Herunterladen'),
     ('de', 'chat.image_preview.copy', 'URL kopieren'),
     ('de', 'chat.image_preview.copied', 'Kopiert!'),
@@ -1330,7 +1330,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
         -- Display Mode section (English)
     ('en', 'settings.appearance.display_mode', 'Display Mode'),
     ('en', 'settings.appearance.display_mode_description', 'Choose between light and dark mode'),
-    
+
     -- Themes section (English)
     ('en', 'settings.appearance.themes', 'Themes'),
     ('en', 'settings.appearance.themes_description', 'Select and manage your color themes'),
@@ -1350,7 +1350,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     -- Display Mode section (German)
     ('de', 'settings.appearance.display_mode', 'Anzeigemodus'),
     ('de', 'settings.appearance.display_mode_description', 'Wählen Sie zwischen Hell- und Dunkelmodus'),
-    
+
     -- Themes section (German)
     ('de', 'settings.appearance.themes', 'Themes'),
     ('de', 'settings.appearance.themes_description', 'Farbthemen auswählen und verwalten'),

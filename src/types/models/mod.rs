@@ -1,6 +1,7 @@
 use crate::types::BaseType;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::types::Json;
 use uuid::Uuid;
 
@@ -31,6 +32,23 @@ pub struct Model {
 
 pub struct ModelViewer<'a> {
 	pub user_id: &'a Uuid,
+}
+
+pub struct ModelSyncInput {
+	pub provider_id: Uuid,
+	pub model_id: String,
+	pub display_name: String,
+	pub capabilities: Value,
+	pub input_modalities: Value,
+	pub output_modalities: Value,
+	pub context_length: Option<i32>,
+	pub max_tokens: Option<i32>,
+}
+
+pub struct ModelSyncSummary {
+	pub added: usize,
+	pub updated: usize,
+	pub removed: usize,
 }
 
 impl BaseType for Model {}
