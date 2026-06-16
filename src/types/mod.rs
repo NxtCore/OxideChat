@@ -24,14 +24,12 @@ pub struct Pagination {
 	pub page_size: usize,
 }
 
-pub mod ai;
 pub mod auth;
 pub mod axum;
 pub mod base;
 pub mod chat;
 pub mod i18n;
 pub mod images;
-pub mod logging;
 pub mod models;
 pub mod models_configs;
 pub mod oauth;
@@ -42,7 +40,6 @@ pub mod state;
 pub mod tools;
 pub mod user;
 
-pub use ai::*;
 pub use auth::*;
 pub use base::*;
 pub use chat::*;

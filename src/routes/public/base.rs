@@ -4,7 +4,7 @@
 
 use crate::i18n::I18n;
 use crate::types::JobState;
-use crate::types::{BaseResponse, CountRow};
+use crate::types::{BaseResponse, User};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::extract::State;
 use axum::response::IntoResponse;
@@ -21,8 +21,8 @@ pub async fn get_base(State(state): State<Arc<JobState>>) -> impl IntoResponse {
 	let i18n = I18n::get().all();
 
 	// Check if any users exist (needs_setup = true if no users)
-	let needs_setup = match sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM users").fetch_one(&state.db).await {
-		Ok(row) => row.count == 0,
+	let needs_setup = match User::any_exist(&state.db).await {
+		Ok(any_exist) => !any_exist,
 		Err(e) => {
 			// Database error - don't assume setup is needed, return error
 			eprintln!("[BASE] Database error checking users: {e}");

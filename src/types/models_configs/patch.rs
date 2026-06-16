@@ -1,45 +1,8 @@
-use crate::types::BaseType;
-use serde::{Deserialize, Serialize};
+use super::ModelConfig;
 use serde_json::Value;
 use sqlx::{Postgres, QueryBuilder, types::Json};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
-pub struct ModelConfig {
-	pub id: Uuid,
-	pub owner_id: Option<Uuid>,
-	pub model_id: Uuid,
-	pub stable_key: String,
-	pub name: String,
-	pub description: Option<String>,
-	pub icon: Option<String>,
-	pub capabilities: Option<Json<Vec<String>>>,
-	pub input_modalities: Option<Json<Vec<String>>>,
-	pub output_modalities: Option<Json<Vec<String>>>,
-	pub context_length: Option<i32>,
-	pub max_output_tokens: Option<i32>,
-	pub system_prompt: Option<String>,
-	pub sampling: Json<Value>,
-	pub enabled_tools: Json<Vec<String>>,
-	pub is_public: bool,
-	pub is_featured: bool,
-	pub is_default: bool,
-	pub is_favorite: bool,
-	pub category: Option<String>,
-	pub tags: Json<Vec<String>>,
-	pub usage_count: i32,
-	pub extra_settings: Json<Value>,
-	pub created_at: chrono::DateTime<chrono::Utc>,
-	pub updated_at: chrono::DateTime<chrono::Utc>,
-}
-
-impl BaseType for ModelConfig {}
-
-/// A typed value that can be written into a `model_configs` column.
-///
-/// Each variant maps to the Postgres type of the column it targets.
-/// `JsonMerge` merges a partial JSONB patch into an existing column, removing
-/// any keys whose value is JSON null via `jsonb_strip_nulls`.
 enum ConfigValue<'a> {
 	Text(Option<&'a str>),
 	Int(Option<i32>),
@@ -48,10 +11,6 @@ enum ConfigValue<'a> {
 	JsonMerge(&'a Value),
 }
 
-/// A type-safe update field for `model_configs`.
-///
-/// The route layer can express which model config fields changed without
-/// passing raw SQL column names around.
 pub enum ModelConfigPatchField<'a> {
 	Description(Option<&'a str>),
 	Icon(Option<&'a str>),
@@ -95,48 +54,9 @@ impl<'a> ModelConfigPatchField<'a> {
 }
 
 impl ModelConfig {
-	/// Ensure a system-level (owner-less) config row exists for a model.
-	///
-	/// Inserts a minimal row if none exists yet; does nothing if one is already
-	/// present. Returns the current row either way.
-	///
-	/// # Errors
-	///
-	/// Returns `sqlx::Error` if the database query fails.
-	pub async fn ensure_system_config(conn: &mut sqlx::PgConnection, model_id: &Uuid, stable_key: &str, name: &str) -> Result<Self, sqlx::Error> {
-		sqlx::query_as::<_, ModelConfig>(
-			r#"
-            INSERT INTO model_configs (owner_id, model_id, stable_key, name)
-            VALUES (NULL, $1, $2, $3)
-            ON CONFLICT (model_id) WHERE owner_id IS NULL DO UPDATE
-                SET stable_key = EXCLUDED.stable_key,
-                    name       = EXCLUDED.name,
-                    updated_at = NOW()
-            RETURNING *
-            "#,
-		)
-		.bind(model_id)
-		.bind(stable_key)
-		.bind(name)
-		.fetch_one(conn)
-		.await
-	}
-
-	/// Apply a partial update to the system-level config for a model.
-	///
-	/// Only the given fields are written; every other column is left untouched.
-	/// `None` inside a nullable field variant explicitly sets that column to
-	/// NULL. If `fields` is empty, the current config row is returned unchanged.
-	///
-	/// # Errors
-	///
-	/// Returns `sqlx::Error` if the database query fails.
 	pub async fn patch_system_config(conn: &mut sqlx::PgConnection, model_id: &Uuid, fields: &[ModelConfigPatchField<'_>]) -> Result<Self, sqlx::Error> {
 		if fields.is_empty() {
-			return sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE model_id = $1 AND owner_id IS NULL")
-				.bind(model_id)
-				.fetch_one(conn)
-				.await;
+			return Self::find_system_by_model_id_on_connection(conn, model_id).await;
 		}
 
 		let mut q = QueryBuilder::<Postgres>::new("UPDATE model_configs SET ");
@@ -167,10 +87,45 @@ impl ModelConfig {
 		}
 
 		drop(separated);
-		q.push(", updated_at = NOW() WHERE model_id = ");
+		q.push(
+			r#"
+			, updated_at = NOW()
+			WHERE model_id = 
+			"#,
+		);
 		q.push_bind(model_id);
-		q.push(" AND owner_id IS NULL RETURNING *");
+		q.push(
+			r#"
+			AND owner_id IS NULL
+			RETURNING
+				id,
+				owner_id,
+				model_id,
+				stable_key,
+				name,
+				description,
+				icon,
+				capabilities,
+				input_modalities,
+				output_modalities,
+				context_length,
+				max_output_tokens,
+				system_prompt,
+				COALESCE(sampling, '{}'::jsonb) AS sampling,
+				COALESCE(enabled_tools, '[]'::jsonb) AS enabled_tools,
+				COALESCE(is_public, false) AS is_public,
+				COALESCE(is_featured, false) AS is_featured,
+				COALESCE(is_default, false) AS is_default,
+				COALESCE(is_favorite, false) AS is_favorite,
+				category,
+				COALESCE(tags, '[]'::jsonb) AS tags,
+				COALESCE(usage_count, 0) AS usage_count,
+				COALESCE(extra_settings, '{}'::jsonb) AS extra_settings,
+				created_at,
+				updated_at
+			"#,
+		);
 
-		q.build_query_as::<ModelConfig>().fetch_one(conn).await
+		q.build_query_as::<ModelConfig>().fetch_one(&mut *conn).await
 	}
 }

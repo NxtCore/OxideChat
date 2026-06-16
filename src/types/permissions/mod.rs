@@ -1,24 +1,3 @@
-//! Permission-related types.
-//!
-//! Types for the extensible permission system.
-
-use serde::Serialize;
-use sqlx::FromRow;
-
-/// Permission name row from database.
-#[derive(Debug, FromRow)]
-pub struct PermissionNameRow {
-	pub name: String,
-}
-
-/// Permission response for API.
-#[derive(Debug, Serialize)]
-pub struct PermissionInfo {
-	pub name: String,
-	pub description: Option<String>,
-}
-
-/// Permission constants for compile-time safety.
 pub mod consts {
 	pub const PROFILE_VIEW: &str = "settings.profile.view";
 	pub const PROFILE_EDIT: &str = "settings.profile.edit";

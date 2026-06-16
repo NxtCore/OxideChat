@@ -4,10 +4,10 @@
 
 use crate::ai;
 use crate::routes::public::auth::get_current_user;
-use crate::types::{CostDetails, JobState};
-use crate::types::models_configs::ModelConfig;
 use crate::types::models::Model;
+use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
 use crate::types::{ChatMessageResponse, Message, MessagePart, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction, UserToolSettings};
+use crate::types::{CostDetails, JobState};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
 	Json,
@@ -377,20 +377,12 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	};
 
-	let user_model_config = sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE owner_id = $1 AND stable_key = $2")
-		.bind(user.id)
-		.bind(&req.model_key)
-		.fetch_optional(&state.db)
+	let user_model_config = ModelConfig::find_for_user_by_stable_key(&state.db, ModelConfigViewer { user_id: &user.id }, &req.model_key)
 		.await
 		.ok()
 		.flatten();
 
-	let system_model_config = sqlx::query_as::<_, ModelConfig>("SELECT * FROM model_configs WHERE owner_id IS NULL AND stable_key = $1")
-		.bind(&req.model_key)
-		.fetch_optional(&state.db)
-		.await
-		.ok()
-		.flatten();
+	let system_model_config = ModelConfig::find_system_by_stable_key(&state.db, &req.model_key).await.ok().flatten();
 
 	let reasoning_details = crate::types::ReasoningDetails {
 		effort: req.reasoning_effort.clone(),
@@ -784,7 +776,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 							cost_details.total = Some(cost.total);
 							yield Ok::<_, Infallible>(Event::default().data(
 								serde_json::to_string(&StreamData::Usage { cost_details }).unwrap_or_default()
-							)); 
+							));
 						}
 						StreamEvent::Done => {
 							eprintln!("[STREAM] Stream done, tool_results: {}", tool_results.len());
