@@ -245,6 +245,20 @@ CREATE TABLE IF NOT EXISTS workspaces (
     UNIQUE(user_id, name)
 );
 
+-- Chats (linked to workspaces)
+CREATE TABLE IF NOT EXISTS chats (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    workspace_id UUID REFERENCES workspaces(id) ON DELETE SET NULL,
+    title VARCHAR(255),
+    is_pinned BOOLEAN DEFAULT false,
+    is_archived BOOLEAN DEFAULT false,
+    branched_from_chat_id UUID REFERENCES chats(id) ON DELETE SET NULL,
+    branched_from_message_id UUID,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Messages
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -264,19 +278,9 @@ CREATE TABLE IF NOT EXISTS messages (
     reasoning_details JSONB DEFAULT '{}'
 );
 
--- Chats (linked to workspaces)
-CREATE TABLE IF NOT EXISTS chats (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    workspace_id UUID REFERENCES workspaces(id) ON DELETE SET NULL,
-    title VARCHAR(255),
-    is_pinned BOOLEAN DEFAULT false,
-    is_archived BOOLEAN DEFAULT false,
-    branched_from_chat_id UUID REFERENCES chats(id) ON DELETE SET NULL,
-    branched_from_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+ALTER TABLE chats
+    ADD CONSTRAINT chats_branched_from_message_id_fkey
+    FOREIGN KEY (branched_from_message_id) REFERENCES messages(id) ON DELETE SET NULL;
 
 -- User preferences (streaming animation, default model, etc.)
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -293,6 +297,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 
 CREATE TABLE IF NOT EXISTS images (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     data BYTEA,  -- NULL if using file storage
     file_path VARCHAR(500),  -- Path relative to storage root (for file storage)
     mime_type VARCHAR(64) NOT NULL DEFAULT 'image/png',
