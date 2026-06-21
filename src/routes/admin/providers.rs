@@ -204,7 +204,6 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, cookies: Cookies,
 		}
 	};
 
-	// Build omniference config
 	let api_key = provider.api_key.as_ref().map(|k| decrypt_api_key(k));
 	let extra_headers = parse_extra_headers(&provider.extra_headers.0);
 
@@ -218,6 +217,7 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, cookies: Cookies,
 			timeout: None,
 		},
 		enabled: true,
+		catalog_provider_slug: None,
 	};
 
 	// Test the connection
@@ -257,6 +257,7 @@ pub async fn test_provider_inline(State(state): State<Arc<JobState>>, cookies: C
 			timeout: None,
 		},
 		enabled: true,
+		catalog_provider_slug: None,
 	};
 
 	match test_provider_connection(config).await {

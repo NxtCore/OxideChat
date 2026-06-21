@@ -5,7 +5,6 @@ use crate::types::tools::*;
 
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{extract::State, response::IntoResponse};
-use sha2::Digest;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;

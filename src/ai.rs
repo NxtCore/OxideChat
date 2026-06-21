@@ -90,6 +90,7 @@ pub fn provider_to_config(provider: &Provider) -> ProviderConfig {
 			timeout: None,
 		},
 		enabled: provider.is_enabled,
+		catalog_provider_slug: None,
 	}
 }
 
