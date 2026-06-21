@@ -10,7 +10,7 @@ on:
 jobs:
     sqlx:
         name: SQLx Checked Build
-        runs-on: ubuntu-24.04
+        runs-on: blacksmith-2vcpu-ubuntu-2404
         services:
             postgres:
                 image: postgres:16
@@ -46,9 +46,6 @@ jobs:
             - name: Check SQLx metadata
               run: cargo sqlx prepare --check
 
-            - name: Build
-              run: cargo build
-
     init:
         name: Init Build Metadata
         runs-on: blacksmith-2vcpu-ubuntu-2404
@@ -79,7 +76,7 @@ jobs:
                   echo "🏷️  Tag: $TAG"
 
     build:
-        needs: init
+        needs: [init, sqlx]
         runs-on: ${{ matrix.runner }}
         strategy:
             fail-fast: false

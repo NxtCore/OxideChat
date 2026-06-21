@@ -43,9 +43,12 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
 
 FROM deps-builder AS rust-builder
 
+ENV SQLX_OFFLINE=true
+
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
 COPY migrations/ ./migrations/
+COPY .sqlx/ ./.sqlx/
 
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
