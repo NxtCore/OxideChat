@@ -86,7 +86,6 @@ impl ModelConfig {
 			};
 		}
 
-		drop(separated);
 		q.push(
 			r#"
 			, updated_at = NOW()

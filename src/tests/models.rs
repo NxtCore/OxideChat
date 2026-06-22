@@ -214,6 +214,7 @@ mod tests {
 		let by_display = Model::list_for_user(&pool, viewer, 1, 10, false, Some("GPT"), false, None).await.unwrap();
 		assert_eq!(by_display.items.len(), 2);
 
+		let viewer = ModelViewer { user_id: &user_id };
 		let by_model_id = Model::list_for_user(&pool, viewer, 1, 10, false, Some("claude"), false, None).await.unwrap();
 		assert_eq!(by_model_id.items.len(), 1);
 		assert_eq!(by_model_id.items[0].model_id, "claude-sonnet");
