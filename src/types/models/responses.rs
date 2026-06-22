@@ -5,6 +5,12 @@ use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
+pub struct ProviderTab {
+	pub id: Uuid,
+	pub name: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ModelListPublic {
 	pub id: Uuid,
 	pub model_id: String,

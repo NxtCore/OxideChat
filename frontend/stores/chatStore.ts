@@ -613,7 +613,7 @@ export const useChatStore = defineStore('chat', {
 			try {
 				const {$customFetch} = useNuxtApp();
 				const mainStore = useMainStore();
-				const models = await $customFetch<PaginatedResponse<ModelList>>('/api/v1/models');
+				const models = await $customFetch<PaginatedResponse<ModelList>>('/api/v1/models?size=100');
 				this.models = models.items;
 
 				if (!this.selectedModel && this.models.length > 0) {

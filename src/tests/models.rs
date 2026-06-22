@@ -112,14 +112,14 @@ mod tests {
 		create_config(&pool, Some(user_id), model_id, "user:model-one", "User Model", "user", Some("user-icon"), true).await;
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let response = Model::list_for_user(&pool, viewer, 1, 10, false).await.unwrap();
+		let response = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
 		assert_eq!(response.items.len(), 1);
 		assert_eq!(response.items[0].capabilities, vec!["user"]);
 		assert_eq!(response.items[0].icon.as_deref(), Some("user-icon"));
 		assert!(response.items[0].is_favorite);
 
 		let other_viewer = ModelViewer { user_id: &other_user_id };
-		let response = Model::list_for_user(&pool, other_viewer, 1, 10, false).await.unwrap();
+		let response = Model::list_for_user(&pool, other_viewer, 1, 10, false, None, false, None).await.unwrap();
 		assert_eq!(response.items.len(), 1);
 		assert_eq!(response.items[0].capabilities, vec!["system"]);
 		assert_eq!(response.items[0].icon.as_deref(), Some("system-icon"));
@@ -135,11 +135,11 @@ mod tests {
 		create_model(&pool, disabled_provider_id, "provider-disabled-model", "Provider Disabled Model", true).await;
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let hidden = Model::list_for_user(&pool, viewer, 1, 10, false).await.unwrap();
+		let hidden = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
 		assert!(hidden.items.is_empty());
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let visible = Model::list_for_user(&pool, viewer, 1, 10, true).await.unwrap();
+		let visible = Model::list_for_user(&pool, viewer, 1, 10, true, None, false, None).await.unwrap();
 		assert_eq!(visible.items.len(), 2);
 	}
 
@@ -199,5 +199,76 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(config_name, "New Name");
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn user_search_filters_by_display_name_and_model_id(pool: PgPool) {
+		let user_id = create_user(&pool, "search").await;
+		let provider_id = create_provider(&pool, "Search Test Provider", true).await;
+		create_model(&pool, provider_id, "gpt-4o", "GPT 4o", true).await;
+		create_model(&pool, provider_id, "claude-sonnet", "Claude Sonnet", true).await;
+		create_model(&pool, provider_id, "gpt-4o-mini", "GPT 4o Mini", true).await;
+
+		let viewer = ModelViewer { user_id: &user_id };
+
+		let by_display = Model::list_for_user(&pool, viewer, 1, 10, false, Some("GPT"), false, None).await.unwrap();
+		assert_eq!(by_display.items.len(), 2);
+
+		let by_model_id = Model::list_for_user(&pool, viewer, 1, 10, false, Some("claude"), false, None).await.unwrap();
+		assert_eq!(by_model_id.items.len(), 1);
+		assert_eq!(by_model_id.items[0].model_id, "claude-sonnet");
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn favorites_only_returns_user_favorites(pool: PgPool) {
+		let user_id = create_user(&pool, "fav").await;
+		let provider_id = create_provider(&pool, "Favorites Provider", true).await;
+		let fav_model = create_model(&pool, provider_id, "fav-model", "Favorite Model", true).await;
+		create_model(&pool, provider_id, "normal-model", "Normal Model", true).await;
+
+		create_config(&pool, Some(user_id), fav_model, "user:fav-model", "User Favorite", "fav", None, true).await;
+
+		let viewer = ModelViewer { user_id: &user_id };
+		let favorites = Model::list_for_user(&pool, viewer, 1, 10, false, None, true, None).await.unwrap();
+		assert_eq!(favorites.items.len(), 1);
+		assert_eq!(favorites.items[0].model_id, "fav-model");
+		assert!(favorites.items[0].is_favorite);
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn provider_id_filter_returns_only_matching_provider(pool: PgPool) {
+		let user_id = create_user(&pool, "provider").await;
+		let provider_a = create_provider(&pool, "Provider A", true).await;
+		let provider_b = create_provider(&pool, "Provider B", true).await;
+		create_model(&pool, provider_a, "model-a1", "Model A1", true).await;
+		create_model(&pool, provider_a, "model-a2", "Model A2", true).await;
+		create_model(&pool, provider_b, "model-b1", "Model B1", true).await;
+
+		let viewer = ModelViewer { user_id: &user_id };
+		let filtered = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, Some(&provider_a)).await.unwrap();
+		assert_eq!(filtered.items.len(), 2);
+		for item in &filtered.items {
+			assert_eq!(item.provider.name, "Provider A");
+		}
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn list_providers_returns_distinct_ids_and_names(pool: PgPool) {
+		let user_id = create_user(&pool, "providers").await;
+		let provider_a = create_provider(&pool, "Provider Alpha", true).await;
+		let provider_b = create_provider(&pool, "Provider Beta", true).await;
+		create_provider(&pool, "Disabled Provider", false).await;
+		create_model(&pool, provider_a, "a1", "A1", true).await;
+		create_model(&pool, provider_a, "a2", "A2", true).await;
+		create_model(&pool, provider_b, "b1", "B1", true).await;
+
+		let viewer = ModelViewer { user_id: &user_id };
+		let providers = Model::list_providers_for_user(&pool, viewer).await.unwrap();
+		assert_eq!(providers.len(), 2);
+
+		let provider_names: Vec<&str> = providers.iter().map(|p| p.name.as_str()).collect();
+		assert!(provider_names.contains(&"Provider Alpha"));
+		assert!(provider_names.contains(&"Provider Beta"));
+		assert!(!provider_names.contains(&"Disabled Provider"));
 	}
 }

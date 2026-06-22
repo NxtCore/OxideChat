@@ -89,6 +89,8 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/chats/{chat_id}/messages/{message_id}/branch", post(public::messages::branch_from_message))
 		// Models
 		.route("/api/v1/models", get(public::models::list_models))
+		// Providers
+		.route("/api/v1/providers", get(public::providers::list_providers))
 		// Tools
 		.route("/api/v1/tools", get(public::tools::list_tools))
 		// Images CDN (public, no auth)

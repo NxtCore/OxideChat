@@ -2,6 +2,7 @@ use super::rows::{ModelDetailedRow, ModelListAdminRow, ModelListPublicRow};
 use super::{Model, ModelDetailed, ModelListAdmin, ModelListPublic, ModelSyncInput, ModelSyncSummary, ModelViewer};
 use crate::types::BaseType;
 use crate::types::axum::PaginatedResponse;
+use crate::types::models::ProviderTab;
 use crate::types::providers::{ProviderKind, ProviderModelResponse};
 use serde_json::Value;
 use sqlx::types::Json;
@@ -47,8 +48,15 @@ impl Model {
 		page: i64,
 		size: i64,
 		show_disabled: bool,
+		search_query: Option<&str>,
+		favorites_only: bool,
+		provider_id: Option<&Uuid>,
 	) -> Result<PaginatedResponse<ModelListPublic>, sqlx::Error> {
 		let pagination = Self::pagination(page, size);
+		let search = search_query
+			.map(str::trim)
+			.filter(|s| !s.is_empty())
+			.map(|s| format!("%{}%", Self::escape_like_pattern(s)));
 
 		let rows = sqlx::query_as!(
 			ModelListPublicRow,
@@ -77,11 +85,24 @@ impl Model {
 				ON user_mc.model_id = m.id
 				AND user_mc.owner_id = $1
 			WHERE (
-				$4::BOOLEAN = TRUE
+				$4 = TRUE
 				OR (
 					COALESCE(m.is_enabled, false) = TRUE
 					AND COALESCE(p.is_enabled, false) = TRUE
 				)
+			)
+			AND (
+				$5::TEXT IS NULL
+				OR m.display_name ILIKE $5 ESCAPE '\'
+				OR m.model_id ILIKE $5 ESCAPE '\'
+			)
+			AND (
+				$6 = FALSE
+				OR COALESCE(user_mc.is_favorite, false) = TRUE
+			)
+			AND (
+				$7::UUID IS NULL
+				OR p.id = $7
 			)
 			ORDER BY m.display_name, p.name
 			LIMIT $2 OFFSET $3
@@ -90,6 +111,9 @@ impl Model {
 			pagination.limit,
 			pagination.offset,
 			show_disabled,
+			search.as_deref(),
+			favorites_only,
+			provider_id,
 		)
 		.fetch_all(pool)
 		.await?;
@@ -98,6 +122,26 @@ impl Model {
 		let items = rows.into_iter().take(pagination.page_size).map(ModelListPublic::from).collect();
 
 		Ok(PaginatedResponse { has_more, items })
+	}
+
+	pub async fn list_providers_for_user(pool: &sqlx::PgPool, _viewer: ModelViewer<'_>) -> Result<Vec<ProviderTab>, sqlx::Error> {
+		let rows = sqlx::query_as!(
+			ProviderTab,
+			r#"
+			SELECT DISTINCT p.id, p.name
+			FROM providers p
+			JOIN models m ON m.provider_id = p.id
+			WHERE (
+				COALESCE(m.is_enabled, false) = TRUE
+				AND COALESCE(p.is_enabled, false) = TRUE
+			)
+			ORDER BY p.name
+			"#,
+		)
+		.fetch_all(pool)
+		.await?;
+
+		Ok(rows)
 	}
 
 	pub async fn list_for_admin(pool: &sqlx::PgPool, page: i64, size: i64, search_query: Option<String>) -> Result<PaginatedResponse<ModelListAdmin>, sqlx::Error> {

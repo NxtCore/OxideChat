@@ -10,11 +10,10 @@
 .nitro
 .cache
 .cargo
+.sqlx
 dist
 node_modules/
 
 .env
 .env.*
 !.env.example
-
-

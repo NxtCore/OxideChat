@@ -3,6 +3,11 @@ export interface PaginatedResponse<T> {
 	items: T[];
 }
 
+export interface ProviderTab {
+	id: string;
+	name: string;
+}
+
 export interface Workspace {
 	id: string;
 	name: string;

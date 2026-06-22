@@ -21,7 +21,18 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 	};
 
 	let viewer = ModelViewer { user_id: &user.id };
-	let models = match Model::list_for_user(&state.db, viewer, params.page.unwrap_or(1), params.size.unwrap_or(0), false).await {
+	let models = match Model::list_for_user(
+		&state.db,
+		viewer,
+		params.page.unwrap_or(1),
+		params.size.unwrap_or(0),
+		false,
+		params.query.as_deref(),
+		params.is_favorite.unwrap_or(false),
+		params.provider_id.as_ref(),
+	)
+	.await
+	{
 		Ok(m) => m,
 		Err(e) => {
 			eprintln!("[PUBLIC] Failed to list models: {e}");
@@ -31,3 +42,4 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 
 	ResponseBuilder::new(ResponseBody::Json(models)).build()
 }
+

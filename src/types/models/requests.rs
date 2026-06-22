@@ -1,11 +1,14 @@
 use serde::Deserialize;
 use serde_json::Value;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct ModelListParams {
 	pub page: Option<i64>,
 	pub size: Option<i64>,
 	pub query: Option<String>,
+	pub is_favorite: Option<bool>,
+	pub provider_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]
