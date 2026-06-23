@@ -51,6 +51,8 @@ jobs:
               with:
                   name: sqlx-metadata
                   path: .sqlx/
+                  include-hidden-files: true
+                  if-no-files-found: error
 
     init:
         name: Init Build Metadata
