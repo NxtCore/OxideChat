@@ -81,30 +81,74 @@
 					</DialogDescription>
 				</DialogHeader>
 
-				<div class="space-y-4 py-4">
-					<div v-if="!selectedProvider?.isPreConfigured" class="space-y-2">
-						<Label for="provider-name">{{ store.getTranslation('settings.providers.name') }}</Label>
-						<Input id="provider-name" v-model="configForm.name" type="text" :placeholder="selectedProvider?.name" />
-					</div>
+				<Tabs v-model="activeProviderTab" default-value="settings" class="w-full">
+					<TabsList v-if="showCatalogTab" class="grid w-full grid-cols-2 mt-2">
+						<TabsTrigger value="settings">{{ store.getTranslation('settings.providers.tab_settings') }}</TabsTrigger>
+						<TabsTrigger value="catalog">{{ store.getTranslation('settings.providers.tab_catalog') }}</TabsTrigger>
+					</TabsList>
 
-					<div class="space-y-2">
-						<Label for="api-key">{{ store.getTranslation('settings.providers.api_key') }}</Label>
-						<Input
-							id="api-key"
-							v-model="configForm.apiKey"
-							type="password"
-							:placeholder="configForm.existingProvider ? '••••••••' : store.getTranslation('settings.providers.api_key_placeholder')"
-						/>
-						<p class="text-xs text-muted-foreground">
-							{{ store.getTranslation('settings.providers.api_key_hint') }}
-						</p>
-					</div>
+					<TabsContent value="settings">
+						<div class="space-y-4 py-4">
+							<div v-if="!selectedProvider?.isPreConfigured" class="space-y-2">
+								<Label for="provider-name">{{ store.getTranslation('settings.providers.name') }}</Label>
+								<Input id="provider-name" v-model="configForm.name" type="text" :placeholder="selectedProvider?.name" />
+							</div>
 
-					<div v-if="!selectedProvider?.isPreConfigured" class="space-y-2">
-						<Label for="base-url">{{ store.getTranslation('settings.providers.base_url') }}</Label>
-						<Input id="base-url" v-model="configForm.baseUrl" type="text" :placeholder="selectedProvider?.defaultBaseUrl || 'https://api.example.com'" />
-					</div>
-				</div>
+							<div class="space-y-2">
+								<Label for="api-key">{{ store.getTranslation('settings.providers.api_key') }}</Label>
+								<Input
+									id="api-key"
+									v-model="configForm.apiKey"
+									type="password"
+									:placeholder="configForm.existingProvider ? '••••••••' : store.getTranslation('settings.providers.api_key_placeholder')"
+								/>
+								<p class="text-xs text-muted-foreground">
+									{{ store.getTranslation('settings.providers.api_key_hint') }}
+								</p>
+							</div>
+
+							<div v-if="!selectedProvider?.isPreConfigured" class="space-y-2">
+								<Label for="base-url">{{ store.getTranslation('settings.providers.base_url') }}</Label>
+								<Input id="base-url" v-model="configForm.baseUrl" type="text" :placeholder="selectedProvider?.defaultBaseUrl || 'https://api.example.com'" />
+							</div>
+						</div>
+					</TabsContent>
+
+					<TabsContent v-if="showCatalogTab" value="catalog">
+						<div class="space-y-3 py-3">
+							<Input v-model="catalogSearch" type="text" :placeholder="store.getTranslation('settings.providers.catalog_search')" />
+
+							<div v-if="catalogLoading" class="flex items-center justify-center py-8 text-muted-foreground">
+								<Loader2 class="h-5 w-5 animate-spin" />
+							</div>
+							<div v-else-if="catalogModels.length === 0" class="py-8 text-center text-sm text-muted-foreground">
+								{{ store.getTranslation('settings.providers.catalog_empty') }}
+							</div>
+							<div v-else class="max-h-[320px] overflow-y-auto space-y-1.5">
+								<div
+									v-for="m in catalogModels"
+									:key="m.id"
+									class="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+									:class="m.availability_state === 'USER_UNAVAILABLE' ? 'opacity-60' : ''"
+								>
+									<div class="min-w-0">
+										<div class="text-sm font-medium text-foreground truncate">{{ m.display_name }}</div>
+										<div class="text-xs text-muted-foreground truncate">{{ m.gateway_model_id }}</div>
+									</div>
+									<span
+										v-if="m.availability_state === 'USER_UNAVAILABLE'"
+										class="shrink-0 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+									>
+										{{ store.getTranslation('settings.providers.catalog_disabled_key') }}
+									</span>
+									<span v-else class="shrink-0 inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600">
+										{{ store.getTranslation('settings.providers.catalog_available') }}
+									</span>
+								</div>
+							</div>
+						</div>
+					</TabsContent>
+				</Tabs>
 
 				<DialogFooter class="gap-2 sm:gap-0">
 					<Button v-if="configForm.existingProvider" variant="destructive" @click="deleteConfig" :disabled="saving" class="mr-auto">
@@ -127,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import {ref, reactive, onMounted, computed} from 'vue';
+import {ref, reactive, onMounted, computed, watch} from 'vue';
 import {Sparkles, Cpu, Zap, Server, Plus, Settings2, Loader2, BrainCircuit, Globe, AudioWaveform, Trash2, RotateCw} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
@@ -136,6 +180,7 @@ import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, Di
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
 import {Switch} from '@/components/ui/switch';
+import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
 const {$customFetch} = useNuxtApp();
 
 interface ProviderConfig {
@@ -164,6 +209,42 @@ const dialogOpen = ref(false);
 const selectedProvider = ref<ProviderConfig | null>(null);
 const saving = ref(false);
 const configuredProviders = ref<ConfiguredProvider[]>([]);
+
+// Provider modal catalog tab (OpenRouter only): browse the gateway catalog, including
+// models the configured key cannot run (USER_UNAVAILABLE).
+const activeProviderTab = ref('settings');
+const catalogModels = ref<any[]>([]);
+const catalogLoading = ref(false);
+const catalogLoaded = ref(false);
+const catalogSearch = ref('');
+let catalogDebounce: ReturnType<typeof setTimeout>;
+
+const showCatalogTab = computed(() => configForm.existingProvider?.kind === 'OPENROUTER');
+
+async function loadCatalog() {
+	if (!configForm.existingProvider) return;
+	catalogLoading.value = true;
+	try {
+		const query = new URLSearchParams({page: '1', size: '50', query: catalogSearch.value});
+		const res = await $customFetch<{has_more: boolean; items: any[]}>(`/api/v1/admin/providers/${configForm.existingProvider.id}/catalog?` + query.toString());
+		catalogModels.value = res?.items || [];
+		catalogLoaded.value = true;
+	} catch (e) {
+		console.error('Failed to load catalog:', e);
+	} finally {
+		catalogLoading.value = false;
+	}
+}
+
+watch(activeProviderTab, tab => {
+	if (tab === 'catalog' && !catalogLoaded.value) loadCatalog();
+});
+
+watch(catalogSearch, () => {
+	if (activeProviderTab.value !== 'catalog') return;
+	clearTimeout(catalogDebounce);
+	catalogDebounce = setTimeout(() => loadCatalog(), 500);
+});
 
 const displayProviders = computed(() => {
 	const result: any[] = [];
@@ -311,6 +392,12 @@ function openConfigDialog(item: any) {
 		configForm.isEnabled = true;
 		configForm.existingProvider = null;
 	}
+
+	// Reset the catalog tab for the newly opened provider.
+	activeProviderTab.value = 'settings';
+	catalogLoaded.value = false;
+	catalogModels.value = [];
+	catalogSearch.value = '';
 
 	dialogOpen.value = true;
 }

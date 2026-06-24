@@ -18,8 +18,11 @@ pub const ADMIN_CONFIG_EDIT: &str = "admin.config.edit";
 ///
 /// Get global configuration (public endpoint).
 pub async fn get_global_config() -> impl IntoResponse {
-	let default_theme = Config::get().default_theme();
-	let response = GlobalConfigResponse { default_theme };
+	let config = Config::get();
+	let response = GlobalConfigResponse {
+		default_theme: config.default_theme(),
+		enable_provider_selector: config.enable_provider_selector(),
+	};
 	ResponseBuilder::new(ResponseBody::Json(response)).build()
 }
 
@@ -64,7 +67,30 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, cookies: C
 		Config::get().reload(&state.db).await;
 	}
 
-	let default_theme = Config::get().default_theme();
-	let response = GlobalConfigResponse { default_theme };
+	if let Some(enable_provider_selector) = req.enable_provider_selector {
+		let result = sqlx::query(
+			r#"
+			INSERT INTO app_config (key, value)
+			VALUES ('enable_provider_selector', $1)
+			ON CONFLICT (key) DO UPDATE SET value = $1
+			"#,
+		)
+		.bind(if enable_provider_selector { "true" } else { "false" })
+		.execute(&state.db)
+		.await;
+
+		if let Err(e) = result {
+			eprintln!("[CONFIG] Failed to update enable_provider_selector: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+
+		Config::get().reload(&state.db).await;
+	}
+
+	let config = Config::get();
+	let response = GlobalConfigResponse {
+		default_theme: config.default_theme(),
+		enable_provider_selector: config.enable_provider_selector(),
+	};
 	ResponseBuilder::new(ResponseBody::Json(response)).build()
 }

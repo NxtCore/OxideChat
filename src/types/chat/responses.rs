@@ -153,12 +153,14 @@ impl Default for PreferencesResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GlobalConfigResponse {
 	pub default_theme: ThemeCssVars,
+	pub enable_provider_selector: bool,
 }
 
 impl Default for GlobalConfigResponse {
 	fn default() -> Self {
 		Self {
 			default_theme: ThemeCssVars::default(),
+			enable_provider_selector: false,
 		}
 	}
 }

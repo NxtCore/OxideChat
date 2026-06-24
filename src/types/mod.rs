@@ -27,6 +27,7 @@ pub struct Pagination {
 pub mod auth;
 pub mod axum;
 pub mod base;
+pub mod catalog;
 pub mod chat;
 pub mod i18n;
 pub mod images;

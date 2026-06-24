@@ -28,6 +28,7 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/providers/{id}/test", post(admin::providers::test_provider))
 		.route("/api/v1/admin/providers/{id}/sync", post(admin::providers::sync_provider))
 		.route("/api/v1/admin/providers/{id}/models", get(admin::providers::list_models))
+		.route("/api/v1/admin/providers/{id}/catalog", get(admin::catalog::list_catalog))
 		// Admin Tools
 		.route("/api/v1/admin/tools", get(admin::tools::list_tools))
 		.route("/api/v1/admin/tools", post(admin::tools::create_tool))
@@ -50,6 +51,8 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/models", get(admin::models::list_models))
 		.route("/api/v1/admin/models/{id}", get(admin::models::get_model))
 		.route("/api/v1/admin/models/{id}", patch(admin::models::patch_model))
+		.route("/api/v1/admin/models/{id}/provider-options", get(admin::catalog::list_provider_options))
+		.route("/api/v1/admin/models/{id}/provider-options/refresh", post(admin::catalog::refresh_provider_options))
 		// Admin Config
 		.route("/api/v1/admin/config", patch(admin::config::update_global_config))
 		// Public Config
@@ -89,6 +92,7 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/chats/{chat_id}/messages/{message_id}/branch", post(public::messages::branch_from_message))
 		// Models
 		.route("/api/v1/models", get(public::models::list_models))
+		.route("/api/v1/models/{id}/provider-options", get(public::models::get_provider_options))
 		// Providers
 		.route("/api/v1/providers", get(public::providers::list_providers))
 		// Tools

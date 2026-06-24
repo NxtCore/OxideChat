@@ -43,6 +43,7 @@ interface Base {
 	needs_setup: boolean;
 	oauth_providers: string[];
 	roles: Role[];
+	enable_provider_selector: boolean;
 }
 export const useMainStore = defineStore('main', {
 	state: (): {

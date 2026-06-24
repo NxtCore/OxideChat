@@ -11,4 +11,6 @@ pub struct BaseResponse {
 	pub needs_setup: bool,
 	pub oauth_providers: Vec<OAuthProvider>,
 	pub roles: Vec<Role>,
+	/// Whether the chat upstream-provider selector is enabled instance-wide.
+	pub enable_provider_selector: bool,
 }

@@ -278,9 +278,18 @@ CREATE TABLE IF NOT EXISTS messages (
     reasoning_details JSONB DEFAULT '{}'
 );
 
-ALTER TABLE chats
-    ADD CONSTRAINT chats_branched_from_message_id_fkey
-    FOREIGN KEY (branched_from_message_id) REFERENCES messages(id) ON DELETE SET NULL;
+-- Add the chats -> messages FK idempotently (messages table is created above in the same migration).
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chats_branched_from_message_id_fkey'
+          AND conrelid = 'chats'::regclass
+    ) THEN
+        ALTER TABLE chats
+            ADD CONSTRAINT chats_branched_from_message_id_fkey
+            FOREIGN KEY (branched_from_message_id) REFERENCES messages(id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
 -- User preferences (streaming animation, default model, etc.)
 CREATE TABLE IF NOT EXISTS user_preferences (

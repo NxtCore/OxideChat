@@ -42,6 +42,7 @@
 							class="border-none! bg-transparent! shadow-none! hover:bg-muted/50"
 						/>
 						<ToolSelector v-if="chatStore.hasToolCapability(chatStore.selectedModel)" class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
+						<ProviderSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
 					</div>
 
 					<div class="flex items-center gap-2">
@@ -71,6 +72,7 @@ import ModelSelector from './ModelSelector.vue';
 import ReasoningSelector from './ReasoningSelector.vue';
 import ContextLimitIndicator from './ContextLimitIndicator.vue';
 import ToolSelector from './ToolSelector.vue';
+import ProviderSelector from './ProviderSelector.vue';
 
 const emit = defineEmits<{send: (content: string, parts?: any[]) => void}>();
 

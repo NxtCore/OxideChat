@@ -559,6 +559,26 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), user_model_config.as_ref(), &model);
 	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, system_model_config.as_ref());
 
+	// Apply the user-picked upstream provider (OpenRouter routing), only when the instance owner
+	// has enabled the provider selector and the model's provider is an OpenRouter gateway.
+	if crate::config::Config::get().enable_provider_selector() {
+		if let Some(slug) = req.provider_slug.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+			if ir.model.provider.endpoint.kind == omniference::types::ProviderKind::OpenRouter {
+				ir.provider_routing = Some(match req.provider_routing_mode.as_deref() {
+					Some("lock") => omniference::types::ProviderRouting {
+						only: Some(vec![slug.to_string()]),
+						allow_fallbacks: Some(false),
+						..Default::default()
+					},
+					_ => omniference::types::ProviderRouting {
+						order: Some(vec![slug.to_string()]),
+						..Default::default()
+					},
+				});
+			}
+		}
+	}
+
 	let system_prompt_text = system_model_config.as_ref().and_then(|mc| mc.system_prompt.as_deref()).unwrap_or("");
 	if !system_prompt_text.is_empty() {
 		let interpolated = interpolate_system_prompt(system_prompt_text, &user, &model);

@@ -39,6 +39,10 @@ interface ChatState {
 	reasoningBudget: number | null;
 	enabledTools: string[];
 
+	// Upstream-provider selection (OpenRouter routing), gated by the instance setting.
+	selectedProviderSlug: string | null;
+	providerRoutingMode: 'prefer' | 'lock';
+
 	// Branch prefill state
 	pendingBranchContent: string | null;
 	pendingBranchParts: any[] | null;
@@ -66,6 +70,9 @@ export const useChatStore = defineStore('chat', {
 		reasoningEffort: null,
 		reasoningBudget: null,
 		enabledTools: [],
+
+		selectedProviderSlug: null,
+		providerRoutingMode: 'prefer',
 
 		pendingBranchContent: null,
 		pendingBranchParts: null,
@@ -431,6 +438,11 @@ export const useChatStore = defineStore('chat', {
 					regenerate_from_message_id: regenerateFromMessageId,
 				};
 
+				if (this.selectedProviderSlug) {
+					body.provider_slug = this.selectedProviderSlug;
+					body.provider_routing_mode = this.providerRoutingMode;
+				}
+
 				if (parts && parts.length > 0) {
 					body.parts = parts;
 				}
@@ -628,8 +640,16 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
+		setProviderSelection(slug: string | null, mode?: 'prefer' | 'lock') {
+			this.selectedProviderSlug = slug;
+			if (mode) this.providerRoutingMode = mode;
+		},
+
 		setSelectedModel(model: ModelList | null) {
 			this.selectedModel = model;
+
+			// A provider pick is model-specific; reset it whenever the model changes.
+			this.selectedProviderSlug = null;
 
 			if (!model) {
 				this.reasoningEffort = null;

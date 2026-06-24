@@ -65,6 +65,9 @@ pub struct ConfigValues {
 	pub oauth_google_client_secret: Option<String>,
 	pub oauth_discord_client_id: Option<String>,
 	pub oauth_discord_client_secret: Option<String>,
+	/// When enabled, the chat UI exposes a per-message upstream-provider selector
+	/// (OpenRouter provider routing). Off by default.
+	pub enable_provider_selector: bool,
 }
 
 impl Default for ConfigValues {
@@ -76,6 +79,7 @@ impl Default for ConfigValues {
 			oauth_google_client_secret: None,
 			oauth_discord_client_id: None,
 			oauth_discord_client_secret: None,
+			enable_provider_selector: false,
 		}
 	}
 }
@@ -135,6 +139,12 @@ impl Config {
 	#[must_use]
 	pub fn default_theme(&self) -> ThemeCssVars {
 		self.values.load().default_theme.clone()
+	}
+
+	/// Whether the chat provider selector is enabled instance-wide.
+	#[must_use]
+	pub fn enable_provider_selector(&self) -> bool {
+		self.values.load().enable_provider_selector
 	}
 
 	/// Get current configuration values.
@@ -199,6 +209,7 @@ impl Config {
 				"oauth_google_client_secret" => values.oauth_google_client_secret = Some(row.value),
 				"oauth_discord_client_id" => values.oauth_discord_client_id = Some(row.value),
 				"oauth_discord_client_secret" => values.oauth_discord_client_secret = Some(row.value),
+				"enable_provider_selector" => values.enable_provider_selector = row.value == "true",
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}
 		}

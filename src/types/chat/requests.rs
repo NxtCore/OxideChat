@@ -87,6 +87,7 @@ pub struct UpdatePreferencesRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateGlobalConfigRequest {
 	pub default_theme: Option<ThemeCssVars>,
+	pub enable_provider_selector: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,4 +116,10 @@ pub struct StreamRequest {
 	#[serde(default)]
 	pub skip_user_message: bool,
 	pub regenerate_from_message_id: Option<String>,
+	/// Upstream-provider slug the user picked in the chat provider selector (OpenRouter only).
+	/// Empty/None means automatic routing.
+	pub provider_slug: Option<String>,
+	/// How the picked provider is applied: `"prefer"` (order, fallbacks on) or `"lock"`
+	/// (only, no fallback). Defaults to `"prefer"`.
+	pub provider_routing_mode: Option<String>,
 }

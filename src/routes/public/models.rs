@@ -2,14 +2,18 @@
 //!
 //! Public endpoint for listing available AI models.
 
+use crate::config::Config;
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
+use crate::types::catalog::{AvailabilityState, GatewayCatalogModel};
 use crate::types::models::{Model, ModelListParams, ModelViewer};
+use crate::utils::providers::sync_endpoint_options;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use axum::extract::Query;
+use axum::extract::{Path, Query};
 use axum::{extract::State, response::IntoResponse};
 use std::sync::Arc;
 use tower_cookies::Cookies;
+use uuid::Uuid;
 
 /// GET /api/v1/models
 ///
@@ -41,5 +45,41 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 	};
 
 	ResponseBuilder::new(ResponseBody::Json(models)).build()
+}
+
+/// GET /api/v1/models/:id/provider-options
+///
+/// Upstream provider options for a runnable model, used by the chat provider selector. Gated on
+/// the instance-wide `enable_provider_selector` setting. Endpoints are fetched lazily on first
+/// open (when nothing is stored yet and the parent catalog model is available), mirroring the
+/// admin endpoint but available to any authenticated user.
+pub async fn get_provider_options(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
+	if get_current_user(&state.db, &cookies).await.is_none() {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	}
+
+	// Feature-gated: when disabled, behave as if there are no provider options.
+	if !Config::get().enable_provider_selector() {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+
+	let mut options = match GatewayCatalogModel::provider_options_for_model(&state.db, &id).await {
+		Ok(options) => options,
+		Err(e) => {
+			eprintln!("[PUBLIC] Failed to load provider options: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	let is_available = matches!(options.availability_state, Some(AvailabilityState::Available));
+	if options.options.is_empty() && is_available {
+		if let Err(e) = sync_endpoint_options(&state.db, &id).await {
+			eprintln!("[PUBLIC] Lazy endpoint fetch failed for {id}: {e}");
+		} else if let Ok(refreshed) = GatewayCatalogModel::provider_options_for_model(&state.db, &id).await {
+			options = refreshed;
+		}
+	}
+
+	ResponseBuilder::new(ResponseBody::Json(options)).build()
 }
 
