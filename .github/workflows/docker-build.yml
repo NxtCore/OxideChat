@@ -9,7 +9,7 @@ on:
 
 jobs:
     sqlx:
-        name: SQLx Checked Build
+        name: SQLx Build
         runs-on: blacksmith-2vcpu-ubuntu-2404
         services:
             postgres:
@@ -43,8 +43,16 @@ jobs:
             - name: Run migrations
               run: cargo sqlx migrate run
 
-            - name: Check SQLx metadata
-              run: cargo sqlx prepare --check
+            - name: Regenerate SQLx metadata
+              run: cargo sqlx prepare
+
+            - name: Upload SQLx metadata
+              uses: actions/upload-artifact@v4
+              with:
+                  name: sqlx-metadata
+                  path: .sqlx/
+                  include-hidden-files: true
+                  if-no-files-found: error
 
     init:
         name: Init Build Metadata
@@ -96,6 +104,12 @@ jobs:
         steps:
             - name: Checkout
               uses: actions/checkout@v4
+
+            - name: Download SQLx metadata
+              uses: actions/download-artifact@v4
+              with:
+                  name: sqlx-metadata
+                  path: .sqlx/
 
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
