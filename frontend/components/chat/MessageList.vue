@@ -11,7 +11,7 @@
 		</div>
 		<div v-else class="mx-auto max-w-4xl space-y-4">
 			<TransitionGroup name="message">
-				<MessageItem v-for="message in messages" :key="message.client_id" :message="message" :animation="store.preferences?.streaming_animation" />
+				<MessageItem v-for="message in messages" :key="message.client_id ?? message.id" :message="message" :animation="store.preferences?.streaming_animation" />
 			</TransitionGroup>
 		</div>
 

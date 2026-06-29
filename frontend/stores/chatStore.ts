@@ -270,30 +270,46 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		async fetchChat(id: string): Promise<ChatWithMessages | null> {
-			this.messagesLoading = true;
+		async fetchChat(id: string, opts: { silent?: boolean } = {}): Promise<ChatWithMessages | null> {
+			if (!opts.silent) this.messagesLoading = true;
 			try {
-				const {$customFetch} = useNuxtApp();
-				const data = await $customFetch(`/api/v1/chats/${id}`);
-				const chatWithMessages = data as ChatWithMessages;
-				this.messages = chatWithMessages.messages.map(msg => {
-					const rawMsg = msg as any;
-					if (rawMsg.tool_calls && Array.isArray(rawMsg.tool_calls)) {
-						const toolCallsRecord: Record<string, any> = {};
-						for (const tc of rawMsg.tool_calls) {
-							toolCallsRecord[tc.tool_call_id] = {
-								name: tc.tool_name || '',
-								args: typeof tc.input_args === 'string' ? tc.input_args : JSON.stringify(tc.input_args),
-								output: tc.output,
-								error: tc.error,
-								isExecuting: false,
-							};
-						}
-						return {...msg, toolCalls: toolCallsRecord};
+			const {$customFetch} = useNuxtApp();
+			const data = await $customFetch(`/api/v1/chats/${id}`);
+			const chatWithMessages = data as ChatWithMessages;
+
+			const existingById = new Map(this.messages.map(m => [m.id, m]));
+			const reconciled: ChatMessage[] = [];
+
+			for (const rawMsg of chatWithMessages.messages as any[]) {
+				const toolCallsRecord: Record<string, any> = {};
+				if (rawMsg.tool_calls && Array.isArray(rawMsg.tool_calls)) {
+					for (const tc of rawMsg.tool_calls) {
+						toolCallsRecord[tc.tool_call_id] = {
+							name: tc.tool_name || '',
+							args: typeof tc.input_args === 'string' ? tc.input_args : JSON.stringify(tc.input_args),
+							output: tc.output,
+							error: tc.error,
+							isExecuting: false,
+						};
 					}
-					return msg;
-				});
-				this.activeChat = chatWithMessages.chat;
+				}
+
+				const existing = existingById.get(rawMsg.id) as any;
+				if (existing) {
+					const existingClientId = existing.client_id ?? rawMsg.id;
+					Object.assign(existing, rawMsg);
+					existing.client_id = existingClientId;
+					if (Object.keys(toolCallsRecord).length) existing.toolCalls = toolCallsRecord;
+					reconciled.push(existing);
+				} else {
+					const newMsg: any = {...rawMsg, client_id: rawMsg.id};
+					if (Object.keys(toolCallsRecord).length) newMsg.toolCalls = toolCallsRecord;
+					reconciled.push(newMsg);
+				}
+			}
+
+			this.messages = reconciled;
+			this.activeChat = chatWithMessages.chat;
 				const lastAssistantMessage = this.messages.findLast(m => m.role === 'assistant');
 				if (lastAssistantMessage)
 					this.setContextTokens((lastAssistantMessage.usage_details?.input_tokens || 0) + (lastAssistantMessage.usage_details?.output_tokens || 0));
@@ -364,6 +380,7 @@ export const useChatStore = defineStore('chat', {
 				userMessageId = `user-${Date.now()}`;
 				const userMessage: ChatMessage = {
 					id: userMessageId,
+					client_id: userMessageId,
 					role: 'user',
 					content,
 					reasoning_content: null,
@@ -396,6 +413,7 @@ export const useChatStore = defineStore('chat', {
 			const streamingMessageId = `streaming-${Date.now()}`;
 			const streamingMessage: ChatMessage = {
 				id: streamingMessageId,
+				client_id: streamingMessageId,
 				role: 'assistant',
 				content: '',
 				reasoning_content: null,
@@ -494,6 +512,7 @@ export const useChatStore = defineStore('chat', {
 											const userMsg = this.messages[userMsgIndex];
 											if (userMsg) {
 												Object.assign(userMsg, data.message);
+												userMsg.client_id = data.message.id;
 											}
 										}
 										break;
@@ -555,10 +574,10 @@ export const useChatStore = defineStore('chat', {
 											Object.assign(msg.cost_details, data.cost_details);
 										}
 										break;
-									case 'done':
-										if (msg) {
-											Object.assign(msg, data.message);
-										}
+								case 'done':
+									if (msg) {
+										Object.assign(msg, data.message);
+									}
 										this.isStreaming = false;
 
 										const chatIndex = this.chats.findIndex(c => c.id === chatId);
@@ -646,10 +665,12 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		setSelectedModel(model: ModelList | null) {
+			const modelChanged = this.selectedModel?.id !== model?.id;
 			this.selectedModel = model;
 
-			// A provider pick is model-specific; reset it whenever the model changes.
-			this.selectedProviderSlug = null;
+			if (modelChanged) {
+				this.selectedProviderSlug = null;
+			}
 
 			if (!model) {
 				this.reasoningEffort = null;
@@ -723,7 +744,7 @@ export const useChatStore = defineStore('chat', {
 					body: {content},
 				});
 				const newMsg = message as ChatMessage;
-				await this.fetchChat(chatId);
+				await this.fetchChat(chatId, {silent: true});
 				return newMsg;
 			} catch (e) {
 				console.error('Failed to edit message:', e);
@@ -739,7 +760,7 @@ export const useChatStore = defineStore('chat', {
 					body: {fork_index: forkIndex},
 				});
 				// Reload the chat to get correct fork path
-				await this.fetchChat(chatId);
+				await this.fetchChat(chatId, {silent: true});
 				return true;
 			} catch (e) {
 				console.error('Failed to switch fork:', e);

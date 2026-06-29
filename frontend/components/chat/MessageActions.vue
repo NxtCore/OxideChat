@@ -189,7 +189,7 @@ async function regenerate() {
 
 	chatStore.messages = chatStore.messages.slice(0, currentIndex);
 	await chatStore.sendAndStream(chatId, userMessage.content, userMessage.content_parts, true, messageId);
-	await chatStore.fetchChat(chatId);
+	await chatStore.fetchChat(chatId, {silent: true});
 }
 
 async function handleBranch() {

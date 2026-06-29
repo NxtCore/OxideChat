@@ -276,12 +276,12 @@ function toggleFavorite(model: Model) {
 }
 
 watch(
-	() => [chatStore.activeChat?.id, chatStore.models.length],
-	(newVal, oldVal) => {
-		if (oldVal !== newVal && newVal && chatStore.messages.length > 0) {
+	() => chatStore.activeChat?.id,
+	(newId, oldId) => {
+		if (newId !== oldId && newId && chatStore.messages.length > 0) {
 			const last_llm_message = chatStore.messages.findLast(m => m.role === 'assistant');
 			const model = chatStore.models.find(m => m.id === last_llm_message?.model_id);
-			if (model) {
+			if (model && model.id !== chatStore.selectedModel?.id) {
 				chatStore.setSelectedModel(model);
 			}
 		}

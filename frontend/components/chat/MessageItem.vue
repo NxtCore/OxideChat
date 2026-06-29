@@ -394,7 +394,7 @@ async function saveEdit() {
 	}
 
 	// Reload the chat to get the new fork path (messages up to the edited message)
-	await chatStore.fetchChat(chatId);
+	await chatStore.fetchChat(chatId, {silent: true});
 
 	// Trigger a new generation with the edited message
 	// Pass skipUserMessage=true since the edited message already exists in the database
