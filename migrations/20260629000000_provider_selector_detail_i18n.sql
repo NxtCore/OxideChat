@@ -7,6 +7,11 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.provider_selector.status_degraded', 'Degraded'),
     ('en', 'chat.provider_selector.status_all_operational', 'All systems operational'),
     ('en', 'chat.provider_selector.status_some_issues', 'Some issues detected'),
+    ('en', 'chat.provider_selector.sort_recommended', 'Recommended'),
+    ('en', 'chat.provider_selector.sort_latency', 'Latency'),
+    ('en', 'chat.provider_selector.sort_throughput', 'Throughput'),
+    ('en', 'chat.provider_selector.sort_price', 'Price'),
+    ('en', 'chat.provider_selector.sort_uptime', 'Uptime'),
     ('de', 'chat.provider_selector.col_uptime', 'Verfügbarkeit'),
     ('de', 'chat.provider_selector.price_io_label', 'Ein / Aus'),
     ('de', 'chat.provider_selector.latency_estimated', 'Geschätzt'),
@@ -14,5 +19,10 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.provider_selector.status_healthy', 'Gesund'),
     ('de', 'chat.provider_selector.status_degraded', 'Beeinträchtigt'),
     ('de', 'chat.provider_selector.status_all_operational', 'Alle Systeme betriebsbereit'),
-    ('de', 'chat.provider_selector.status_some_issues', 'Einige Probleme erkannt')
+    ('de', 'chat.provider_selector.status_some_issues', 'Einige Probleme erkannt'),
+    ('de', 'chat.provider_selector.sort_recommended', 'Empfohlen'),
+    ('de', 'chat.provider_selector.sort_latency', 'Latenz'),
+    ('de', 'chat.provider_selector.sort_throughput', 'Durchsatz'),
+    ('de', 'chat.provider_selector.sort_price', 'Preis'),
+    ('de', 'chat.provider_selector.sort_uptime', 'Verfügbarkeit')
 ON CONFLICT (language, key_path) DO NOTHING;

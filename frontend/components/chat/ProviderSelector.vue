@@ -37,9 +37,29 @@
 							class="w-full pl-9 pr-10 py-2.5 text-sm bg-transparent outline-none placeholder:text-muted-foreground"
 						/>
 						<div class="absolute right-3 top-1/2 -translate-y-1/2">
-							<button class="text-muted-foreground hover:text-foreground transition-colors">
-								<Filter class="h-3.5 w-3.5" />
-							</button>
+							<div class="relative">
+								<button
+									class="text-muted-foreground hover:text-foreground transition-colors"
+									:class="sortBy !== 'recommend' ? 'text-primary' : ''"
+									@click="showSortMenu = !showSortMenu"
+								>
+									<Filter class="h-3.5 w-3.5" />
+								</button>
+								<div
+									v-if="showSortMenu"
+									class="absolute right-0 top-6 z-50 w-40 rounded-md border border-border bg-popover shadow-md py-1"
+								>
+									<button
+										v-for="opt in sortOptions"
+										:key="opt.value"
+										class="w-full px-3 py-1.5 text-xs text-left hover:bg-accent transition-colors flex items-center justify-between"
+										@click="sortBy = opt.value; showSortMenu = false"
+									>
+										{{ store.getTranslation(opt.labelKey) }}
+										<Check v-if="sortBy === opt.value" class="h-3 w-3 text-primary" />
+									</button>
+								</div>
+							</div>
 						</div>
 					</div>
 
@@ -273,6 +293,16 @@ const parentUnavailable = ref(false);
 const loadedModelId = ref<string | null>(null);
 
 const searchQuery = ref('');
+const sortBy = ref<'recommend' | 'latency' | 'throughput' | 'price' | 'uptime'>('recommend');
+const showSortMenu = ref(false);
+
+const sortOptions = [
+	{value: 'recommend', labelKey: 'chat.provider_selector.sort_recommended'},
+	{value: 'latency', labelKey: 'chat.provider_selector.sort_latency'},
+	{value: 'throughput', labelKey: 'chat.provider_selector.sort_throughput'},
+	{value: 'price', labelKey: 'chat.provider_selector.sort_price'},
+	{value: 'uptime', labelKey: 'chat.provider_selector.sort_uptime'},
+] as const;
 
 const hoveredOpt = ref<ProviderOption | null>(null);
 const isHoveringAuto = ref(false);
@@ -293,7 +323,20 @@ const filteredOptions = computed(() => {
 
 const sortedOptions = computed(() => {
 	const list = [...filteredOptions.value];
-	list.sort((a, b) => recommendScore(b) - recommendScore(a));
+	list.sort((a, b) => {
+		switch (sortBy.value) {
+			case 'latency':
+				return (a.latency ?? Infinity) - (b.latency ?? Infinity);
+			case 'throughput':
+				return (b.throughput ?? 0) - (a.throughput ?? 0);
+			case 'price':
+				return ((a.price_input ?? Infinity) + (a.price_output ?? Infinity)) - ((b.price_input ?? Infinity) + (b.price_output ?? Infinity));
+			case 'uptime':
+				return (b.uptime ?? 0) - (a.uptime ?? 0);
+			default:
+				return recommendScore(b) - recommendScore(a);
+		}
+	});
 	return list;
 });
 
