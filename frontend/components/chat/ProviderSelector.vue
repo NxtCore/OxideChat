@@ -173,14 +173,6 @@
 									<div class="h-1.5 w-1.5 rounded-full" :class="opt.uptime != null && opt.uptime > 95 ? 'bg-green-500' : 'bg-yellow-500'" />
 									{{ store.getTranslation('chat.provider_selector.expanded_uptime') }}: {{ formatUptime(opt.uptime) }}
 								</span>
-								<span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-									<Gauge class="h-3 w-3" />
-									{{ store.getTranslation('chat.provider_selector.expanded_rate_limits') }}: —
-								</span>
-								<span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-									<Wrench class="h-3 w-3" />
-									{{ store.getTranslation('chat.provider_selector.expanded_tools') }}: —
-								</span>
 								<div class="ml-auto flex items-center gap-2 text-muted-foreground">
 									<Shield class="h-3.5 w-3.5" />
 									<Info class="h-3.5 w-3.5" />

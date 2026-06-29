@@ -172,6 +172,14 @@ pub async fn sync_endpoint_options(pool: &PgPool, model_id: &Uuid) -> Result<(),
 		.iter()
 		.map(|endpoint| {
 			let pricing = endpoint.pricing.as_ref().and_then(omniference::catalog::pricing_from_catalog);
+			let latency_median = endpoint
+				.latency_last_30m
+				.as_ref()
+				.and_then(|p| p.p50.or_else(|| p.p75.or_else(|| p.p90.or_else(|| p.p99))));
+			let throughput_median = endpoint
+				.throughput_last_30m
+				.as_ref()
+				.and_then(|p| p.p50.or_else(|| p.p75.or_else(|| p.p90.or_else(|| p.p99))));
 			GatewayProviderOptionSyncInput {
 				provider_slug: endpoint.tag.clone(),
 				provider_name: endpoint.provider_name.clone(),
@@ -180,8 +188,8 @@ pub async fn sync_endpoint_options(pool: &PgPool, model_id: &Uuid) -> Result<(),
 				quantization: endpoint.quantization.clone(),
 				context_length: endpoint.context_length.map(|c| c as i32),
 				max_completion_tokens: endpoint.max_completion_tokens.map(|c| c as i32),
-				latency: endpoint.latency_last_30m,
-				throughput: endpoint.throughput_last_30m,
+				latency: latency_median,
+				throughput: throughput_median,
 				uptime: endpoint.uptime_last_30m,
 				price_input: pricing.as_ref().map(|p| p.input),
 				price_output: pricing.as_ref().map(|p| p.output),
