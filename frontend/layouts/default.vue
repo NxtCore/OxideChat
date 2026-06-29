@@ -1,24 +1,21 @@
 <template>
-	<div v-if="!store.initialized" class="flex h-screen items-center justify-center">
-		<svg
-			xmlns="http://www.w3.org/2000/svg"
-			width="24"
-			height="24"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			class="animate-spin"
-		>
-			<path d="M21 12a9 9 0 1 1-6.219-8.56" />
-		</svg>
+	<!-- Boot screen: server loading, auth resolving, or chat data not yet ready -->
+	<BootScreen v-if="store.bootState !== 'online' || store.auth.loading || (store.auth.isAuthenticated && !chatStore.initialized)" />
+	<!-- Auth pages: server up, session confirmed as unauthenticated -->
+	<div v-else-if="!store.auth.isAuthenticated">
+		<slot />
 	</div>
+	<!-- Full app: everything ready -->
 	<ShadSidebarProvider v-else class="flex h-screen overflow-hidden w-full">
-		<AppSidebar v-if="store.auth.isAuthenticated" />
-		<ShadSidebarInset class="flex-1">
-			<slot />
+		<AppSidebar />
+		<ShadSidebarInset class="flex-1 flex flex-col min-w-0">
+			<header class="flex items-center gap-2 px-3 py-2 border-b border-border md:hidden shrink-0">
+				<ShadSidebarTrigger class="h-8 w-8" />
+				<span class="font-semibold text-sm">OxideChat</span>
+			</header>
+			<div class="flex-1 min-h-0">
+				<slot />
+			</div>
 		</ShadSidebarInset>
 	</ShadSidebarProvider>
 	<ShadToaster
@@ -53,27 +50,21 @@ let getMePromise: Promise<void> | null = null;
 
 const checkAuth = async () => {
 	try {
-		if (!store.initialized) {
+		if (store.bootState !== 'online') {
 			await store.getBaseData();
 		}
 
 		if (store.base?.needs_setup) {
 			if (route.path !== '/auth/setup') {
 				await router.push('/auth/setup');
-				return {
-					authenticated: false,
-				};
+				return {authenticated: false};
 			}
-			return {
-				authenticated: false,
-			};
+			return {authenticated: false};
 		}
 
 		if (route.path === '/auth/setup') {
 			await router.push('/auth/login');
-			return {
-				authenticated: false,
-			};
+			return {authenticated: false};
 		}
 
 		if (!store.auth.user && !store.auth.isAuthenticated) {
@@ -89,37 +80,28 @@ const checkAuth = async () => {
 
 		if (store.auth.isAuthenticated && isAuthPage) {
 			await router.push('/');
-			return {
-				authenticated: false,
-			};
+			return {authenticated: false};
 		}
 
 		if (!store.auth.isAuthenticated && !isAuthPage) {
 			await router.push('/auth/login');
-			return {
-				authenticated: false,
-			};
+			return {authenticated: false};
 		}
 		if (!store.auth.isAuthenticated && isAuthPage) {
-			return {
-				authenticated: false,
-			};
+			return {authenticated: false};
 		}
-		return {
-			authenticated: true,
-		};
+		return {authenticated: true};
 	} catch (error) {
 		console.error('Auth check error:', error);
+		if (isServerUnreachable(error)) {
+			// Server is down — keep boot screen, do not redirect to login
+			return {authenticated: false};
+		}
 		const isAuthPage = route.path.startsWith('/auth');
 		if (!isAuthPage) {
 			await router.push('/auth/login');
-			return {
-				authenticated: false,
-			};
 		}
-		return {
-			authenticated: false,
-		};
+		return {authenticated: false};
 	}
 };
 

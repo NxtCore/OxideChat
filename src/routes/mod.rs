@@ -13,6 +13,7 @@ use tower_cookies::CookieManagerLayer;
 
 pub fn build_router() -> Router<Arc<JobState>> {
 	Router::new()
+		.route("/api/v1/health", get(public::base::health))
 		.route("/api/v1/base", get(public::base::get_base))
 		// Admin i18n
 		.route("/api/v1/admin/i18n", get(admin::i18n::list_translations))
@@ -92,6 +93,7 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/chats/{chat_id}/messages/{message_id}/branch", post(public::messages::branch_from_message))
 		// Models
 		.route("/api/v1/models", get(public::models::list_models))
+		.route("/api/v1/models/{id}/favorite", post(public::models::set_model_favorite))
 		.route("/api/v1/models/{id}/provider-options", get(public::models::get_provider_options))
 		// Providers
 		.route("/api/v1/providers", get(public::providers::list_providers))

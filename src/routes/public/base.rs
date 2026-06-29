@@ -10,6 +10,13 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use std::sync::Arc;
 
+/// GET /api/v1/health
+///
+/// Liveness probe — responds the moment the TCP listener binds, no DB access.
+pub async fn health() -> impl IntoResponse {
+	ResponseBuilder::new(ResponseBody::Json(serde_json::json!({"status": "ok"}))).build()
+}
+
 /// GET /api/v1/base
 ///
 /// Returns base application data including translations and setup status.

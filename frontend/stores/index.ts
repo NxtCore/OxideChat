@@ -7,6 +7,11 @@ import type {UserPreferences} from '~/types/chat';
 dayjs.locale('de');
 dayjs.extend(localizedFormat);
 
+// Module-level signal for the retry loop — set by retryBoot(), read by _pollUntilHealthy()
+let _retryNow = false;
+
+type BootState = 'idle' | 'booting' | 'server-starting' | 'online';
+
 interface BreadcrumbType {
 	to: object;
 	name: string;
@@ -45,18 +50,23 @@ interface Base {
 	roles: Role[];
 	enable_provider_selector: boolean;
 }
+
 export const useMainStore = defineStore('main', {
 	state: (): {
 		breadcrumbs: BreadcrumbType[];
 		base: Base | null;
-		initialized: boolean;
+		bootState: BootState;
+		retryCount: number;
+		lastBootError: string | null;
 		preferences: UserPreferences | null;
 		auth: AuthState;
 	} => {
 		return {
 			breadcrumbs: [],
 			base: null,
-			initialized: false,
+			bootState: 'idle',
+			retryCount: 0,
+			lastBootError: null,
 			preferences: null,
 			auth: {
 				user: null,
@@ -66,6 +76,9 @@ export const useMainStore = defineStore('main', {
 		};
 	},
 	getters: {
+		initialized(): boolean {
+			return this.bootState === 'online';
+		},
 		roles(): Role[] {
 			return this.base?.roles ?? [];
 		},
@@ -111,16 +124,53 @@ export const useMainStore = defineStore('main', {
 			return dayjs(timestamp).format(format);
 		},
 		async getBaseData() {
+			this.bootState = 'booting';
 			try {
 				const {$customFetch} = useNuxtApp();
 				const base = await $customFetch<Base>('/api/v1/base');
 				if (base) {
 					this.base = base;
 				}
+				this.bootState = 'online';
 			} catch (e: any) {
-				console.error('Failed to fetch base data:', e.toString());
+				if (isServerUnreachable(e)) {
+					this.bootState = 'server-starting';
+					this.lastBootError = e?.message ?? 'Network error';
+					await this._pollUntilHealthy();
+					await this.getBaseData();
+				} else {
+					// Server responded with a non-5xx error — proceed so auth pages still render
+					console.error('Failed to fetch base data:', e.toString());
+					this.bootState = 'online';
+				}
 			}
-			this.initialized = true;
+		},
+		async _pollUntilHealthy() {
+			let delay = 1000;
+			const maxDelay = 10000;
+			while (true) {
+				// Wait with early-exit: check _retryNow every 100ms
+				const deadline = Date.now() + delay;
+				while (Date.now() < deadline) {
+					if (_retryNow) {
+						_retryNow = false;
+						break;
+					}
+					await new Promise<void>(r => setTimeout(r, Math.min(100, deadline - Date.now())));
+				}
+				_retryNow = false;
+				this.retryCount++;
+				try {
+					const {$customFetch} = useNuxtApp();
+					await $customFetch('/api/v1/health');
+					return; // Server is healthy
+				} catch {
+					delay = Math.min(delay * 2, maxDelay);
+				}
+			}
+		},
+		retryBoot() {
+			_retryNow = true;
 		},
 		isOAuthEnabled(provider: string): boolean {
 			return this.base?.oauth_providers.includes(provider) ?? false;
@@ -136,6 +186,10 @@ export const useMainStore = defineStore('main', {
 					this.auth.isAuthenticated = true;
 				}
 			} catch (e: any) {
+				if (isServerUnreachable(e)) {
+					// Propagate so checkAuth keeps the boot screen rather than redirecting to login
+					throw e;
+				}
 				this.auth.user = null;
 				this.auth.isAuthenticated = false;
 			} finally {

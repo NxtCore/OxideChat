@@ -1,20 +1,5 @@
 <template>
-	<div v-if="!store.initialized" class="flex h-screen items-center justify-center bg-background">
-		<svg
-			xmlns="http://www.w3.org/2000/svg"
-			width="24"
-			height="24"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			class="animate-spin text-primary"
-		>
-			<path d="M21 12a9 9 0 1 1-6.219-8.56" />
-		</svg>
-	</div>
+	<BootScreen v-if="store.bootState !== 'online'" />
 	<div v-else class="container mx-auto flex max-w-12xl flex-1 flex-col p-3 pb-6 lg:max-h-dvh lg:overflow-y-hidden lg:p-6">
 		<slot />
 	</div>
@@ -49,7 +34,7 @@ let getMePromise: Promise<void> | null = null;
 
 const checkAuth = async () => {
 	try {
-		if (!store.initialized) {
+		if (store.bootState !== 'online') {
 			await store.getBaseData();
 		}
 

@@ -8,30 +8,35 @@
 			<span>{{ store.getTranslation('chat.list.new_chat') }}</span>
 		</ShadButton>
 		<div class="flex-1 space-y-1 overflow-y-auto px-2">
-			<template v-if="chatStore.pinnedChats.length > 0">
-				<div class="mb-2 px-2 text-xs font-medium text-muted-foreground">{{ store.getTranslation('chat.list.pinned') }}</div>
-				<ChatListItem
-					v-for="chat in chatStore.pinnedChats"
-					:key="chat.id"
-					:chat="chat"
-					:active="chat.id === chatStore.activeChat?.id"
-					@click="selectChat(chat)"
-					@contextmenu="showContextMenu($event, chat)"
-				/>
+			<template v-if="chatStore.chatsLoading">
+				<div v-for="i in 5" :key="i" class="mx-1 h-8 animate-pulse rounded-md bg-muted" />
 			</template>
+			<template v-else>
+				<template v-if="chatStore.pinnedChats.length > 0">
+					<div class="mb-2 px-2 text-xs font-medium text-muted-foreground">{{ store.getTranslation('chat.list.pinned') }}</div>
+					<ChatListItem
+						v-for="chat in chatStore.pinnedChats"
+						:key="chat.id"
+						:chat="chat"
+						:active="chat.id === chatStore.activeChat?.id"
+						@click="selectChat(chat)"
+						@contextmenu="showContextMenu($event, chat)"
+					/>
+				</template>
 
-			<template v-for="group in groupedChats" :key="group.label">
-				<div class="mb-2 mt-4 px-2 text-xs font-medium text-muted-foreground">
-					{{ store.getTranslation('chat.list.' + group.label.replace(/\s+/g, '_').toLowerCase()) }}
-				</div>
-				<ChatListItem
-					v-for="chat in group.chats"
-					:key="chat.id"
-					:chat="chat"
-					:active="chat.id === chatStore.activeChat?.id"
-					@click="selectChat(chat)"
-					@contextmenu="showContextMenu($event, chat)"
-				/>
+				<template v-for="group in groupedChats" :key="group.label">
+					<div class="mb-2 mt-4 px-2 text-xs font-medium text-muted-foreground">
+						{{ store.getTranslation('chat.list.' + group.label.replace(/\s+/g, '_').toLowerCase()) }}
+					</div>
+					<ChatListItem
+						v-for="chat in group.chats"
+						:key="chat.id"
+						:chat="chat"
+						:active="chat.id === chatStore.activeChat?.id"
+						@click="selectChat(chat)"
+						@contextmenu="showContextMenu($event, chat)"
+					/>
+				</template>
 			</template>
 		</div>
 

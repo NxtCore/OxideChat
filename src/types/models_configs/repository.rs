@@ -123,6 +123,25 @@ impl ModelConfig {
 		.await
 	}
 
+	pub async fn set_user_favorite(pool: &sqlx::PgPool, user_id: &Uuid, model_id: &Uuid, is_favorite: bool) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+			r#"
+			INSERT INTO model_configs (owner_id, model_id, stable_key, name, is_favorite)
+			SELECT $1, m.id, COALESCE(sys_mc.stable_key, m.model_id), COALESCE(sys_mc.name, m.display_name), $3
+			FROM models m
+			LEFT JOIN model_configs sys_mc ON sys_mc.model_id = m.id AND sys_mc.owner_id IS NULL
+			WHERE m.id = $2
+			ON CONFLICT (owner_id, model_id) DO UPDATE SET is_favorite = $3, updated_at = NOW()
+			"#,
+			user_id,
+			model_id,
+			is_favorite,
+		)
+		.execute(pool)
+		.await?;
+		Ok(())
+	}
+
 	pub(super) async fn find_system_by_model_id_on_connection(conn: &mut sqlx::PgConnection, model_id: &Uuid) -> Result<Self, sqlx::Error> {
 		sqlx::query_as::<_, ModelConfig>(
 			r#"

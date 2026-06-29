@@ -75,7 +75,7 @@
 									<div class="flex-1 min-w-0">
 										<div class="flex items-center gap-2 flex-wrap">
 											<span class="font-medium text-sm">{{ model.display_name }}</span>
-											<Star v-if="model.is_favorite" class="h-3.5 w-3.5 text-yellow-500 fill-yellow-500" />
+											<Star v-if="chatStore.isFavoriteModel(model)" class="h-3.5 w-3.5 text-yellow-500 fill-yellow-500" />
 											<span
 												v-for="cap in getDisplayCapabilities(model)"
 												:key="cap"
@@ -272,7 +272,10 @@ function selectModel(model: Model) {
 }
 
 function toggleFavorite(model: Model) {
-	chatStore.toggleFavoriteModel(model.model_id);
+	const newVal = !model.is_favorite;
+	const idx = pickerModels.value.findIndex(m => m.id === model.id);
+	if (idx !== -1) pickerModels.value[idx] = {...pickerModels.value[idx], is_favorite: newVal};
+	chatStore.toggleFavoriteModel(model.id);
 }
 
 watch(

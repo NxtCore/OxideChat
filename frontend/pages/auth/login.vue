@@ -88,7 +88,11 @@ async function handleLogin() {
 		await store.login(form.value.email, form.value.password);
 		router.push('/');
 	} catch (e: any) {
-		store.toast(e.message || store.getTranslation('auth.errors.invalid_email_or_password'), {type: 'error'});
+		if (isServerUnreachable(e)) {
+			store.toast('Server is starting up, please wait…', {type: 'warning'});
+		} else {
+			store.toast(e.message || store.getTranslation('auth.errors.invalid_email_or_password'), {type: 'error'});
+		}
 	} finally {
 		loading.value = false;
 	}

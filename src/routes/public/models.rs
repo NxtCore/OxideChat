@@ -7,13 +7,21 @@ use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
 use crate::types::catalog::{AvailabilityState, GatewayCatalogModel};
 use crate::types::models::{Model, ModelListParams, ModelViewer};
+use crate::types::models_configs::ModelConfig;
 use crate::utils::providers::sync_endpoint_options;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use axum::Json;
 use axum::extract::{Path, Query};
 use axum::{extract::State, response::IntoResponse};
+use serde::Deserialize;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
+
+#[derive(Deserialize)]
+pub struct SetFavoriteRequest {
+	pub is_favorite: bool,
+}
 
 /// GET /api/v1/models
 ///
@@ -83,3 +91,19 @@ pub async fn get_provider_options(State(state): State<Arc<JobState>>, cookies: C
 	ResponseBuilder::new(ResponseBody::Json(options)).build()
 }
 
+/// POST /api/v1/models/:id/favorite
+///
+/// Toggle or set the favorite status of a model for the current user.
+pub async fn set_model_favorite(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(body): Json<SetFavoriteRequest>) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	if let Err(e) = ModelConfig::set_user_favorite(&state.db, &user.id, &id, body.is_favorite).await {
+		eprintln!("[PUBLIC] Failed to set model favorite: {e}");
+		return ErrorBuilder::new(ErrorCode::InternalError).build();
+	}
+
+	ResponseBuilder::<()>::new(ResponseBody::Empty).build()
+}

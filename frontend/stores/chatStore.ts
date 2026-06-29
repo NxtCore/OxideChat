@@ -46,6 +46,8 @@ interface ChatState {
 	// Branch prefill state
 	pendingBranchContent: string | null;
 	pendingBranchParts: any[] | null;
+
+	initialized: boolean;
 }
 
 export const useChatStore = defineStore('chat', {
@@ -76,6 +78,8 @@ export const useChatStore = defineStore('chat', {
 
 		pendingBranchContent: null,
 		pendingBranchParts: null,
+
+		initialized: false,
 	}),
 
 	getters: {
@@ -101,8 +105,7 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		favoriteModels(): ModelList[] {
-			const mainStore = useMainStore();
-			return this.models.filter(m => m.is_favorite || mainStore.preferences?.favorite_model_keys.includes(m.model_id));
+			return this.models.filter(m => m.is_favorite);
 		},
 
 		groupedModels(): Record<string, ModelList[]> {
@@ -161,9 +164,8 @@ export const useChatStore = defineStore('chat', {
 			return Math.min(100, (this.contextTokens / this.selectedModel.context_length) * 100);
 		},
 
-		isFavoriteModel: state => (model: ModelList) => {
-			const mainStore = useMainStore();
-			return mainStore.preferences?.favorite_model_keys.includes(model.model_id);
+		isFavoriteModel: _state => (model: ModelList) => {
+			return model.is_favorite;
 		},
 	},
 
@@ -696,18 +698,24 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		async toggleFavoriteModel(modelKey: string): Promise<boolean> {
-			const mainStore = useMainStore();
-			const favorites = [...(mainStore.preferences?.favorite_model_keys || [])];
-			const index = favorites.indexOf(modelKey);
+		async toggleFavoriteModel(modelDbId: string): Promise<boolean> {
+			const model = this.models.find(m => m.id === modelDbId);
+			const isFavorite = !(model?.is_favorite ?? false);
 
-			if (index === -1) {
-				favorites.push(modelKey);
-			} else {
-				favorites.splice(index, 1);
+			if (model) model.is_favorite = isFavorite;
+
+			try {
+				const {$customFetch} = useNuxtApp();
+				await $customFetch(`/api/v1/models/${modelDbId}/favorite`, {
+					method: 'POST',
+					body: {is_favorite: isFavorite},
+				});
+				return true;
+			} catch (e) {
+				if (model) model.is_favorite = !isFavorite;
+				console.error('Failed to toggle model favorite:', e);
+				return false;
 			}
-
-			return this.updatePreferences({favorite_model_keys: favorites});
 		},
 
 		setStreamingAnimation(animation: StreamingAnimation) {
@@ -815,8 +823,10 @@ export const useChatStore = defineStore('chat', {
 		},
 
 		async init() {
+			this.initialized = false;
 			await Promise.all([this.fetchWorkspaces(), this.fetchChats(), this.fetchPreferences()]);
 			await this.fetchModels();
+			this.initialized = true;
 		},
 	},
 });
