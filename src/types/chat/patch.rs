@@ -26,16 +26,19 @@ impl Workspace {
 		user_id: &Uuid,
 		name: Option<&str>,
 		icon: Option<&str>,
-		color: Option<&str>,
+		color: Option<Option<&str>>,
 		sort_order: Option<i32>,
 		is_default: Option<bool>,
 	) -> Result<Option<Self>, sqlx::Error> {
+		let update_color = color.is_some();
+		let color_value = color.flatten();
+
 		sqlx::query_as::<_, Workspace>(
 			r#"
 			UPDATE workspaces
 			SET name = COALESCE($3, name),
 			    icon = COALESCE($4, icon),
-			    color = COALESCE($5, color),
+			    color = CASE WHEN $8 THEN $5 ELSE color END,
 			    sort_order = COALESCE($6, sort_order),
 			    is_default = COALESCE($7, is_default),
 			    updated_at = NOW()
@@ -47,9 +50,10 @@ impl Workspace {
 		.bind(user_id)
 		.bind(name)
 		.bind(icon)
-		.bind(color)
+		.bind(color_value)
 		.bind(sort_order)
 		.bind(is_default)
+		.bind(update_color)
 		.fetch_optional(pool)
 		.await
 	}
@@ -70,15 +74,18 @@ impl Chat {
 		id: &Uuid,
 		user_id: &Uuid,
 		title: Option<&str>,
-		workspace_id: Option<&Uuid>,
+		workspace_id: Option<Option<&Uuid>>,
 		is_pinned: Option<bool>,
 		is_archived: Option<bool>,
 	) -> Result<Option<Self>, sqlx::Error> {
+		let update_workspace = workspace_id.is_some();
+		let workspace_value = workspace_id.flatten();
+
 		sqlx::query_as::<_, Chat>(
 			r#"
 			UPDATE chats
 			SET title = COALESCE($3, title),
-			    workspace_id = COALESCE($4, workspace_id),
+			    workspace_id = CASE WHEN $7 THEN $4 ELSE workspace_id END,
 			    is_pinned = COALESCE($5, is_pinned),
 			    is_archived = COALESCE($6, is_archived),
 			    updated_at = NOW()
@@ -89,9 +96,10 @@ impl Chat {
 		.bind(id)
 		.bind(user_id)
 		.bind(title)
-		.bind(workspace_id)
+		.bind(workspace_value)
 		.bind(is_pinned)
 		.bind(is_archived)
+		.bind(update_workspace)
 		.fetch_optional(pool)
 		.await
 	}
@@ -102,6 +110,34 @@ impl Chat {
 			.execute(pool)
 			.await?;
 		Ok(())
+	}
+
+	pub async fn move_all_to_workspace(pool: &PgPool, user_id: &Uuid, from: &Uuid, to: &Uuid) -> Result<u64, sqlx::Error> {
+		let result = sqlx::query("UPDATE chats SET workspace_id = $3, updated_at = NOW() WHERE user_id = $1 AND workspace_id = $2")
+			.bind(user_id)
+			.bind(from)
+			.bind(to)
+			.execute(pool)
+			.await?;
+		Ok(result.rows_affected())
+	}
+
+	pub async fn archive_all_in_workspace(pool: &PgPool, user_id: &Uuid, workspace_id: &Uuid) -> Result<u64, sqlx::Error> {
+		let result = sqlx::query("UPDATE chats SET is_archived = true, workspace_id = NULL, updated_at = NOW() WHERE user_id = $1 AND workspace_id = $2")
+			.bind(user_id)
+			.bind(workspace_id)
+			.execute(pool)
+			.await?;
+		Ok(result.rows_affected())
+	}
+
+	pub async fn delete_all_in_workspace(pool: &PgPool, user_id: &Uuid, workspace_id: &Uuid) -> Result<u64, sqlx::Error> {
+		let result = sqlx::query("DELETE FROM chats WHERE user_id = $1 AND workspace_id = $2")
+			.bind(user_id)
+			.bind(workspace_id)
+			.execute(pool)
+			.await?;
+		Ok(result.rows_affected())
 	}
 
 	pub async fn delete(pool: &PgPool, id: &Uuid, user_id: &Uuid) -> Result<bool, sqlx::Error> {

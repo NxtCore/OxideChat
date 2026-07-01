@@ -1,7 +1,17 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
 
 use super::ThemeCssVars;
+
+/// Distinguishes an absent field (`None`) from an explicit JSON `null` (`Some(None)`),
+/// so a PATCH can clear a nullable column instead of leaving it unchanged.
+fn deserialize_nullable_field<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+	T: Deserialize<'de>,
+	D: Deserializer<'de>,
+{
+	Ok(Some(Option::deserialize(deserializer)?))
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkspaceRequest {
@@ -16,9 +26,26 @@ pub struct CreateWorkspaceRequest {
 pub struct UpdateWorkspaceRequest {
 	pub name: Option<String>,
 	pub icon: Option<String>,
-	pub color: Option<String>,
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub color: Option<Option<String>>,
 	pub sort_order: Option<i32>,
 	pub is_default: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceDeleteAction {
+	#[default]
+	Archive,
+	Move,
+	Delete,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteWorkspaceParams {
+	#[serde(default)]
+	pub action: WorkspaceDeleteAction,
+	pub target_workspace_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,7 +57,8 @@ pub struct CreateChatRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateChatRequest {
 	pub title: Option<String>,
-	pub workspace_id: Option<Uuid>,
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub workspace_id: Option<Option<Uuid>>,
 	pub model_id: Option<Uuid>,
 	pub is_pinned: Option<bool>,
 	pub is_archived: Option<bool>,

@@ -1,10 +1,10 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::{CreateWorkspaceRequest, UpdateWorkspaceRequest, Workspace, WorkspaceResponse};
+use crate::types::{Chat, CreateWorkspaceRequest, DeleteWorkspaceParams, UpdateWorkspaceRequest, Workspace, WorkspaceDeleteAction, WorkspaceResponse};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Path, Query, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
@@ -91,7 +91,7 @@ pub async fn update_workspace(State(state): State<Arc<JobState>>, cookies: Cooki
 		&user.id,
 		req.name.as_deref(),
 		req.icon.as_deref(),
-		req.color.as_deref(),
+		req.color.as_ref().map(|c| c.as_deref()),
 		req.sort_order,
 		req.is_default,
 	)
@@ -119,10 +119,46 @@ pub async fn update_workspace(State(state): State<Arc<JobState>>, cookies: Cooki
 }
 
 /// DELETE /api/v1/workspaces/:id
-pub async fn delete_workspace(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
+pub async fn delete_workspace(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Query(params): Query<DeleteWorkspaceParams>) -> impl IntoResponse {
 	let Some(user) = get_current_user(&state.db, &cookies).await else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
+
+	let workspace = match Workspace::find_by_id_and_user(&state.db, &id, &user.id).await {
+		Ok(Some(ws)) => ws,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[WORKSPACES] Failed to load workspace: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+
+	if workspace.is_default {
+		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+	}
+
+	let disposition = match params.action {
+		WorkspaceDeleteAction::Move => {
+			let Some(target) = params.target_workspace_id else {
+				return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+			};
+			if target == id {
+				return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+			}
+			match Chat::verify_workspace_belongs_to_user(&state.db, &target, &user.id).await {
+				Ok(true) => Chat::move_all_to_workspace(&state.db, &user.id, &id, &target).await.map(|_| ()),
+				Ok(false) => return ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
+				Err(e) => Err(e),
+			}
+		}
+		WorkspaceDeleteAction::Archive => Chat::archive_all_in_workspace(&state.db, &user.id, &id).await.map(|_| ()),
+		WorkspaceDeleteAction::Delete => Chat::delete_all_in_workspace(&state.db, &user.id, &id).await.map(|_| ()),
+	};
+
+	if let Err(e) = disposition {
+		eprintln!("[WORKSPACES] Failed to apply chat disposition: {e}");
+		return ErrorBuilder::new(ErrorCode::InternalError).build();
+	}
 
 	match Workspace::delete(&state.db, &id, &user.id).await {
 		Ok(true) => (StatusCode::NO_CONTENT, "").into_response(),

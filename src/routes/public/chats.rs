@@ -180,8 +180,8 @@ pub async fn update_chat(State(state): State<Arc<JobState>>, cookies: Cookies, P
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
-	if let Some(workspace_id) = req.workspace_id {
-		match Chat::verify_workspace_belongs_to_user(&state.db, &workspace_id, &user.id).await {
+	if let Some(Some(workspace_id)) = &req.workspace_id {
+		match Chat::verify_workspace_belongs_to_user(&state.db, workspace_id, &user.id).await {
 			Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
 			Err(e) => {
 				eprintln!("[CHATS] Failed to validate workspace: {e}");
@@ -196,7 +196,7 @@ pub async fn update_chat(State(state): State<Arc<JobState>>, cookies: Cookies, P
 		&id,
 		&user.id,
 		req.title.as_deref(),
-		req.workspace_id.as_ref(),
+		req.workspace_id.as_ref().map(|w| w.as_ref()),
 		req.is_pinned,
 		req.is_archived,
 	)
