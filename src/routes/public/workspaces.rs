@@ -33,14 +33,7 @@ pub async fn create_workspace(State(state): State<Arc<JobState>>, cookies: Cooki
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
-	if req.is_default {
-		if let Err(e) = Workspace::clear_default_for_user(&state.db, &user.id, None).await {
-			eprintln!("[WORKSPACES] Failed to unset default: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	}
-
-	match Workspace::create(&state.db, &user.id, &req.name, req.icon.as_deref(), req.color.as_deref(), req.is_default).await {
+	match Workspace::create_from_request(&state.db, &user.id, &req).await {
 		Ok(ws) => {
 			let response = WorkspaceResponse::from_workspace(ws, 0);
 			ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
@@ -78,24 +71,7 @@ pub async fn update_workspace(State(state): State<Arc<JobState>>, cookies: Cooki
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
-	if req.is_default == Some(true) {
-		if let Err(e) = Workspace::clear_default_for_user(&state.db, &user.id, Some(&id)).await {
-			eprintln!("[WORKSPACES] Failed to unset default: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	}
-
-	let updated = Workspace::update(
-		&state.db,
-		&id,
-		&user.id,
-		req.name.as_deref(),
-		req.icon.as_deref(),
-		req.color.as_ref().map(|c| c.as_deref()),
-		req.sort_order,
-		req.is_default,
-	)
-	.await;
+	let updated = Workspace::update_from_request(&state.db, &id, &user.id, &req).await;
 
 	match updated {
 		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
@@ -119,7 +95,12 @@ pub async fn update_workspace(State(state): State<Arc<JobState>>, cookies: Cooki
 }
 
 /// DELETE /api/v1/workspaces/:id
-pub async fn delete_workspace(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Query(params): Query<DeleteWorkspaceParams>) -> impl IntoResponse {
+pub async fn delete_workspace(
+	State(state): State<Arc<JobState>>,
+	cookies: Cookies,
+	Path(id): Path<Uuid>,
+	Query(params): Query<DeleteWorkspaceParams>,
+) -> impl IntoResponse {
 	let Some(user) = get_current_user(&state.db, &cookies).await else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
@@ -134,33 +115,27 @@ pub async fn delete_workspace(State(state): State<Arc<JobState>>, cookies: Cooki
 	};
 
 	if workspace.is_default {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		return ErrorBuilder::new(ErrorCode::DefaultWorkspaceDelete).build();
 	}
 
-	let disposition = match params.action {
-		WorkspaceDeleteAction::Move => {
-			let Some(target) = params.target_workspace_id else {
-				return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
-			};
-			if target == id {
-				return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
-			}
-			match Chat::verify_workspace_belongs_to_user(&state.db, &target, &user.id).await {
-				Ok(true) => Chat::move_all_to_workspace(&state.db, &user.id, &id, &target).await.map(|_| ()),
-				Ok(false) => return ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
-				Err(e) => Err(e),
+	if let WorkspaceDeleteAction::Move = params.action {
+		let Some(target) = params.target_workspace_id else {
+			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		};
+		if target == id {
+			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		}
+		match Chat::verify_workspace_belongs_to_user(&state.db, &target, &user.id).await {
+			Ok(true) => {}
+			Ok(false) => return ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
+			Err(e) => {
+				eprintln!("[WORKSPACES] Failed to validate target workspace: {e}");
+				return ErrorBuilder::new(ErrorCode::InternalError).build();
 			}
 		}
-		WorkspaceDeleteAction::Archive => Chat::archive_all_in_workspace(&state.db, &user.id, &id).await.map(|_| ()),
-		WorkspaceDeleteAction::Delete => Chat::delete_all_in_workspace(&state.db, &user.id, &id).await.map(|_| ()),
-	};
-
-	if let Err(e) = disposition {
-		eprintln!("[WORKSPACES] Failed to apply chat disposition: {e}");
-		return ErrorBuilder::new(ErrorCode::InternalError).build();
 	}
 
-	match Workspace::delete(&state.db, &id, &user.id).await {
+	match Workspace::delete_with_chat_disposition(&state.db, &id, &user.id, params.action, params.target_workspace_id.as_ref()).await {
 		Ok(true) => (StatusCode::NO_CONTENT, "").into_response(),
 		Ok(false) => ErrorBuilder::new(ErrorCode::NotFound).build(),
 		Err(e) => {

@@ -261,6 +261,7 @@ export const useChatStore = defineStore('chat', {
 				return true;
 			} catch (e) {
 				console.error('Failed to delete workspace:', e);
+				this.notifyWorkspaceError(e, 'workspace.delete_failed');
 				return false;
 			}
 		},
@@ -870,11 +871,12 @@ export const useChatStore = defineStore('chat', {
 		async init() {
 			this.initialized = false;
 			this.activeWorkspaceId = loadActiveWorkspaceId();
-			await Promise.all([this.fetchWorkspaces(), this.fetchChats({workspace_id: this.activeWorkspaceId || undefined}), this.fetchPreferences()]);
+			await Promise.all([this.fetchWorkspaces(), this.fetchPreferences()]);
 			if (this.activeWorkspaceId && !this.workspaces.some(w => w.id === this.activeWorkspaceId)) {
 				this.activeWorkspaceId = null;
 				persistActiveWorkspaceId(null);
 			}
+			await this.fetchChats({workspace_id: this.activeWorkspaceId || undefined});
 			this.applyWorkspaceAccent();
 			await this.fetchModels();
 			this.initialized = true;

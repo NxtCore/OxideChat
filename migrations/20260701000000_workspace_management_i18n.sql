@@ -26,6 +26,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'workspace.cancel', 'Cancel'),
     ('en', 'workspace.create_failed', 'Could not create the workspace.'),
     ('en', 'workspace.update_failed', 'Could not update the workspace.'),
+    ('en', 'workspace.delete_failed', 'Could not delete the workspace.'),
     ('en', 'chat.context_menu.no_workspace', 'No workspace'),
     ('de', 'sidebar.manage_workspaces', 'Arbeitsbereiche verwalten'),
     ('de', 'workspace.manage_title', 'Arbeitsbereiche'),
@@ -53,5 +54,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'workspace.cancel', 'Abbrechen'),
     ('de', 'workspace.create_failed', 'Arbeitsbereich konnte nicht erstellt werden.'),
     ('de', 'workspace.update_failed', 'Arbeitsbereich konnte nicht aktualisiert werden.'),
+    ('de', 'workspace.delete_failed', 'Arbeitsbereich konnte nicht gelöscht werden.'),
     ('de', 'chat.context_menu.no_workspace', 'Kein Arbeitsbereich')
 ON CONFLICT (language, key_path) DO NOTHING;
