@@ -214,6 +214,24 @@ impl Chat {
 		Ok(row)
 	}
 
+	pub async fn message_stats_batch(pool: &PgPool, chat_ids: &[Uuid]) -> Result<HashMap<Uuid, (i64, Option<DateTime<Utc>>)>, sqlx::Error> {
+		if chat_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, i64, Option<DateTime<Utc>>)> = sqlx::query_as(
+			r#"
+			SELECT chat_id, COUNT(*)::int8, MAX(created_at)
+			FROM messages
+			WHERE chat_id = ANY($1)
+			GROUP BY chat_id
+			"#,
+		)
+		.bind(chat_ids)
+		.fetch_all(pool)
+		.await?;
+		Ok(rows.into_iter().map(|(id, count, last)| (id, (count, last))).collect())
+	}
+
 	pub async fn verify_workspace_belongs_to_user(pool: &PgPool, workspace_id: &Uuid, user_id: &Uuid) -> Result<bool, sqlx::Error> {
 		let exists: (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = $1 AND user_id = $2)")
 			.bind(workspace_id)

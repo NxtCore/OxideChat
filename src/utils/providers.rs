@@ -40,12 +40,12 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 		}
 	}
 
-	let all_discovered = match engine_service.discover_models().await {
+	let all_discovered = match engine_service.discover_models_for_provider(&provider.name).await {
 		Ok(models) => models,
 		Err(e) => return Err(format!("Discovery failed: {e}")),
 	};
 
-	let discovered: Vec<_> = all_discovered.into_iter().filter(|m| m.provider_name == provider.name).collect();
+	let discovered = all_discovered;
 
 	let mut sync_models = Vec::with_capacity(discovered.len());
 	for model in discovered {

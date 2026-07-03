@@ -2,6 +2,8 @@ use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
 use crate::types::{Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, Message, UpdateChatRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use chrono::{DateTime, Utc};
+use sqlx::PgPool;
 use axum::{
 	Json,
 	extract::{Path, Query, State},
@@ -12,9 +14,8 @@ use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
-async fn build_chat_response(pool: &sqlx::PgPool, chat: &Chat) -> Result<ChatResponse, sqlx::Error> {
-	let (message_count, last_message_at) = Chat::message_stats(pool, &chat.id).await?;
-	Ok(ChatResponse {
+fn chat_response_with_stats(chat: &Chat, message_count: i64, last_message_at: Option<DateTime<Utc>>) -> ChatResponse {
+	ChatResponse {
 		id: chat.id,
 		workspace_id: chat.workspace_id,
 		title: chat.title.clone(),
@@ -26,7 +27,12 @@ async fn build_chat_response(pool: &sqlx::PgPool, chat: &Chat) -> Result<ChatRes
 		last_message_at,
 		created_at: chat.created_at,
 		updated_at: chat.updated_at,
-	})
+	}
+}
+
+async fn build_chat_response(pool: &PgPool, chat: &Chat) -> Result<ChatResponse, sqlx::Error> {
+	let (message_count, last_message_at) = Chat::message_stats(pool, &chat.id).await?;
+	Ok(chat_response_with_stats(chat, message_count, last_message_at))
 }
 
 /// GET /api/v1/chats
@@ -50,16 +56,21 @@ pub async fn list_chats(State(state): State<Arc<JobState>>, cookies: Cookies, Qu
 
 	match chats {
 		Ok(chats) => {
-			let mut responses = Vec::with_capacity(chats.len());
-			for chat in &chats {
-				match build_chat_response(&state.db, chat).await {
-					Ok(r) => responses.push(r),
-					Err(e) => {
-						eprintln!("[CHATS] Failed to build chat response: {e}");
-						return ErrorBuilder::new(ErrorCode::InternalError).build();
-					}
+			let chat_ids: Vec<Uuid> = chats.iter().map(|c| c.id).collect();
+			let stats = match Chat::message_stats_batch(&state.db, &chat_ids).await {
+				Ok(s) => s,
+				Err(e) => {
+					eprintln!("[CHATS] Failed to load message stats: {e}");
+					return ErrorBuilder::new(ErrorCode::InternalError).build();
 				}
-			}
+			};
+			let responses = chats
+				.iter()
+				.map(|chat| {
+					let (count, last) = stats.get(&chat.id).copied().unwrap_or((0, None));
+					chat_response_with_stats(chat, count, last)
+				})
+				.collect::<Vec<_>>();
 			ResponseBuilder::new(ResponseBody::Json(responses)).build()
 		}
 		Err(e) => {
