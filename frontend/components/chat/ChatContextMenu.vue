@@ -6,6 +6,46 @@
 			class="fixed z-50 min-w-48 rounded-lg border border-border bg-popover p-1 shadow-lg"
 			:style="{left: `${position.x}px`, top: `${position.y}px`}"
 		>
+			<template v-if="showMoveMenu">
+				<ShadButton
+					variant="ghost"
+					class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+					@click="showMoveMenu = false"
+				>
+					<ChevronLeft class="h-4 w-4" />
+					<span>{{ store.getTranslation('chat.context_menu.move_to') }}</span>
+				</ShadButton>
+
+				<div class="my-1 h-px bg-border" />
+
+				<div class="max-h-64 overflow-y-auto">
+					<ShadButton
+						v-for="workspace in chatStore.workspaces"
+						:key="workspace.id"
+						variant="ghost"
+						class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+						:disabled="workspace.id === chat.workspace_id"
+						@click="moveToWorkspace(workspace.id)"
+					>
+						<span class="h-2.5 w-2.5 shrink-0 rounded-full border border-border" :style="{backgroundColor: workspace.color || 'var(--muted)'}" />
+						<span class="truncate">{{ workspace.name }}</span>
+						<Check v-if="workspace.id === chat.workspace_id" class="ml-auto h-4 w-4 text-primary" />
+					</ShadButton>
+
+					<ShadButton
+						variant="ghost"
+						class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+						:disabled="!chat.workspace_id"
+						@click="moveToWorkspace(null)"
+					>
+						<Ban class="h-4 w-4 text-muted-foreground" />
+						<span>{{ store.getTranslation('chat.context_menu.no_workspace') }}</span>
+						<Check v-if="!chat.workspace_id" class="ml-auto h-4 w-4 text-primary" />
+					</ShadButton>
+				</div>
+			</template>
+
+			<template v-else>
 			<ShadButton
 				variant="ghost"
 				class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
@@ -63,6 +103,7 @@
 				<Trash2 class="h-4 w-4" />
 				<span>{{ store.getTranslation('chat.context_menu.delete') }}</span>
 			</ShadButton>
+			</template>
 		</div>
 
 		<ShadDialog v-model:open="showRenameDialog">
@@ -105,7 +146,7 @@
 </template>
 
 <script setup lang="ts">
-import {Pin, Pencil, FolderInput, Archive, Download, Trash2} from 'lucide-vue-next';
+import {Pin, Pencil, FolderInput, Archive, Download, Trash2, ChevronLeft, Check, Ban} from 'lucide-vue-next';
 import type {Chat} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
@@ -147,6 +188,17 @@ async function submitRename() {
 
 async function toggleArchive() {
 	await chatStore.updateChat(props.chat.id, {is_archived: !props.chat.is_archived});
+	emit('close');
+}
+
+async function moveToWorkspace(workspaceId: string | null) {
+	if (workspaceId === (props.chat.workspace_id ?? null)) {
+		emit('close');
+		return;
+	}
+	await chatStore.updateChat(props.chat.id, {workspace_id: workspaceId});
+	await chatStore.fetchChats({workspace_id: chatStore.activeWorkspaceId || undefined});
+	chatStore.fetchWorkspaces();
 	emit('close');
 }
 

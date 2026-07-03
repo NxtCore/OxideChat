@@ -1,6 +1,6 @@
 import {defineStore} from 'pinia';
 import type {ThemeCssVars, FetchedTheme, GlobalConfig} from '~/types/chat';
-import {applyThemeToElement, clearThemeFromElement, getSystemTheme, type ThemeMode, type ThemeState} from '~/lib/apply-theme';
+import {applyThemeToElement, applyAccentToElement, clearAccentFromElement, clearThemeFromElement, getSystemTheme, type ThemeMode, type ThemeState} from '~/lib/apply-theme';
 import {fetchThemeFromUrl, THEME_URLS} from '~/lib/theme-utils';
 
 const THEME_STORE_KEY = 'oxide-theme-store';
@@ -49,6 +49,7 @@ export const useThemeStore = defineStore('theme', {
 			fetchedThemes: [] as FetchedTheme[],
 			customThemeUrls: [] as string[],
 			isLoadingThemes: false,
+			workspaceAccent: null as string | null,
 		};
 	},
 
@@ -118,9 +119,16 @@ export const useThemeStore = defineStore('theme', {
 			this.apply();
 		},
 
+		setWorkspaceAccent(color: string | null) {
+			this.workspaceAccent = color;
+			this.apply();
+		},
+
 		apply() {
 			if (typeof document === 'undefined') return;
+			clearAccentFromElement(document.body);
 			applyThemeToElement(this.themeState, document.body);
+			applyAccentToElement(this.workspaceAccent, document.body);
 		},
 
 		persist() {

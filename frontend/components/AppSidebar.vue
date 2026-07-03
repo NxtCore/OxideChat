@@ -53,10 +53,16 @@
 								class="text-popover-foreground focus:bg-accent"
 								@click="chatStore.setActiveWorkspace(workspace.id)"
 							>
+								<span class="mr-2 h-2.5 w-2.5 shrink-0 rounded-full border border-border" :style="{backgroundColor: workspace.color || 'var(--muted)'}" />
 								<span :class="workspace.id === chatStore.activeWorkspaceId ? 'font-medium' : ''">
 									{{ workspace.name }}
 								</span>
 								<span class="ml-auto text-xs text-muted-foreground">{{ workspace.chat_count }}</span>
+							</ShadDropdownMenuItem>
+							<ShadDropdownMenuSeparator class="bg-border" />
+							<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent" @click="showWorkspaceManager = true">
+								<Settings2 class="mr-2 h-4 w-4" />
+								<span>{{ store.getTranslation('sidebar.manage_workspaces') }}</span>
 							</ShadDropdownMenuItem>
 						</ShadDropdownMenuSubContent>
 					</ShadDropdownMenuSub>
@@ -74,16 +80,20 @@
 			</ShadDropdownMenu>
 		</ShadSidebarFooter>
 	</ShadSidebar>
+
+	<WorkspaceManagerDialog v-model:open="showWorkspaceManager" />
 </template>
 
 <script setup lang="ts">
-import {MessageSquare, ChevronUp, LogOut, Settings, Layers} from 'lucide-vue-next';
+import {ChevronUp, LogOut, Settings, Settings2, Layers} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useChatStore} from '@/stores/chatStore';
 
 const store = useMainStore();
 const chatStore = useChatStore();
 const router = useRouter();
+
+const showWorkspaceManager = ref(false);
 
 const userInitials = computed(() => {
 	const username = store.auth.user?.username || 'U';

@@ -130,9 +130,16 @@ export interface CreateWorkspaceRequest {
 export interface UpdateWorkspaceRequest {
 	name?: string;
 	icon?: string;
-	color?: string;
+	color?: string | null;
 	sort_order?: number;
 	is_default?: boolean;
+}
+
+export type WorkspaceDeleteAction = 'move' | 'archive' | 'delete';
+
+export interface DeleteWorkspaceOptions {
+	action: WorkspaceDeleteAction;
+	target_workspace_id?: string;
 }
 
 export interface CreateChatRequest {
@@ -143,7 +150,7 @@ export interface CreateChatRequest {
 
 export interface UpdateChatRequest {
 	title?: string;
-	workspace_id?: string;
+	workspace_id?: string | null;
 	is_pinned?: boolean;
 	is_archived?: boolean;
 }

@@ -205,6 +205,7 @@ pub enum ErrorCode {
 	MalformedRequest,
 	InvalidProvider,
 	ProviderNotConfigured,
+	DefaultWorkspaceDelete,
 
 	// 401 Unauthorized
 	Unauthorized,
@@ -271,7 +272,8 @@ impl ErrorCode {
 			| Self::SetupCompleted
 			| Self::MalformedRequest
 			| Self::InvalidProvider
-			| Self::ProviderNotConfigured => StatusCode::BAD_REQUEST,
+			| Self::ProviderNotConfigured
+			| Self::DefaultWorkspaceDelete => StatusCode::BAD_REQUEST,
 
 			Self::Unauthorized
 			| Self::NotAuthenticated
@@ -314,6 +316,7 @@ impl ErrorCode {
 			Self::MalformedRequest => "errors.malformed_request",
 			Self::InvalidProvider => "auth.errors.oauth_provider_invalid",
 			Self::ProviderNotConfigured => "auth.errors.oauth_provider_disabled",
+			Self::DefaultWorkspaceDelete => "workspace.cannot_delete_default",
 
 			Self::Unauthorized => "auth.errors.unauthorized",
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
@@ -372,6 +375,7 @@ impl ErrorCode {
 			Self::MalformedRequest => "malformed_request",
 			Self::InvalidProvider => "invalid_provider",
 			Self::ProviderNotConfigured => "provider_not_configured",
+			Self::DefaultWorkspaceDelete => "default_workspace_delete",
 
 			Self::Unauthorized => "unauthorized",
 			Self::NotAuthenticated => "not_authenticated",
