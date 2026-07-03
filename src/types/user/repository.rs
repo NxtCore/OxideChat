@@ -1,6 +1,6 @@
-use crate::types::{PreferencesResponse, UserPreferences};
 use crate::types::user::rows::{CountRow, PermissionNameRow, RoleNameRow, UserRoleRow};
 use crate::types::user::{PaginatedUsersListResponse, PaginatedUsersResponse, User, UserListResponse, UserResponse};
+use crate::types::{PreferencesResponse, Team, UserPreferences};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -37,7 +37,10 @@ impl User {
 				.fetch_one(pool)
 				.await?
 		} else {
-			sqlx::query_as("SELECT COUNT(*) as count FROM users WHERE email = $1").bind(email).fetch_one(pool).await?
+			sqlx::query_as("SELECT COUNT(*) as count FROM users WHERE email = $1")
+				.bind(email)
+				.fetch_one(pool)
+				.await?
 		};
 		Ok(count.count > 0)
 	}
@@ -94,6 +97,8 @@ impl User {
 		.execute(pool)
 		.await?;
 
+		Team::ensure_default_membership(pool, &self.id).await?;
+
 		Ok(())
 	}
 
@@ -149,6 +154,7 @@ impl User {
 
 	pub async fn to_response(&self, pool: &PgPool) -> Result<UserResponse, sqlx::Error> {
 		let roles = self.roles(pool).await?;
+		let teams = Team::summaries_for_user(pool, &self.id).await?;
 		let permissions = self.permissions(pool).await?;
 		let preferences = self.preferences(pool).await?;
 		Ok(UserResponse {
@@ -157,138 +163,135 @@ impl User {
 			username: self.username.clone(),
 			auth_method: self.auth_method.clone(),
 			roles,
+			teams,
 			permissions,
 			preferences: PreferencesResponse::from(preferences),
 			created_at: self.created_at,
 		})
 	}
 
-	pub async fn list_paginated(pool: &PgPool, page: i64, per_page: i64, search: Option<&str>, role: Option<&str>) -> Result<PaginatedUsersResponse, sqlx::Error> {
+	pub async fn list_paginated(
+		pool: &PgPool,
+		page: i64,
+		per_page: i64,
+		search: Option<&str>,
+		role: Option<&str>,
+		team_id: Option<&Uuid>,
+	) -> Result<PaginatedUsersResponse, sqlx::Error> {
 		let offset = (page - 1) * per_page;
 		let search_pattern = search.map(|s| format!("%{s}%"));
 
-		let total = if let Some(role_name) = role {
-			let row: CountRow = sqlx::query_as(
-				"SELECT COUNT(DISTINCT u.id) as count FROM users u
-                 INNER JOIN user_roles ur ON u.id = ur.user_id
-                 INNER JOIN roles r ON ur.role_id = r.id
-                 WHERE r.name = $1
-                 AND ($2::text IS NULL OR u.email ILIKE $2 OR u.username ILIKE $2)",
-			)
-			.bind(role_name)
-			.bind(&search_pattern)
-			.fetch_one(pool)
-			.await?;
-			row.count
-		} else {
-			let row: CountRow = sqlx::query_as(
-				"SELECT COUNT(*) as count FROM users
-                 WHERE ($1::text IS NULL OR email ILIKE $1 OR username ILIKE $1)",
-			)
-			.bind(&search_pattern)
-			.fetch_one(pool)
-			.await?;
-			row.count
-		};
+		let total: CountRow = sqlx::query_as(
+			r#"
+			SELECT COUNT(DISTINCT u.id) as count
+			FROM users u
+			LEFT JOIN user_roles ur ON u.id = ur.user_id
+			LEFT JOIN roles r ON ur.role_id = r.id
+			LEFT JOIN team_members tm ON tm.user_id = u.id
+			WHERE ($1::text IS NULL OR r.name = $1)
+			  AND ($2::uuid IS NULL OR tm.team_id = $2)
+			  AND ($3::text IS NULL OR u.email ILIKE $3 OR u.username ILIKE $3)
+			"#,
+		)
+		.bind(role)
+		.bind(team_id)
+		.bind(&search_pattern)
+		.fetch_one(pool)
+		.await?;
 
-		let users: Vec<User> = if let Some(role_name) = role {
-			sqlx::query_as(
-				"SELECT DISTINCT u.* FROM users u
-                 INNER JOIN user_roles ur ON u.id = ur.user_id
-                 INNER JOIN roles r ON ur.role_id = r.id
-                 WHERE r.name = $1
-                 AND ($2::text IS NULL OR u.email ILIKE $2 OR u.username ILIKE $2)
-                 ORDER BY u.created_at DESC
-                 LIMIT $3 OFFSET $4",
-			)
-			.bind(role_name)
-			.bind(&search_pattern)
-			.bind(per_page)
-			.bind(offset)
-			.fetch_all(pool)
-			.await?
-		} else {
-			sqlx::query_as(
-				"SELECT * FROM users
-                 WHERE ($1::text IS NULL OR email ILIKE $1 OR username ILIKE $1)
-                 ORDER BY created_at DESC
-                 LIMIT $2 OFFSET $3",
-			)
-			.bind(&search_pattern)
-			.bind(per_page)
-			.bind(offset)
-			.fetch_all(pool)
-			.await?
-		};
+		let users: Vec<User> = sqlx::query_as(
+			r#"
+			SELECT DISTINCT u.*
+			FROM users u
+			LEFT JOIN user_roles ur ON u.id = ur.user_id
+			LEFT JOIN roles r ON ur.role_id = r.id
+			LEFT JOIN team_members tm ON tm.user_id = u.id
+			WHERE ($1::text IS NULL OR r.name = $1)
+			  AND ($2::uuid IS NULL OR tm.team_id = $2)
+			  AND ($3::text IS NULL OR u.email ILIKE $3 OR u.username ILIKE $3)
+			ORDER BY u.created_at DESC
+			LIMIT $4 OFFSET $5
+			"#,
+		)
+		.bind(role)
+		.bind(team_id)
+		.bind(&search_pattern)
+		.bind(per_page)
+		.bind(offset)
+		.fetch_all(pool)
+		.await?;
 
 		let mut responses = Vec::with_capacity(users.len());
 		for u in users {
 			responses.push(u.to_response(pool).await?);
 		}
 
-		Ok(PaginatedUsersResponse { users: responses, total, page, per_page })
+		Ok(PaginatedUsersResponse {
+			users: responses,
+			total: total.count,
+			page,
+			per_page,
+		})
 	}
 
-	pub async fn list_paginated_light(pool: &PgPool, page: i64, per_page: i64, search: Option<&str>, role: Option<&str>) -> Result<PaginatedUsersListResponse, sqlx::Error> {
+	pub async fn list_paginated_light(
+		pool: &PgPool,
+		page: i64,
+		per_page: i64,
+		search: Option<&str>,
+		role: Option<&str>,
+		team_id: Option<&Uuid>,
+	) -> Result<PaginatedUsersListResponse, sqlx::Error> {
 		let offset = (page - 1) * per_page;
 		let search_pattern = search.map(|s| format!("%{s}%"));
 
-		let total = if let Some(role_name) = role {
-			let row: CountRow = sqlx::query_as(
-				"SELECT COUNT(DISTINCT u.id) as count FROM users u
-                 INNER JOIN user_roles ur ON u.id = ur.user_id
-                 INNER JOIN roles r ON ur.role_id = r.id
-                 WHERE r.name = $1
-                 AND ($2::text IS NULL OR u.email ILIKE $2 OR u.username ILIKE $2)",
-			)
-			.bind(role_name)
-			.bind(&search_pattern)
-			.fetch_one(pool)
-			.await?;
-			row.count
-		} else {
-			let row: CountRow = sqlx::query_as(
-				"SELECT COUNT(*) as count FROM users
-                 WHERE ($1::text IS NULL OR email ILIKE $1 OR username ILIKE $1)",
-			)
-			.bind(&search_pattern)
-			.fetch_one(pool)
-			.await?;
-			row.count
-		};
+		let total: CountRow = sqlx::query_as(
+			r#"
+			SELECT COUNT(DISTINCT u.id) as count
+			FROM users u
+			LEFT JOIN user_roles ur ON u.id = ur.user_id
+			LEFT JOIN roles r ON ur.role_id = r.id
+			LEFT JOIN team_members tm ON tm.user_id = u.id
+			WHERE ($1::text IS NULL OR r.name = $1)
+			  AND ($2::uuid IS NULL OR tm.team_id = $2)
+			  AND ($3::text IS NULL OR u.email ILIKE $3 OR u.username ILIKE $3)
+			"#,
+		)
+		.bind(role)
+		.bind(team_id)
+		.bind(&search_pattern)
+		.fetch_one(pool)
+		.await?;
 
-		let users: Vec<User> = if let Some(role_name) = role {
-			sqlx::query_as(
-				"SELECT DISTINCT u.* FROM users u
-                 INNER JOIN user_roles ur ON u.id = ur.user_id
-                 INNER JOIN roles r ON ur.role_id = r.id
-                 WHERE r.name = $1
-                 AND ($2::text IS NULL OR u.email ILIKE $2 OR u.username ILIKE $2)
-                 ORDER BY u.created_at DESC
-                 LIMIT $3 OFFSET $4",
-			)
-			.bind(role_name)
-			.bind(&search_pattern)
-			.bind(per_page)
-			.bind(offset)
-			.fetch_all(pool)
-			.await?
-		} else {
-			sqlx::query_as(
-				"SELECT * FROM users
-                 WHERE ($1::text IS NULL OR email ILIKE $1 OR username ILIKE $1)
-                 ORDER BY created_at DESC
-                 LIMIT $2 OFFSET $3",
-			)
-			.bind(&search_pattern)
-			.bind(per_page)
-			.bind(offset)
-			.fetch_all(pool)
-			.await?
-		};
+		let users: Vec<User> = sqlx::query_as(
+			r#"
+			SELECT DISTINCT u.*
+			FROM users u
+			LEFT JOIN user_roles ur ON u.id = ur.user_id
+			LEFT JOIN roles r ON ur.role_id = r.id
+			LEFT JOIN team_members tm ON tm.user_id = u.id
+			WHERE ($1::text IS NULL OR r.name = $1)
+			  AND ($2::uuid IS NULL OR tm.team_id = $2)
+			  AND ($3::text IS NULL OR u.email ILIKE $3 OR u.username ILIKE $3)
+			ORDER BY u.created_at DESC
+			LIMIT $4 OFFSET $5
+			"#,
+		)
+		.bind(role)
+		.bind(team_id)
+		.bind(&search_pattern)
+		.bind(per_page)
+		.bind(offset)
+		.fetch_all(pool)
+		.await?;
 
 		if users.is_empty() {
-			return Ok(PaginatedUsersListResponse { users: Vec::new(), total, page, per_page });
+			return Ok(PaginatedUsersListResponse {
+				users: Vec::new(),
+				total: total.count,
+				page,
+				per_page,
+			});
 		}
 
 		let user_ids: Vec<Uuid> = users.iter().map(|u| u.id).collect();
@@ -306,16 +309,31 @@ impl User {
 		for row in all_roles {
 			user_roles_map.entry(row.user_id).or_default().push(row.name);
 		}
+		let all_teams = Team::summaries_for_users(pool, &user_ids).await?;
 
 		let responses = users
 			.into_iter()
 			.map(|u| {
 				let roles = user_roles_map.get(&u.id).cloned().unwrap_or_default();
-				UserListResponse { id: u.id, email: u.email, username: u.username, auth_method: u.auth_method, roles, created_at: u.created_at }
+				let teams = all_teams.get(&u.id).cloned().unwrap_or_default();
+				UserListResponse {
+					id: u.id,
+					email: u.email,
+					username: u.username,
+					auth_method: u.auth_method,
+					roles,
+					teams,
+					created_at: u.created_at,
+				}
 			})
 			.collect();
 
-		Ok(PaginatedUsersListResponse { users: responses, total, page, per_page })
+		Ok(PaginatedUsersListResponse {
+			users: responses,
+			total: total.count,
+			page,
+			per_page,
+		})
 	}
 
 	pub(super) fn permission_matches(user_permission: &str, required: &str) -> bool {

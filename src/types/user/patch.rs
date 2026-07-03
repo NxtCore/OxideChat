@@ -1,19 +1,19 @@
+use crate::types::Team;
 use crate::types::user::User;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 impl User {
 	pub async fn update(&mut self, pool: &PgPool, email: Option<&str>, username: Option<&str>) -> Result<(), sqlx::Error> {
 		let new_email = email.unwrap_or(&self.email);
 		let new_username = username.unwrap_or(&self.username);
 
-		let updated = sqlx::query_as::<_, User>(
-			"UPDATE users SET email = $2, username = $3, updated_at = NOW() WHERE id = $1 RETURNING *",
-		)
-		.bind(self.id)
-		.bind(new_email)
-		.bind(new_username)
-		.fetch_one(pool)
-		.await?;
+		let updated = sqlx::query_as::<_, User>("UPDATE users SET email = $2, username = $3, updated_at = NOW() WHERE id = $1 RETURNING *")
+			.bind(self.id)
+			.bind(new_email)
+			.bind(new_username)
+			.fetch_one(pool)
+			.await?;
 
 		*self = updated;
 		Ok(())
@@ -64,5 +64,9 @@ impl User {
 			.execute(pool)
 			.await?;
 		Ok(())
+	}
+
+	pub async fn set_teams(&self, pool: &PgPool, team_ids: &[Uuid]) -> Result<(), sqlx::Error> {
+		Team::set_user_teams(pool, &self.id, team_ids).await
 	}
 }

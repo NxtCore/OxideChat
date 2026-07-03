@@ -2,7 +2,7 @@ import {defineStore} from 'pinia';
 import localizedFormat from 'dayjs/plugin/localizedFormat';
 import dayjs from 'dayjs';
 import 'dayjs/locale/de';
-import type {UserPreferences} from '~/types/chat';
+import type {TeamSummary, UserPreferences} from '~/types/chat';
 
 dayjs.locale('de');
 dayjs.extend(localizedFormat);
@@ -25,6 +25,7 @@ interface User {
 	username: string;
 	auth_method: string;
 	roles: string[];
+	teams: TeamSummary[];
 	permissions: string[];
 	preferences: UserPreferences;
 	created_at: string;

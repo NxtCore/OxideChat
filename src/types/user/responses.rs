@@ -1,4 +1,5 @@
 use crate::types::PreferencesResponse;
+use crate::types::teams::TeamSummaryResponse;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -9,6 +10,7 @@ pub struct UserResponse {
 	pub username: String,
 	pub auth_method: String,
 	pub roles: Vec<String>,
+	pub teams: Vec<TeamSummaryResponse>,
 	pub permissions: Vec<String>,
 	pub preferences: PreferencesResponse,
 	pub created_at: chrono::DateTime<chrono::Utc>,
@@ -21,6 +23,7 @@ pub struct UserListResponse {
 	pub username: String,
 	pub auth_method: String,
 	pub roles: Vec<String>,
+	pub teams: Vec<TeamSummaryResponse>,
 	pub created_at: chrono::DateTime<chrono::Utc>,
 }
 

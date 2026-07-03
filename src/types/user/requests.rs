@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct ListUsersQuery {
@@ -6,6 +7,7 @@ pub struct ListUsersQuery {
 	pub per_page: Option<i64>,
 	pub search: Option<String>,
 	pub role: Option<String>,
+	pub team_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -14,6 +16,7 @@ pub struct CreateAdminUserRequest {
 	pub username: String,
 	pub password: String,
 	pub roles: Vec<String>,
+	pub team_ids: Option<Vec<Uuid>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,5 +32,12 @@ pub struct AdminResetPasswordRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct SetUserRolesRequest {
+	#[serde(default)]
 	pub roles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetUserTeamsRequest {
+	#[serde(default)]
+	pub team_ids: Vec<Uuid>,
 }

@@ -1,6 +1,7 @@
 use super::rows::{ModelDetailedRow, ModelListAdminRow, ModelListPublicRow};
 use super::{Model, ModelDetailed, ModelListAdmin, ModelListPublic, ModelSyncInput, ModelSyncSummary, ModelViewer};
 use crate::types::BaseType;
+use crate::types::PolicyResolver;
 use crate::types::axum::PaginatedResponse;
 use crate::types::models::ProviderTab;
 use crate::types::providers::{ProviderKind, ProviderModelResponse};
@@ -58,24 +59,23 @@ impl Model {
 			.filter(|s| !s.is_empty())
 			.map(|s| format!("%{}%", Self::escape_like_pattern(s)));
 
-		let rows = sqlx::query_as!(
-			ModelListPublicRow,
+		let rows = sqlx::query_as::<_, ModelListPublicRow>(
 			r#"
 			SELECT
 				m.id,
 				m.model_id,
 				m.display_name,
-				COALESCE(user_mc.capabilities, sys_mc.capabilities, m.capabilities, '[]'::jsonb) AS "capabilities!: Json<Vec<String>>",
-				COALESCE(user_mc.input_modalities, sys_mc.input_modalities, m.input_modalities, '[]'::jsonb) AS "input_modalities!: Json<Vec<String>>",
-				COALESCE(user_mc.output_modalities, sys_mc.output_modalities, m.output_modalities, '[]'::jsonb) AS "output_modalities!: Json<Vec<String>>",
+				COALESCE(user_mc.capabilities, sys_mc.capabilities, m.capabilities, '[]'::jsonb) AS capabilities,
+				COALESCE(user_mc.input_modalities, sys_mc.input_modalities, m.input_modalities, '[]'::jsonb) AS input_modalities,
+				COALESCE(user_mc.output_modalities, sys_mc.output_modalities, m.output_modalities, '[]'::jsonb) AS output_modalities,
 				COALESCE(user_mc.context_length, sys_mc.context_length, m.context_length) AS context_length,
 				COALESCE(user_mc.max_output_tokens, sys_mc.max_output_tokens, m.max_tokens) AS max_tokens,
-				COALESCE(m.is_enabled, false) AS "is_enabled!",
+				COALESCE(m.is_enabled, false) AS is_enabled,
 				p.id AS provider_id,
 				p.name AS provider_name,
-				p.kind AS "provider_kind: ProviderKind",
+				p.kind AS provider_kind,
 				COALESCE(user_mc.icon, sys_mc.icon) AS icon,
-				COALESCE(user_mc.is_favorite, false) AS "is_favorite!"
+				COALESCE(user_mc.is_favorite, false) AS is_favorite
 			FROM models m
 			JOIN providers p ON m.provider_id = p.id
 			LEFT JOIN model_configs sys_mc
@@ -104,17 +104,26 @@ impl Model {
 				$7::UUID IS NULL
 				OR p.id = $7
 			)
+			AND EXISTS (
+				SELECT 1
+				FROM team_members tm
+				INNER JOIN teams t ON t.id = tm.team_id
+				LEFT JOIN team_model_access tma_model ON tma_model.team_id = t.id AND tma_model.model_id = m.id
+				LEFT JOIN team_model_access tma_provider ON tma_provider.team_id = t.id AND tma_provider.provider_id = p.id
+				WHERE tm.user_id = $1
+				  AND (t.allow_all_models = true OR tma_model.id IS NOT NULL OR tma_provider.id IS NOT NULL)
+			)
 			ORDER BY m.display_name, p.name
 			LIMIT $2 OFFSET $3
 			"#,
-			viewer.user_id,
-			pagination.limit,
-			pagination.offset,
-			show_disabled,
-			search.as_deref(),
-			favorites_only,
-			provider_id,
 		)
+		.bind(viewer.user_id)
+		.bind(pagination.limit)
+		.bind(pagination.offset)
+		.bind(show_disabled)
+		.bind(search.as_deref())
+		.bind(favorites_only)
+		.bind(provider_id)
 		.fetch_all(pool)
 		.await?;
 
@@ -124,9 +133,8 @@ impl Model {
 		Ok(PaginatedResponse { has_more, items })
 	}
 
-	pub async fn list_providers_for_user(pool: &sqlx::PgPool, _viewer: ModelViewer<'_>) -> Result<Vec<ProviderTab>, sqlx::Error> {
-		let rows = sqlx::query_as!(
-			ProviderTab,
+	pub async fn list_providers_for_user(pool: &sqlx::PgPool, viewer: ModelViewer<'_>) -> Result<Vec<ProviderTab>, sqlx::Error> {
+		let rows = sqlx::query_as::<_, ProviderTab>(
 			r#"
 			SELECT DISTINCT p.id, p.name
 			FROM providers p
@@ -135,13 +143,27 @@ impl Model {
 				COALESCE(m.is_enabled, false) = TRUE
 				AND COALESCE(p.is_enabled, false) = TRUE
 			)
+			AND EXISTS (
+				SELECT 1
+				FROM team_members tm
+				INNER JOIN teams t ON t.id = tm.team_id
+				LEFT JOIN team_model_access tma_model ON tma_model.team_id = t.id AND tma_model.model_id = m.id
+				LEFT JOIN team_model_access tma_provider ON tma_provider.team_id = t.id AND tma_provider.provider_id = p.id
+				WHERE tm.user_id = $1
+				  AND (t.allow_all_models = true OR tma_model.id IS NOT NULL OR tma_provider.id IS NOT NULL)
+			)
 			ORDER BY p.name
 			"#,
 		)
+		.bind(viewer.user_id)
 		.fetch_all(pool)
 		.await?;
 
 		Ok(rows)
+	}
+
+	pub async fn can_user_use_model(pool: &sqlx::PgPool, user_id: &Uuid, model_id: &Uuid) -> Result<bool, sqlx::Error> {
+		PolicyResolver::can_use_model(pool, user_id, model_id).await
 	}
 
 	pub async fn list_for_admin(pool: &sqlx::PgPool, page: i64, size: i64, search_query: Option<String>) -> Result<PaginatedResponse<ModelListAdmin>, sqlx::Error> {

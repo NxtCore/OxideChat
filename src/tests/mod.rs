@@ -6,4 +6,5 @@ pub mod i18n;
 pub mod logging;
 pub mod models;
 pub mod response;
+pub mod teams;
 pub mod workspaces;

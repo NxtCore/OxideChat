@@ -40,6 +40,15 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/tools/{id}/settings", get(admin::tools::get_tool_settings))
 		.route("/api/v1/admin/tools/{id}/settings", put(admin::tools::set_tool_settings))
 		.route("/api/v1/admin/tools/{id}/test", post(admin::tools::test_tool))
+		// Admin Teams
+		.route("/api/v1/admin/teams", get(admin::teams::list_teams))
+		.route("/api/v1/admin/teams", post(admin::teams::create_team))
+		.route("/api/v1/admin/teams/{id}", get(admin::teams::get_team))
+		.route("/api/v1/admin/teams/{id}", patch(admin::teams::update_team))
+		.route("/api/v1/admin/teams/{id}", delete(admin::teams::delete_team))
+		.route("/api/v1/admin/teams/{id}/members", put(admin::teams::set_team_members))
+		.route("/api/v1/admin/teams/{id}/models", put(admin::teams::set_team_models))
+		.route("/api/v1/admin/teams/{id}/budget", patch(admin::teams::update_team_budget))
 		// Admin Users
 		.route("/api/v1/admin/users", get(admin::users::list_users))
 		.route("/api/v1/admin/users", post(admin::users::create_user))
@@ -47,6 +56,7 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/users/{id}", put(admin::users::update_user))
 		.route("/api/v1/admin/users/{id}", delete(admin::users::delete_user))
 		.route("/api/v1/admin/users/{id}/roles", put(admin::users::set_user_roles))
+		.route("/api/v1/admin/users/{id}/teams", put(admin::users::set_user_teams))
 		.route("/api/v1/admin/users/{id}/password", put(admin::users::reset_password))
 		// Admin Models
 		.route("/api/v1/admin/models", get(admin::models::list_models))

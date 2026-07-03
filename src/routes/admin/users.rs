@@ -5,7 +5,7 @@
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::routes::public::auth::get_current_user;
 use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
-use crate::types::{AdminResetPasswordRequest, CreateAdminUserRequest, JobState, ListUsersQuery, SetUserRolesRequest, UpdateUserRequest, User};
+use crate::types::{AdminResetPasswordRequest, CreateAdminUserRequest, JobState, ListUsersQuery, SetUserRolesRequest, SetUserTeamsRequest, UpdateUserRequest, User};
 use crate::utils::auth::{hash_password, validate_email, validate_password, validate_username};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
@@ -37,7 +37,7 @@ pub async fn list_users(State(state): State<Arc<JobState>>, cookies: Cookies, Qu
 	let search = params.search.as_deref();
 	let role = params.role.as_deref();
 
-	match User::list_paginated_light(&state.db, page, per_page, search, role).await {
+	match User::list_paginated_light(&state.db, page, per_page, search, role, params.team_id.as_ref()).await {
 		Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),
 		Err(e) => {
 			eprintln!("[USERS] Failed to list users: {e}");
@@ -149,6 +149,13 @@ pub async fn create_user(State(state): State<Arc<JobState>>, cookies: Cookies, J
 	if let Err(e) = new_user.set_roles(&state.db, &req.roles).await {
 		eprintln!("[USERS] Failed to assign roles: {e}");
 		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+	}
+
+	if let Some(team_ids) = &req.team_ids {
+		if let Err(e) = new_user.set_teams(&state.db, team_ids).await {
+			eprintln!("[USERS] Failed to assign teams: {e}");
+			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+		}
 	}
 
 	AuditLog::log(&state.db, LogEvent::UserRegistered, Some(actor.id), Some(EntityType::User), Some(new_user.id));
@@ -307,6 +314,41 @@ pub async fn set_user_roles(State(state): State<Arc<JobState>>, cookies: Cookies
 	}
 
 	AuditLog::log(&state.db, LogEvent::RoleAssigned, Some(actor.id), Some(EntityType::User), Some(id));
+
+	match target.to_response(&state.db).await {
+		Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),
+		Err(e) => {
+			eprintln!("[USERS] Failed to build user response: {e}");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
+	}
+}
+
+pub async fn set_user_teams(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<SetUserTeamsRequest>) -> impl IntoResponse {
+	let actor = match get_current_user(&state.db, &cookies).await {
+		Some(u) => u,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+
+	if !actor.has_permission(&state.db, ADMIN_USERS_EDIT).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+
+	let target = match User::find_by_id(&state.db, &id).await {
+		Ok(Some(u)) => u,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::UserNotFound).build(),
+		Err(e) => {
+			eprintln!("[USERS] Failed to fetch user for team update: {e}");
+			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+		}
+	};
+
+	if let Err(e) = target.set_teams(&state.db, &req.team_ids).await {
+		eprintln!("[USERS] Failed to set teams: {e}");
+		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+	}
+
+	AuditLog::log(&state.db, LogEvent::UserUpdated, Some(actor.id), Some(EntityType::User), Some(id));
 
 	match target.to_response(&state.db).await {
 		Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),

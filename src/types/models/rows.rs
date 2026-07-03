@@ -5,6 +5,7 @@ use serde_json::Value;
 use sqlx::types::Json;
 use uuid::Uuid;
 
+#[derive(sqlx::FromRow)]
 pub(super) struct ModelListPublicRow {
 	pub id: Uuid,
 	pub model_id: String,

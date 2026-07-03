@@ -62,13 +62,22 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 /// open (when nothing is stored yet and the parent catalog model is available), mirroring the
 /// admin endpoint but available to any authenticated user.
 pub async fn get_provider_options(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	if get_current_user(&state.db, &cookies).await.is_none() {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	}
+	};
 
 	// Feature-gated: when disabled, behave as if there are no provider options.
 	if !Config::get().enable_provider_selector() {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+
+	match Model::can_user_use_model(&state.db, &user.id, &id).await {
+		Ok(true) => {}
+		Ok(false) => return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build(),
+		Err(e) => {
+			eprintln!("[PUBLIC] Failed to check provider option access: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
 	}
 
 	let mut options = match GatewayCatalogModel::provider_options_for_model(&state.db, &id).await {
@@ -99,6 +108,15 @@ pub async fn set_model_favorite(State(state): State<Arc<JobState>>, cookies: Coo
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
+
+	match Model::can_user_use_model(&state.db, &user.id, &id).await {
+		Ok(true) => {}
+		Ok(false) => return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build(),
+		Err(e) => {
+			eprintln!("[PUBLIC] Failed to check favorite model access: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	}
 
 	if let Err(e) = ModelConfig::set_user_favorite(&state.db, &user.id, &id, body.is_favorite).await {
 		eprintln!("[PUBLIC] Failed to set model favorite: {e}");

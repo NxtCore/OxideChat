@@ -3,6 +3,38 @@ export interface PaginatedResponse<T> {
 	items: T[];
 }
 
+export interface TeamSummary {
+	id: string;
+	name: string;
+	is_default: boolean;
+}
+
+export interface TeamList {
+	id: string;
+	name: string;
+	description: string | null;
+	is_default: boolean;
+	allow_all_models: boolean;
+	budget_id: string | null;
+	member_count: number;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface TeamMember {
+	id: string;
+	email: string;
+	username: string;
+}
+
+export interface TeamDetailed extends Omit<TeamList, 'member_count'> {
+	members: TeamMember[];
+	model_access: {
+		provider_ids: string[];
+		model_ids: string[];
+	};
+}
+
 export interface ProviderTab {
 	id: string;
 	name: string;

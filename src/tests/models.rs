@@ -2,12 +2,13 @@
 mod tests {
 	use crate::types::models::{Model, ModelViewer};
 	use crate::types::models_configs::ModelConfig;
+	use crate::types::teams::Team;
 	use sqlx::PgPool;
 	use sqlx::types::Json;
 	use uuid::Uuid;
 
 	async fn create_user(pool: &PgPool, suffix: &str) -> Uuid {
-		sqlx::query_scalar::<_, Uuid>(
+		let user_id = sqlx::query_scalar::<_, Uuid>(
 			r#"
 			INSERT INTO users (email, username, password_hash)
 			VALUES ($1, $2, 'hash')
@@ -18,7 +19,9 @@ mod tests {
 		.bind(format!("user_{suffix}"))
 		.fetch_one(pool)
 		.await
-		.unwrap()
+		.unwrap();
+		Team::ensure_default_membership(pool, &user_id).await.unwrap();
+		user_id
 	}
 
 	async fn create_provider(pool: &PgPool, name: &str, is_enabled: bool) -> Uuid {
@@ -271,5 +274,134 @@ mod tests {
 		assert!(provider_names.contains(&"Provider Alpha"));
 		assert!(provider_names.contains(&"Provider Beta"));
 		assert!(!provider_names.contains(&"Disabled Provider"));
+	}
+
+	async fn restrict_general_team(pool: &PgPool) {
+		sqlx::query("UPDATE teams SET allow_all_models = false WHERE is_default = true")
+			.execute(pool)
+			.await
+			.unwrap();
+	}
+
+	async fn create_team(pool: &PgPool, name: &str) -> Uuid {
+		sqlx::query_scalar::<_, Uuid>(
+			r#"
+			INSERT INTO teams (name, allow_all_models)
+			VALUES ($1, false)
+			RETURNING id
+			"#,
+		)
+		.bind(name)
+		.fetch_one(pool)
+		.await
+		.unwrap()
+	}
+
+	async fn add_user_to_team(pool: &PgPool, user_id: Uuid, team_id: Uuid) {
+		sqlx::query("INSERT INTO team_members (team_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+			.bind(team_id)
+			.bind(user_id)
+			.execute(pool)
+			.await
+			.unwrap();
+	}
+
+	async fn grant_model(pool: &PgPool, team_id: Uuid, model_id: Uuid) {
+		sqlx::query("INSERT INTO team_model_access (team_id, model_id) VALUES ($1, $2)")
+			.bind(team_id)
+			.bind(model_id)
+			.execute(pool)
+			.await
+			.unwrap();
+	}
+
+	async fn grant_provider(pool: &PgPool, team_id: Uuid, provider_id: Uuid) {
+		sqlx::query("INSERT INTO team_model_access (team_id, provider_id) VALUES ($1, $2)")
+			.bind(team_id)
+			.bind(provider_id)
+			.execute(pool)
+			.await
+			.unwrap();
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn team_model_access_aggregates_across_memberships(pool: PgPool) {
+		restrict_general_team(&pool).await;
+		let user_id = create_user(&pool, "team-union").await;
+		let provider_id = create_provider(&pool, "Union Provider", true).await;
+		let gpt_model = create_model(&pool, provider_id, "gpt-team", "GPT Team", true).await;
+		let claude_model = create_model(&pool, provider_id, "claude-team", "Claude Team", true).await;
+		create_model(&pool, provider_id, "hidden-team", "Hidden Team", true).await;
+
+		let team_a = create_team(&pool, "Team A").await;
+		let team_b = create_team(&pool, "Team B").await;
+		add_user_to_team(&pool, user_id, team_a).await;
+		add_user_to_team(&pool, user_id, team_b).await;
+		grant_model(&pool, team_a, gpt_model).await;
+		grant_model(&pool, team_b, claude_model).await;
+
+		let viewer = ModelViewer { user_id: &user_id };
+		let response = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
+		let ids: Vec<&str> = response.items.iter().map(|item| item.model_id.as_str()).collect();
+		assert_eq!(response.items.len(), 2);
+		assert!(ids.contains(&"gpt-team"));
+		assert!(ids.contains(&"claude-team"));
+		assert!(!ids.contains(&"hidden-team"));
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn team_grants_do_not_expose_disabled_models_or_providers(pool: PgPool) {
+		restrict_general_team(&pool).await;
+		let user_id = create_user(&pool, "team-disabled").await;
+		let disabled_provider_id = create_provider(&pool, "Disabled Team Provider", false).await;
+		let enabled_provider_id = create_provider(&pool, "Enabled Team Provider", true).await;
+		let provider_disabled_model = create_model(&pool, disabled_provider_id, "provider-off", "Provider Off", true).await;
+		let disabled_model = create_model(&pool, enabled_provider_id, "model-off", "Model Off", false).await;
+		let team_id = create_team(&pool, "Disabled Grant Team").await;
+		add_user_to_team(&pool, user_id, team_id).await;
+		grant_model(&pool, team_id, provider_disabled_model).await;
+		grant_model(&pool, team_id, disabled_model).await;
+
+		let viewer = ModelViewer { user_id: &user_id };
+		let response = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
+		assert!(response.items.is_empty());
+		assert!(!Model::can_user_use_model(&pool, &user_id, &provider_disabled_model).await.unwrap());
+		assert!(!Model::can_user_use_model(&pool, &user_id, &disabled_model).await.unwrap());
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn provider_level_team_grant_exposes_provider_models(pool: PgPool) {
+		restrict_general_team(&pool).await;
+		let user_id = create_user(&pool, "team-provider").await;
+		let provider_a = create_provider(&pool, "Granted Provider", true).await;
+		let provider_b = create_provider(&pool, "Other Provider", true).await;
+		create_model(&pool, provider_a, "provider-a-one", "Provider A One", true).await;
+		create_model(&pool, provider_a, "provider-a-two", "Provider A Two", true).await;
+		create_model(&pool, provider_b, "provider-b-one", "Provider B One", true).await;
+		let team_id = create_team(&pool, "Provider Grant Team").await;
+		add_user_to_team(&pool, user_id, team_id).await;
+		grant_provider(&pool, team_id, provider_a).await;
+
+		let viewer = ModelViewer { user_id: &user_id };
+		let response = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
+		let ids: Vec<&str> = response.items.iter().map(|item| item.model_id.as_str()).collect();
+		assert_eq!(response.items.len(), 2);
+		assert!(ids.contains(&"provider-a-one"));
+		assert!(ids.contains(&"provider-a-two"));
+		assert!(!ids.contains(&"provider-b-one"));
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn direct_model_authorization_requires_team_grant(pool: PgPool) {
+		restrict_general_team(&pool).await;
+		let user_id = create_user(&pool, "team-authz").await;
+		let provider_id = create_provider(&pool, "Authz Provider", true).await;
+		let model_id = create_model(&pool, provider_id, "authz-model", "Authz Model", true).await;
+		assert!(!Model::can_user_use_model(&pool, &user_id, &model_id).await.unwrap());
+
+		let team_id = create_team(&pool, "Authz Team").await;
+		add_user_to_team(&pool, user_id, team_id).await;
+		grant_model(&pool, team_id, model_id).await;
+		assert!(Model::can_user_use_model(&pool, &user_id, &model_id).await.unwrap());
 	}
 }

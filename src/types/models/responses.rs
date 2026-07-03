@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct ProviderTab {
 	pub id: Uuid,
 	pub name: String,

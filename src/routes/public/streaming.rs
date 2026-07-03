@@ -377,6 +377,15 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	};
 
+	match Model::can_user_use_model(&state.db, &user.id, &model.id).await {
+		Ok(true) => {}
+		Ok(false) => return error_stream("model_not_allowed", "Model not available for this user").into_response(),
+		Err(e) => {
+			eprintln!("[STREAM] Failed to check model access: {e}");
+			return error_stream("internal_error", "Failed to check model access").into_response();
+		}
+	}
+
 	let user_model_config = ModelConfig::find_for_user_by_stable_key(&state.db, ModelConfigViewer { user_id: &user.id }, &req.model_key)
 		.await
 		.ok()

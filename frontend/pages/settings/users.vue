@@ -21,6 +21,14 @@
 					<ShadSelectItem v-for="role in availableRoles" :key="role.id" :value="role.name">{{ role.name }}</ShadSelectItem>
 				</ShadSelectContent>
 			</ShadSelect>
+			<ShadSelect v-model="teamFilter" clearable>
+				<ShadSelectTrigger class="w-44">
+					<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.filter_team')" />
+				</ShadSelectTrigger>
+				<ShadSelectContent>
+					<ShadSelectItem v-for="team in availableTeams" :key="team.id" :value="team.id">{{ team.name }}</ShadSelectItem>
+				</ShadSelectContent>
+			</ShadSelect>
 		</div>
 
 		<div v-if="loading" class="flex items-center justify-center py-12 text-muted-foreground">
@@ -50,6 +58,13 @@
 							:class="role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'"
 						>
 							{{ role }}
+						</span>
+						<span
+							v-for="team in user.teams"
+							:key="team.id"
+							class="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-foreground"
+						>
+							{{ team.name }}
 						</span>
 					</div>
 					<div class="flex items-center gap-3 mt-0.5 text-sm text-muted-foreground">
@@ -127,6 +142,17 @@
 							</ShadSelectContent>
 						</ShadSelect>
 					</div>
+					<div class="space-y-2">
+						<ShadLabel>{{ store.getTranslation('settings.admin_users.field_teams') }}</ShadLabel>
+						<ShadSelect v-model="createForm.team_ids" multiple>
+							<ShadSelectTrigger class="w-full">
+								<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.select_teams')" />
+							</ShadSelectTrigger>
+							<ShadSelectContent>
+								<ShadSelectItem v-for="team in availableTeams" :key="team.id" :value="team.id" :disabled="team.is_default">{{ team.name }}</ShadSelectItem>
+							</ShadSelectContent>
+						</ShadSelect>
+					</div>
 				</div>
 				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="createOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
@@ -161,6 +187,17 @@
 							</ShadSelectTrigger>
 							<ShadSelectContent>
 								<ShadSelectItem v-for="role in availableRoles" :key="role.id" :value="role.name">{{ role.name }}</ShadSelectItem>
+							</ShadSelectContent>
+						</ShadSelect>
+					</div>
+					<div class="space-y-2">
+						<ShadLabel>{{ store.getTranslation('settings.admin_users.field_teams') }}</ShadLabel>
+						<ShadSelect v-model="editForm.team_ids" multiple>
+							<ShadSelectTrigger class="w-full">
+								<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.select_teams')" />
+							</ShadSelectTrigger>
+							<ShadSelectContent>
+								<ShadSelectItem v-for="team in availableTeams" :key="team.id" :value="team.id" :disabled="team.is_default">{{ team.name }}</ShadSelectItem>
 							</ShadSelectContent>
 						</ShadSelect>
 					</div>
@@ -208,6 +245,7 @@
 import {ref, reactive, computed, watch, onMounted} from 'vue';
 import {Users, Plus, Pencil, Trash2, Loader2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
+import type {PaginatedResponse, TeamList, TeamSummary} from '~/types/chat';
 
 const {$customFetch} = useNuxtApp();
 const store = useMainStore();
@@ -218,6 +256,7 @@ interface UserResponse {
 	username: string;
 	auth_method: string;
 	roles: string[];
+	teams: TeamSummary[];
 	permissions: string[];
 	created_at: string;
 }
@@ -236,6 +275,7 @@ const perPage = ref(20);
 const searchRaw = ref('');
 const search = ref('');
 const roleFilter = ref(null);
+const teamFilter = ref(null);
 const loading = ref(false);
 const saving = ref(false);
 
@@ -243,12 +283,24 @@ const createOpen = ref(false);
 const editOpen = ref(false);
 const deleteOpen = ref(false);
 const selectedUser = ref<UserResponse | null>(null);
+const teams = ref<TeamList[]>([]);
 
-const createForm = reactive({email: '', username: '', password: '', roles: [] as string[]});
-const editForm = reactive({email: '', username: '', roles: [] as string[], newPassword: ''});
+const defaultTeamIds = computed(() => teams.value.filter(t => t.is_default).map(t => t.id));
+function ensureDefaultTeams(ids: string[]) {
+	for (const id of defaultTeamIds.value) {
+		if (!ids.includes(id)) ids.push(id);
+	}
+}
+
+const createForm = reactive({email: '', username: '', password: '', roles: [] as string[], team_ids: [] as string[]});
+const editForm = reactive({email: '', username: '', roles: [] as string[], team_ids: [] as string[], newPassword: ''});
+
+watch(() => createForm.team_ids, () => ensureDefaultTeams(createForm.team_ids));
+watch(() => editForm.team_ids, () => ensureDefaultTeams(editForm.team_ids));
 
 const totalPages = computed(() => Math.ceil(total.value / perPage.value));
 const availableRoles = computed(() => store.roles);
+const availableTeams = computed(() => teams.value);
 const visiblePages = computed(() => {
 	const pages: number[] = [];
 	const maxPages = 5;
@@ -287,7 +339,7 @@ watch(searchRaw, val => {
 	}, 300);
 });
 
-watch([roleFilter, page, perPage], () => {
+watch([roleFilter, teamFilter, page, perPage], () => {
 	loadUsers();
 });
 
@@ -301,6 +353,7 @@ async function loadUsers() {
 		const params: Record<string, string | number> = {page: page.value, per_page: perPage.value};
 		if (search.value) params.search = search.value;
 		if (roleFilter.value) params.role = roleFilter.value;
+		if (teamFilter.value) params.team_id = teamFilter.value;
 
 		const result = await $customFetch<PaginatedUsersResponse>('/api/v1/admin/users', {params});
 		users.value = result.users ?? [];
@@ -313,6 +366,16 @@ async function loadUsers() {
 	}
 }
 
+async function loadTeams() {
+	try {
+		const result = await $customFetch<PaginatedResponse<TeamList>>('/api/v1/admin/teams', {params: {size: 100}});
+		teams.value = result.items ?? [];
+	} catch (e: any) {
+		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
+		store.toast(store.getTranslation('settings.teams.load_error'), {type: 'error', description: errorMessage});
+	}
+}
+
 function formatDate(iso: string) {
 	return new Date(iso).toLocaleDateString(undefined, {year: 'numeric', month: 'short', day: 'numeric'});
 }
@@ -322,6 +385,7 @@ function openCreateDialog() {
 	createForm.username = '';
 	createForm.password = '';
 	createForm.roles = ['user'];
+	createForm.team_ids = teams.value.filter(team => team.is_default).map(team => team.id);
 	createOpen.value = true;
 }
 
@@ -330,6 +394,7 @@ function openEditDialog(u: UserResponse) {
 	editForm.email = u.email;
 	editForm.username = u.username;
 	editForm.roles = [...u.roles];
+	editForm.team_ids = u.teams.map(team => team.id);
 	editForm.newPassword = '';
 	editOpen.value = true;
 }
@@ -344,7 +409,7 @@ async function submitCreate() {
 	try {
 		await $customFetch('/api/v1/admin/users', {
 			method: 'POST',
-			body: {email: createForm.email, username: createForm.username, password: createForm.password, roles: createForm.roles},
+			body: {email: createForm.email, username: createForm.username, password: createForm.password, roles: createForm.roles, team_ids: createForm.team_ids},
 		});
 		store.toast(store.getTranslation('settings.admin_users.create_success'), {type: 'success'});
 		createOpen.value = false;
@@ -369,6 +434,11 @@ async function submitEdit() {
 		await $customFetch(`/api/v1/admin/users/${selectedUser.value.id}/roles`, {
 			method: 'PUT',
 			body: {roles: editForm.roles},
+		});
+
+		await $customFetch(`/api/v1/admin/users/${selectedUser.value.id}/teams`, {
+			method: 'PUT',
+			body: {team_ids: editForm.team_ids},
 		});
 
 		if (editForm.newPassword) {
@@ -405,7 +475,8 @@ async function submitDelete() {
 	}
 }
 
-onMounted(() => {
-	loadUsers();
+onMounted(async () => {
+	await loadTeams();
+	await loadUsers();
 });
 </script>
