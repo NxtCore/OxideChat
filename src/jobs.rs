@@ -3,6 +3,7 @@
 //! Contains scheduled tasks like session cleanup and provider model sync that run periodically.
 
 use crate::types::providers::Provider;
+use crate::types::tools::McpServer;
 use crate::utils::providers::sync_provider_models;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -11,6 +12,10 @@ use std::time::Duration;
 /// Minimum interval between session cleanup runs.
 const SESSION_CLEANUP_INTERVAL_SECS: u64 = 3600; // 1 hour
 const PROVIDER_SYNC_INTERVAL_SECS: u64 = 500; // 5 minutes
+/// How often to reap idle MCP clients and health-check system servers.
+const MCP_MAINTENANCE_INTERVAL_SECS: u64 = 300; // 5 minutes
+/// Close pooled MCP clients that have been idle for longer than this.
+const MCP_IDLE_MAX_SECS: u64 = 300; // 5 minutes
 
 /// Start the background job scheduler.
 ///
@@ -21,10 +26,38 @@ pub async fn start_job_scheduler(state: Arc<super::JobState>) {
 	let handles: Vec<tokio::task::JoinHandle<()>> = vec![
 		tokio::spawn(session_cleanup_job(Arc::clone(&state))),
 		tokio::spawn(provider_sync_job(Arc::clone(&state))),
+		tokio::spawn(mcp_maintenance_job(Arc::clone(&state))),
 	];
 
 	for handle in handles {
 		let _ = handle.await;
+	}
+}
+
+/// Periodically close idle pooled MCP clients and refresh system server health.
+///
+/// Reaping frees idle `stdio` subprocesses and stale remote connections while
+/// still letting a single chat reuse one client across its tool calls.
+async fn mcp_maintenance_job(state: Arc<super::JobState>) {
+	println!("[JOBS] MCP maintenance job started");
+
+	loop {
+		tokio::time::sleep(Duration::from_secs(MCP_MAINTENANCE_INTERVAL_SECS)).await;
+
+		let reaped = state.mcp_pool.reap_idle(Duration::from_secs(MCP_IDLE_MAX_SECS)).await;
+		if reaped > 0 {
+			println!("[JOBS] Reaped {reaped} idle MCP clients");
+		}
+
+		match McpServer::list_system(&state.db).await {
+			Ok(servers) => {
+				for server in servers.into_iter().filter(|s| s.is_enabled) {
+					let status = if server.discover().await.is_ok() { "healthy" } else { "unhealthy" };
+					let _ = McpServer::set_health(&state.db, &server.id, status).await;
+				}
+			}
+			Err(e) => eprintln!("[JOBS] Failed to list MCP servers for health check: {e}"),
+		}
 	}
 }
 

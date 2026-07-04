@@ -297,8 +297,8 @@ impl Message {
 
 		sqlx::query_as::<_, Message>(
 			r#"
-			INSERT INTO messages (chat_id, role, content, model_id, reasoning_details, usage_details, cost_details, parent_id, fork_index, is_active_fork)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
+			INSERT INTO messages (chat_id, role, content, model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
 			RETURNING *
 			"#,
 		)
@@ -309,6 +309,7 @@ impl Message {
 		.bind(&original.reasoning_details)
 		.bind(&original.usage_details)
 		.bind(&original.cost_details)
+		.bind(&original.request_settings)
 		.bind(original.parent_id)
 		.bind(next_fork_index)
 		.fetch_one(pool)
@@ -376,8 +377,8 @@ impl Message {
 			let new_msg = sqlx::query_as::<_, Message>(
 				r#"
 				INSERT INTO messages (chat_id, role, content, content_parts, reasoning_content, model_id,
-					cost_details, usage_details, reasoning_details, parent_id, fork_index, is_active_fork)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, TRUE)
+					cost_details, usage_details, reasoning_details, request_settings, parent_id, fork_index, is_active_fork)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, TRUE)
 				RETURNING *
 				"#,
 			)
@@ -390,6 +391,7 @@ impl Message {
 			.bind(&msg.cost_details)
 			.bind(&msg.usage_details)
 			.bind(&msg.reasoning_details)
+			.bind(&msg.request_settings)
 			.bind(new_parent_id)
 			.fetch_one(pool)
 			.await?;

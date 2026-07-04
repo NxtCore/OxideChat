@@ -62,10 +62,16 @@ mod tests {
 		let user = create_user(&pool, "color").await;
 		let ws = Workspace::create(&pool, &user, "Ws", None, Some("#3b82f6"), false).await.unwrap();
 
-		let kept = Workspace::update(&pool, &ws.id, &user, Some("Renamed"), None, None, None, None).await.unwrap().unwrap();
+		let kept = Workspace::update(&pool, &ws.id, &user, Some("Renamed"), None, None, None, None)
+			.await
+			.unwrap()
+			.unwrap();
 		assert_eq!(kept.color.as_deref(), Some("#3b82f6"));
 
-		let recolored = Workspace::update(&pool, &ws.id, &user, None, None, Some(Some("#ef4444")), None, None).await.unwrap().unwrap();
+		let recolored = Workspace::update(&pool, &ws.id, &user, None, None, Some(Some("#ef4444")), None, None)
+			.await
+			.unwrap()
+			.unwrap();
 		assert_eq!(recolored.color.as_deref(), Some("#ef4444"));
 
 		let cleared = Workspace::update(&pool, &ws.id, &user, None, None, Some(None), None, None).await.unwrap().unwrap();

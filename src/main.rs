@@ -66,7 +66,11 @@ async fn main() {
 
 	ai::init(&pool).await;
 
-	let app_state = Arc::new(JobState { db: pool.clone() });
+	let app_state = Arc::new(JobState {
+		db: pool.clone(),
+		mcp_pool: crate::utils::tools::McpConnectionPool::new(),
+		client_tool_pending: crate::types::state::ClientToolPending::new(),
+	});
 
 	tokio::spawn(jobs::start_job_scheduler(app_state.clone()));
 

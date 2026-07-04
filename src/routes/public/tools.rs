@@ -1,6 +1,5 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::consts::ADMIN_TOOLS_VIEW;
 use crate::types::tools::*;
 
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
@@ -15,14 +14,7 @@ pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) ->
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
 
-	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	let tools = match sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE owner_id IS NULL AND is_public = true ORDER BY created_at DESC")
-		.fetch_all(&state.db)
-		.await
-	{
+	let tools = match Tool::list_for_user(&state.db, &user.id).await {
 		Ok(t) => t,
 		Err(e) => {
 			eprintln!("[TOOLS] Failed to list tools: {e}");

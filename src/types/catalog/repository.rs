@@ -1,7 +1,5 @@
 use super::rows::{GatewayCatalogModelRow, GatewayProviderOptionRow};
-use super::{
-	AvailabilityState, GatewayCatalogModel, GatewayCatalogModelResponse, GatewayCatalogSyncInput, GatewayProviderOptionSyncInput, ModelProviderOptions,
-};
+use super::{AvailabilityState, GatewayCatalogModel, GatewayCatalogModelResponse, GatewayCatalogSyncInput, GatewayProviderOptionSyncInput, ModelProviderOptions};
 use crate::types::BaseType;
 use crate::types::axum::PaginatedResponse;
 use serde_json::Value;

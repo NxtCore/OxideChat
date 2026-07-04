@@ -1,15 +1,16 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
+use crate::types::models::Model;
 use crate::types::{Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, Message, UpdateChatRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use chrono::{DateTime, Utc};
-use sqlx::PgPool;
 use axum::{
 	Json,
 	extract::{Path, Query, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
+use chrono::{DateTime, Utc};
+use sqlx::PgPool;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -44,15 +45,7 @@ pub async fn list_chats(State(state): State<Arc<JobState>>, cookies: Cookies, Qu
 	let limit = params.limit.unwrap_or(50).min(100) as i64;
 	let offset = params.offset.unwrap_or(0) as i64;
 
-	let chats = Chat::list_by_user(
-		&state.db,
-		&user.id,
-		params.workspace_id.as_ref(),
-		params.include_archived,
-		limit,
-		offset,
-	)
-	.await;
+	let chats = Chat::list_by_user(&state.db, &user.id, params.workspace_id.as_ref(), params.include_archived, limit, offset).await;
 
 	match chats {
 		Ok(chats) => {
@@ -144,6 +137,14 @@ pub async fn get_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path
 	};
 
 	let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+	let model_ids: Vec<Uuid> = messages.iter().filter_map(|m| m.model_id).collect();
+	let model_keys = match Model::model_keys_by_ids(&state.db, &model_ids).await {
+		Ok(keys) => keys,
+		Err(e) => {
+			eprintln!("[CHATS] Failed to get message model keys: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
 
 	let sibling_counts = match Message::sibling_counts_for_chat(&state.db, &id).await {
 		Ok(c) => c,
@@ -168,6 +169,9 @@ pub async fn get_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path
 			let parent_id = m.parent_id;
 			let role = m.role.clone();
 			let mut response = ChatMessageResponse::from(m);
+			if response.model_key.is_none() {
+				response.model_key = response.model_id.and_then(|model_id| model_keys.get(&model_id).cloned());
+			}
 			if let Some(tools) = tool_executions.remove(&msg_id) {
 				if !tools.is_empty() {
 					response.tool_calls = Some(tools);

@@ -135,6 +135,16 @@ pub struct McpSourceConfig {
 	pub tool_name: String,
 }
 
+impl McpSourceConfig {
+	#[must_use]
+	pub fn from_tool(tool: &Tool) -> Option<Self> {
+		if tool.source_kind != ToolSourceKind::Mcp {
+			return None;
+		}
+		serde_json::from_value(tool.source_config.clone()).ok()
+	}
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpSourceConfig {
 	pub url: String,
@@ -159,7 +169,7 @@ pub struct McpStdioConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpSseConfig {
+pub struct McpHttpConfig {
 	pub url: String,
 	#[serde(default)]
 	pub headers: std::collections::HashMap<String, String>,

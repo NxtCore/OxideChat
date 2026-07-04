@@ -621,7 +621,33 @@ pub async fn test_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Pat
 			}
 		}
 		ToolSourceKind::Mcp => {
-			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+			let config: McpSourceConfig = match serde_json::from_value(tool.source_config.clone()) {
+				Ok(c) => c,
+				Err(e) => {
+					eprintln!("[TOOLS] Invalid MCP config: {e}");
+					return ErrorBuilder::new(ErrorCode::InternalError).build();
+				}
+			};
+
+			let server = match McpServer::find_scoped(&state.db, &config.mcp_server_id, None).await {
+				Ok(Some(s)) => s,
+				Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+				Err(e) => {
+					eprintln!("[TOOLS] Failed to load MCP server: {e}");
+					return ErrorBuilder::new(ErrorCode::InternalError).build();
+				}
+			};
+
+			match server.get_client(&state.mcp_pool).await {
+				Ok(client) => match client.call_tool(&config.tool_name, req.input.clone()).await {
+					Ok(output) => Ok(output),
+					Err(e) => {
+						state.mcp_pool.evict(&server.id).await;
+						Err(e)
+					}
+				},
+				Err(e) => Err(e),
+			}
 		}
 	};
 	let execution_ms = start.elapsed().as_millis() as i32;

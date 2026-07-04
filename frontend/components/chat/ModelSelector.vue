@@ -278,16 +278,4 @@ function toggleFavorite(model: Model) {
 	chatStore.toggleFavoriteModel(model.id);
 }
 
-watch(
-	() => chatStore.activeChat?.id,
-	(newId, oldId) => {
-		if (newId !== oldId && newId && chatStore.messages.length > 0) {
-			const last_llm_message = chatStore.messages.findLast(m => m.role === 'assistant');
-			const model = chatStore.models.find(m => m.id === last_llm_message?.model_id);
-			if (model && model.id !== chatStore.selectedModel?.id) {
-				chatStore.setSelectedModel(model);
-			}
-		}
-	}
-);
 </script>

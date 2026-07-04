@@ -1,5 +1,8 @@
-use super::{McpServer, Tool, ToolExecution, ToolFunction, ToolSourceKind, UserToolSettings, WasmBlob};
+use super::{McpHttpConfig, McpServer, McpSourceConfig, McpStdioConfig, Tool, ToolExecution, ToolFunction, ToolSourceKind, UserToolSettings, WasmBlob};
+use crate::utils::tools::mcp::McpToolInfo;
+use crate::utils::tools::{McpClient, McpConnectionPool, ToolError};
 use sqlx::Row;
+use std::sync::Arc;
 use uuid::Uuid;
 
 impl Tool {
@@ -129,6 +132,48 @@ impl Tool {
 	pub async fn delete(pool: &sqlx::PgPool, id: &Uuid) -> Result<bool, sqlx::Error> {
 		let result = sqlx::query("DELETE FROM tools WHERE id = $1").bind(id).execute(pool).await?;
 		Ok(result.rows_affected() > 0)
+	}
+
+	/// Fetch enabled tools by id that the user may use (owned by the user or global).
+	pub async fn find_enabled_for_user(pool: &sqlx::PgPool, ids: &[Uuid], user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)")
+			.bind(ids)
+			.bind(user_id)
+			.fetch_all(pool)
+			.await
+	}
+
+	/// Look up an enabled tool by name that the user may use, preferring the
+	/// user-owned tool over a global one on a name collision.
+	pub async fn find_enabled_by_name_for_user(pool: &sqlx::PgPool, name: &str, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Tool>(
+			"SELECT * FROM tools WHERE name = $1 AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL) ORDER BY owner_id NULLS LAST LIMIT 1",
+		)
+		.bind(name)
+		.bind(user_id)
+		.fetch_optional(pool)
+		.await
+	}
+
+	/// Display names of the generated tools for a given MCP server and owner scope.
+	pub async fn names_for_mcp_server(pool: &sqlx::PgPool, server_id: &Uuid, owner_id: Option<&Uuid>) -> Result<Vec<String>, sqlx::Error> {
+		let rows: Vec<(String,)> = sqlx::query_as(
+			"SELECT display_name FROM tools WHERE source_kind = 'MCP' AND owner_id IS NOT DISTINCT FROM $2 AND source_config->>'mcp_server_id' = $1 ORDER BY display_name",
+		)
+		.bind(server_id.to_string())
+		.bind(owner_id)
+		.fetch_all(pool)
+		.await?;
+		Ok(rows.into_iter().map(|r| r.0).collect())
+	}
+
+	/// List enabled tools visible to the user in the chat tool selector
+	/// (their own tools plus global tools).
+	pub async fn list_for_user(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE is_enabled = true AND (owner_id = $1 OR owner_id IS NULL) ORDER BY created_at DESC")
+			.bind(user_id)
+			.fetch_all(pool)
+			.await
 	}
 }
 
@@ -318,6 +363,232 @@ impl McpServer {
 			.fetch_all(pool)
 			.await
 	}
+
+	/// List the servers owned by a specific user (excludes global/system servers).
+	pub async fn list_owned(pool: &sqlx::PgPool, owner_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, McpServer>("SELECT * FROM mcp_servers WHERE owner_id = $1 ORDER BY name")
+			.bind(owner_id)
+			.fetch_all(pool)
+			.await
+	}
+
+	/// Fetch a server by id restricted to the given owner scope.
+	///
+	/// `owner_id = None` matches system (global) servers; `Some(uuid)` matches
+	/// servers owned by that user.
+	pub async fn find_scoped(pool: &sqlx::PgPool, id: &Uuid, owner_id: Option<&Uuid>) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, McpServer>("SELECT * FROM mcp_servers WHERE id = $1 AND owner_id IS NOT DISTINCT FROM $2")
+			.bind(id)
+			.bind(owner_id)
+			.fetch_optional(pool)
+			.await
+	}
+
+	/// Fetch a server usable by a user for execution: their own or a global one.
+	pub async fn find_owned_or_system(pool: &sqlx::PgPool, id: &Uuid, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, McpServer>("SELECT * FROM mcp_servers WHERE id = $1 AND (owner_id = $2 OR owner_id IS NULL)")
+			.bind(id)
+			.bind(user_id)
+			.fetch_optional(pool)
+			.await
+	}
+
+	pub async fn create(
+		pool: &sqlx::PgPool,
+		owner_id: Option<&Uuid>,
+		name: &str,
+		transport: &str,
+		connection_config: &serde_json::Value,
+		is_enabled: bool,
+	) -> Result<Self, sqlx::Error> {
+		sqlx::query_as::<_, McpServer>(
+			r#"
+			INSERT INTO mcp_servers (owner_id, name, transport, connection_config, is_enabled)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING *
+			"#,
+		)
+		.bind(owner_id)
+		.bind(name)
+		.bind(transport)
+		.bind(connection_config)
+		.bind(is_enabled)
+		.fetch_one(pool)
+		.await
+	}
+
+	pub async fn update_scoped(
+		pool: &sqlx::PgPool,
+		id: &Uuid,
+		owner_id: Option<&Uuid>,
+		name: Option<&str>,
+		transport: Option<&str>,
+		connection_config: Option<&serde_json::Value>,
+		is_enabled: Option<bool>,
+	) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, McpServer>(
+			r#"
+			UPDATE mcp_servers
+			SET name = COALESCE($3, name),
+			    transport = COALESCE($4, transport),
+			    connection_config = COALESCE($5, connection_config),
+			    is_enabled = COALESCE($6, is_enabled),
+			    updated_at = NOW()
+			WHERE id = $1 AND owner_id IS NOT DISTINCT FROM $2
+			RETURNING *
+			"#,
+		)
+		.bind(id)
+		.bind(owner_id)
+		.bind(name)
+		.bind(transport)
+		.bind(connection_config)
+		.bind(is_enabled)
+		.fetch_optional(pool)
+		.await
+	}
+
+	pub async fn delete_scoped(pool: &sqlx::PgPool, id: &Uuid, owner_id: Option<&Uuid>) -> Result<bool, sqlx::Error> {
+		let mut tx = pool.begin().await?;
+
+		sqlx::query("DELETE FROM tools WHERE source_kind = 'MCP' AND owner_id IS NOT DISTINCT FROM $1 AND source_config->>'mcp_server_id' = $2")
+			.bind(owner_id)
+			.bind(id.to_string())
+			.execute(&mut *tx)
+			.await?;
+
+		let result = sqlx::query("DELETE FROM mcp_servers WHERE id = $1 AND owner_id IS NOT DISTINCT FROM $2")
+			.bind(id)
+			.bind(owner_id)
+			.execute(&mut *tx)
+			.await?;
+
+		tx.commit().await?;
+		Ok(result.rows_affected() > 0)
+	}
+
+	pub async fn set_health(pool: &sqlx::PgPool, id: &Uuid, status: &str) -> Result<(), sqlx::Error> {
+		sqlx::query("UPDATE mcp_servers SET health_status = $2, last_health_check = NOW(), updated_at = NOW() WHERE id = $1")
+			.bind(id)
+			.bind(status)
+			.execute(pool)
+			.await?;
+		Ok(())
+	}
+
+	/// Whether this server uses a server-side stdio transport.
+	#[must_use]
+	pub fn is_stdio(&self) -> bool {
+		matches!(self.transport.to_lowercase().as_str(), "stdio")
+	}
+
+	/// Open a fresh, initialized MCP client based on this server's transport.
+	pub async fn connect(&self) -> Result<McpClient, ToolError> {
+		match self.transport.to_lowercase().as_str() {
+			"http" | "streamable-http" | "streamable_http" => {
+				let config: McpHttpConfig =
+					serde_json::from_value(self.connection_config.clone()).map_err(|e| ToolError::McpError(format!("Invalid HTTP config: {e}")))?;
+				McpClient::new_http(self.name.clone(), config.url, config.headers).await
+			}
+			"stdio" => {
+				let config: McpStdioConfig =
+					serde_json::from_value(self.connection_config.clone()).map_err(|e| ToolError::McpError(format!("Invalid stdio config: {e}")))?;
+				McpClient::new_stdio(self.name.clone(), &config.command, &config.args, &config.env).await
+			}
+			other => Err(ToolError::McpError(format!("Unsupported MCP transport: {other}"))),
+		}
+	}
+
+	/// Obtain a shared client for this server from the pool, connecting on miss.
+	pub async fn get_client(&self, mcp_pool: &McpConnectionPool) -> Result<Arc<McpClient>, ToolError> {
+		if let Some(client) = mcp_pool.get(&self.id).await {
+			return Ok(client);
+		}
+		let client = Arc::new(self.connect().await?);
+		mcp_pool.insert(self.id, Arc::clone(&client)).await;
+		Ok(client)
+	}
+
+	/// Connect and list the tools this server exposes.
+	pub async fn discover(&self) -> Result<Vec<McpToolInfo>, ToolError> {
+		let client = self.connect().await?;
+		let tools = client.list_tools().await;
+		let _ = client.close().await;
+		tools
+	}
+
+	/// Replace the generated `Tool` records for this server with the freshly
+	/// discovered tools, scoped to `owner_id` (`None` = system/global).
+	///
+	/// Each discovered MCP tool becomes one `Tool` row (`source_kind = MCP`)
+	/// whose `input_schema` is passed to the model and whose `source_config`
+	/// records the originating server and tool name.
+	pub async fn sync_tools(&self, pool: &sqlx::PgPool, owner_id: Option<&Uuid>, discovered: &[McpToolInfo]) -> Result<Vec<Tool>, sqlx::Error> {
+		let mut tx = pool.begin().await?;
+
+		sqlx::query("DELETE FROM tools WHERE source_kind = 'MCP' AND owner_id IS NOT DISTINCT FROM $1 AND source_config->>'mcp_server_id' = $2")
+			.bind(owner_id)
+			.bind(self.id.to_string())
+			.execute(&mut *tx)
+			.await?;
+
+		let mut created = Vec::with_capacity(discovered.len());
+		for info in discovered {
+			let tool_name = sanitize_tool_name(&format!("mcp_{}_{}", self.name, info.name));
+			let source_config = serde_json::to_value(McpSourceConfig {
+				mcp_server_id: self.id,
+				tool_name: info.name.clone(),
+			})
+			.unwrap_or_else(|_| serde_json::json!({}));
+
+			let tool = sqlx::query_as::<_, Tool>(
+				r#"
+				INSERT INTO tools (owner_id, name, display_name, description, icon,
+				                   source_kind, source_config, input_schema, settings_schema, is_enabled)
+				VALUES ($1, $2, $3, $4, NULL, 'MCP', $5, $6, '{}'::jsonb, true)
+				RETURNING *
+				"#,
+			)
+			.bind(owner_id)
+			.bind(&tool_name)
+			.bind(&info.name)
+			.bind(&info.description)
+			.bind(&source_config)
+			.bind(&info.input_schema)
+			.fetch_one(&mut *tx)
+			.await?;
+
+			created.push(tool);
+		}
+
+		tx.commit().await?;
+		Ok(created)
+	}
+}
+
+/// Sanitize a name into a model-safe tool identifier: lowercase, only
+/// `[a-z0-9_]`, collapsed underscores, capped at 100 characters.
+fn sanitize_tool_name(raw: &str) -> String {
+	let mut out = String::with_capacity(raw.len());
+	let mut prev_underscore = false;
+	for ch in raw.chars() {
+		let mapped = if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '_' };
+		if mapped == '_' {
+			if prev_underscore {
+				continue;
+			}
+			prev_underscore = true;
+		} else {
+			prev_underscore = false;
+		}
+		out.push(mapped);
+	}
+	let trimmed = out.trim_matches('_');
+	let mut result: String = trimmed.chars().take(100).collect();
+	if result.is_empty() {
+		result.push_str("mcp_tool");
+	}
+	result
 }
 
 impl ToolExecution {

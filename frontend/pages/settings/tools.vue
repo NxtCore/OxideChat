@@ -5,11 +5,19 @@
 				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.tools.title') }}</h2>
 				<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.tools.description') }}</p>
 			</div>
-			<ShadButton variant="default" size="sm" class="gap-2" @click="openCreateDialog">
-				<Plus class="h-4 w-4" />
-				<span>{{ store.getTranslation('settings.tools.add') }}</span>
-			</ShadButton>
+			<div class="flex items-center gap-2">
+				<ShadButton variant="outline" size="sm" class="gap-2" @click="mcpManagerOpen = true">
+					<Server class="h-4 w-4" />
+					<span>{{ store.getTranslation('sidebar.manage_mcp') }}</span>
+				</ShadButton>
+				<ShadButton variant="default" size="sm" class="gap-2" @click="openCreateDialog">
+					<Plus class="h-4 w-4" />
+					<span>{{ store.getTranslation('settings.tools.add') }}</span>
+				</ShadButton>
+			</div>
 		</div>
+
+		<McpManagerDialog v-model:open="mcpManagerOpen" :admin="true" @changed="loadTools" />
 
 		<div v-if="loading" class="flex items-center justify-center py-12">
 			<Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
@@ -152,15 +160,10 @@
 									</div>
 									<Input v-model="httpConfig.url" :placeholder="store.getTranslation('settings.tools.url_placeholder')" class="flex-1" />
 								</div>
-								<div class="space-y-1">
-									<Label class="text-xs">{{ store.getTranslation('settings.tools.headers') }}</Label>
-									<Textarea
-										v-model="httpConfig.headers_json"
-										:placeholder="store.getTranslation('settings.tools.headers_placeholder')"
-										rows="2"
-										class="font-mono text-xs"
-									/>
-								</div>
+							<div class="space-y-2">
+								<Label class="text-xs">{{ store.getTranslation('settings.tools.headers') }}</Label>
+								<HeaderEditor v-model="httpConfig.headers_json" />
+							</div>
 							</div>
 
 							<div v-if="toolForm.source_kind === 'MCP'" class="space-y-3 pt-2">
@@ -175,15 +178,10 @@
 									<Input v-model="mcpConfig.command" :placeholder="store.getTranslation('settings.tools.command_placeholder')" />
 									<Input v-model="mcpConfig.args" :placeholder="store.getTranslation('settings.tools.args_placeholder')" />
 								</template>
-								<template v-if="mcpConfig.transport === 'sse'">
-									<Input v-model="mcpConfig.url" :placeholder="store.getTranslation('settings.tools.url_placeholder')" />
-									<Textarea
-										v-model="mcpConfig.headers_json"
-										:placeholder="store.getTranslation('settings.tools.headers_placeholder')"
-										rows="2"
-										class="font-mono text-xs"
-									/>
-								</template>
+							<template v-if="mcpConfig.transport === 'sse'">
+								<Input v-model="mcpConfig.url" :placeholder="store.getTranslation('settings.tools.url_placeholder')" />
+								<HeaderEditor v-model="mcpConfig.headers_json" />
+							</template>
 								<Input v-model="mcpConfig.tool_name" :placeholder="store.getTranslation('settings.tools.tool_name_placeholder')" />
 							</div>
 
@@ -325,7 +323,9 @@
 import {ref, reactive, onMounted, computed} from 'vue';
 import {Plus, Settings2, Loader2, Wrench, Globe, Code, Server, Sparkles, Key, Play, Trash2, Check} from 'lucide-vue-next';
 import SchemaBuilder from '@/components/settings/SchemaBuilder.vue';
+import HeaderEditor from '@/components/settings/HeaderEditor.vue';
 import ToolTestDialog from '@/components/settings/ToolTestDialog.vue';
+import McpManagerDialog from '@/components/mcp/McpManagerDialog.vue';
 import {useMainStore} from '@/stores';
 import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog';
 import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
@@ -366,6 +366,7 @@ const loading = ref(true);
 const saving = ref(false);
 const uploading = ref(false);
 const tools = ref<Tool[]>([]);
+const mcpManagerOpen = ref(false);
 const dialogOpen = ref(false);
 const settingsDialogOpen = ref(false);
 const editingTool = ref<Tool | null>(null);

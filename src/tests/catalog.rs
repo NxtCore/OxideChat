@@ -87,7 +87,9 @@ mod tests {
 		GatewayCatalogModel::upsert_public_catalog(&pool, &provider_id, GATEWAY, &inputs).await.unwrap();
 
 		// Only gpt-4o is visible to the key.
-		GatewayCatalogModel::mark_availability(&pool, &provider_id, GATEWAY, &["openai/gpt-4o".to_string()]).await.unwrap();
+		GatewayCatalogModel::mark_availability(&pool, &provider_id, GATEWAY, &["openai/gpt-4o".to_string()])
+			.await
+			.unwrap();
 
 		assert_eq!(availability(&pool, provider_id, "openai/gpt-4o").await, AvailabilityState::Available);
 		assert_eq!(availability(&pool, provider_id, "secret/private-model").await, AvailabilityState::UserUnavailable);
@@ -98,9 +100,13 @@ mod tests {
 		let provider_id = create_provider(&pool, "OpenRouter").await;
 		// models.model_id is the provider-prefixed id: "openrouter/openai/gpt-4o".
 		create_model(&pool, provider_id, "openrouter/openai/gpt-4o").await;
-		GatewayCatalogModel::upsert_public_catalog(&pool, &provider_id, GATEWAY, &[catalog_input("openai/gpt-4o")]).await.unwrap();
+		GatewayCatalogModel::upsert_public_catalog(&pool, &provider_id, GATEWAY, &[catalog_input("openai/gpt-4o")])
+			.await
+			.unwrap();
 
-		GatewayCatalogModel::refresh_local_model_ids(&pool, &provider_id, GATEWAY, "OpenRouter").await.unwrap();
+		GatewayCatalogModel::refresh_local_model_ids(&pool, &provider_id, GATEWAY, "OpenRouter")
+			.await
+			.unwrap();
 
 		assert!(local_link(&pool, provider_id, "openai/gpt-4o").await.is_some());
 	}
@@ -132,10 +138,14 @@ mod tests {
 			price_output: None,
 			raw: json!({}),
 		};
-		GatewayCatalogModel::upsert_provider_options(&pool, &stale_id, std::slice::from_ref(&option)).await.unwrap();
+		GatewayCatalogModel::upsert_provider_options(&pool, &stale_id, std::slice::from_ref(&option))
+			.await
+			.unwrap();
 
 		// New public catalog no longer contains "old/model".
-		GatewayCatalogModel::delete_absent(&pool, &provider_id, GATEWAY, &["openai/gpt-4o".to_string()]).await.unwrap();
+		GatewayCatalogModel::delete_absent(&pool, &provider_id, GATEWAY, &["openai/gpt-4o".to_string()])
+			.await
+			.unwrap();
 
 		let remaining = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM gateway_catalog_models WHERE provider_id = $1")
 			.bind(provider_id)
@@ -156,8 +166,12 @@ mod tests {
 	async fn deleting_runnable_model_nulls_local_link_but_keeps_catalog(pool: PgPool) {
 		let provider_id = create_provider(&pool, "OpenRouter").await;
 		let model_id = create_model(&pool, provider_id, "openrouter/openai/gpt-4o").await;
-		GatewayCatalogModel::upsert_public_catalog(&pool, &provider_id, GATEWAY, &[catalog_input("openai/gpt-4o")]).await.unwrap();
-		GatewayCatalogModel::refresh_local_model_ids(&pool, &provider_id, GATEWAY, "OpenRouter").await.unwrap();
+		GatewayCatalogModel::upsert_public_catalog(&pool, &provider_id, GATEWAY, &[catalog_input("openai/gpt-4o")])
+			.await
+			.unwrap();
+		GatewayCatalogModel::refresh_local_model_ids(&pool, &provider_id, GATEWAY, "OpenRouter")
+			.await
+			.unwrap();
 		assert!(local_link(&pool, provider_id, "openai/gpt-4o").await.is_some());
 
 		sqlx::query("DELETE FROM models WHERE id = $1").bind(model_id).execute(&pool).await.unwrap();
@@ -170,9 +184,15 @@ mod tests {
 	async fn provider_options_for_model_reports_parent_availability(pool: PgPool) {
 		let provider_id = create_provider(&pool, "OpenRouter").await;
 		let model_id = create_model(&pool, provider_id, "openrouter/openai/gpt-4o").await;
-		GatewayCatalogModel::upsert_public_catalog(&pool, &provider_id, GATEWAY, &[catalog_input("openai/gpt-4o")]).await.unwrap();
-		GatewayCatalogModel::mark_availability(&pool, &provider_id, GATEWAY, &["openai/gpt-4o".to_string()]).await.unwrap();
-		GatewayCatalogModel::refresh_local_model_ids(&pool, &provider_id, GATEWAY, "OpenRouter").await.unwrap();
+		GatewayCatalogModel::upsert_public_catalog(&pool, &provider_id, GATEWAY, &[catalog_input("openai/gpt-4o")])
+			.await
+			.unwrap();
+		GatewayCatalogModel::mark_availability(&pool, &provider_id, GATEWAY, &["openai/gpt-4o".to_string()])
+			.await
+			.unwrap();
+		GatewayCatalogModel::refresh_local_model_ids(&pool, &provider_id, GATEWAY, "OpenRouter")
+			.await
+			.unwrap();
 
 		let result = GatewayCatalogModel::provider_options_for_model(&pool, &model_id).await.unwrap();
 		assert_eq!(result.availability_state, Some(AvailabilityState::Available));

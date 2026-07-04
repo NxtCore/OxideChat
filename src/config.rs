@@ -68,6 +68,9 @@ pub struct ConfigValues {
 	/// When enabled, the chat UI exposes a per-message upstream-provider selector
 	/// (OpenRouter provider routing). Off by default.
 	pub enable_provider_selector: bool,
+	/// When enabled, admins may register global MCP servers that run over
+	/// server-side `stdio` (arbitrary commands on the host). Off by default.
+	pub allow_server_stdio_mcp: bool,
 }
 
 impl Default for ConfigValues {
@@ -80,6 +83,7 @@ impl Default for ConfigValues {
 			oauth_discord_client_id: None,
 			oauth_discord_client_secret: None,
 			enable_provider_selector: false,
+			allow_server_stdio_mcp: false,
 		}
 	}
 }
@@ -147,6 +151,12 @@ impl Config {
 		self.values.load().enable_provider_selector
 	}
 
+	/// Whether admins may register server-side `stdio` MCP servers.
+	#[must_use]
+	pub fn allow_server_stdio_mcp(&self) -> bool {
+		self.values.load().allow_server_stdio_mcp
+	}
+
 	/// Get current configuration values.
 	#[must_use]
 	pub fn values(&self) -> std::sync::Arc<ConfigValues> {
@@ -210,6 +220,7 @@ impl Config {
 				"oauth_discord_client_id" => values.oauth_discord_client_id = Some(row.value),
 				"oauth_discord_client_secret" => values.oauth_discord_client_secret = Some(row.value),
 				"enable_provider_selector" => values.enable_provider_selector = row.value == "true",
+				"allow_server_stdio_mcp" => values.allow_server_stdio_mcp = row.value == "true",
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}
 		}

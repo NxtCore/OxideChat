@@ -40,12 +40,14 @@ pub struct ToolResponse {
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
 	pub has_user_settings: bool,
+	pub mcp_server_id: Option<Uuid>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }
 
 impl ToolResponse {
 	pub fn from_tool_with_functions(t: Tool, functions: Vec<ToolFunction>) -> Self {
+		let mcp_server_id = super::McpSourceConfig::from_tool(&t).map(|c| c.mcp_server_id);
 		Self {
 			id: t.id,
 			owner_id: t.owner_id,
@@ -59,6 +61,7 @@ impl ToolResponse {
 			settings_schema: t.settings_schema,
 			is_enabled: t.is_enabled,
 			has_user_settings: false,
+			mcp_server_id,
 			created_at: t.created_at,
 			updated_at: t.updated_at,
 		}
@@ -67,6 +70,7 @@ impl ToolResponse {
 
 impl From<Tool> for ToolResponse {
 	fn from(t: Tool) -> Self {
+		let mcp_server_id = super::McpSourceConfig::from_tool(&t).map(|c| c.mcp_server_id);
 		Self {
 			id: t.id,
 			owner_id: t.owner_id,
@@ -80,6 +84,7 @@ impl From<Tool> for ToolResponse {
 			settings_schema: t.settings_schema,
 			is_enabled: t.is_enabled,
 			has_user_settings: false,
+			mcp_server_id,
 			created_at: t.created_at,
 			updated_at: t.updated_at,
 		}
@@ -92,6 +97,7 @@ pub struct McpServerResponse {
 	pub owner_id: Option<Uuid>,
 	pub name: String,
 	pub transport: String,
+	pub connection_config: serde_json::Value,
 	pub is_enabled: bool,
 	pub last_health_check: Option<DateTime<Utc>>,
 	pub health_status: Option<String>,
@@ -107,6 +113,7 @@ impl From<McpServer> for McpServerResponse {
 			owner_id: s.owner_id,
 			name: s.name,
 			transport: s.transport,
+			connection_config: s.connection_config,
 			is_enabled: s.is_enabled,
 			last_health_check: s.last_health_check,
 			health_status: s.health_status,

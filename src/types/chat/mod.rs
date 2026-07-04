@@ -100,6 +100,18 @@ pub struct ReasoningDetails {
 	pub budget_tokens: Option<i32>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RequestSettings {
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub model_key: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub provider_slug: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub provider_routing_mode: Option<String>,
+	#[serde(default)]
+	pub enabled_tools: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolExecutionResponse {
 	pub tool_call_id: String,
@@ -178,6 +190,7 @@ pub struct Message {
 	pub cost_details: sqlx::types::Json<CostDetails>,
 	pub usage_details: sqlx::types::Json<UsageDetails>,
 	pub reasoning_details: sqlx::types::Json<ReasoningDetails>,
+	pub request_settings: sqlx::types::Json<RequestSettings>,
 	pub created_at: DateTime<Utc>,
 	pub parent_id: Option<Uuid>,
 	pub fork_index: i32,

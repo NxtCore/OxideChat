@@ -41,7 +41,7 @@
 							v-if="chatStore.hasReasoningCapability(chatStore.selectedModel)"
 							class="border-none! bg-transparent! shadow-none! hover:bg-muted/50"
 						/>
-						<ToolSelector v-if="chatStore.hasToolCapability(chatStore.selectedModel)" class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
+						<ToolSelector v-if="chatStore.hasToolCapability(chatStore.selectedModel)" />
 						<ProviderSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
 					</div>
 
@@ -61,6 +61,8 @@
 
 			<p class="mt-2 text-center text-[10px] text-muted-foreground opacity-50">{{ store.getTranslation('chat.composer.hint') }}</p>
 		</div>
+
+		<McpManagerDialog v-model:open="chatStore.mcpManagerOpen" />
 	</div>
 </template>
 
@@ -73,6 +75,7 @@ import ReasoningSelector from './ReasoningSelector.vue';
 import ContextLimitIndicator from './ContextLimitIndicator.vue';
 import ToolSelector from './ToolSelector.vue';
 import ProviderSelector from './ProviderSelector.vue';
+import McpManagerDialog from '../mcp/McpManagerDialog.vue';
 
 const emit = defineEmits<{send: (content: string, parts?: any[]) => void}>();
 

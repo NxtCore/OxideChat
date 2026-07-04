@@ -2,6 +2,7 @@ pub mod auth;
 pub mod base;
 pub mod chats;
 pub mod images;
+pub mod mcp;
 pub mod messages;
 pub mod models;
 pub mod oauth;

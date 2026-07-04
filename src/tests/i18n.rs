@@ -25,14 +25,14 @@ mod tests {
 		#[test]
 		fn translation_serializes_correctly() {
 			let translation = Translation {
-			id: sqlx::types::Uuid::nil(),
-			language: String::from("en"),
-			key_path: String::from("test.key"),
-			value: String::from("Hello"),
-			is_override: false,
-			created_at: chrono::Utc::now(),
-			updated_at: chrono::Utc::now(),
-		};
+				id: sqlx::types::Uuid::nil(),
+				language: String::from("en"),
+				key_path: String::from("test.key"),
+				value: String::from("Hello"),
+				is_override: false,
+				created_at: chrono::Utc::now(),
+				updated_at: chrono::Utc::now(),
+			};
 
 			let json = serde_json::to_string(&translation).unwrap();
 			assert!(json.contains("\"language\":\"en\""));

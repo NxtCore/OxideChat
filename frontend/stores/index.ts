@@ -50,6 +50,7 @@ interface Base {
 	oauth_providers: string[];
 	roles: Role[];
 	enable_provider_selector: boolean;
+	allow_server_stdio_mcp: boolean;
 }
 
 export const useMainStore = defineStore('main', {

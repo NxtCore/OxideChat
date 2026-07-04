@@ -7,7 +7,7 @@ use crate::types::models::ProviderTab;
 use crate::types::providers::{ProviderKind, ProviderModelResponse};
 use serde_json::Value;
 use sqlx::types::Json;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
 impl Model {
@@ -41,6 +41,19 @@ impl Model {
 		)
 		.fetch_one(pool)
 		.await
+	}
+
+	pub async fn model_keys_by_ids(pool: &sqlx::PgPool, model_ids: &[Uuid]) -> Result<HashMap<Uuid, String>, sqlx::Error> {
+		if model_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+
+		let rows: Vec<(Uuid, String)> = sqlx::query_as("SELECT id, model_id FROM models WHERE id = ANY($1)")
+			.bind(model_ids)
+			.fetch_all(pool)
+			.await?;
+
+		Ok(rows.into_iter().collect())
 	}
 
 	pub async fn list_for_user(

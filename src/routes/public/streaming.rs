@@ -6,7 +6,10 @@ use crate::ai;
 use crate::routes::public::auth::get_current_user;
 use crate::types::models::Model;
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
-use crate::types::{ChatMessageResponse, Message, MessagePart, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction, UserToolSettings};
+use crate::types::{
+	ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction,
+	UserToolSettings,
+};
 use crate::types::{CostDetails, JobState};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
@@ -127,7 +130,6 @@ fn merge_reasoning_with_priority(
 	}
 }
 
-//TODO: Fix SQL statement in terms of owner_id if owner_id is null, rn it is searched for user meaning it will not find any tools rn as they are global (owner_id == null)
 async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[String]) -> (Vec<ToolSpec>, ToolChoice) {
 	if enabled_tool_ids.is_empty() {
 		return (vec![], ToolChoice::None);
@@ -138,23 +140,14 @@ async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[Str
 		return (vec![], ToolChoice::None);
 	}
 
-	let tools = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)")
-		.bind(&tool_uuids)
-		.bind(user_id)
-		.fetch_all(db)
-		.await
-		.unwrap_or_default();
+	let tools = Tool::find_enabled_for_user(db, &tool_uuids, &user_id).await.unwrap_or_default();
 
 	if tools.is_empty() {
 		return (vec![], ToolChoice::None);
 	}
 
 	let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
-	let functions: Vec<ToolFunction> = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = ANY($1) ORDER BY sort_order, created_at")
-		.bind(&tool_ids)
-		.fetch_all(db)
-		.await
-		.unwrap_or_default();
+	let functions: Vec<ToolFunction> = ToolFunction::list_by_tool_ids(db, &tool_ids).await.unwrap_or_default();
 
 	let mut functions_by_tool: HashMap<Uuid, Vec<ToolFunction>> = HashMap::new();
 	for f in functions {
@@ -174,17 +167,36 @@ async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[Str
 	}
 }
 
-async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: &str, input: serde_json::Value) -> Result<crate::types::ToolExecutionResult, String> {
+/// Returns `(mcp_server_id, mcp_tool_name)` if the given tool name resolves to a
+/// user-owned MCP tool that must be executed client-side. Returns `None` for
+/// system/global tools and all non-MCP tool types.
+async fn get_client_tool_info(db: &sqlx::PgPool, tool_name: &str, user_id: Uuid) -> Option<(uuid::Uuid, String)> {
+	use crate::types::tools::{McpSourceConfig, ToolSourceKind};
+
+	let tool = Tool::find_enabled_by_name_for_user(db, tool_name, &user_id).await.ok().flatten()?;
+
+	if tool.source_kind != ToolSourceKind::Mcp || tool.owner_id.is_none() {
+		return None;
+	}
+
+	let config: McpSourceConfig = serde_json::from_value(tool.source_config).ok()?;
+	Some((config.mcp_server_id, config.tool_name))
+}
+
+async fn execute_tool_by_name(
+	db: &sqlx::PgPool,
+	mcp_pool: &crate::utils::tools::McpConnectionPool,
+	user_id: Uuid,
+	full_tool_name: &str,
+	input: serde_json::Value,
+) -> Result<crate::types::ToolExecutionResult, String> {
 	use crate::types::ToolSourceKind;
 
 	let mut tool: Option<Tool>;
 	let mut function_name: Option<String> = None;
 	let mut function_id: Option<Uuid> = None;
 
-	tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true AND owner_id = $2")
-		.bind(full_tool_name)
-		.bind(user_id)
-		.fetch_optional(db)
+	tool = Tool::find_enabled_by_name_for_user(db, full_tool_name, &user_id)
 		.await
 		.map_err(|e| format!("Database error: {e}"))?;
 
@@ -194,10 +206,7 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 			let potential_tool_name = &full_tool_name[..*pos];
 			let potential_func_name = &full_tool_name[pos + 1..];
 
-			let found = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true")
-				.bind(potential_tool_name)
-				.bind(user_id)
-				.fetch_optional(db)
+			let found = Tool::find_enabled_by_name_for_user(db, potential_tool_name, &user_id)
 				.await
 				.map_err(|e| format!("Database error: {e}"))?;
 
@@ -297,7 +306,50 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 				output,
 			})
 		}
-		_ => Err(format!("Unsupported tool source: {:?}", tool.source_kind)),
+		ToolSourceKind::Mcp => {
+			let output = execute_mcp_tool(db, mcp_pool, user_id, &tool, input).await.map_err(|e| format!("{e}"))?;
+			Ok(crate::types::ToolExecutionResult {
+				tool_id: tool.id,
+				function_id,
+				output,
+			})
+		}
+		ToolSourceKind::Wasm => Err(format!("WASM tools are not supported in chat execution: {:?}", tool.source_kind)),
+	}
+}
+
+/// Execute an MCP-backed tool by resolving its server, obtaining a pooled client,
+/// and calling the remote tool. On transport failure the cached client is evicted
+/// so the next call reconnects.
+async fn execute_mcp_tool(
+	db: &sqlx::PgPool,
+	mcp_pool: &crate::utils::tools::McpConnectionPool,
+	user_id: Uuid,
+	tool: &Tool,
+	input: serde_json::Value,
+) -> Result<serde_json::Value, crate::utils::tools::ToolError> {
+	use crate::types::McpSourceConfig;
+	use crate::types::tools::McpServer;
+	use crate::utils::tools::ToolError;
+
+	let config: McpSourceConfig = serde_json::from_value(tool.source_config.clone()).map_err(|e| ToolError::McpError(format!("Invalid MCP source config: {e}")))?;
+
+	let server = McpServer::find_owned_or_system(db, &config.mcp_server_id, &user_id)
+		.await
+		.map_err(|e| ToolError::McpError(format!("Database error: {e}")))?
+		.ok_or_else(|| ToolError::NotFound(format!("MCP server {} not found", config.mcp_server_id)))?;
+
+	if !server.is_enabled {
+		return Err(ToolError::ExecutionFailed("MCP server is disabled".to_string()));
+	}
+
+	let client = server.get_client(mcp_pool).await?;
+	match client.call_tool(&config.tool_name, input).await {
+		Ok(output) => Ok(output),
+		Err(e) => {
+			mcp_pool.evict(&server.id).await;
+			Err(e)
+		}
 	}
 }
 
@@ -399,6 +451,12 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	};
 	let usage_details = crate::types::UsageDetails::default();
 	let cost_details = crate::types::CostDetails::default();
+	let request_settings = RequestSettings {
+		model_key: Some(req.model_key.clone()),
+		provider_slug: req.provider_slug.as_ref().map(|slug| slug.trim().to_string()).filter(|slug| !slug.is_empty()),
+		provider_routing_mode: Some(req.provider_routing_mode.clone().unwrap_or_else(|| "prefer".to_string())),
+		enabled_tools: req.tools_enabled.clone().unwrap_or_default(),
+	};
 
 	let content_parts_json = req.parts.as_ref().map(|parts| serde_json::to_value(parts).ok()).flatten();
 
@@ -415,8 +473,8 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	let user_message: Option<Message> = if !req.skip_user_message {
 		let msg = sqlx::query_as::<_, Message>(
 			r#"
-			INSERT INTO messages (chat_id, role, content, content_parts, model_id, reasoning_details, usage_details, cost_details, parent_id)
-			VALUES ($1, 'user', $2, $3, $4, $5, $6, $7, $8)
+			INSERT INTO messages (chat_id, role, content, content_parts, model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id)
+			VALUES ($1, 'user', $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING *
 			"#,
 		)
@@ -427,6 +485,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		.bind(sqlx::types::Json(reasoning_details))
 		.bind(sqlx::types::Json(usage_details))
 		.bind(sqlx::types::Json(cost_details))
+		.bind(sqlx::types::Json(request_settings.clone()))
 		.bind(last_active_message_id)
 		.fetch_one(&state.db)
 		.await;
@@ -613,9 +672,12 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	let ir_for_stream = ir.clone();
 
 	let db = state.db.clone();
+	let mcp_pool = state.mcp_pool.clone();
+	let client_tool_pending = state.client_tool_pending.clone();
 	let start_time = Instant::now();
 	let reasoning_effort = req.reasoning_effort.clone();
 	let reasoning_budget_tokens = req.reasoning_budget_tokens;
+	let stream_request_settings = request_settings.clone();
 
 	let sse_stream = async_stream::stream! {
 	eprintln!("[STREAM] Stream generator started");
@@ -644,6 +706,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	const MAX_ITERATIONS: usize = 10;
 
 	let mut all_tool_executions: Vec<ToolExecutionInternal> = Vec::new();
+	let request_settings = stream_request_settings;
 
 	let engine = ai::get();
 	let tool_specs = ir_for_stream.tools.clone();
@@ -748,16 +811,49 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 							if let Some((tool_name, _)) = pending_tool_calls.remove(&id) {
 								let args = args_json;
 								completed_tool_calls.push((id.clone(), tool_name.clone(), args.clone()));
-								eprintln!("[STREAM] Executing tool: {} with args: {:?}", tool_name, args);
 
 								let exec_start = Instant::now();
-								let tool_result = execute_tool_by_name(&db, user.id, &tool_name, args.clone()).await;
-								let execution_ms = exec_start.elapsed().as_millis() as i32;
 
-								let (output, error, tool_id, function_id) = match tool_result {
-									Ok(result) => (result.output, None, Some(result.tool_id), result.function_id),
-									Err(e) => (serde_json::json!({"error": e}), Some(e), None, None),
+								let client_info = get_client_tool_info(&db, &tool_name, user.id).await;
+
+								let (output, error, tool_id, function_id) = if let Some((mcp_server_id, mcp_tool_name)) = client_info {
+									eprintln!("[STREAM] Delegating tool {} to client (mcp_server_id={})", tool_name, mcp_server_id);
+
+									yield Ok::<_, Infallible>(Event::default().data(
+										serde_json::to_string(&StreamData::ClientToolCall {
+											id: id.clone(),
+											name: tool_name.clone(),
+											args: args.clone(),
+											mcp_server_id,
+											mcp_tool_name,
+										}).unwrap_or_default()
+									));
+
+									let rx = client_tool_pending.register(id.clone()).await;
+
+									let result = match tokio::time::timeout(
+										std::time::Duration::from_secs(120),
+										rx,
+									).await {
+										Ok(Ok(r)) => r,
+										_ => {
+											client_tool_pending.cancel(&id).await;
+											eprintln!("[STREAM] Client tool call {} timed out or failed", id);
+											serde_json::json!({"error": "Client tool execution timed out"})
+										}
+									};
+
+									(result, None, None, None)
+								} else {
+									eprintln!("[STREAM] Executing tool server-side: {} with args: {:?}", tool_name, args);
+									let tool_result = execute_tool_by_name(&db, &mcp_pool, user.id, &tool_name, args.clone()).await;
+									match tool_result {
+										Ok(result) => (result.output, None, Some(result.tool_id), result.function_id),
+										Err(e) => (serde_json::json!({"error": e}), Some(e), None, None),
+									}
 								};
+
+								let execution_ms = exec_start.elapsed().as_millis() as i32;
 
 								tool_results.push(ToolExecutionInternal {
 									call_id: id.clone(),
@@ -829,9 +925,9 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									r#"
 										INSERT INTO messages (
 											chat_id, role, content, reasoning_content,
-											model_id, reasoning_details, usage_details, cost_details, parent_id, fork_index, is_active_fork
+											model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork
 										)
-										VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
+										VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
 										RETURNING *
 										"#,
 								)
@@ -842,8 +938,9 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 								.bind(sqlx::types::Json(reasoning_details))
 								.bind(sqlx::types::Json(usage_details))
 								.bind(sqlx::types::Json(cost_details))
+								.bind(sqlx::types::Json(request_settings.clone()))
 								.bind(assistant_parent_id)
-							.bind(assistant_fork_index)
+								.bind(assistant_fork_index)
 								.fetch_one(&db)
 								.await;
 
@@ -943,4 +1040,28 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	};
 
 	Sse::new(sse_stream).keep_alive(KeepAlive::default()).into_response()
+}
+
+/// POST `/api/v1/chats/{chat_id}/stream/tool-result`
+///
+/// Called by the browser after it has executed a client-side MCP tool call.
+/// The result is forwarded to the waiting streaming loop via the oneshot channel
+/// that was registered when the `ClientToolCall` SSE event was emitted.
+pub async fn submit_client_tool_result(
+	State(state): State<Arc<JobState>>,
+	cookies: Cookies,
+	Path(_chat_id): Path<Uuid>,
+	Json(req): Json<ClientToolResultRequest>,
+) -> impl IntoResponse {
+	use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+
+	let Some(_user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+
+	if state.client_tool_pending.resolve(&req.call_id, req.result).await {
+		ResponseBuilder::new(ResponseBody::Json(serde_json::json!({"ok": true}))).build()
+	} else {
+		ErrorBuilder::new(ErrorCode::NotFound).build()
+	}
 }
