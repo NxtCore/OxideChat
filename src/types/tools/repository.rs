@@ -136,18 +136,32 @@ impl Tool {
 
 	/// Fetch enabled tools by id that the user may use (owned by the user or global).
 	pub async fn find_enabled_for_user(pool: &sqlx::PgPool, ids: &[Uuid], user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)")
-			.bind(ids)
-			.bind(user_id)
-			.fetch_all(pool)
-			.await
+		sqlx::query_as::<_, Tool>(
+			r#"
+			SELECT id, owner_id, name, display_name, description, icon, source_kind,
+			       source_config, input_schema, settings_schema, is_enabled, created_at, updated_at
+			FROM tools
+			WHERE id = ANY($1) AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)
+			"#,
+		)
+		.bind(ids)
+		.bind(user_id)
+		.fetch_all(pool)
+		.await
 	}
 
 	/// Look up an enabled tool by name that the user may use, preferring the
 	/// user-owned tool over a global one on a name collision.
 	pub async fn find_enabled_by_name_for_user(pool: &sqlx::PgPool, name: &str, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Tool>(
-			"SELECT * FROM tools WHERE name = $1 AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL) ORDER BY owner_id NULLS LAST LIMIT 1",
+			r#"
+			SELECT id, owner_id, name, display_name, description, icon, source_kind,
+			       source_config, input_schema, settings_schema, is_enabled, created_at, updated_at
+			FROM tools
+			WHERE name = $1 AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)
+			ORDER BY owner_id NULLS LAST
+			LIMIT 1
+			"#,
 		)
 		.bind(name)
 		.bind(user_id)
@@ -170,10 +184,18 @@ impl Tool {
 	/// List enabled tools visible to the user in the chat tool selector
 	/// (their own tools plus global tools).
 	pub async fn list_for_user(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE is_enabled = true AND (owner_id = $1 OR owner_id IS NULL) ORDER BY created_at DESC")
-			.bind(user_id)
-			.fetch_all(pool)
-			.await
+		sqlx::query_as::<_, Tool>(
+			r#"
+			SELECT id, owner_id, name, display_name, description, icon, source_kind,
+			       source_config, input_schema, settings_schema, is_enabled, created_at, updated_at
+			FROM tools
+			WHERE is_enabled = true AND (owner_id = $1 OR owner_id IS NULL)
+			ORDER BY created_at DESC
+			"#,
+		)
+		.bind(user_id)
+		.fetch_all(pool)
+		.await
 	}
 }
 
@@ -359,17 +381,33 @@ impl UserToolSettings {
 
 impl McpServer {
 	pub async fn list_system(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>("SELECT * FROM mcp_servers WHERE owner_id IS NULL ORDER BY name")
-			.fetch_all(pool)
-			.await
+		sqlx::query_as::<_, McpServer>(
+			r#"
+			SELECT id, owner_id, name, transport, connection_config, is_enabled,
+			       last_health_check, health_status, created_at, updated_at
+			FROM mcp_servers
+			WHERE owner_id IS NULL
+			ORDER BY name
+			"#,
+		)
+		.fetch_all(pool)
+		.await
 	}
 
 	/// List the servers owned by a specific user (excludes global/system servers).
 	pub async fn list_owned(pool: &sqlx::PgPool, owner_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>("SELECT * FROM mcp_servers WHERE owner_id = $1 ORDER BY name")
-			.bind(owner_id)
-			.fetch_all(pool)
-			.await
+		sqlx::query_as::<_, McpServer>(
+			r#"
+			SELECT id, owner_id, name, transport, connection_config, is_enabled,
+			       last_health_check, health_status, created_at, updated_at
+			FROM mcp_servers
+			WHERE owner_id = $1
+			ORDER BY name
+			"#,
+		)
+		.bind(owner_id)
+		.fetch_all(pool)
+		.await
 	}
 
 	/// Fetch a server by id restricted to the given owner scope.
@@ -377,20 +415,34 @@ impl McpServer {
 	/// `owner_id = None` matches system (global) servers; `Some(uuid)` matches
 	/// servers owned by that user.
 	pub async fn find_scoped(pool: &sqlx::PgPool, id: &Uuid, owner_id: Option<&Uuid>) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>("SELECT * FROM mcp_servers WHERE id = $1 AND owner_id IS NOT DISTINCT FROM $2")
-			.bind(id)
-			.bind(owner_id)
-			.fetch_optional(pool)
-			.await
+		sqlx::query_as::<_, McpServer>(
+			r#"
+			SELECT id, owner_id, name, transport, connection_config, is_enabled,
+			       last_health_check, health_status, created_at, updated_at
+			FROM mcp_servers
+			WHERE id = $1 AND owner_id IS NOT DISTINCT FROM $2
+			"#,
+		)
+		.bind(id)
+		.bind(owner_id)
+		.fetch_optional(pool)
+		.await
 	}
 
 	/// Fetch a server usable by a user for execution: their own or a global one.
 	pub async fn find_owned_or_system(pool: &sqlx::PgPool, id: &Uuid, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>("SELECT * FROM mcp_servers WHERE id = $1 AND (owner_id = $2 OR owner_id IS NULL)")
-			.bind(id)
-			.bind(user_id)
-			.fetch_optional(pool)
-			.await
+		sqlx::query_as::<_, McpServer>(
+			r#"
+			SELECT id, owner_id, name, transport, connection_config, is_enabled,
+			       last_health_check, health_status, created_at, updated_at
+			FROM mcp_servers
+			WHERE id = $1 AND (owner_id = $2 OR owner_id IS NULL)
+			"#,
+		)
+		.bind(id)
+		.bind(user_id)
+		.fetch_optional(pool)
+		.await
 	}
 
 	pub async fn create(
@@ -405,7 +457,7 @@ impl McpServer {
 			r#"
 			INSERT INTO mcp_servers (owner_id, name, transport, connection_config, is_enabled)
 			VALUES ($1, $2, $3, $4, $5)
-			RETURNING *
+			RETURNING id, owner_id, name, transport, connection_config, is_enabled, last_health_check, health_status, created_at, updated_at
 			"#,
 		)
 		.bind(owner_id)
@@ -435,7 +487,7 @@ impl McpServer {
 			    is_enabled = COALESCE($6, is_enabled),
 			    updated_at = NOW()
 			WHERE id = $1 AND owner_id IS NOT DISTINCT FROM $2
-			RETURNING *
+			RETURNING id, owner_id, name, transport, connection_config, is_enabled, last_health_check, health_status, created_at, updated_at
 			"#,
 		)
 		.bind(id)
@@ -546,7 +598,7 @@ impl McpServer {
 				INSERT INTO tools (owner_id, name, display_name, description, icon,
 				                   source_kind, source_config, input_schema, settings_schema, is_enabled)
 				VALUES ($1, $2, $3, $4, NULL, 'MCP', $5, $6, '{}'::jsonb, true)
-				RETURNING *
+				RETURNING id, owner_id, name, display_name, description, icon, source_kind, source_config, input_schema, settings_schema, is_enabled, created_at, updated_at
 				"#,
 			)
 			.bind(owner_id)

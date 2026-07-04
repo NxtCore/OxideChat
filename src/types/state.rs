@@ -5,6 +5,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, oneshot};
+use uuid::Uuid;
 
 /// Holds pending client-side tool calls keyed by call ID.
 ///
@@ -14,7 +15,7 @@ use tokio::sync::{RwLock, oneshot};
 /// to the submit endpoint, and `resolve` sends it through the channel so the
 /// loop can continue.
 #[derive(Clone, Default)]
-pub struct ClientToolPending(Arc<RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>>);
+pub struct ClientToolPending(Arc<RwLock<HashMap<(Uuid, String), oneshot::Sender<serde_json::Value>>>>);
 
 impl std::fmt::Debug for ClientToolPending {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -29,15 +30,15 @@ impl ClientToolPending {
 	}
 
 	/// Register a pending call and return the receiver the streaming loop waits on.
-	pub async fn register(&self, call_id: String) -> oneshot::Receiver<serde_json::Value> {
+	pub async fn register(&self, call_id: String, user_id: Uuid) -> oneshot::Receiver<serde_json::Value> {
 		let (tx, rx) = oneshot::channel();
-		self.0.write().await.insert(call_id, tx);
+		self.0.write().await.insert((user_id, call_id), tx);
 		rx
 	}
 
 	/// Deliver a result from the client. Returns `true` if the call was found and delivered.
-	pub async fn resolve(&self, call_id: &str, result: serde_json::Value) -> bool {
-		if let Some(tx) = self.0.write().await.remove(call_id) {
+	pub async fn resolve(&self, call_id: &str, user_id: Uuid, result: serde_json::Value) -> bool {
+		if let Some(tx) = self.0.write().await.remove(&(user_id, call_id.to_string())) {
 			tx.send(result).is_ok()
 		} else {
 			false
@@ -45,8 +46,8 @@ impl ClientToolPending {
 	}
 
 	/// Remove a pending call without delivering a result (used on timeout).
-	pub async fn cancel(&self, call_id: &str) {
-		self.0.write().await.remove(call_id);
+	pub async fn cancel(&self, call_id: &str, user_id: Uuid) {
+		self.0.write().await.remove(&(user_id, call_id.to_string()));
 	}
 }
 

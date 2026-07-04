@@ -170,7 +170,7 @@ async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[Str
 /// Returns `(mcp_server_id, mcp_tool_name)` if the given tool name resolves to a
 /// user-owned MCP tool that must be executed client-side. Returns `None` for
 /// system/global tools and all non-MCP tool types.
-async fn get_client_tool_info(db: &sqlx::PgPool, tool_name: &str, user_id: Uuid) -> Option<(uuid::Uuid, String)> {
+async fn get_client_tool_info(db: &sqlx::PgPool, tool_name: &str, user_id: Uuid) -> Option<(uuid::Uuid, String, uuid::Uuid)> {
 	use crate::types::tools::{McpSourceConfig, ToolSourceKind};
 
 	let tool = Tool::find_enabled_by_name_for_user(db, tool_name, &user_id).await.ok().flatten()?;
@@ -180,7 +180,7 @@ async fn get_client_tool_info(db: &sqlx::PgPool, tool_name: &str, user_id: Uuid)
 	}
 
 	let config: McpSourceConfig = serde_json::from_value(tool.source_config).ok()?;
-	Some((config.mcp_server_id, config.tool_name))
+	Some((config.mcp_server_id, config.tool_name, tool.id))
 }
 
 async fn execute_tool_by_name(
@@ -816,7 +816,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 
 								let client_info = get_client_tool_info(&db, &tool_name, user.id).await;
 
-								let (output, error, tool_id, function_id) = if let Some((mcp_server_id, mcp_tool_name)) = client_info {
+								let (output, error, tool_id, function_id) = if let Some((mcp_server_id, mcp_tool_name, actual_tool_id)) = client_info {
 									eprintln!("[STREAM] Delegating tool {} to client (mcp_server_id={})", tool_name, mcp_server_id);
 
 									yield Ok::<_, Infallible>(Event::default().data(
@@ -829,7 +829,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 										}).unwrap_or_default()
 									));
 
-									let rx = client_tool_pending.register(id.clone()).await;
+									let rx = client_tool_pending.register(id.clone(), user.id).await;
 
 									let result = match tokio::time::timeout(
 										std::time::Duration::from_secs(120),
@@ -837,13 +837,13 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									).await {
 										Ok(Ok(r)) => r,
 										_ => {
-											client_tool_pending.cancel(&id).await;
+											client_tool_pending.cancel(&id, user.id).await;
 											eprintln!("[STREAM] Client tool call {} timed out or failed", id);
 											serde_json::json!({"error": "Client tool execution timed out"})
 										}
 									};
 
-									(result, None, None, None)
+									(result, None, Some(actual_tool_id), None)
 								} else {
 									eprintln!("[STREAM] Executing tool server-side: {} with args: {:?}", tool_name, args);
 									let tool_result = execute_tool_by_name(&db, &mcp_pool, user.id, &tool_name, args.clone()).await;
@@ -1055,11 +1055,11 @@ pub async fn submit_client_tool_result(
 ) -> impl IntoResponse {
 	use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 
-	let Some(_user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
-	if state.client_tool_pending.resolve(&req.call_id, req.result).await {
+	if state.client_tool_pending.resolve(&req.call_id, user.id, req.result).await {
 		ResponseBuilder::new(ResponseBody::Json(serde_json::json!({"ok": true}))).build()
 	} else {
 		ErrorBuilder::new(ErrorCode::NotFound).build()

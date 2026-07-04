@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+	use crate::types::ClientToolPending;
+	use crate::types::tools::McpServerResponse;
 	use crate::types::tools::{McpServer, Tool, ToolSourceKind};
 	use sqlx::PgPool;
 	use uuid::Uuid;
@@ -21,6 +23,10 @@ mod tests {
 
 	fn http_config(url: &str) -> serde_json::Value {
 		serde_json::json!({ "url": url, "headers": {} })
+	}
+
+	fn http_config_with_secret(url: &str) -> serde_json::Value {
+		serde_json::json!({ "url": url, "headers": { "Authorization": "Bearer secret" } })
 	}
 
 	async fn insert_tool(pool: &PgPool, owner_id: Option<&Uuid>, name: &str) -> Uuid {
@@ -158,5 +164,32 @@ mod tests {
 		let other = create_user(&pool, "mcp_lookup_other").await;
 		let found_other = Tool::find_enabled_by_name_for_user(&pool, "shared", &other).await.unwrap().unwrap();
 		assert_eq!(found_other.id, global_id);
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn mcp_server_response_masks_secrets_when_requested(pool: PgPool) {
+		let server = McpServer::create(&pool, None, "sys_secret", "http", &http_config_with_secret("https://sys.example"), true)
+			.await
+			.unwrap();
+
+		let masked = McpServerResponse::from_server(server.clone(), false);
+		assert_eq!(masked.connection_config["headers"]["Authorization"], "***");
+
+		let unmasked = McpServerResponse::from_server(server, true);
+		assert_eq!(unmasked.connection_config["headers"]["Authorization"], "Bearer secret");
+	}
+
+	#[tokio::test]
+	async fn pending_client_tool_results_are_user_scoped() {
+		let pending = ClientToolPending::new();
+		let owner = Uuid::new_v4();
+		let other = Uuid::new_v4();
+		let rx = pending.register("call-1".to_string(), owner).await;
+
+		assert!(!pending.resolve("call-1", other, serde_json::json!({"value": "bad"})).await);
+		assert!(pending.resolve("call-1", owner, serde_json::json!({"value": "ok"})).await);
+
+		let result = rx.await.unwrap();
+		assert_eq!(result["value"], "ok");
 	}
 }

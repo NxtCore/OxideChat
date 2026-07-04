@@ -7,8 +7,8 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
 use crate::types::tools::*;
-use crate::utils::tools::mcp::McpToolInfo;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use crate::utils::tools::mcp::McpToolInfo;
 use axum::{
 	Json,
 	extract::{Path, State},
@@ -38,7 +38,7 @@ pub(crate) fn validate_remote_config(connection_config: &serde_json::Value) -> b
 /// Build a response for a server, populating its discovered tool names.
 pub(crate) async fn server_response(db: &sqlx::PgPool, server: McpServer, owner_id: Option<&Uuid>) -> McpServerResponse {
 	let names = Tool::names_for_mcp_server(db, &server.id, owner_id).await.unwrap_or_default();
-	let mut response = McpServerResponse::from(server);
+	let mut response = McpServerResponse::from_server(server, owner_id.is_some());
 	response.discovered_tools = names;
 	response
 }
@@ -181,7 +181,12 @@ pub async fn delete_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 /// and persists them as `Tool` records, exactly like server-side discover would.
 /// Used for user-owned MCP servers whose URL is only reachable from the user's
 /// machine (e.g. localhost).
-pub async fn sync_tools_from_client(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<SyncMcpToolsRequest>) -> impl IntoResponse {
+pub async fn sync_tools_from_client(
+	State(state): State<Arc<JobState>>,
+	cookies: Cookies,
+	Path(id): Path<Uuid>,
+	Json(req): Json<SyncMcpToolsRequest>,
+) -> impl IntoResponse {
 	let Some(user) = get_current_user(&state.db, &cookies).await else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};

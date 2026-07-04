@@ -124,6 +124,30 @@ impl From<McpServer> for McpServerResponse {
 	}
 }
 
+impl McpServerResponse {
+	pub fn from_server(s: McpServer, include_secrets: bool) -> Self {
+		let mut response = Self::from(s);
+		if !include_secrets {
+			response.connection_config = mask_connection_config(response.connection_config);
+		}
+		response
+	}
+}
+
+fn mask_connection_config(mut config: serde_json::Value) -> serde_json::Value {
+	if let Some(headers) = config.get_mut("headers").and_then(serde_json::Value::as_object_mut) {
+		for value in headers.values_mut() {
+			*value = serde_json::Value::String("***".to_string());
+		}
+	}
+	if let Some(env) = config.get_mut("env").and_then(serde_json::Value::as_object_mut) {
+		for value in env.values_mut() {
+			*value = serde_json::Value::String("***".to_string());
+		}
+	}
+	config
+}
+
 #[derive(Debug, Serialize)]
 pub struct UploadWasmResponse {
 	pub blob_id: Uuid,
