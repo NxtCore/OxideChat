@@ -6,7 +6,10 @@ use crate::ai;
 use crate::routes::public::auth::get_current_user;
 use crate::types::models::Model;
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
-use crate::types::{ChatMessageResponse, Message, MessagePart, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction, UserToolSettings};
+use crate::types::{
+	Chat, ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, StreamingAssistantMessageCreate,
+	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolFunction, UserToolSettings,
+};
 use crate::types::{CostDetails, JobState};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
@@ -127,7 +130,6 @@ fn merge_reasoning_with_priority(
 	}
 }
 
-//TODO: Fix SQL statement in terms of owner_id if owner_id is null, rn it is searched for user meaning it will not find any tools rn as they are global (owner_id == null)
 async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[String]) -> (Vec<ToolSpec>, ToolChoice) {
 	if enabled_tool_ids.is_empty() {
 		return (vec![], ToolChoice::None);
@@ -138,23 +140,14 @@ async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[Str
 		return (vec![], ToolChoice::None);
 	}
 
-	let tools = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = ANY($1) AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)")
-		.bind(&tool_uuids)
-		.bind(user_id)
-		.fetch_all(db)
-		.await
-		.unwrap_or_default();
+	let tools = Tool::find_enabled_for_user(db, &tool_uuids, &user_id).await.unwrap_or_default();
 
 	if tools.is_empty() {
 		return (vec![], ToolChoice::None);
 	}
 
 	let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
-	let functions: Vec<ToolFunction> = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = ANY($1) ORDER BY sort_order, created_at")
-		.bind(&tool_ids)
-		.fetch_all(db)
-		.await
-		.unwrap_or_default();
+	let functions: Vec<ToolFunction> = ToolFunction::list_by_tool_ids(db, &tool_ids).await.unwrap_or_default();
 
 	let mut functions_by_tool: HashMap<Uuid, Vec<ToolFunction>> = HashMap::new();
 	for f in functions {
@@ -174,17 +167,36 @@ async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[Str
 	}
 }
 
-async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: &str, input: serde_json::Value) -> Result<crate::types::ToolExecutionResult, String> {
+/// Returns `(mcp_server_id, mcp_tool_name)` if the given tool name resolves to a
+/// user-owned MCP tool that must be executed client-side. Returns `None` for
+/// system/global tools and all non-MCP tool types.
+async fn get_client_tool_info(db: &sqlx::PgPool, tool_name: &str, user_id: Uuid) -> Option<(uuid::Uuid, String, uuid::Uuid)> {
+	use crate::types::tools::{McpSourceConfig, ToolSourceKind};
+
+	let tool = Tool::find_enabled_by_name_for_user(db, tool_name, &user_id).await.ok().flatten()?;
+
+	if tool.source_kind != ToolSourceKind::Mcp || tool.owner_id.is_none() {
+		return None;
+	}
+
+	let config: McpSourceConfig = serde_json::from_value(tool.source_config).ok()?;
+	Some((config.mcp_server_id, config.tool_name, tool.id))
+}
+
+async fn execute_tool_by_name(
+	db: &sqlx::PgPool,
+	mcp_pool: &crate::utils::tools::McpConnectionPool,
+	user_id: Uuid,
+	full_tool_name: &str,
+	input: serde_json::Value,
+) -> Result<crate::types::ToolExecutionResult, String> {
 	use crate::types::ToolSourceKind;
 
 	let mut tool: Option<Tool>;
 	let mut function_name: Option<String> = None;
 	let mut function_id: Option<Uuid> = None;
 
-	tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true AND owner_id = $2")
-		.bind(full_tool_name)
-		.bind(user_id)
-		.fetch_optional(db)
+	tool = Tool::find_enabled_by_name_for_user(db, full_tool_name, &user_id)
 		.await
 		.map_err(|e| format!("Database error: {e}"))?;
 
@@ -194,10 +206,7 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 			let potential_tool_name = &full_tool_name[..*pos];
 			let potential_func_name = &full_tool_name[pos + 1..];
 
-			let found = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE name = $1 AND is_enabled = true")
-				.bind(potential_tool_name)
-				.bind(user_id)
-				.fetch_optional(db)
+			let found = Tool::find_enabled_by_name_for_user(db, potential_tool_name, &user_id)
 				.await
 				.map_err(|e| format!("Database error: {e}"))?;
 
@@ -212,10 +221,7 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 	let tool = tool.ok_or_else(|| format!("Tool '{}' not found", full_tool_name))?;
 
 	let function_entrypoint = if let Some(fn_name) = &function_name {
-		let func = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 AND name = $2")
-			.bind(tool.id)
-			.bind(fn_name)
-			.fetch_optional(db)
+		let func = ToolFunction::find_by_tool_and_name(db, &tool.id, fn_name)
 			.await
 			.map_err(|e| format!("Database error: {e}"))?
 			.ok_or_else(|| format!("Function '{}' not found in tool '{}'", fn_name, tool.name))?;
@@ -225,20 +231,12 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 		None
 	};
 
-	let settings = sqlx::query_as::<_, UserToolSettings>(
-		"SELECT * FROM user_tool_settings 
-		WHERE tool_id = $1 
-		ORDER BY (CASE WHEN user_id = ($2::uuid) THEN 0 ELSE 1 END) 
-		LIMIT 1",
-	)
-	.bind(tool.id)
-	.bind(user_id)
-	.fetch_optional(db)
-	.await
-	.ok()
-	.flatten()
-	.map(|s| s.settings)
-	.unwrap_or_else(|| serde_json::json!({}));
+	let settings = UserToolSettings::find_effective_for_user(db, &tool.id, &user_id)
+		.await
+		.ok()
+		.flatten()
+		.map(|s| s.settings)
+		.unwrap_or_else(|| serde_json::json!({}));
 
 	let ctx = ToolContext {
 		user_id: Some(user_id),
@@ -297,7 +295,50 @@ async fn execute_tool_by_name(db: &sqlx::PgPool, user_id: Uuid, full_tool_name: 
 				output,
 			})
 		}
-		_ => Err(format!("Unsupported tool source: {:?}", tool.source_kind)),
+		ToolSourceKind::Mcp => {
+			let output = execute_mcp_tool(db, mcp_pool, user_id, &tool, input).await.map_err(|e| format!("{e}"))?;
+			Ok(crate::types::ToolExecutionResult {
+				tool_id: tool.id,
+				function_id,
+				output,
+			})
+		}
+		ToolSourceKind::Wasm => Err(format!("WASM tools are not supported in chat execution: {:?}", tool.source_kind)),
+	}
+}
+
+/// Execute an MCP-backed tool by resolving its server, obtaining a pooled client,
+/// and calling the remote tool. On transport failure the cached client is evicted
+/// so the next call reconnects.
+async fn execute_mcp_tool(
+	db: &sqlx::PgPool,
+	mcp_pool: &crate::utils::tools::McpConnectionPool,
+	user_id: Uuid,
+	tool: &Tool,
+	input: serde_json::Value,
+) -> Result<serde_json::Value, crate::utils::tools::ToolError> {
+	use crate::types::McpSourceConfig;
+	use crate::types::tools::McpServer;
+	use crate::utils::tools::ToolError;
+
+	let config: McpSourceConfig = serde_json::from_value(tool.source_config.clone()).map_err(|e| ToolError::McpError(format!("Invalid MCP source config: {e}")))?;
+
+	let server = McpServer::find_owned_or_system(db, &config.mcp_server_id, &user_id)
+		.await
+		.map_err(|e| ToolError::McpError(format!("Database error: {e}")))?
+		.ok_or_else(|| ToolError::NotFound(format!("MCP server {} not found", config.mcp_server_id)))?;
+
+	if !server.is_enabled {
+		return Err(ToolError::ExecutionFailed("MCP server is disabled".to_string()));
+	}
+
+	let client = server.get_client(mcp_pool).await?;
+	match client.call_tool(&config.tool_name, input).await {
+		Ok(output) => Ok(output),
+		Err(e) => {
+			mcp_pool.evict(&server.id).await;
+			Err(e)
+		}
 	}
 }
 
@@ -348,11 +389,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		return error_stream("not_authenticated", "Authentication required").into_response();
 	};
 
-	let chat = sqlx::query_as::<_, crate::types::Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
-		.bind(chat_id)
-		.bind(user.id)
-		.fetch_optional(&state.db)
-		.await;
+	let chat = Chat::find_by_id_and_user(&state.db, &chat_id, &user.id).await;
 
 	let _chat = match chat {
 		Ok(Some(chat)) => chat,
@@ -363,10 +400,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	};
 
-	let model = sqlx::query_as::<_, Model>("SELECT * FROM models WHERE model_id = $1")
-		.bind(&req.model_key)
-		.fetch_optional(&state.db)
-		.await;
+	let model = Model::find_by_model_id(&state.db, &req.model_key).await;
 
 	let model = match model {
 		Ok(Some(m)) => m,
@@ -399,36 +433,34 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	};
 	let usage_details = crate::types::UsageDetails::default();
 	let cost_details = crate::types::CostDetails::default();
+	let request_settings = RequestSettings {
+		model_key: Some(req.model_key.clone()),
+		provider_slug: req.provider_slug.as_ref().map(|slug| slug.trim().to_string()).filter(|slug| !slug.is_empty()),
+		provider_routing_mode: Some(req.provider_routing_mode.clone().unwrap_or_else(|| "prefer".to_string())),
+		enabled_tools: req.tools_enabled.clone().unwrap_or_default(),
+	};
 
 	let content_parts_json = req.parts.as_ref().map(|parts| serde_json::to_value(parts).ok()).flatten();
 
 	// Get the last active message to use as parent for the new user message
-	let last_active_message_id: Option<Uuid> =
-		sqlx::query_scalar("SELECT id FROM messages WHERE chat_id = $1 AND is_active_fork = TRUE ORDER BY created_at DESC LIMIT 1")
-			.bind(chat_id)
-			.fetch_optional(&state.db)
-			.await
-			.ok()
-			.flatten();
+	let last_active_message_id = Message::last_active_id(&state.db, &chat_id).await.ok().flatten();
 
 	// Only create user message if not regenerating/skipping
 	let user_message: Option<Message> = if !req.skip_user_message {
-		let msg = sqlx::query_as::<_, Message>(
-			r#"
-			INSERT INTO messages (chat_id, role, content, content_parts, model_id, reasoning_details, usage_details, cost_details, parent_id)
-			VALUES ($1, 'user', $2, $3, $4, $5, $6, $7, $8)
-			RETURNING *
-			"#,
+		let msg = Message::create_streaming_user(
+			&state.db,
+			StreamingUserMessageCreate {
+				chat_id: &chat_id,
+				content: &req.content,
+				content_parts: content_parts_json.as_ref(),
+				model_id: &model.id,
+				reasoning_details: &reasoning_details,
+				usage_details: &usage_details,
+				cost_details: &cost_details,
+				request_settings: &request_settings,
+				parent_id: last_active_message_id,
+			},
 		)
-		.bind(chat_id)
-		.bind(&req.content)
-		.bind(content_parts_json)
-		.bind(model.id)
-		.bind(sqlx::types::Json(reasoning_details))
-		.bind(sqlx::types::Json(usage_details))
-		.bind(sqlx::types::Json(cost_details))
-		.bind(last_active_message_id)
-		.fetch_one(&state.db)
 		.await;
 
 		match msg {
@@ -443,10 +475,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	};
 
 	// Only fetch active fork messages for AI context
-	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 AND is_active_fork = TRUE ORDER BY created_at ASC")
-		.bind(chat_id)
-		.fetch_all(&state.db)
-		.await;
+	let messages = Message::list_active_by_chat(&state.db, &chat_id).await;
 
 	let messages = match messages {
 		Ok(msgs) => msgs,
@@ -465,11 +494,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		};
 
 		// Fetch the original assistant message to get its parent_id
-		let original_msg = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1 AND chat_id = $2")
-			.bind(regen_uuid)
-			.bind(chat_id)
-			.fetch_optional(&state.db)
-			.await;
+		let original_msg = Message::find_by_id_and_chat(&state.db, &regen_uuid, &chat_id).await;
 
 		let original = match original_msg {
 			Ok(Some(m)) => m,
@@ -483,34 +508,10 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		let parent_id = original.parent_id;
 
 		// Get the next fork_index for siblings with same parent_id and role
-		let next_fork_index: i32 = sqlx::query_scalar(
-			r#"SELECT COALESCE(MAX(fork_index), 0) + 1 FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = 'assistant'"#,
-		)
-		.bind(chat_id)
-		.bind(parent_id)
-		.fetch_one(&state.db)
-		.await
-		.unwrap_or(1);
+		let next_fork_index = Message::next_assistant_fork_index(&state.db, &chat_id, parent_id).await.unwrap_or(1);
 
 		// Deactivate the old assistant message and all its descendants
-		let _ = sqlx::query(
-			r#"
-			WITH RECURSIVE descendants AS (
-				SELECT id FROM messages 
-				WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = 'assistant' AND is_active_fork = TRUE
-				UNION ALL
-				SELECT m.id FROM messages m
-				INNER JOIN descendants d ON m.parent_id = d.id
-				WHERE m.chat_id = $1
-			)
-			UPDATE messages SET is_active_fork = FALSE 
-			WHERE id IN (SELECT id FROM descendants)
-			"#,
-		)
-		.bind(chat_id)
-		.bind(parent_id)
-		.execute(&state.db)
-		.await;
+		let _ = Message::deactivate_active_assistant_forks(&state.db, &chat_id, parent_id).await;
 
 		// Filter messages to only include up to and including the parent_id
 		// This prevents context from other fork branches being included
@@ -613,9 +614,12 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	let ir_for_stream = ir.clone();
 
 	let db = state.db.clone();
+	let mcp_pool = state.mcp_pool.clone();
+	let client_tool_pending = state.client_tool_pending.clone();
 	let start_time = Instant::now();
 	let reasoning_effort = req.reasoning_effort.clone();
 	let reasoning_budget_tokens = req.reasoning_budget_tokens;
+	let stream_request_settings = request_settings.clone();
 
 	let sse_stream = async_stream::stream! {
 	eprintln!("[STREAM] Stream generator started");
@@ -644,6 +648,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	const MAX_ITERATIONS: usize = 10;
 
 	let mut all_tool_executions: Vec<ToolExecutionInternal> = Vec::new();
+	let request_settings = stream_request_settings;
 
 	let engine = ai::get();
 	let tool_specs = ir_for_stream.tools.clone();
@@ -748,16 +753,49 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 							if let Some((tool_name, _)) = pending_tool_calls.remove(&id) {
 								let args = args_json;
 								completed_tool_calls.push((id.clone(), tool_name.clone(), args.clone()));
-								eprintln!("[STREAM] Executing tool: {} with args: {:?}", tool_name, args);
 
 								let exec_start = Instant::now();
-								let tool_result = execute_tool_by_name(&db, user.id, &tool_name, args.clone()).await;
-								let execution_ms = exec_start.elapsed().as_millis() as i32;
 
-								let (output, error, tool_id, function_id) = match tool_result {
-									Ok(result) => (result.output, None, Some(result.tool_id), result.function_id),
-									Err(e) => (serde_json::json!({"error": e}), Some(e), None, None),
+								let client_info = get_client_tool_info(&db, &tool_name, user.id).await;
+
+								let (output, error, tool_id, function_id) = if let Some((mcp_server_id, mcp_tool_name, actual_tool_id)) = client_info {
+									eprintln!("[STREAM] Delegating tool {} to client (mcp_server_id={})", tool_name, mcp_server_id);
+
+									yield Ok::<_, Infallible>(Event::default().data(
+										serde_json::to_string(&StreamData::ClientToolCall {
+											id: id.clone(),
+											name: tool_name.clone(),
+											args: args.clone(),
+											mcp_server_id,
+											mcp_tool_name,
+										}).unwrap_or_default()
+									));
+
+									let rx = client_tool_pending.register(id.clone(), user.id).await;
+
+									let result = match tokio::time::timeout(
+										std::time::Duration::from_secs(120),
+										rx,
+									).await {
+										Ok(Ok(r)) => r,
+										_ => {
+											client_tool_pending.cancel(&id, user.id).await;
+											eprintln!("[STREAM] Client tool call {} timed out or failed", id);
+											serde_json::json!({"error": "Client tool execution timed out"})
+										}
+									};
+
+									(result, None, Some(actual_tool_id), None)
+								} else {
+									eprintln!("[STREAM] Executing tool server-side: {} with args: {:?}", tool_name, args);
+									let tool_result = execute_tool_by_name(&db, &mcp_pool, user.id, &tool_name, args.clone()).await;
+									match tool_result {
+										Ok(result) => (result.output, None, Some(result.tool_id), result.function_id),
+										Err(e) => (serde_json::json!({"error": e}), Some(e), None, None),
+									}
 								};
+
+								let execution_ms = exec_start.elapsed().as_millis() as i32;
 
 								tool_results.push(ToolExecutionInternal {
 									call_id: id.clone(),
@@ -825,69 +863,47 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									budget_tokens: reasoning_budget_tokens.map(|b| b as i32),
 								};
 
-								let message = sqlx::query_as::<_, Message>(
-									r#"
-										INSERT INTO messages (
-											chat_id, role, content, reasoning_content,
-											model_id, reasoning_details, usage_details, cost_details, parent_id, fork_index, is_active_fork
-										)
-										VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
-										RETURNING *
-										"#,
-								)
-								.bind(chat_id)
-								.bind(&full_content)
-								.bind(if reasoning_content.is_empty() { None } else { Some(&reasoning_content) })
-								.bind(&model.id)
-								.bind(sqlx::types::Json(reasoning_details))
-								.bind(sqlx::types::Json(usage_details))
-								.bind(sqlx::types::Json(cost_details))
-								.bind(assistant_parent_id)
-							.bind(assistant_fork_index)
-								.fetch_one(&db)
-								.await;
-
-								let _ = sqlx::query("UPDATE chats SET updated_at = NOW() WHERE id = $1")
-									.bind(chat_id)
-									.execute(&db)
+									let message = Message::create_streaming_assistant(
+										&db,
+										StreamingAssistantMessageCreate {
+											chat_id: &chat_id,
+											content: &full_content,
+											reasoning_content: if reasoning_content.is_empty() { None } else { Some(&reasoning_content) },
+											model_id: &model.id,
+											reasoning_details: &reasoning_details,
+											usage_details: &usage_details,
+											cost_details: &cost_details,
+											request_settings: &request_settings,
+											parent_id: assistant_parent_id,
+											fork_index: assistant_fork_index,
+										},
+									)
 									.await;
 
-								match message {
-									Ok(msg) => {
-									if !all_tool_executions.is_empty() {
-										for exec in &all_tool_executions {
-											let _ = sqlx::query(
-												"INSERT INTO tool_executions (message_id, tool_call_id, input_args, output, error, execution_ms, tool_id, tool_function) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
-											)
-											.bind(msg.id)
-											.bind(&exec.call_id)
-											.bind(&exec.args)
-											.bind(&exec.output)
-											.bind(&exec.error)
-											.bind(exec.execution_ms)
-											.bind(exec.tool_id)
-											.bind(exec.function_id)
-											.execute(&db)
-											.await;
-										}
-										eprintln!("[STREAM] Saved {} tool executions for message {}", all_tool_executions.len(), msg.id);
-									}
+									match message {
+										Ok(msg) => {
+											if !all_tool_executions.is_empty() {
+												if let Err(e) = ToolExecution::create_for_message_batch(&db, &msg.id, &all_tool_executions).await {
+													eprintln!("[STREAM] Failed to save tool executions for message {}: {e}", msg.id);
+												}
+												eprintln!("[STREAM] Saved {} tool executions for message {}", all_tool_executions.len(), msg.id);
+											}
 
-									let message_response: ChatMessageResponse = msg.into();
-									yield Ok::<_, Infallible>(Event::default().data(
-										serde_json::to_string(&StreamData::Done { message: message_response }).unwrap_or_default()
-										));
+											let message_response: ChatMessageResponse = msg.into();
+											yield Ok::<_, Infallible>(Event::default().data(
+												serde_json::to_string(&StreamData::Done { message: message_response }).unwrap_or_default()
+											));
+										}
+										Err(e) => {
+											eprintln!("[STREAM] Failed to save message: {e}");
+											yield Ok::<_, Infallible>(Event::default().data(
+												serde_json::to_string(&StreamData::Error {
+													code: "save_failed".to_string(),
+													message: "Failed to save response".to_string(),
+												}).unwrap_or_default()
+											));
+										}
 									}
-									Err(e) => {
-										eprintln!("[STREAM] Failed to save message: {e}");
-										yield Ok::<_, Infallible>(Event::default().data(
-											serde_json::to_string(&StreamData::Error {
-												code: "save_failed".to_string(),
-												message: "Failed to save response".to_string(),
-											}).unwrap_or_default()
-										));
-									}
-								}
 								break 'agentic_loop;
 							} else {
 								eprintln!("[STREAM] Continuing agentic loop with {} tool results", tool_results.len());
@@ -943,4 +959,28 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	};
 
 	Sse::new(sse_stream).keep_alive(KeepAlive::default()).into_response()
+}
+
+/// POST `/api/v1/chats/{chat_id}/stream/tool-result`
+///
+/// Called by the browser after it has executed a client-side MCP tool call.
+/// The result is forwarded to the waiting streaming loop via the oneshot channel
+/// that was registered when the `ClientToolCall` SSE event was emitted.
+pub async fn submit_client_tool_result(
+	State(state): State<Arc<JobState>>,
+	cookies: Cookies,
+	Path(_chat_id): Path<Uuid>,
+	Json(req): Json<ClientToolResultRequest>,
+) -> impl IntoResponse {
+	use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+
+	if state.client_tool_pending.resolve(&req.call_id, user.id, req.result).await {
+		ResponseBuilder::new(ResponseBody::Json(serde_json::json!({"ok": true}))).build()
+	} else {
+		ErrorBuilder::new(ErrorCode::NotFound).build()
+	}
 }

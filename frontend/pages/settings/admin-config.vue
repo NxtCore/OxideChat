@@ -13,6 +13,14 @@
 				</div>
 				<Switch :modelValue="enableProviderSelector" :disabled="saving" @update:modelValue="toggleProviderSelector" />
 			</div>
+
+			<div class="mt-4 flex items-start justify-between gap-4 rounded-lg border border-border p-4">
+				<div class="min-w-0">
+					<p class="text-sm font-medium text-foreground">{{ store.getTranslation('admin.tools.mcp.allow_stdio') }}</p>
+					<p class="text-xs text-amber-500 mt-0.5">{{ store.getTranslation('admin.tools.mcp.allow_stdio_hint') }}</p>
+				</div>
+				<Switch :modelValue="allowServerStdioMcp" :disabled="saving" @update:modelValue="toggleAllowStdioMcp" />
+			</div>
 		</div>
 	</div>
 </template>
@@ -25,6 +33,7 @@ import {Switch} from '@/components/ui/switch';
 const store = useMainStore();
 const saving = ref(false);
 const enableProviderSelector = ref(store.base?.enable_provider_selector ?? false);
+const allowServerStdioMcp = ref(store.base?.allow_server_stdio_mcp ?? false);
 
 async function toggleProviderSelector(val: boolean) {
 	const previous = enableProviderSelector.value;
@@ -40,6 +49,25 @@ async function toggleProviderSelector(val: boolean) {
 	} catch (error) {
 		console.error('Failed to update provider selector setting:', error);
 		enableProviderSelector.value = previous;
+	} finally {
+		saving.value = false;
+	}
+}
+
+async function toggleAllowStdioMcp(val: boolean) {
+	const previous = allowServerStdioMcp.value;
+	allowServerStdioMcp.value = val;
+	saving.value = true;
+	try {
+		const {$customFetch} = useNuxtApp();
+		await $customFetch('/api/v1/admin/config', {
+			method: 'PATCH',
+			body: {allow_server_stdio_mcp: val},
+		});
+		if (store.base) store.base.allow_server_stdio_mcp = val;
+	} catch (error) {
+		console.error('Failed to update stdio MCP setting:', error);
+		allowServerStdioMcp.value = previous;
 	} finally {
 		saving.value = false;
 	}

@@ -116,6 +116,13 @@ pub struct UpdatePreferencesRequest {
 pub struct UpdateGlobalConfigRequest {
 	pub default_theme: Option<ThemeCssVars>,
 	pub enable_provider_selector: Option<bool>,
+	pub allow_server_stdio_mcp: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClientToolResultRequest {
+	pub call_id: String,
+	pub result: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]

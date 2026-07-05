@@ -81,6 +81,19 @@ pub struct UpdateMcpServerRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ClientDiscoveredTool {
+	pub name: String,
+	pub description: Option<String>,
+	#[serde(alias = "inputSchema")]
+	pub input_schema: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SyncMcpToolsRequest {
+	pub tools: Vec<ClientDiscoveredTool>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SetToolSettingsRequest {
 	pub settings: serde_json::Value,
 }

@@ -49,6 +49,7 @@ pub async fn get_base(State(state): State<Arc<JobState>>) -> impl IntoResponse {
 		oauth_providers: crate::config::Config::get().get_configured_oauth_providers(),
 		roles,
 		enable_provider_selector: crate::config::Config::get().enable_provider_selector(),
+		allow_server_stdio_mcp: crate::config::Config::get().allow_server_stdio_mcp(),
 	}))
 	.build()
 }

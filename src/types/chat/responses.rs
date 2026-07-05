@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{CostDetails, Message, ReasoningDetails, ThemeCssVars, ToolExecutionResponse, UsageDetails, UserPreferences};
+use super::{CostDetails, Message, ReasoningDetails, RequestSettings, ThemeCssVars, ToolExecutionResponse, UsageDetails, UserPreferences};
 
 #[derive(Debug, Serialize)]
 pub struct WorkspaceResponse {
@@ -79,11 +79,13 @@ pub struct ChatMessageResponse {
 	pub content: String,
 	pub reasoning_content: Option<String>,
 	pub model_id: Option<Uuid>,
+	pub model_key: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub content_parts: Option<serde_json::Value>,
 	pub cost_details: CostDetails,
 	pub usage_details: UsageDetails,
 	pub reasoning_details: ReasoningDetails,
+	pub request_settings: RequestSettings,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub tool_calls: Option<Vec<ToolExecutionResponse>>,
 	pub created_at: DateTime<Utc>,
@@ -95,16 +97,20 @@ pub struct ChatMessageResponse {
 
 impl From<Message> for ChatMessageResponse {
 	fn from(m: Message) -> Self {
+		let request_settings = m.request_settings.0;
+		let model_key = request_settings.model_key.clone();
 		Self {
 			id: m.id,
 			role: m.role,
 			content: m.content,
 			reasoning_content: m.reasoning_content,
 			model_id: m.model_id,
+			model_key,
 			content_parts: m.content_parts,
 			cost_details: m.cost_details.0,
 			usage_details: m.usage_details.0,
 			reasoning_details: m.reasoning_details.0,
+			request_settings,
 			tool_calls: None,
 			created_at: m.created_at,
 			parent_id: m.parent_id,
@@ -154,6 +160,7 @@ impl Default for PreferencesResponse {
 pub struct GlobalConfigResponse {
 	pub default_theme: ThemeCssVars,
 	pub enable_provider_selector: bool,
+	pub allow_server_stdio_mcp: bool,
 }
 
 impl Default for GlobalConfigResponse {
@@ -161,6 +168,7 @@ impl Default for GlobalConfigResponse {
 		Self {
 			default_theme: ThemeCssVars::default(),
 			enable_provider_selector: false,
+			allow_server_stdio_mcp: false,
 		}
 	}
 }
@@ -177,12 +185,26 @@ pub struct BranchResponse {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamData {
-	UserMessageSaved { message: ChatMessageResponse },
-	TextDelta { content: String },
-	ReasoningDelta { content: String },
-	ToolCallStart { id: String, name: String },
-	ToolCallDelta { id: String, args_delta: String },
-	ToolCallEnd { id: String },
+	UserMessageSaved {
+		message: ChatMessageResponse,
+	},
+	TextDelta {
+		content: String,
+	},
+	ReasoningDelta {
+		content: String,
+	},
+	ToolCallStart {
+		id: String,
+		name: String,
+	},
+	ToolCallDelta {
+		id: String,
+		args_delta: String,
+	},
+	ToolCallEnd {
+		id: String,
+	},
 	ToolResult {
 		id: String,
 		output: serde_json::Value,
@@ -191,8 +213,29 @@ pub enum StreamData {
 		tool_function: Option<Uuid>,
 		tool_name: Option<String>,
 	},
-	Tokens { input: u32, output: u32, reasoning: Option<u32> },
-	Usage { cost_details: CostDetails },
-	Error { code: String, message: String },
-	Done { message: ChatMessageResponse },
+	/// Emitted when the AI calls a user-owned MCP tool that must run client-side.
+	/// The browser executes the tool against the local MCP server and POSTs the
+	/// result back via the tool-result endpoint before the stream can continue.
+	ClientToolCall {
+		id: String,
+		name: String,
+		args: serde_json::Value,
+		mcp_server_id: Uuid,
+		mcp_tool_name: String,
+	},
+	Tokens {
+		input: u32,
+		output: u32,
+		reasoning: Option<u32>,
+	},
+	Usage {
+		cost_details: CostDetails,
+	},
+	Error {
+		code: String,
+		message: String,
+	},
+	Done {
+		message: ChatMessageResponse,
+	},
 }

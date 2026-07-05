@@ -52,6 +52,40 @@ export interface Workspace {
 	updated_at: string;
 }
 
+export interface McpServer {
+	id: string;
+	owner_id: string | null;
+	name: string;
+	transport: string;
+	connection_config: Record<string, any>;
+	is_enabled: boolean;
+	last_health_check: string | null;
+	health_status: string | null;
+	discovered_tools: string[];
+	created_at: string;
+	updated_at: string;
+}
+
+export interface CreateMcpServerRequest {
+	name: string;
+	transport: string;
+	connection_config: Record<string, any>;
+	is_enabled?: boolean;
+}
+
+export interface UpdateMcpServerRequest {
+	name?: string;
+	transport?: string;
+	connection_config?: Record<string, any>;
+	is_enabled?: boolean;
+}
+
+export interface McpDiscoveryResult {
+	tools: {name: string; description: string | null; input_schema: any}[];
+	server_name: string;
+	server_version: string | null;
+}
+
 export interface Chat {
 	id: string;
 	workspace_id: string | null;
@@ -85,6 +119,13 @@ export interface ChatMessageToolCall {
 	tool_function: string | null;
 }
 
+export interface ChatMessageRequestSettings {
+	model_key?: string | null;
+	provider_slug?: string | null;
+	provider_routing_mode?: 'prefer' | 'lock' | string | null;
+	enabled_tools?: string[];
+}
+
 export interface ChatMessage {
 	id: string;
 	client_id?: string;
@@ -92,6 +133,7 @@ export interface ChatMessage {
 	content: string;
 	reasoning_content: string | null;
 	model_id: string | null;
+	model_key: string | null;
 	content_parts?: Array<{type: string; text?: string; image_id?: string}> | null;
 	cost_details: {
 		input: string | null;
@@ -110,6 +152,7 @@ export interface ChatMessage {
 		effort: string | null;
 		budget_tokens: number | null;
 	};
+	request_settings: ChatMessageRequestSettings;
 	tool_calls: Array<ChatMessageToolCall>;
 	created_at: string;
 	// Fork support

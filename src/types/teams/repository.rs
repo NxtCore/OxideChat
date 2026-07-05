@@ -80,17 +80,19 @@ impl Team {
 		let items = rows
 			.into_iter()
 			.take(pagination.page_size)
-			.map(|(id, name, description, is_default, allow_all_models, budget_id, member_count, created_at, updated_at)| TeamResponse {
-				id,
-				name,
-				description,
-				is_default,
-				allow_all_models,
-				budget_id,
-				member_count,
-				created_at,
-				updated_at,
-			})
+			.map(
+				|(id, name, description, is_default, allow_all_models, budget_id, member_count, created_at, updated_at)| TeamResponse {
+					id,
+					name,
+					description,
+					is_default,
+					allow_all_models,
+					budget_id,
+					member_count,
+					created_at,
+					updated_at,
+				},
+			)
 			.collect();
 
 		Ok(PaginatedResponse { has_more, items })

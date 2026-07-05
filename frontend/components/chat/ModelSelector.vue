@@ -75,7 +75,6 @@
 									<div class="flex-1 min-w-0">
 										<div class="flex items-center gap-2 flex-wrap">
 											<span class="font-medium text-sm">{{ model.display_name }}</span>
-											<Star v-if="chatStore.isFavoriteModel(model)" class="h-3.5 w-3.5 text-yellow-500 fill-yellow-500" />
 											<span
 												v-for="cap in getDisplayCapabilities(model)"
 												:key="cap"
@@ -278,16 +277,4 @@ function toggleFavorite(model: Model) {
 	chatStore.toggleFavoriteModel(model.id);
 }
 
-watch(
-	() => chatStore.activeChat?.id,
-	(newId, oldId) => {
-		if (newId !== oldId && newId && chatStore.messages.length > 0) {
-			const last_llm_message = chatStore.messages.findLast(m => m.role === 'assistant');
-			const model = chatStore.models.find(m => m.id === last_llm_message?.model_id);
-			if (model && model.id !== chatStore.selectedModel?.id) {
-				chatStore.setSelectedModel(model);
-			}
-		}
-	}
-);
 </script>

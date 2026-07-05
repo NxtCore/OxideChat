@@ -40,6 +40,14 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/tools/{id}/settings", get(admin::tools::get_tool_settings))
 		.route("/api/v1/admin/tools/{id}/settings", put(admin::tools::set_tool_settings))
 		.route("/api/v1/admin/tools/{id}/test", post(admin::tools::test_tool))
+		// Admin MCP Servers
+		.route("/api/v1/admin/mcp-servers", get(admin::mcp::list_servers))
+		.route("/api/v1/admin/mcp-servers", post(admin::mcp::create_server))
+		.route("/api/v1/admin/mcp-servers/{id}", get(admin::mcp::get_server))
+		.route("/api/v1/admin/mcp-servers/{id}", put(admin::mcp::update_server))
+		.route("/api/v1/admin/mcp-servers/{id}", delete(admin::mcp::delete_server))
+		.route("/api/v1/admin/mcp-servers/{id}/discover", post(admin::mcp::discover_server))
+		.route("/api/v1/admin/mcp-servers/{id}/health-check", post(admin::mcp::health_check))
 		// Admin Teams
 		.route("/api/v1/admin/teams", get(admin::teams::list_teams))
 		.route("/api/v1/admin/teams", post(admin::teams::create_team))
@@ -95,6 +103,7 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/chats/{chat_id}/messages", get(public::messages::list_messages))
 		.route("/api/v1/chats/{chat_id}/messages", post(public::messages::send_message))
 		.route("/api/v1/chats/{chat_id}/stream", post(public::streaming::stream_completion))
+		.route("/api/v1/chats/{chat_id}/stream/tool-result", post(public::streaming::submit_client_tool_result))
 		// Message Forks
 		.route("/api/v1/chats/{chat_id}/messages/{message_id}/edit", post(public::messages::edit_message))
 		.route("/api/v1/chats/{chat_id}/messages/{message_id}/switch-fork", post(public::messages::switch_fork))
@@ -109,6 +118,14 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/providers", get(public::providers::list_providers))
 		// Tools
 		.route("/api/v1/tools", get(public::tools::list_tools))
+		// User MCP Servers
+		.route("/api/v1/mcp-servers", get(public::mcp::list_servers))
+		.route("/api/v1/mcp-servers", post(public::mcp::create_server))
+		.route("/api/v1/mcp-servers/{id}", get(public::mcp::get_server))
+		.route("/api/v1/mcp-servers/{id}", put(public::mcp::update_server))
+		.route("/api/v1/mcp-servers/{id}", delete(public::mcp::delete_server))
+		.route("/api/v1/mcp-servers/{id}/discover", post(public::mcp::discover_server))
+		.route("/api/v1/mcp-servers/{id}/sync-tools", post(public::mcp::sync_tools_from_client))
 		// Images CDN (public, no auth)
 		.route("/api/v1/images/{id}", get(public::images::serve_image))
 		.route("/api/v1/images", post(public::images::upload_image))

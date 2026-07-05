@@ -1,4 +1,3 @@
-
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::JobState;
 use crate::types::{AuthResponse, LoginRequest, RegisterRequest, SetupRequest, User};

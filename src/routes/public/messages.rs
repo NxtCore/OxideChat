@@ -1,5 +1,6 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
+use crate::types::models::Model;
 use crate::types::{
 	BranchFromMessageRequest, BranchResponse, Chat, ChatMessageResponse, ChatResponse, EditMessageRequest, Message, MessageListParams, ReasoningDetails,
 	SendMessageRequest, SwitchForkRequest,
@@ -44,6 +45,14 @@ pub async fn list_messages(
 	};
 
 	let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+	let model_ids: Vec<Uuid> = messages.iter().filter_map(|m| m.model_id).collect();
+	let model_keys = match Model::model_keys_by_ids(&state.db, &model_ids).await {
+		Ok(keys) => keys,
+		Err(e) => {
+			eprintln!("[MESSAGES] Failed to get message model keys: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
 
 	let sibling_counts = match Message::sibling_counts_for_chat(&state.db, &chat_id).await {
 		Ok(c) => c,
@@ -68,6 +77,9 @@ pub async fn list_messages(
 			let parent_id = m.parent_id;
 			let role = m.role.clone();
 			let mut response = ChatMessageResponse::from(m);
+			if response.model_key.is_none() {
+				response.model_key = response.model_id.and_then(|model_id| model_keys.get(&model_id).cloned());
+			}
 			response.tool_calls = tool_executions.remove(&msg_id);
 			response.sibling_count = sibling_counts.get(&(parent_id, role)).copied().unwrap_or(1) as i32;
 			response

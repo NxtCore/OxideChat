@@ -7,7 +7,7 @@ use crate::types::models::ProviderTab;
 use crate::types::providers::{ProviderKind, ProviderModelResponse};
 use serde_json::Value;
 use sqlx::types::Json;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
 impl Model {
@@ -40,6 +40,33 @@ impl Model {
 			display_name,
 		)
 		.fetch_one(pool)
+		.await
+	}
+
+	pub async fn model_keys_by_ids(pool: &sqlx::PgPool, model_ids: &[Uuid]) -> Result<HashMap<Uuid, String>, sqlx::Error> {
+		if model_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+
+		let rows: Vec<(Uuid, String)> = sqlx::query_as("SELECT id, model_id FROM models WHERE id = ANY($1)")
+			.bind(model_ids)
+			.fetch_all(pool)
+			.await?;
+
+		Ok(rows.into_iter().collect())
+	}
+
+	pub async fn find_by_model_id(pool: &sqlx::PgPool, model_id: &str) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Model>(
+			r#"
+			SELECT id, provider_id, model_id, display_name, capabilities, input_modalities,
+			       output_modalities, context_length, max_tokens, is_enabled, created_at, updated_at
+			FROM models
+			WHERE model_id = $1
+			"#,
+		)
+		.bind(model_id)
+		.fetch_optional(pool)
 		.await
 	}
 

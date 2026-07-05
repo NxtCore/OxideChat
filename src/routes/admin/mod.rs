@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod config;
 pub mod i18n;
+pub mod mcp;
 pub mod models;
 pub mod providers;
 pub mod teams;

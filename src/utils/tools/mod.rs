@@ -10,6 +10,7 @@ pub mod mcp;
 mod wasm;
 
 pub use builtin::get_builtin_executor;
-pub use executor::{ToolContext, ToolExecutor};
+pub use executor::{ToolContext, ToolError, ToolExecutor};
 pub use http::HttpExecutor;
+pub use mcp::{McpClient, McpConnectionPool};
 pub use wasm::WasmExecutor;

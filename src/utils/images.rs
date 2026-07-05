@@ -118,6 +118,14 @@ pub async fn store_from_data_uri(db: &PgPool, data_uri: &str, user_id: Option<Uu
 	store_image(db, &data, &mime_type, user_id, source).await
 }
 
+#[must_use]
+pub fn safe_image_mime(data: &[u8], declared_mime: &str) -> Option<&'static str> {
+	let detected = infer::get(data)?.mime_type();
+	let declared = normalize_image_mime(declared_mime)?;
+
+	if detected == declared { Some(declared) } else { None }
+}
+
 /// Retrieve an image by ID
 ///
 /// Returns (data, mime_type) or None if not found.
@@ -156,39 +164,45 @@ pub async fn get_image(db: &PgPool, id: Uuid) -> Result<Option<(Vec<u8>, String)
 }
 
 /// Parse a base64 data URI into (mime_type, decoded_bytes)
-fn parse_data_uri(data_uri: &str) -> Result<(String, Vec<u8>), String> {
+pub(crate) fn parse_data_uri(data_uri: &str) -> Result<(String, Vec<u8>), String> {
 	if !data_uri.starts_with("data:") {
 		return Err("Invalid data URI: must start with 'data:'".to_string());
 	}
 
 	let without_prefix = &data_uri[5..];
-	let parts: Vec<&str> = without_prefix.splitn(2, ',').collect();
-
-	if parts.len() != 2 {
+	let Some((header, data)) = without_prefix.split_once(',') else {
 		return Err("Invalid data URI format".to_string());
+	};
+
+	if !header.split(';').skip(1).any(|part| part.eq_ignore_ascii_case("base64")) {
+		return Err("Invalid data URI: image data must be base64 encoded".to_string());
 	}
 
-	let header = parts[0];
-	let data = parts[1];
-
-	let mime_type = if header.contains(';') {
-		let extracted = header.split(';').next().unwrap_or("image/png");
-		if extracted.is_empty() {
-			"application/octet-stream".to_string()
-		} else {
-			extracted.to_string()
-		}
+	let declared_mime = if header.contains(';') {
+		header.split(';').next().unwrap_or_default()
 	} else {
-		if header.is_empty() {
-			"application/octet-stream".to_string()
-		} else {
-			header.to_string()
-		}
+		header
+	};
+	let Some(mime_type) = normalize_image_mime(declared_mime) else {
+		return Err("Unsupported image type".to_string());
 	};
 
 	let decoded = BASE64.decode(data).map_err(|e| format!("Failed to decode base64: {e}"))?;
+	if safe_image_mime(&decoded, mime_type).is_none() {
+		return Err("Image content does not match a supported raster image type".to_string());
+	}
 
-	Ok((mime_type, decoded))
+	Ok((mime_type.to_string(), decoded))
+}
+
+fn normalize_image_mime(mime: &str) -> Option<&'static str> {
+	match mime.trim().to_ascii_lowercase().as_str() {
+		"image/png" => Some("image/png"),
+		"image/jpeg" | "image/jpg" => Some("image/jpeg"),
+		"image/gif" => Some("image/gif"),
+		"image/webp" => Some("image/webp"),
+		_ => None,
+	}
 }
 
 /// Convert MIME type to file extension
@@ -198,8 +212,6 @@ fn mime_to_extension(mime: &str) -> &'static str {
 		"image/jpeg" | "image/jpg" => "jpg",
 		"image/gif" => "gif",
 		"image/webp" => "webp",
-		"image/svg+xml" => "svg",
-		"image/bmp" => "bmp",
 		_ => "bin",
 	}
 }

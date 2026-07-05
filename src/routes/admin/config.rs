@@ -22,6 +22,7 @@ pub async fn get_global_config() -> impl IntoResponse {
 	let response = GlobalConfigResponse {
 		default_theme: config.default_theme(),
 		enable_provider_selector: config.enable_provider_selector(),
+		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
 	};
 	ResponseBuilder::new(ResponseBody::Json(response)).build()
 }
@@ -87,10 +88,31 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, cookies: C
 		Config::get().reload(&state.db).await;
 	}
 
+	if let Some(allow_server_stdio_mcp) = req.allow_server_stdio_mcp {
+		let result = sqlx::query(
+			r#"
+			INSERT INTO app_config (key, value)
+			VALUES ('allow_server_stdio_mcp', $1)
+			ON CONFLICT (key) DO UPDATE SET value = $1
+			"#,
+		)
+		.bind(if allow_server_stdio_mcp { "true" } else { "false" })
+		.execute(&state.db)
+		.await;
+
+		if let Err(e) = result {
+			eprintln!("[CONFIG] Failed to update allow_server_stdio_mcp: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+
+		Config::get().reload(&state.db).await;
+	}
+
 	let config = Config::get();
 	let response = GlobalConfigResponse {
 		default_theme: config.default_theme(),
 		enable_provider_selector: config.enable_provider_selector(),
+		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
 	};
 	ResponseBuilder::new(ResponseBody::Json(response)).build()
 }

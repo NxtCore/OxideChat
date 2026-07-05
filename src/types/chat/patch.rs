@@ -281,6 +281,28 @@ impl Message {
 		Ok(())
 	}
 
+	pub async fn deactivate_active_assistant_forks(pool: &PgPool, chat_id: &Uuid, parent_id: Option<Uuid>) -> Result<(), sqlx::Error> {
+		sqlx::query(
+			r#"
+			WITH RECURSIVE descendants AS (
+				SELECT id FROM messages
+				WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = 'assistant' AND is_active_fork = TRUE
+				UNION ALL
+				SELECT m.id FROM messages m
+				INNER JOIN descendants d ON m.parent_id = d.id
+				WHERE m.chat_id = $1
+			)
+			UPDATE messages SET is_active_fork = FALSE
+			WHERE id IN (SELECT id FROM descendants)
+			"#,
+		)
+		.bind(chat_id)
+		.bind(parent_id)
+		.execute(pool)
+		.await?;
+		Ok(())
+	}
+
 	/// Create a new fork of the given message with different content.
 	/// Deactivates all current siblings and their subtrees, then inserts the new fork.
 	pub async fn create_fork(pool: &PgPool, chat_id: &Uuid, original: &Message, new_content: &str) -> Result<Self, sqlx::Error> {
@@ -297,8 +319,8 @@ impl Message {
 
 		sqlx::query_as::<_, Message>(
 			r#"
-			INSERT INTO messages (chat_id, role, content, model_id, reasoning_details, usage_details, cost_details, parent_id, fork_index, is_active_fork)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
+			INSERT INTO messages (chat_id, role, content, model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
 			RETURNING *
 			"#,
 		)
@@ -309,6 +331,7 @@ impl Message {
 		.bind(&original.reasoning_details)
 		.bind(&original.usage_details)
 		.bind(&original.cost_details)
+		.bind(&original.request_settings)
 		.bind(original.parent_id)
 		.bind(next_fork_index)
 		.fetch_one(pool)
@@ -376,8 +399,8 @@ impl Message {
 			let new_msg = sqlx::query_as::<_, Message>(
 				r#"
 				INSERT INTO messages (chat_id, role, content, content_parts, reasoning_content, model_id,
-					cost_details, usage_details, reasoning_details, parent_id, fork_index, is_active_fork)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, TRUE)
+					cost_details, usage_details, reasoning_details, request_settings, parent_id, fork_index, is_active_fork)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, TRUE)
 				RETURNING *
 				"#,
 			)
@@ -390,6 +413,7 @@ impl Message {
 			.bind(&msg.cost_details)
 			.bind(&msg.usage_details)
 			.bind(&msg.reasoning_details)
+			.bind(&msg.request_settings)
 			.bind(new_parent_id)
 			.fetch_one(pool)
 			.await?;

@@ -2,6 +2,7 @@ import {defineStore} from 'pinia';
 import {useMainStore} from './index';
 import {useThemeStore} from './theme';
 import type {
+	McpServer,
 	Workspace,
 	Chat,
 	ChatMessage,
@@ -18,6 +19,20 @@ import type {
 	StreamingAnimation,
 	PaginatedResponse,
 } from '~/types/chat';
+
+function parseSseJsonRpc(body: string): any {
+	for (const line of body.split('\n')) {
+		if (line.startsWith('data:')) {
+			const payload = line.slice(5).trim();
+			if (payload) {
+				try {
+					return JSON.parse(payload);
+				} catch {}
+			}
+		}
+	}
+	throw new Error('No JSON-RPC response found in SSE stream');
+}
 
 const ACTIVE_WORKSPACE_KEY = 'oxide-active-workspace';
 
@@ -42,6 +57,9 @@ interface ChatState {
 	workspaces: Workspace[];
 	activeWorkspaceId: string | null;
 	workspacesLoading: boolean;
+
+	mcpManagerOpen: boolean;
+	userMcpServers: McpServer[];
 
 	chats: Chat[];
 	activeChat: Chat | null;
@@ -76,6 +94,9 @@ export const useChatStore = defineStore('chat', {
 		workspaces: [],
 		activeWorkspaceId: null,
 		workspacesLoading: false,
+
+		mcpManagerOpen: false,
+		userMcpServers: [],
 
 		chats: [],
 		activeChat: null,
@@ -191,6 +212,16 @@ export const useChatStore = defineStore('chat', {
 	},
 
 	actions: {
+		async fetchUserMcpServers() {
+			try {
+				const {$customFetch} = useNuxtApp();
+				const result = await $customFetch('/api/v1/mcp-servers');
+				this.userMcpServers = (result as McpServer[]) ?? [];
+			} catch (e) {
+				console.error('Failed to fetch user MCP servers:', e);
+			}
+		},
+
 		async fetchWorkspaces() {
 			this.workspacesLoading = true;
 			try {
@@ -356,8 +387,9 @@ export const useChatStore = defineStore('chat', {
 				}
 			}
 
-			this.messages = reconciled;
-			this.activeChat = chatWithMessages.chat;
+				this.messages = reconciled;
+				this.activeChat = chatWithMessages.chat;
+				await this.hydrateComposerFromMessages(this.messages);
 				const lastAssistantMessage = this.messages.findLast(m => m.role === 'assistant');
 				if (lastAssistantMessage)
 					this.setContextTokens((lastAssistantMessage.usage_details?.input_tokens || 0) + (lastAssistantMessage.usage_details?.output_tokens || 0));
@@ -413,6 +445,53 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
+		async callLocalMcpTool(mcp_server_id: string, mcp_tool_name: string, args: any): Promise<any> {
+			const server = this.userMcpServers.find(s => s.id === mcp_server_id);
+			if (!server) throw new Error(`MCP server ${mcp_server_id} not found in local server list`);
+
+			const url: string = server.connection_config?.url;
+			const headers: Record<string, string> = server.connection_config?.headers ?? {};
+			if (!url) throw new Error(`MCP server ${server.name} has no URL configured`);
+
+			const response = await fetch(url, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json, text/event-stream',
+					'MCP-Protocol-Version': '2025-06-18',
+					...headers,
+				},
+				body: JSON.stringify({
+					jsonrpc: '2.0',
+					id: Date.now(),
+					method: 'tools/call',
+					params: {name: mcp_tool_name, arguments: args},
+				}),
+			});
+
+			if (!response.ok) {
+				throw new Error(`MCP call failed: HTTP ${response.status}`);
+			}
+
+			const rawText = await response.text();
+			const contentType = response.headers.get('content-type') ?? '';
+			let data: any;
+			if (contentType.includes('text/event-stream')) {
+				data = parseSseJsonRpc(rawText);
+			} else {
+				data = JSON.parse(rawText);
+			}
+
+			if (data.error) throw new Error(data.error.message ?? 'MCP tool error');
+
+			const content = data.result?.content ?? [];
+			const text = content
+				.filter((c: any) => c.type === 'text')
+				.map((c: any) => c.text)
+				.join('\n');
+			return {result: text};
+		},
+
 		async sendAndStream(chatId: string, content: string, parts?: any[], skipUserMessage: boolean = false, regenerateFromMessageId?: string): Promise<void> {
 			if (!this.selectedModel) {
 				console.error('No model selected');
@@ -433,6 +512,7 @@ export const useChatStore = defineStore('chat', {
 					content,
 					reasoning_content: null,
 					model_id: this.selectedModel.model_id,
+					model_key: this.selectedModel.model_id,
 					cost_details: {
 						input: null,
 						output: null,
@@ -448,6 +528,12 @@ export const useChatStore = defineStore('chat', {
 					reasoning_details: {
 						effort: this.reasoningEffort,
 						budget_tokens: this.reasoningBudget,
+					},
+					request_settings: {
+						model_key: this.selectedModel.model_id,
+						provider_slug: this.selectedProviderSlug,
+						provider_routing_mode: this.providerRoutingMode,
+						enabled_tools: [...this.enabledTools],
 					},
 					tool_calls: [],
 					created_at: new Date().toISOString(),
@@ -466,6 +552,7 @@ export const useChatStore = defineStore('chat', {
 				content: '',
 				reasoning_content: null,
 				model_id: this.selectedModel.model_id,
+				model_key: this.selectedModel.model_id,
 				cost_details: {
 					input: null,
 					output: null,
@@ -481,6 +568,12 @@ export const useChatStore = defineStore('chat', {
 				reasoning_details: {
 					effort: this.reasoningEffort,
 					budget_tokens: this.reasoningBudget,
+				},
+				request_settings: {
+					model_key: this.selectedModel.model_id,
+					provider_slug: this.selectedProviderSlug,
+					provider_routing_mode: this.providerRoutingMode,
+					enabled_tools: [...this.enabledTools],
 				},
 				tool_calls: [],
 				created_at: new Date().toISOString(),
@@ -609,6 +702,35 @@ export const useChatStore = defineStore('chat', {
 										}
 										break;
 									}
+									case 'client_tool_call': {
+										const config = useRuntimeConfig();
+										const apiBase = config.public.apiBase || '';
+										let result: any;
+										let hasError = false;
+										try {
+											result = await this.callLocalMcpTool(data.mcp_server_id, data.mcp_tool_name, data.args);
+										} catch (e: any) {
+											result = {error: e?.message ?? 'Client MCP tool failed'};
+											hasError = true;
+										}
+										try {
+											await fetch(`${apiBase}/api/v1/chats/${chatId}/stream/tool-result`, {
+												method: 'POST',
+												headers: {'Content-Type': 'application/json'},
+												credentials: 'include',
+												body: JSON.stringify({call_id: data.id, result}),
+											});
+										} catch (e) {
+											console.error('Failed to submit client tool result:', e);
+										}
+										if (msg && !hasError) {
+											const toolCall = msg.tool_calls?.find(tc => tc.tool_call_id === data.id);
+											if (toolCall) {
+												toolCall.output = JSON.stringify(result);
+											}
+										}
+										break;
+									}
 									case 'tokens':
 										if (msg) {
 											msg.usage_details.input_tokens = data.input;
@@ -705,6 +827,55 @@ export const useChatStore = defineStore('chat', {
 			} finally {
 				this.modelsLoading = false;
 			}
+		},
+
+		async findModelByKey(modelKey: string): Promise<ModelList | null> {
+			let model = this.models.find(m => m.model_id === modelKey) ?? null;
+			if (model) return model;
+
+			if (this.models.length === 0) {
+				await this.fetchModels();
+				model = this.models.find(m => m.model_id === modelKey) ?? null;
+				if (model) return model;
+			}
+
+			try {
+				const {$customFetch} = useNuxtApp();
+				const result = await $customFetch<PaginatedResponse<ModelList>>('/api/v1/models', {
+					params: {
+						query: modelKey,
+						size: '10',
+					},
+				});
+				const exact = result.items.find(m => m.model_id === modelKey) ?? null;
+				if (exact && !this.models.some(m => m.id === exact.id)) {
+					this.models.push(exact);
+				}
+				return exact;
+			} catch (e) {
+				console.error('Failed to fetch model for chat hydration:', e);
+				return null;
+			}
+		},
+
+		async hydrateComposerFromMessages(messages: ChatMessage[]) {
+			const source = messages.findLast(m => m.role === 'assistant') ?? messages.findLast(m => m.role === 'user');
+			if (!source) return;
+
+			const settings = source.request_settings ?? {};
+			const modelKey = source.model_key ?? settings.model_key ?? null;
+			if (modelKey) {
+				const model = await this.findModelByKey(modelKey);
+				if (model && model.id !== this.selectedModel?.id) {
+					this.setSelectedModel(model);
+				}
+			}
+
+			this.reasoningEffort = source.reasoning_details?.effort ?? null;
+			this.reasoningBudget = source.reasoning_details?.budget_tokens ?? null;
+			this.selectedProviderSlug = settings.provider_slug ?? null;
+			this.providerRoutingMode = settings.provider_routing_mode === 'lock' ? 'lock' : 'prefer';
+			this.enabledTools = Array.isArray(settings.enabled_tools) ? [...settings.enabled_tools] : [];
 		},
 
 		setProviderSelection(slug: string | null, mode?: 'prefer' | 'lock') {
@@ -871,7 +1042,7 @@ export const useChatStore = defineStore('chat', {
 		async init() {
 			this.initialized = false;
 			this.activeWorkspaceId = loadActiveWorkspaceId();
-			await Promise.all([this.fetchWorkspaces(), this.fetchPreferences()]);
+			await Promise.all([this.fetchWorkspaces(), this.fetchPreferences(), this.fetchUserMcpServers()]);
 			if (this.activeWorkspaceId && !this.workspaces.some(w => w.id === this.activeWorkspaceId)) {
 				this.activeWorkspaceId = null;
 				persistActiveWorkspaceId(null);

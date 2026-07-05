@@ -6,7 +6,7 @@
 
 use crate::types::JobState;
 use crate::types::{UploadImageRequest, UploadImageResponse};
-use crate::utils::images::{get_image, image_url, store_from_data_uri};
+use crate::utils::images::{get_image, image_url, safe_image_mime, store_from_data_uri};
 use axum::{
 	Json,
 	extract::{Path, State},
@@ -14,15 +14,26 @@ use axum::{
 	response::{IntoResponse, Response},
 };
 use std::sync::Arc;
+use tower_cookies::Cookies;
 use uuid::Uuid;
+
+use super::auth::get_current_user;
 
 /// Upload a base64 image and return its URL
 ///
 /// POST /api/images
-pub async fn upload_image(State(state): State<Arc<JobState>>, Json(req): Json<UploadImageRequest>) -> Result<Json<UploadImageResponse>, (StatusCode, String)> {
-	let stored = store_from_data_uri(&state.db, &req.data_uri, req.user_id, req.source.as_deref())
+pub async fn upload_image(
+	State(state): State<Arc<JobState>>,
+	cookies: Cookies,
+	Json(req): Json<UploadImageRequest>,
+) -> Result<Json<UploadImageResponse>, (StatusCode, String)> {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return Err((StatusCode::UNAUTHORIZED, "Not authenticated".to_string()));
+	};
+
+	let stored = store_from_data_uri(&state.db, &req.data_uri, Some(user.id), req.source.as_deref())
 		.await
-		.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+		.map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
 	Ok(Json(UploadImageResponse {
 		id: stored.id,
@@ -39,11 +50,15 @@ pub async fn serve_image(State(state): State<Arc<JobState>>, Path(id): Path<Uuid
 	match get_image(&state.db, id).await {
 		Ok(Some((data, mime_type))) => {
 			let mut headers = HeaderMap::new();
-			headers.insert(
-				header::CONTENT_TYPE,
-				mime_type.parse().unwrap_or(header::HeaderValue::from_static("application/octet-stream")),
-			);
 			headers.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("public, max-age=31536000, immutable"));
+			headers.insert(header::X_CONTENT_TYPE_OPTIONS, header::HeaderValue::from_static("nosniff"));
+
+			if let Some(safe_mime) = safe_image_mime(&data, &mime_type) {
+				headers.insert(header::CONTENT_TYPE, header::HeaderValue::from_static(safe_mime));
+			} else {
+				headers.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("application/octet-stream"));
+				headers.insert(header::CONTENT_DISPOSITION, header::HeaderValue::from_static("attachment"));
+			}
 
 			(StatusCode::OK, headers, data).into_response()
 		}
