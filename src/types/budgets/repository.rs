@@ -1,16 +1,30 @@
 use super::rows::EffectiveBudgetRow;
-use super::{Budget, BudgetAssignmentInfo, BudgetAssignmentRequest, BudgetResponse, CreateBudgetRequest, EffectiveBudget, EffectiveBudgetResponse, UpdateBudgetRequest, UserBudgetStatus};
+use super::{
+	Budget, BudgetAssignmentInfo, BudgetAssignmentRequest, BudgetResponse, CreateBudgetRequest, EffectiveBudget, EffectiveBudgetResponse, UpdateBudgetRequest,
+	UserBudgetStatus,
+};
 use crate::types::BaseType;
 use crate::types::axum::PaginatedResponse;
 use crate::types::models::ModelPricing;
 use chrono::{DateTime, Datelike, Duration, NaiveTime, TimeZone, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use uuid::Uuid;
 
+#[derive(sqlx::FromRow)]
+struct BudgetSpentRow {
+	assignment_id: Uuid,
+	spent: Decimal,
+}
+
 impl Budget {
+	fn escape_like_pattern(s: &str) -> String {
+		s.replace('\\', r"\\").replace('%', r"\%").replace('_', r"\_")
+	}
+
 	fn search_pattern(search: Option<&str>) -> Option<String> {
-		search.map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{s}%"))
+		search.map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{}%", Self::escape_like_pattern(s)))
 	}
 
 	fn budget_from_row(row: EffectiveBudgetRow) -> EffectiveBudget {
@@ -43,7 +57,7 @@ impl Budget {
 			SELECT id, name, description, amount, kind::text AS kind, interval::text AS interval,
 			       reset_strategy::text AS reset_strategy, on_exceed::text AS on_exceed, is_enabled, created_at, updated_at
 			FROM budgets
-			WHERE ($1::text IS NULL OR name ILIKE $1)
+			WHERE ($1::text IS NULL OR name ILIKE $1 ESCAPE '\')
 			ORDER BY name ASC
 			LIMIT $2 OFFSET $3
 			"#,
@@ -154,10 +168,19 @@ impl Budget {
 
 	pub async fn assign_to_user(&self, pool: &PgPool, user_id: &Uuid) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
-		sqlx::query("DELETE FROM budget_assignments WHERE user_id = $1")
-			.bind(user_id)
-			.execute(&mut *tx)
-			.await?;
+		sqlx::query(
+			r#"
+			DELETE FROM budget_assignments ba
+			USING budgets b
+			WHERE ba.budget_id = b.id
+			  AND ba.user_id = $1
+			  AND b.kind = $2::budget_kind
+			"#,
+		)
+		.bind(user_id)
+		.bind(self.kind.as_str())
+		.execute(&mut *tx)
+		.await?;
 		sqlx::query("INSERT INTO budget_assignments (budget_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
 			.bind(self.id)
 			.bind(user_id)
@@ -194,9 +217,10 @@ impl Budget {
 		Ok(())
 	}
 
-	pub async fn delete_assignment(pool: &PgPool, assignment_id: &Uuid) -> Result<(), sqlx::Error> {
-		sqlx::query("DELETE FROM budget_assignments WHERE id = $1")
+	pub async fn delete_assignment(pool: &PgPool, budget_id: &Uuid, assignment_id: &Uuid) -> Result<(), sqlx::Error> {
+		sqlx::query("DELETE FROM budget_assignments WHERE id = $1 AND budget_id = $2")
 			.bind(assignment_id)
+			.bind(budget_id)
 			.execute(pool)
 			.await?;
 		Ok(())
@@ -262,12 +286,21 @@ impl Budget {
 
 	pub async fn status_for_user(pool: &PgPool, user_id: &Uuid) -> Result<UserBudgetStatus, sqlx::Error> {
 		let effective = Self::budgets_for_user(pool, user_id).await?;
+		let mut window_starts = Vec::with_capacity(effective.len());
+		let mut resets_at = Vec::with_capacity(effective.len());
+		for budget in &effective {
+			let (window_start, resets) = Self::window(budget);
+			window_starts.push(window_start);
+			resets_at.push(resets);
+		}
+		let spent_by_assignment = Self::spent_by_assignment(pool, user_id, &effective, &window_starts).await?;
 		let mut budgets = Vec::with_capacity(effective.len());
 		let mut should_block = false;
 		let mut should_warn = false;
-		for budget in effective {
-			let (window_start, resets_at) = Self::window(&budget);
-			let spent = Self::spent_in_window(pool, user_id, &budget, window_start).await?;
+		for (index, budget) in effective.into_iter().enumerate() {
+			let window_start = window_starts[index];
+			let resets_at = resets_at[index];
+			let spent = spent_by_assignment.get(&budget.assignment_id).copied().unwrap_or(Decimal::ZERO);
 			let remaining = (budget.budget.amount - spent).max(Decimal::ZERO);
 			let exhausted = spent >= budget.budget.amount;
 			should_block |= exhausted && budget.budget.on_exceed == "block";
@@ -301,37 +334,47 @@ impl Budget {
 		})
 	}
 
-	async fn spent_in_window(pool: &PgPool, user_id: &Uuid, budget: &EffectiveBudget, window_start: DateTime<Utc>) -> Result<Decimal, sqlx::Error> {
-		if budget.budget.kind == "pooled" {
-			if let Some(team_id) = budget.team_id {
-				return sqlx::query_scalar(
-					r#"
-					SELECT COALESCE(SUM(ue.cost_total), 0)
-					FROM usage_events ue
-					WHERE ue.created_at >= $1
-					  AND EXISTS (
-					      SELECT 1 FROM team_members tm
-					      WHERE tm.team_id = $2 AND tm.user_id = ue.user_id
-					  )
-					"#,
-				)
-				.bind(window_start)
-				.bind(team_id)
-				.fetch_one(pool)
-				.await;
-			}
+	async fn spent_by_assignment(
+		pool: &PgPool,
+		user_id: &Uuid,
+		budgets: &[EffectiveBudget],
+		window_starts: &[DateTime<Utc>],
+	) -> Result<HashMap<Uuid, Decimal>, sqlx::Error> {
+		if budgets.is_empty() {
+			return Ok(HashMap::new());
 		}
-		sqlx::query_scalar(
+		let mut assignment_ids = Vec::with_capacity(budgets.len());
+		let mut team_ids = Vec::with_capacity(budgets.len());
+		let mut is_pooled_team = Vec::with_capacity(budgets.len());
+		for budget in budgets {
+			assignment_ids.push(budget.assignment_id);
+			team_ids.push(budget.team_id.unwrap_or_else(Uuid::nil));
+			is_pooled_team.push(budget.budget.kind == "pooled" && budget.team_id.is_some());
+		}
+		let rows = sqlx::query_as::<_, BudgetSpentRow>(
 			r#"
-			SELECT COALESCE(SUM(cost_total), 0)
-			FROM usage_events
-			WHERE user_id = $1 AND created_at >= $2
+			SELECT budget_windows.assignment_id, COALESCE(SUM(ue.cost_total), 0)::numeric AS spent
+			FROM UNNEST($1::uuid[], $2::uuid[], $3::bool[], $4::timestamptz[]) AS budget_windows(assignment_id, team_id, is_pooled_team, window_start)
+			LEFT JOIN usage_events ue
+			  ON ue.created_at >= budget_windows.window_start
+			 AND (
+			     (budget_windows.is_pooled_team AND EXISTS (
+			         SELECT 1 FROM team_members tm
+			         WHERE tm.team_id = budget_windows.team_id AND tm.user_id = ue.user_id
+			     ))
+			     OR (NOT budget_windows.is_pooled_team AND ue.user_id = $5)
+			 )
+			GROUP BY budget_windows.assignment_id
 			"#,
 		)
+		.bind(&assignment_ids)
+		.bind(&team_ids)
+		.bind(&is_pooled_team)
+		.bind(window_starts)
 		.bind(user_id)
-		.bind(window_start)
-		.fetch_one(pool)
-		.await
+		.fetch_all(pool)
+		.await?;
+		Ok(rows.into_iter().map(|row| (row.assignment_id, row.spent)).collect())
 	}
 
 	fn window(budget: &EffectiveBudget) -> (DateTime<Utc>, Option<DateTime<Utc>>) {

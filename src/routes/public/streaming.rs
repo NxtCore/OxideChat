@@ -38,6 +38,15 @@ fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl
 	Sse::new(futures_util::stream::once(async move { Ok::<_, Infallible>(Event::default().data(data)) })).keep_alive(KeepAlive::default())
 }
 
+async fn acquire_budget_lock(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, sqlx::Error> {
+	let mut tx = pool.begin().await?;
+	sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text, 0))")
+		.bind(user_id)
+		.execute(&mut *tx)
+		.await?;
+	Ok(tx)
+}
+
 /// Interpolate `{{variable}}` placeholders in a system prompt string.
 ///
 /// Supported variables:
@@ -384,7 +393,7 @@ async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>) -> Vec<Omn
 }
 
 pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cookies, Path(chat_id): Path<Uuid>, Json(req): Json<StreamRequest>) -> impl IntoResponse {
-	eprint!("[STREAM] Starting stream completion");
+	eprintln!("[STREAM] Starting stream completion");
 
 	let Some(user) = get_current_user(&state.db, &cookies).await else {
 		return error_stream("not_authenticated", "Authentication required").into_response();
@@ -421,18 +430,30 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	}
 
+	let mut budget_lock = None;
 	match ModelPricing::is_free(&state.db, &model.id).await {
 		Ok(true) => {}
-		Ok(false) => match Budget::status_for_user(&state.db, &user.id).await {
-			Ok(status) if status.blocked_model_ids.contains(&model.id) => {
-				return error_stream("budget_exceeded", "Budget exceeded for this model").into_response();
+		Ok(false) => {
+			let lock = match acquire_budget_lock(&state.db, &user.id).await {
+				Ok(lock) => lock,
+				Err(e) => {
+					eprintln!("[STREAM] Failed to acquire budget lock: {e}");
+					return error_stream("internal_error", "Failed to check budget status").into_response();
+				}
+			};
+			match Budget::status_for_user(&state.db, &user.id).await {
+				Ok(status) if status.blocked_model_ids.contains(&model.id) => {
+					return error_stream("budget_exceeded", "Budget exceeded for this model").into_response();
+				}
+				Ok(_) => {
+					budget_lock = Some(lock);
+				}
+				Err(e) => {
+					eprintln!("[STREAM] Failed to check budget status: {e}");
+					return error_stream("internal_error", "Failed to check budget status").into_response();
+				}
 			}
-			Ok(_) => {}
-			Err(e) => {
-				eprintln!("[STREAM] Failed to check budget status: {e}");
-				return error_stream("internal_error", "Failed to check budget status").into_response();
-			}
-		},
+		}
 		Err(e) => {
 			eprintln!("[STREAM] Failed to check model pricing: {e}");
 			return error_stream("internal_error", "Failed to check model pricing").into_response();
@@ -633,13 +654,13 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	let ir_for_stream = ir.clone();
 
 	let db = state.db.clone();
-	let primary_team_id = Budget::primary_team_id(&state.db, &user.id).await.ok().flatten();
 	let mcp_pool = state.mcp_pool.clone();
 	let client_tool_pending = state.client_tool_pending.clone();
 	let start_time = Instant::now();
 	let reasoning_effort = req.reasoning_effort.clone();
 	let reasoning_budget_tokens = req.reasoning_budget_tokens;
 	let stream_request_settings = request_settings.clone();
+	let mut budget_lock = budget_lock;
 
 	let sse_stream = async_stream::stream! {
 	eprintln!("[STREAM] Stream generator started");
@@ -883,9 +904,15 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									budget_tokens: reasoning_budget_tokens.map(|b| b as i32),
 								};
 
-								// Cost (including any admin pricing override) is computed by
-								// omniference's cost middleware and delivered via the Cost event.
-								let final_cost_total = Decimal::from_f64(cost_details.total.unwrap_or(0.0)).unwrap_or(Decimal::ZERO);
+								let provider_cost_total = Decimal::from_f64(cost_details.total.unwrap_or(0.0)).unwrap_or(Decimal::ZERO);
+								let final_cost_total = match ModelPricing::usage_cost(&db, &model.id, input_tokens as i32, output_tokens as i32, reasoning_tokens as i32).await {
+									Ok(Some(cost)) => cost,
+									Ok(None) => provider_cost_total,
+									Err(e) => {
+										eprintln!("[STREAM] Failed to compute local usage cost for model {}: {e}", model.id);
+										provider_cost_total
+									}
+								};
 
 									let message = Message::create_streaming_assistant(
 										&db,
@@ -908,7 +935,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 										Ok(msg) => {
 											if let Err(e) = UsageEvent::record(&db, UsageEventRecord {
 												user_id: &user.id,
-												team_id: primary_team_id,
+												team_id: Budget::primary_team_id(&db, &user.id).await.ok().flatten(),
 												model_id: &model.id,
 												provider_id: &model.provider_id,
 												request_type: "chat",
@@ -918,6 +945,11 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 												cost_total: final_cost_total,
 											}).await {
 												eprintln!("[STREAM] Failed to record usage event for message {}: {e}", msg.id);
+											}
+											if let Some(lock) = budget_lock.take() {
+												if let Err(e) = lock.commit().await {
+													eprintln!("[STREAM] Failed to release budget lock for message {}: {e}", msg.id);
+												}
 											}
 											if !all_tool_executions.is_empty() {
 												if let Err(e) = ToolExecution::create_for_message_batch(&db, &msg.id, &all_tool_executions).await {

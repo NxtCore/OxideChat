@@ -137,14 +137,14 @@ pub async fn get_budget_assignments(State(state): State<Arc<JobState>>, cookies:
 	}
 }
 
-pub async fn delete_assignment(State(state): State<Arc<JobState>>, cookies: Cookies, Path((_budget_id, assignment_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
+pub async fn delete_assignment(State(state): State<Arc<JobState>>, cookies: Cookies, Path((budget_id, assignment_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
 	let Some(user) = get_current_user(&state.db, &cookies).await else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
-	match Budget::delete_assignment(&state.db, &assignment_id).await {
+	match Budget::delete_assignment(&state.db, &budget_id, &assignment_id).await {
 		Ok(()) => (StatusCode::NO_CONTENT, "").into_response(),
 		Err(e) => {
 			eprintln!("[BUDGETS] Failed to delete assignment: {e}");

@@ -52,7 +52,7 @@
 					<div class="rounded-lg border border-border bg-card p-4">
 						<p class="text-xs text-muted-foreground uppercase tracking-wider">{{ store.getTranslation('settings.analytics.total_cost') }}</p>
 						<p class="mt-1 text-2xl font-bold text-foreground">{{ formatMoney(totalCost) }}</p>
-						<p v-if="costChange !== null" class="mt-1 text-xs" :class="costChange >= 0 ? 'text-emerald-500' : 'text-red-400'">
+						<p v-if="costChange !== null" class="mt-1 text-xs" :class="costChange <= 0 ? 'text-emerald-500' : 'text-red-400'">
 							<TrendingUp v-if="costChange >= 0" class="inline h-3 w-3 mr-0.5" />
 							<TrendingDown v-else class="inline h-3 w-3 mr-0.5" />
 							{{ costChange >= 0 ? '+' : '' }}{{ costChange.toFixed(1) }}%
@@ -196,7 +196,7 @@
 										<span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{backgroundColor: model.color}" />
 										<span class="text-sm font-medium truncate">{{ model.label }}</span>
 									</div>
-									<span class="text-xs font-medium shrink-0" :class="model.pct >= 0 ? 'text-emerald-500' : 'text-red-400'">
+									<span class="text-xs font-medium shrink-0" :class="model.pct <= 0 ? 'text-emerald-500' : 'text-red-400'">
 										{{ model.pct >= 0 ? '↑' : '↓' }} {{ Math.abs(model.pct).toFixed(0) }}%
 									</span>
 								</div>
@@ -508,13 +508,32 @@ const userBarData = computed(() =>
 );
 
 const trendingModels = computed(() => {
+	const days = [...new Set(byDayModel.value.map(row => row.day))].sort();
+	const mid = Math.floor(days.length / 2);
+	const firstDays = new Set(days.slice(0, mid));
+	const secondDays = new Set(days.slice(mid));
+	const spendByModel = new Map<string, {first: number; second: number}>();
+	for (const row of byDayModel.value) {
+		const spend = spendByModel.get(row.model_name) ?? {first: 0, second: 0};
+		if (firstDays.has(row.day)) {
+			spend.first += Number(row.cost_total);
+		} else if (secondDays.has(row.day)) {
+			spend.second += Number(row.cost_total);
+		}
+		spendByModel.set(row.model_name, spend);
+	}
 	return byModel.value.slice(0, 8).map((model, i) => ({
 		label: model.label,
 		color: CHART_COLORS[i % CHART_COLORS.length],
-		pct: Math.random() * 200 - 50,
+		pct: trendPercent(spendByModel.get(model.label)),
 		cost: Number(model.cost_total),
 	}));
 });
+
+function trendPercent(spend: {first: number; second: number} | undefined): number {
+	if (!spend || spend.first === 0) return 0;
+	return ((spend.second - spend.first) / spend.first) * 100;
+}
 
 function getMetricValue(row: AnalyticsDayModelRow): number {
 	switch (exploreMetric.value) {

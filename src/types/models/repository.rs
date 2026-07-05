@@ -5,6 +5,7 @@ use crate::types::PolicyResolver;
 use crate::types::axum::PaginatedResponse;
 use crate::types::models::ProviderTab;
 use crate::types::providers::{ProviderKind, ProviderModelResponse};
+use rust_decimal::Decimal;
 use serde_json::Value;
 use sqlx::types::Json;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -513,6 +514,14 @@ impl Model {
 }
 
 impl ModelPricing {
+	fn decimal_from_json(value: Option<&Value>) -> Option<Decimal> {
+		value.and_then(Value::as_f64).and_then(Decimal::from_f64_retain)
+	}
+
+	fn millionths(tokens: i32, rate: Decimal) -> Decimal {
+		Decimal::from(tokens.max(0)) * rate / Decimal::from(1_000_000)
+	}
+
 	pub async fn effective(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
 			r#"
@@ -581,6 +590,25 @@ impl ModelPricing {
 			.execute(pool)
 			.await?;
 		Ok(())
+	}
+
+	pub async fn usage_cost(pool: &sqlx::PgPool, model_id: &Uuid, input_tokens: i32, output_tokens: i32, reasoning_tokens: i32) -> Result<Option<Decimal>, sqlx::Error> {
+		let Some(pricing) = Self::effective(pool, model_id).await? else {
+			return Ok(None);
+		};
+		if pricing.override_pricing.is_none() && (pricing.reported_input.is_none() || pricing.reported_output.is_none()) {
+			return Ok(None);
+		}
+		let reasoning_rate = pricing.override_pricing.as_ref().and_then(|value| Self::decimal_from_json(value.get("reasoning")));
+		let input_cost = Self::millionths(input_tokens, pricing.effective_input);
+		let output_cost = if let Some(reasoning_rate) = reasoning_rate {
+			let billed_reasoning_tokens = reasoning_tokens.max(0).min(output_tokens.max(0));
+			let visible_output_tokens = output_tokens.max(0) - billed_reasoning_tokens;
+			Self::millionths(visible_output_tokens, pricing.effective_output) + Self::millionths(billed_reasoning_tokens, reasoning_rate)
+		} else {
+			Self::millionths(output_tokens, pricing.effective_output)
+		};
+		Ok(Some(input_cost + output_cost))
 	}
 
 	/// All pricing overrides keyed by the model's string identifier, for pushing
