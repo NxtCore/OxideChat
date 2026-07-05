@@ -1,6 +1,6 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::models::{AdminModelPatchBody, Model, ModelListParams};
+use crate::types::models::{AdminModelPatchBody, Model, ModelListParams, ModelPricing, ModelPricingOverrideRequest};
 use crate::types::models_configs::{ModelConfig, ModelConfigPatchField};
 use crate::utils::images::{image_url, is_data_uri, store_from_data_uri};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
@@ -99,6 +99,86 @@ pub async fn get_model(State(state): State<Arc<JobState>>, cookies: Cookies, Pat
 	};
 
 	ResponseBuilder::new(ResponseBody::Json(row)).build()
+}
+
+pub async fn get_model_pricing(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+	if !user.has_permission(&state.db, ADMIN_MODELS_VIEW).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	match ModelPricing::effective(&state.db, &id).await {
+		Ok(Some(pricing)) => ResponseBuilder::new(ResponseBody::Json(pricing)).build(),
+		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[ADMIN] Failed to get model pricing: {e}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+	}
+}
+
+pub async fn put_model_pricing(
+	State(state): State<Arc<JobState>>,
+	cookies: Cookies,
+	Path(id): Path<Uuid>,
+	Json(req): Json<ModelPricingOverrideRequest>,
+) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+	if !user.has_permission(&state.db, ADMIN_MODELS_EDIT).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	let model = match Model::find_by_id(&state.db, &id).await {
+		Ok(Some(model)) => model,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[ADMIN] Failed to load model for pricing: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+	let pricing_json = match serde_json::to_value(&req.pricing) {
+		Ok(value) => value,
+		Err(e) => {
+			eprintln!("[ADMIN] Failed to serialize pricing override: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+	match ModelPricing::upsert_override(&state.db, &id, &pricing_json).await {
+		Ok(pricing) => ResponseBuilder::new(ResponseBody::Json(pricing)).build(),
+		Err(e) => {
+			eprintln!("[ADMIN] Failed to save model pricing: {e}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+	}
+}
+
+pub async fn delete_model_pricing(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+	if !user.has_permission(&state.db, ADMIN_MODELS_EDIT).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	let model = match Model::find_by_id(&state.db, &id).await {
+		Ok(Some(model)) => model,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[ADMIN] Failed to load model for pricing: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
+	match ModelPricing::delete_override(&state.db, &id).await {
+		Ok(()) => ResponseBuilder::<()>::new(ResponseBody::Empty).build(),
+		Err(e) => {
+			eprintln!("[ADMIN] Failed to delete model pricing: {e}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+	}
 }
 
 /// PATCH /api/v1/admin/models/:id

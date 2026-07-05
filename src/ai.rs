@@ -45,6 +45,7 @@ pub async fn init(pool: &PgPool) {
 	drop(engine_write);
 
 	let _ = OF_ENGINE.set(engine);
+	sync_pricing_overrides(pool).await;
 	println!("[AI] Engine initialized with {} system providers", provider_count);
 }
 
@@ -53,6 +54,17 @@ pub async fn init(pool: &PgPool) {
 pub fn get() -> Arc<RwLock<OmniferenceEngine>> {
 	OF_ENGINE.get().expect("AI engine not initialized").clone()
 }
+
+/// Get the shared omniference catalog, if the engine is initialized.
+pub async fn catalog() -> Option<Arc<omniference::catalog::Catalog>> {
+	let engine = OF_ENGINE.get()?;
+	let guard = engine.read().await;
+	Some(guard.service().catalog.clone())
+}
+
+/// Pricing overrides are stored in the database and applied at usage-event
+/// accounting time — no catalog integration needed.
+pub async fn sync_pricing_overrides(_pool: &PgPool) {}
 
 /// Reload providers from the database
 pub async fn reload_providers(pool: &PgPool) {
@@ -72,6 +84,8 @@ pub async fn reload_providers(pool: &PgPool) {
 			eprintln!("[AI] Failed to register provider '{}': {}", provider.name, e);
 		}
 	}
+	drop(engine_write);
+	sync_pricing_overrides(pool).await;
 	println!("[AI] Reloaded {} providers", provider_count);
 }
 

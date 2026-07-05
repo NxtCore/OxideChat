@@ -24,6 +24,7 @@ pub struct ModelListPublic {
 	pub provider: ProviderSlim,
 	pub icon: Option<String>,
 	pub is_favorite: bool,
+	pub budget_blocked: bool,
 }
 
 #[derive(Debug, Serialize)]

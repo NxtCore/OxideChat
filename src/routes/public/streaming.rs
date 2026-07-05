@@ -4,11 +4,11 @@
 
 use crate::ai;
 use crate::routes::public::auth::get_current_user;
-use crate::types::models::Model;
+use crate::types::models::{Model, ModelPricing};
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
 use crate::types::{
-	Chat, ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, StreamingAssistantMessageCreate,
-	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolFunction, UserToolSettings,
+	Budget, Chat, ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, StreamingAssistantMessageCreate,
+	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolFunction, UsageEvent, UsageEventRecord, UserToolSettings,
 };
 use crate::types::{CostDetails, JobState};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
@@ -26,6 +26,7 @@ use omniference::{
 	stream::StreamEvent,
 	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec},
 };
+use rust_decimal::{Decimal, prelude::FromPrimitive};
 use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -420,6 +421,24 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	}
 
+	match ModelPricing::is_free(&state.db, &model.id).await {
+		Ok(true) => {}
+		Ok(false) => match Budget::status_for_user(&state.db, &user.id).await {
+			Ok(status) if status.blocked_model_ids.contains(&model.id) => {
+				return error_stream("budget_exceeded", "Budget exceeded for this model").into_response();
+			}
+			Ok(_) => {}
+			Err(e) => {
+				eprintln!("[STREAM] Failed to check budget status: {e}");
+				return error_stream("internal_error", "Failed to check budget status").into_response();
+			}
+		},
+		Err(e) => {
+			eprintln!("[STREAM] Failed to check model pricing: {e}");
+			return error_stream("internal_error", "Failed to check model pricing").into_response();
+		}
+	}
+
 	let user_model_config = ModelConfig::find_for_user_by_stable_key(&state.db, ModelConfigViewer { user_id: &user.id }, &req.model_key)
 		.await
 		.ok()
@@ -614,6 +633,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	let ir_for_stream = ir.clone();
 
 	let db = state.db.clone();
+	let primary_team_id = Budget::primary_team_id(&state.db, &user.id).await.ok().flatten();
 	let mcp_pool = state.mcp_pool.clone();
 	let client_tool_pending = state.client_tool_pending.clone();
 	let start_time = Instant::now();
@@ -863,6 +883,10 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									budget_tokens: reasoning_budget_tokens.map(|b| b as i32),
 								};
 
+								// Cost (including any admin pricing override) is computed by
+								// omniference's cost middleware and delivered via the Cost event.
+								let final_cost_total = Decimal::from_f64(cost_details.total.unwrap_or(0.0)).unwrap_or(Decimal::ZERO);
+
 									let message = Message::create_streaming_assistant(
 										&db,
 										StreamingAssistantMessageCreate {
@@ -882,6 +906,19 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 
 									match message {
 										Ok(msg) => {
+											if let Err(e) = UsageEvent::record(&db, UsageEventRecord {
+												user_id: &user.id,
+												team_id: primary_team_id,
+												model_id: &model.id,
+												provider_id: &model.provider_id,
+												request_type: "chat",
+												input_tokens: input_tokens as i32,
+												output_tokens: output_tokens as i32,
+												reasoning_tokens: reasoning_tokens as i32,
+												cost_total: final_cost_total,
+											}).await {
+												eprintln!("[STREAM] Failed to record usage event for message {}: {e}", msg.id);
+											}
 											if !all_tool_executions.is_empty() {
 												if let Err(e) = ToolExecution::create_for_message_batch(&db, &msg.id, &all_tool_executions).await {
 													eprintln!("[STREAM] Failed to save tool executions for message {}: {e}", msg.id);

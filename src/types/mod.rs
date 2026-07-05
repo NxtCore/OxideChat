@@ -27,6 +27,7 @@ pub struct Pagination {
 pub mod auth;
 pub mod axum;
 pub mod base;
+pub mod budgets;
 pub mod catalog;
 pub mod chat;
 pub mod i18n;
@@ -41,10 +42,12 @@ pub mod roles;
 pub mod state;
 pub mod teams;
 pub mod tools;
+pub mod usage;
 pub mod user;
 
 pub use auth::*;
 pub use base::*;
+pub use budgets::*;
 pub use chat::*;
 pub use i18n::*;
 pub use images::*;
@@ -54,4 +57,5 @@ pub use roles::*;
 pub use state::*;
 pub use teams::*;
 pub use tools::*;
+pub use usage::*;
 pub use user::*;

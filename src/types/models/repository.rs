@@ -1,5 +1,5 @@
 use super::rows::{ModelDetailedRow, ModelListAdminRow, ModelListPublicRow};
-use super::{Model, ModelDetailed, ModelListAdmin, ModelListPublic, ModelSyncInput, ModelSyncSummary, ModelViewer};
+use super::{Model, ModelDetailed, ModelListAdmin, ModelListPublic, ModelPricing, ModelSyncInput, ModelSyncSummary, ModelViewer};
 use crate::types::BaseType;
 use crate::types::PolicyResolver;
 use crate::types::axum::PaginatedResponse;
@@ -509,5 +509,124 @@ impl Model {
 		.await?;
 
 		Ok(row.map(|r| (r.display_name, r.model_id)))
+	}
+}
+
+impl ModelPricing {
+	pub async fn effective(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Self>(
+			r#"
+			SELECT
+				m.id AS model_id,
+				MIN(gmpo.price_input)::numeric AS reported_input,
+				MIN(gmpo.price_output)::numeric AS reported_output,
+				mpo.pricing AS override_pricing,
+				COALESCE((mpo.pricing->>'input')::numeric, MIN(gmpo.price_input)::numeric, 0) AS effective_input,
+				COALESCE((mpo.pricing->>'output')::numeric, MIN(gmpo.price_output)::numeric, 0) AS effective_output
+			FROM models m
+			LEFT JOIN gateway_catalog_models gcm ON gcm.local_model_id = m.id
+			LEFT JOIN gateway_model_provider_options gmpo ON gmpo.catalog_model_id = gcm.id
+			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
+			WHERE m.id = $1
+			GROUP BY m.id, mpo.pricing
+			"#,
+		)
+		.bind(model_id)
+		.fetch_optional(pool)
+		.await
+	}
+
+	pub async fn list_with_overrides(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Self>(
+			r#"
+			SELECT
+				m.id AS model_id,
+				MIN(gmpo.price_input)::numeric AS reported_input,
+				MIN(gmpo.price_output)::numeric AS reported_output,
+				mpo.pricing AS override_pricing,
+				COALESCE((mpo.pricing->>'input')::numeric, MIN(gmpo.price_input)::numeric, 0) AS effective_input,
+				COALESCE((mpo.pricing->>'output')::numeric, MIN(gmpo.price_output)::numeric, 0) AS effective_output
+			FROM models m
+			LEFT JOIN gateway_catalog_models gcm ON gcm.local_model_id = m.id
+			LEFT JOIN gateway_model_provider_options gmpo ON gmpo.catalog_model_id = gcm.id
+			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
+			GROUP BY m.id, mpo.pricing
+			ORDER BY m.display_name ASC
+			"#,
+		)
+		.fetch_all(pool)
+		.await
+	}
+
+	pub async fn upsert_override(pool: &sqlx::PgPool, model_id: &Uuid, pricing: &Value) -> Result<Self, sqlx::Error> {
+		sqlx::query(
+			r#"
+			INSERT INTO model_pricing_overrides (model_id, pricing)
+			VALUES ($1, $2)
+			ON CONFLICT (model_id) DO UPDATE
+			SET pricing = EXCLUDED.pricing,
+			    updated_at = NOW()
+			"#,
+		)
+		.bind(model_id)
+		.bind(pricing)
+		.execute(pool)
+		.await?;
+		Self::effective(pool, model_id).await?.ok_or(sqlx::Error::RowNotFound)
+	}
+
+	pub async fn delete_override(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<(), sqlx::Error> {
+		sqlx::query("DELETE FROM model_pricing_overrides WHERE model_id = $1")
+			.bind(model_id)
+			.execute(pool)
+			.await?;
+		Ok(())
+	}
+
+	/// All pricing overrides keyed by the model's string identifier, for pushing
+	/// into the omniference catalog as programmatic overrides.
+	pub async fn all_overrides(pool: &sqlx::PgPool) -> Result<Vec<(String, Value)>, sqlx::Error> {
+		sqlx::query_as::<_, (String, Value)>(
+			r#"
+			SELECT m.model_id, mpo.pricing
+			FROM model_pricing_overrides mpo
+			JOIN models m ON m.id = mpo.model_id
+			"#,
+		)
+		.fetch_all(pool)
+		.await
+	}
+
+	pub async fn is_free(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<bool, sqlx::Error> {
+		let Some(pricing) = Self::effective(pool, model_id).await? else {
+			return Ok(false);
+		};
+		let override_free = pricing.override_pricing.is_some() && pricing.effective_input.is_zero() && pricing.effective_output.is_zero();
+		let reported_free = pricing.override_pricing.is_none()
+			&& pricing.reported_input.is_some()
+			&& pricing.reported_output.is_some()
+			&& pricing.effective_input.is_zero()
+			&& pricing.effective_output.is_zero();
+		Ok(override_free || reported_free)
+	}
+
+	pub async fn priced_model_ids(pool: &sqlx::PgPool) -> Result<Vec<Uuid>, sqlx::Error> {
+		sqlx::query_scalar(
+			r#"
+			SELECT m.id
+			FROM models m
+			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
+			LEFT JOIN gateway_catalog_models gcm ON gcm.local_model_id = m.id
+			LEFT JOIN gateway_model_provider_options gmpo ON gmpo.catalog_model_id = gcm.id
+			GROUP BY m.id, mpo.pricing
+			HAVING CASE
+				WHEN mpo.pricing IS NOT NULL THEN (mpo.pricing->>'input')::numeric > 0 OR (mpo.pricing->>'output')::numeric > 0
+				WHEN MIN(gmpo.price_input) IS NOT NULL AND MIN(gmpo.price_output) IS NOT NULL THEN MIN(gmpo.price_input) > 0 OR MIN(gmpo.price_output) > 0
+				ELSE TRUE
+			END
+			"#,
+		)
+		.fetch_all(pool)
+		.await
 	}
 }

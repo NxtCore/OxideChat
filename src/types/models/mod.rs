@@ -1,5 +1,6 @@
 use crate::types::BaseType;
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::Json;
@@ -49,6 +50,16 @@ pub struct ModelSyncSummary {
 	pub added: usize,
 	pub updated: usize,
 	pub removed: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ModelPricing {
+	pub model_id: Uuid,
+	pub reported_input: Option<Decimal>,
+	pub reported_output: Option<Decimal>,
+	pub override_pricing: Option<Value>,
+	pub effective_input: Decimal,
+	pub effective_output: Decimal,
 }
 
 impl BaseType for Model {}

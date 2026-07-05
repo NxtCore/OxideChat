@@ -837,15 +837,61 @@
 					<Loader2 class="h-5 w-5 animate-spin" />
 				</div>
 
-				<div v-else-if="providerParentUnavailable" class="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+				<div class="rounded-lg border border-border bg-card p-4">
+					<div class="mb-3 flex items-center justify-between gap-3">
+						<div>
+							<h4 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.models.editor.pricing') }}</h4>
+							<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.pricing_desc') }}</p>
+						</div>
+						<ShadButton v-if="pricing?.override_pricing != null" variant="outline" size="sm" @click="deletePricingOverride">
+							<Trash2 class="h-4 w-4" />
+						</ShadButton>
+					</div>
+					<div class="grid gap-3 md:grid-cols-2">
+						<div class="rounded-md bg-muted/40 p-3 text-sm">
+							<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.reported_price') }}</p>
+							<p class="mt-1 font-medium">{{ formatPricingPair(pricing?.reported_input, pricing?.reported_output) }}</p>
+						</div>
+						<div class="rounded-md bg-muted/40 p-3 text-sm">
+							<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.effective_price') }}</p>
+							<p class="mt-1 font-medium">{{ formatPricingPair(pricing?.effective_input, pricing?.effective_output) }}</p>
+						</div>
+						<div class="space-y-1.5">
+							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_input') }}</ShadLabel>
+							<ShadInput v-model="pricingForm.input" type="number" step="0.000001" />
+						</div>
+						<div class="space-y-1.5">
+							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_output') }}</ShadLabel>
+							<ShadInput v-model="pricingForm.output" type="number" step="0.000001" />
+						</div>
+						<div class="space-y-1.5">
+							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_reasoning') }}</ShadLabel>
+							<ShadInput v-model="pricingForm.reasoning" type="number" step="0.000001" />
+						</div>
+						<div class="space-y-1.5">
+							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_cache_read') }}</ShadLabel>
+							<ShadInput v-model="pricingForm.cache_read" type="number" step="0.000001" />
+						</div>
+						<div class="space-y-1.5">
+							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_cache_write') }}</ShadLabel>
+							<ShadInput v-model="pricingForm.cache_write" type="number" step="0.000001" />
+						</div>
+					</div>
+					<p class="mt-2 text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.pricing_unit') }}</p>
+					<div class="mt-3 flex justify-end">
+						<ShadButton size="sm" @click="savePricingOverride">{{ store.getTranslation('common.save') }}</ShadButton>
+					</div>
+				</div>
+
+				<div v-if="!providerOptionsLoading && providerParentUnavailable" class="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
 					{{ store.getTranslation('settings.models.editor.providers_user_unavailable') }}
 				</div>
 
-				<div v-else-if="!providerOptions || providerOptions.options.length === 0" class="flex items-center justify-center py-10 text-sm text-muted-foreground">
+				<div v-else-if="!providerOptionsLoading && (!providerOptions || providerOptions.options.length === 0)" class="flex items-center justify-center py-10 text-sm text-muted-foreground">
 					{{ store.getTranslation('settings.models.editor.providers_empty') }}
 				</div>
 
-				<div v-else class="overflow-x-auto rounded-lg border border-border">
+				<div v-else-if="providerOptions" class="overflow-x-auto rounded-lg border border-border">
 					<table class="w-full text-sm">
 						<thead>
 							<tr class="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
@@ -940,6 +986,14 @@ const providerOptions = ref<Record<string, any> | null>(null);
 const providerOptionsLoading = ref(false);
 const providerOptionsLoaded = ref(false);
 const providerParentUnavailable = computed(() => providerOptions.value?.availability_state === 'USER_UNAVAILABLE');
+const pricing = ref<Record<string, any> | null>(null);
+const pricingForm = reactive({
+	input: '0',
+	output: '0',
+	reasoning: '',
+	cache_read: '',
+	cache_write: '',
+});
 
 type ProviderRowState = 'user_unavailable' | 'unavailable' | 'available' | 'unknown';
 
@@ -973,6 +1027,51 @@ function formatPrice(opt: Record<string, any>): string {
 	if (opt.price_input == null && opt.price_output == null) return '—';
 	const fmt = (v: number | null | undefined) => (v == null ? '—' : '$' + Number(v).toFixed(2));
 	return `${fmt(opt.price_input)} / ${fmt(opt.price_output)}`;
+}
+
+function formatPricingPair(input: string | number | null | undefined, output: string | number | null | undefined): string {
+	const fmt = (value: string | number | null | undefined) => (value == null ? '-' : '$' + Number(value).toFixed(6));
+	return `${fmt(input)} / ${fmt(output)}`;
+}
+
+async function loadPricing() {
+	try {
+		pricing.value = await $customFetch(`/api/v1/admin/models/${modelId}/pricing`);
+		const override = pricing.value?.override_pricing ?? null;
+		pricingForm.input = String(override?.input ?? pricing.value?.effective_input ?? 0);
+		pricingForm.output = String(override?.output ?? pricing.value?.effective_output ?? 0);
+		pricingForm.reasoning = override?.reasoning != null ? String(override.reasoning) : '';
+		pricingForm.cache_read = override?.cache_read != null ? String(override.cache_read) : '';
+		pricingForm.cache_write = override?.cache_write != null ? String(override.cache_write) : '';
+	} catch (e) {
+		console.error(e);
+	}
+}
+
+async function savePricingOverride() {
+	const optional = (value: string): number | undefined => {
+		const trimmed = value.trim();
+		return trimmed === '' ? undefined : Number(trimmed);
+	};
+	const overridePricing: Record<string, number | undefined | never[]> = {
+		input: Number(pricingForm.input || 0),
+		output: Number(pricingForm.output || 0),
+		reasoning: optional(pricingForm.reasoning),
+		cache_read: optional(pricingForm.cache_read),
+		cache_write: optional(pricingForm.cache_write),
+		tiers: [],
+	};
+	pricing.value = await $customFetch(`/api/v1/admin/models/${modelId}/pricing`, {
+		method: 'PUT',
+		body: {pricing: overridePricing},
+	});
+	store.toast(store.getTranslation('settings.models.editor.pricing_saved'), {type: 'success'});
+}
+
+async function deletePricingOverride() {
+	await $customFetch(`/api/v1/admin/models/${modelId}/pricing`, {method: 'DELETE'});
+	await loadPricing();
+	store.toast(store.getTranslation('settings.models.editor.pricing_deleted'), {type: 'success'});
 }
 
 async function loadProviderOptions(force = false) {
@@ -1174,6 +1273,7 @@ function insertVariable(token: string) {
 
 onMounted(async () => {
 	await loadModel();
+	await loadPricing();
 });
 
 function populateForm(data: Record<string, any>) {

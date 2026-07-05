@@ -54,7 +54,8 @@
 							<div
 								v-for="model in pickerModels"
 								:key="model.id"
-								class="px-3 py-2 hover:bg-accent/50 cursor-pointer transition-colors border-b border-border/50 last:border-0"
+								class="px-3 py-2 transition-colors border-b border-border/50 last:border-0"
+								:class="model.budget_blocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent/50 cursor-pointer'"
 								@click="selectModel(model)"
 							>
 								<div class="flex items-start gap-3">
@@ -85,6 +86,9 @@
 										</div>
 										<p class="text-xs text-muted-foreground mt-0.5 truncate">
 											{{ model.model_id }}
+										</p>
+										<p v-if="model.budget_blocked" class="text-xs text-destructive mt-1">
+											{{ store.getTranslation('settings.budgets.reached') }}
 										</p>
 									</div>
 
@@ -196,7 +200,7 @@
 
 <script setup lang="ts">
 import {Bot, Star, Bookmark, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2} from 'lucide-vue-next';
-import type {Model} from '~/types/chat';
+import type {ModelList} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
 import {useModelPicker} from '~/composables/useModelPicker';
@@ -268,7 +272,7 @@ onUnmounted(() => {
 	teardownObserver();
 });
 
-function getDisplayCapabilities(model: Model): string[] {
+function getDisplayCapabilities(model: ModelList): string[] {
 	const caps: string[] = [];
 	if (model.context_length) {
 		caps.push(`${Math.round(model.context_length / 1000)}k`);
@@ -276,23 +280,27 @@ function getDisplayCapabilities(model: Model): string[] {
 	return caps;
 }
 
-function selectModel(model: Model) {
+function selectModel(model: ModelList) {
+	if (model.budget_blocked) {
+		store.toast(store.getTranslation('settings.budgets.reached'), {type: 'warning'});
+		return;
+	}
 	chatStore.setSelectedModel(model);
 	isOpen.value = false;
 }
 
-function toggleFavorite(model: Model) {
+function toggleFavorite(model: ModelList) {
 	const newVal = !model.is_favorite;
 	const idx = pickerModels.value.findIndex(m => m.id === model.id);
 	if (idx !== -1) pickerModels.value[idx] = {...pickerModels.value[idx], is_favorite: newVal};
 	chatStore.toggleFavoriteModel(model.id);
 }
 
-function isDefaultModel(model: Model): boolean {
+function isDefaultModel(model: ModelList): boolean {
 	return store.preferences?.default_model_key === model.model_id;
 }
 
-async function toggleDefault(model: Model) {
+async function toggleDefault(model: ModelList) {
 	const newKey = isDefaultModel(model) ? null : model.model_id;
 	await chatStore.updatePreferences({default_model_key: newKey});
 }
