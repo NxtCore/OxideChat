@@ -23,6 +23,7 @@ pub async fn get_global_config() -> impl IntoResponse {
 		default_theme: config.default_theme(),
 		enable_provider_selector: config.enable_provider_selector(),
 		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
+		default_model_key: config.default_model_key(),
 	};
 	ResponseBuilder::new(ResponseBody::Json(response)).build()
 }
@@ -41,71 +42,31 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, cookies: C
 	}
 
 	if let Some(default_theme) = req.default_theme {
-		let theme_json = match serde_json::to_string(&default_theme) {
-			Ok(json) => json,
-			Err(e) => {
-				eprintln!("[CONFIG] Failed to serialize theme: {e}");
-				return ErrorBuilder::new(ErrorCode::InternalError).build();
-			}
-		};
-
-		let result = sqlx::query(
-			r#"
-			INSERT INTO app_config (key, value)
-			VALUES ('default_theme', $1)
-			ON CONFLICT (key) DO UPDATE SET value = $1
-			"#,
-		)
-		.bind(&theme_json)
-		.execute(&state.db)
-		.await;
-
-		if let Err(e) = result {
+		if let Err(e) = Config::get().set_default_theme(&state.db, &default_theme).await {
 			eprintln!("[CONFIG] Failed to update default_theme: {e}");
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
-
-		Config::get().reload(&state.db).await;
 	}
 
 	if let Some(enable_provider_selector) = req.enable_provider_selector {
-		let result = sqlx::query(
-			r#"
-			INSERT INTO app_config (key, value)
-			VALUES ('enable_provider_selector', $1)
-			ON CONFLICT (key) DO UPDATE SET value = $1
-			"#,
-		)
-		.bind(if enable_provider_selector { "true" } else { "false" })
-		.execute(&state.db)
-		.await;
-
-		if let Err(e) = result {
+		if let Err(e) = Config::get().set_enable_provider_selector(&state.db, enable_provider_selector).await {
 			eprintln!("[CONFIG] Failed to update enable_provider_selector: {e}");
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
-
-		Config::get().reload(&state.db).await;
 	}
 
 	if let Some(allow_server_stdio_mcp) = req.allow_server_stdio_mcp {
-		let result = sqlx::query(
-			r#"
-			INSERT INTO app_config (key, value)
-			VALUES ('allow_server_stdio_mcp', $1)
-			ON CONFLICT (key) DO UPDATE SET value = $1
-			"#,
-		)
-		.bind(if allow_server_stdio_mcp { "true" } else { "false" })
-		.execute(&state.db)
-		.await;
-
-		if let Err(e) = result {
+		if let Err(e) = Config::get().set_allow_server_stdio_mcp(&state.db, allow_server_stdio_mcp).await {
 			eprintln!("[CONFIG] Failed to update allow_server_stdio_mcp: {e}");
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
+	}
 
-		Config::get().reload(&state.db).await;
+	if let Some(default_model_key) = req.default_model_key {
+		if let Err(e) = Config::get().set_default_model_key(&state.db, default_model_key.as_deref()).await {
+			eprintln!("[CONFIG] Failed to update default_model_key: {e}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
 	}
 
 	let config = Config::get();
@@ -113,6 +74,7 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, cookies: C
 		default_theme: config.default_theme(),
 		enable_provider_selector: config.enable_provider_selector(),
 		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
+		default_model_key: config.default_model_key(),
 	};
 	ResponseBuilder::new(ResponseBody::Json(response)).build()
 }

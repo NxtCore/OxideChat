@@ -18,6 +18,7 @@ pub struct Team {
 	pub is_default: bool,
 	pub allow_all_models: bool,
 	pub budget_id: Option<Uuid>,
+	pub default_model_key: Option<String>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }

@@ -134,6 +134,7 @@ impl Team {
 			SET name = COALESCE($2, name),
 				description = CASE WHEN $3 THEN $4 ELSE description END,
 				allow_all_models = COALESCE($5, allow_all_models),
+				default_model_key = CASE WHEN $6 THEN $7 ELSE default_model_key END,
 				updated_at = NOW()
 			WHERE id = $1
 			RETURNING *
@@ -144,8 +145,41 @@ impl Team {
 		.bind(req.description.is_some())
 		.bind(req.description.as_ref().and_then(|v| v.as_deref()).filter(|s| !s.trim().is_empty()))
 		.bind(req.allow_all_models)
+		.bind(req.default_model_key.is_some())
+		.bind(req.default_model_key.as_ref().and_then(|v| v.as_deref()))
 		.fetch_one(pool)
 		.await
+	}
+
+	/// Resolve the effective default model key for a user.
+	///
+	/// Precedence: user preference → specific team default → default team default → global default.
+	pub async fn resolve_default_model_key(pool: &PgPool, user_id: &Uuid, user_default_model_key: Option<String>) -> Option<String> {
+		use crate::config::Config;
+
+		if user_default_model_key.is_some() {
+			return user_default_model_key;
+		}
+
+		let team_default: Option<String> = sqlx::query_scalar(
+			r#"
+			SELECT t.default_model_key FROM teams t
+			INNER JOIN team_members tm ON tm.team_id = t.id
+			WHERE tm.user_id = $1 AND t.default_model_key IS NOT NULL
+			ORDER BY t.is_default ASC LIMIT 1
+			"#,
+		)
+		.bind(user_id)
+		.fetch_optional(pool)
+		.await
+		.ok()
+		.flatten();
+
+		if team_default.is_some() {
+			return team_default;
+		}
+
+		Config::get().default_model_key()
 	}
 
 	pub async fn update_budget(&self, pool: &PgPool, req: &UpdateTeamBudgetRequest) -> Result<Self, sqlx::Error> {
@@ -276,6 +310,7 @@ impl Team {
 			is_default: self.is_default,
 			allow_all_models: self.allow_all_models,
 			budget_id: self.budget_id,
+			default_model_key: self.default_model_key.clone(),
 			members: self.members(pool).await?,
 			model_access: self.model_access(pool).await?,
 			created_at: self.created_at,

@@ -123,6 +123,17 @@
 										</div>
 										<Tooltip>
 											<TooltipTrigger as-child>
+												<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleDefault(model)">
+													<Bookmark v-if="isDefaultModel(model)" class="h-4 w-4 fill-primary stroke-primary" />
+													<Bookmark v-else class="h-4 w-4" />
+												</button>
+											</TooltipTrigger>
+											<TooltipContent>
+												<p>{{ store.getTranslation('chat.model_selector.toggle_default') }}</p>
+											</TooltipContent>
+										</Tooltip>
+										<Tooltip>
+											<TooltipTrigger as-child>
 												<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleFavorite(model)">
 													<Star v-if="chatStore.isFavoriteModel(model)" class="h-4 w-4 fill-primary stroke-primary" />
 													<Star v-else class="h-4 w-4" />
@@ -184,7 +195,7 @@
 </template>
 
 <script setup lang="ts">
-import {Bot, Star, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2} from 'lucide-vue-next';
+import {Bot, Star, Bookmark, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2} from 'lucide-vue-next';
 import type {Model} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
@@ -275,6 +286,15 @@ function toggleFavorite(model: Model) {
 	const idx = pickerModels.value.findIndex(m => m.id === model.id);
 	if (idx !== -1) pickerModels.value[idx] = {...pickerModels.value[idx], is_favorite: newVal};
 	chatStore.toggleFavoriteModel(model.id);
+}
+
+function isDefaultModel(model: Model): boolean {
+	return store.preferences?.default_model_key === model.model_id;
+}
+
+async function toggleDefault(model: Model) {
+	const newKey = isDefaultModel(model) ? null : model.model_id;
+	await chatStore.updatePreferences({default_model_key: newKey});
 }
 
 </script>

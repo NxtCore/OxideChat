@@ -85,6 +85,16 @@
 									<div class="text-xs text-muted-foreground truncate">{{ store.getTranslation('chat.provider_selector.automatic_hint') }}</div>
 								</div>
 								<Check v-if="!chatStore.selectedProviderSlug" class="h-4 w-4 text-primary shrink-0" />
+								<Tooltip v-if="selectedModelIsDefault">
+									<TooltipTrigger as-child>
+										<span class="shrink-0 p-1 rounded hover:bg-accent" @click.stop="setDefaultProvider(null)">
+											<Bookmark class="h-4 w-4" :class="isDefaultProvider(null) ? 'fill-primary stroke-primary' : 'text-muted-foreground'" />
+										</span>
+									</TooltipTrigger>
+									<TooltipContent>
+										<p>{{ store.getTranslation('chat.provider_selector.set_as_default') }}</p>
+									</TooltipContent>
+								</Tooltip>
 							</button>
 
 							<div v-if="parentUnavailable" class="p-4 text-center text-xs text-muted-foreground">
@@ -122,6 +132,16 @@
 										<div class="text-xs text-muted-foreground truncate">{{ opt.provider_slug }}</div>
 									</div>
 									<div class="h-2 w-2 rounded-full shrink-0" :class="getStatusColor(opt)" />
+									<Tooltip v-if="selectedModelIsDefault">
+										<TooltipTrigger as-child>
+											<span class="shrink-0 p-1 rounded hover:bg-accent" @click.stop="setDefaultProvider(opt.provider_slug)">
+												<Bookmark class="h-4 w-4" :class="isDefaultProvider(opt.provider_slug) ? 'fill-primary stroke-primary' : 'text-muted-foreground'" />
+											</span>
+										</TooltipTrigger>
+										<TooltipContent>
+											<p>{{ store.getTranslation('chat.provider_selector.set_as_default') }}</p>
+										</TooltipContent>
+									</Tooltip>
 								</button>
 							</template>
 							<div v-else class="p-4 text-center text-xs text-muted-foreground">
@@ -249,12 +269,13 @@
 </template>
 
 <script setup lang="ts">
-import {Server, ChevronDown, Check, Loader2, Sparkles, Search, Filter, Bot, Tag, Cpu, Clock, Gauge, Activity} from 'lucide-vue-next';
+import {Bookmark, Server, ChevronDown, Check, Loader2, Sparkles, Search, Filter, Bot, Tag, Cpu, Clock, Gauge, Activity} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
 import {useIconsStore} from '~/stores/icons';
 import {cn} from '~/lib/utils';
 import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
+import {Tooltip, TooltipContent, TooltipTrigger} from '~/components/ui/tooltip';
 
 interface ProviderOption {
 	id: string;
@@ -420,6 +441,20 @@ function formatContextFull(value: number | null): string {
 	return String(value);
 }
 
+const selectedModelIsDefault = computed(() =>
+	!!chatStore.selectedModel && chatStore.selectedModel.model_id === store.preferences?.default_model_key,
+);
+
+function isDefaultProvider(slug: string | null): boolean {
+	const pref = store.preferences?.default_provider_slug ?? null;
+	return pref === slug;
+}
+
+async function setDefaultProvider(slug: string | null) {
+	if (!selectedModelIsDefault.value) return;
+	await chatStore.updatePreferences({default_provider_slug: slug});
+}
+
 function selectAuto() {
 	chatStore.setProviderSelection(null);
 	isOpen.value = false;
@@ -451,6 +486,10 @@ async function loadOptions() {
 		loading.value = false;
 	}
 }
+
+watch(isVisible, visible => {
+	if (visible) loadOptions();
+}, {immediate: true});
 
 watch(isOpen, open => {
 	if (open) {

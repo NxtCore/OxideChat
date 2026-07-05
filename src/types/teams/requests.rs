@@ -1,5 +1,13 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
+
+fn deserialize_nullable_field<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+	T: Deserialize<'de>,
+	D: Deserializer<'de>,
+{
+	Ok(Some(Option::deserialize(deserializer)?))
+}
 
 #[derive(Debug, Deserialize)]
 pub struct ListTeamsQuery {
@@ -23,6 +31,8 @@ pub struct UpdateTeamRequest {
 	pub name: Option<String>,
 	pub description: Option<Option<String>>,
 	pub allow_all_models: Option<bool>,
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub default_model_key: Option<Option<String>>,
 }
 
 #[derive(Debug, Deserialize)]

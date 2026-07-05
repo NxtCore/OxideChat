@@ -123,6 +123,9 @@ impl From<Message> for ChatMessageResponse {
 #[derive(Debug, Serialize)]
 pub struct PreferencesResponse {
 	pub default_model_key: Option<String>,
+	pub effective_default_model_key: Option<String>,
+	pub default_provider_slug: Option<String>,
+	pub default_tools: Vec<String>,
 	pub favorite_model_keys: Vec<String>,
 	pub streaming_animation: String,
 	pub use_remend: bool,
@@ -134,6 +137,9 @@ impl From<UserPreferences> for PreferencesResponse {
 	fn from(p: UserPreferences) -> Self {
 		Self {
 			default_model_key: p.default_model_key,
+			effective_default_model_key: None,
+			default_provider_slug: p.default_provider_slug,
+			default_tools: serde_json::from_value(p.default_tools).unwrap_or_default(),
 			favorite_model_keys: serde_json::from_value(p.favorite_model_keys).unwrap_or_default(),
 			streaming_animation: p.streaming_animation,
 			use_remend: p.use_remend,
@@ -147,6 +153,9 @@ impl Default for PreferencesResponse {
 	fn default() -> Self {
 		Self {
 			default_model_key: None,
+			effective_default_model_key: None,
+			default_provider_slug: None,
+			default_tools: Vec::new(),
 			favorite_model_keys: Vec::new(),
 			streaming_animation: "fade".to_string(),
 			use_remend: true,
@@ -161,6 +170,7 @@ pub struct GlobalConfigResponse {
 	pub default_theme: ThemeCssVars,
 	pub enable_provider_selector: bool,
 	pub allow_server_stdio_mcp: bool,
+	pub default_model_key: Option<String>,
 }
 
 impl Default for GlobalConfigResponse {
@@ -169,6 +179,7 @@ impl Default for GlobalConfigResponse {
 			default_theme: ThemeCssVars::default(),
 			enable_provider_selector: false,
 			allow_server_stdio_mcp: false,
+			default_model_key: None,
 		}
 	}
 }

@@ -122,6 +122,17 @@
 
 					<!-- Models -->
 					<ShadTabsContent value="models" class="mt-4 rounded-lg border border-border bg-card">
+						<div class="border-b border-border p-3 space-y-1.5">
+							<ShadLabel>{{ store.getTranslation('settings.teams.default_model') }}</ShadLabel>
+							<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.default_model_hint') }}</p>
+							<DefaultModelPicker
+								:model-value="teamDefaultModelKey"
+								:disabled="!canEdit"
+								endpoint="/api/v1/admin/models"
+								:placeholder="store.getTranslation('settings.teams.use_global_default')"
+								@update:model-value="v => (teamDefaultModelKey = v)"
+							/>
+						</div>
 						<div class="flex items-center justify-between gap-3 border-b border-border p-3">
 							<div class="flex items-start gap-3">
 								<ShadSwitch v-model:model-value="form.allow_all_models" :disabled="!canEdit" class="mt-0.5" />
@@ -306,6 +317,7 @@ import {computed, onMounted, onUnmounted, reactive, ref, watch} from 'vue';
 import {Bot, Loader2, Network, Plus, Search, Trash2, Users, Wallet} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
+import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
 import type {ModelListAdmin, PaginatedResponse, TeamDetailed, TeamList} from '~/types/chat';
 
 interface UserListItem {
@@ -341,6 +353,7 @@ const createOpen = ref(false);
 const deleteOpen = ref(false);
 
 const form = reactive({name: '', description: '', allow_all_models: false});
+const teamDefaultModelKey = ref<string | null>(null);
 const createForm = reactive({name: '', description: '', allow_all_models: false});
 const budgetId = ref<string | null>(null);
 const selectedMemberIds = ref<string[]>([]);
@@ -457,6 +470,7 @@ function applySelected(team: TeamDetailed) {
 	form.name = team.name;
 	form.description = team.description ?? '';
 	form.allow_all_models = team.allow_all_models;
+	teamDefaultModelKey.value = team.default_model_key ?? null;
 	budgetId.value = team.budget_id;
 	selectedMemberIds.value = team.members.map(member => member.id);
 	selectedProviderIds.value = [...team.model_access.provider_ids];
@@ -545,7 +559,7 @@ async function saveAll() {
 
 		await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${id}`, {
 			method: 'PATCH',
-			body: {name: form.name, description: form.description ? form.description : null, allow_all_models: form.allow_all_models},
+			body: {name: form.name, description: form.description ? form.description : null, allow_all_models: form.allow_all_models, default_model_key: teamDefaultModelKey.value},
 		});
 
 		await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${id}/members`, {

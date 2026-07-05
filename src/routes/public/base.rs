@@ -50,6 +50,7 @@ pub async fn get_base(State(state): State<Arc<JobState>>) -> impl IntoResponse {
 		roles,
 		enable_provider_selector: crate::config::Config::get().enable_provider_selector(),
 		allow_server_stdio_mcp: crate::config::Config::get().allow_server_stdio_mcp(),
+		default_model_key: crate::config::Config::get().default_model_key(),
 	}))
 	.build()
 }

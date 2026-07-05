@@ -104,7 +104,11 @@ pub struct SwitchForkRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdatePreferencesRequest {
-	pub default_model_key: Option<String>,
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub default_model_key: Option<Option<String>>,
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub default_provider_slug: Option<Option<String>>,
+	pub default_tools: Option<Vec<String>>,
 	pub favorite_model_keys: Option<Vec<String>>,
 	pub streaming_animation: Option<String>,
 	pub use_remend: Option<bool>,
@@ -117,6 +121,8 @@ pub struct UpdateGlobalConfigRequest {
 	pub default_theme: Option<ThemeCssVars>,
 	pub enable_provider_selector: Option<bool>,
 	pub allow_server_stdio_mcp: Option<bool>,
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub default_model_key: Option<Option<String>>,
 }
 
 #[derive(Debug, Deserialize)]
