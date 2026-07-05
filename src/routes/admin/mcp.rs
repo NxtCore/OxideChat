@@ -7,7 +7,7 @@
 
 use crate::config::Config;
 use crate::routes::public::auth::get_current_user;
-use crate::routes::public::mcp::{normalize_remote_transport, run_discovery, server_response, validate_admin_remote_config};
+use crate::routes::public::mcp::{normalize_remote_transport, run_discovery, validate_admin_remote_config};
 use crate::types::JobState;
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
@@ -59,7 +59,7 @@ pub async fn list_servers(State(state): State<Arc<JobState>>, cookies: Cookies) 
 
 	let mut responses = Vec::with_capacity(servers.len());
 	for server in servers {
-		responses.push(server_response(&state.db, server, None).await);
+		responses.push(server.to_response_with_tools(&state.db, None).await);
 	}
 	ResponseBuilder::new(ResponseBody::Json(responses)).build()
 }
@@ -83,7 +83,7 @@ pub async fn create_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 
 	match McpServer::create(&state.db, None, req.name.trim(), transport, &req.connection_config, req.is_enabled).await {
 		Ok(server) => {
-			let response = server_response(&state.db, server, None).await;
+			let response = server.to_response_with_tools(&state.db, None).await;
 			ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
 		}
 		Err(e) => {
@@ -108,7 +108,7 @@ pub async fn get_server(State(state): State<Arc<JobState>>, cookies: Cookies, Pa
 
 	match McpServer::find_scoped(&state.db, &id, None).await {
 		Ok(Some(server)) => {
-			let response = server_response(&state.db, server, None).await;
+			let response = server.to_response_with_tools(&state.db, None).await;
 			ResponseBuilder::new(ResponseBody::Json(response)).build()
 		}
 		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
@@ -145,7 +145,7 @@ pub async fn update_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 	match updated {
 		Ok(Some(server)) => {
 			state.mcp_pool.evict(&id).await;
-			let response = server_response(&state.db, server, None).await;
+			let response = server.to_response_with_tools(&state.db, None).await;
 			ResponseBuilder::new(ResponseBody::Json(response)).build()
 		}
 		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),

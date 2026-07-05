@@ -1,7 +1,7 @@
 <template>
-	<Popover v-model:open="open">
-		<PopoverTrigger as-child>
-			<button
+	<ShadPopover v-model:open="open">
+		<ShadPopoverTrigger as-child>
+			<ShadButton
 				type="button"
 				:class="
 					cn(
@@ -13,9 +13,9 @@
 			>
 				<Wrench class="h-4 w-4" />
 				<span v-if="chatStore.enabledTools.length > 0">{{ chatStore.enabledTools.length }}</span>
-			</button>
-		</PopoverTrigger>
-		<PopoverContent align="start" class="w-80 p-0">
+			</ShadButton>
+		</ShadPopoverTrigger>
+		<ShadPopoverContent align="start" class="w-80 p-0">
 			<div class="flex flex-col">
 				<div class="border-b border-border p-2">
 					<div class="flex items-center justify-between px-1 pb-2">
@@ -48,7 +48,7 @@
 							</div>
 
 							<template v-for="head in group.heads" :key="head.id">
-								<button
+								<ShadButton
 									v-if="!head.collapsible"
 									type="button"
 									class="group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted"
@@ -67,12 +67,12 @@
 										</div>
 										<p v-if="head.description" class="truncate text-[11px] text-muted-foreground">{{ head.description }}</p>
 									</div>
-								</button>
+								</ShadButton>
 
-								<Collapsible v-else :open="isExpanded(head.id)" @update:open="val => setExpanded(head.id, val)" as-child>
+								<ShadCollapsible v-else :open="isExpanded(head.id)" @update:open="val => setExpanded(head.id, val)" as-child>
 									<div class="rounded-md transition-colors hover:bg-muted/50">
 										<div class="flex items-center gap-1.5 px-2 py-1.5">
-											<button type="button" class="shrink-0" :aria-label="store.getTranslation('chat.tool_selector.select_all')" @click="toggleHead(head)">
+											<ShadButton type="button" class="shrink-0" :aria-label="store.getTranslation('chat.tool_selector.select_all')" @click="toggleHead(head)">
 												<div
 													class="flex h-4 w-4 items-center justify-center rounded border transition-colors"
 													:class="headSelectionState(head) === 'unchecked' ? 'border-input bg-background' : 'border-primary bg-primary text-primary-foreground'"
@@ -80,9 +80,9 @@
 													<Check v-if="headSelectionState(head) === 'checked'" class="h-3 w-3" />
 													<Minus v-else-if="headSelectionState(head) === 'indeterminate'" class="h-3 w-3" />
 												</div>
-											</button>
-											<CollapsibleTrigger as-child>
-												<button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+											</ShadButton>
+											<ShadCollapsibleTrigger as-child>
+												<ShadButton type="button" class="flex min-w-0 flex-1 items-center gap-1.5 text-left">
 													<ChevronRight class="h-3 w-3 shrink-0 text-muted-foreground transition-transform" :class="isExpanded(head.id) ? 'rotate-90' : ''" />
 													<div class="min-w-0 flex-1">
 														<div class="flex items-center justify-between gap-2">
@@ -91,10 +91,10 @@
 														</div>
 														<p v-if="head.description" class="truncate text-[11px] text-muted-foreground">{{ head.description }}</p>
 													</div>
-												</button>
-											</CollapsibleTrigger>
+												</ShadButton>
+											</ShadCollapsibleTrigger>
 										</div>
-										<CollapsibleContent>
+										<ShadCollapsibleContent>
 											<div class="ml-6 border-l border-border pb-1 pl-1">
 												<button
 													v-for="item in head.items"
@@ -115,9 +115,9 @@
 													</div>
 												</button>
 											</div>
-										</CollapsibleContent>
+										</ShadCollapsibleContent>
 									</div>
-								</Collapsible>
+								</ShadCollapsible>
 							</template>
 						</template>
 					</template>
@@ -129,44 +129,41 @@
 				</div>
 
 				<div class="flex items-center gap-1 border-t border-border p-1">
-					<button
+					<ShadButton
 						v-if="allToolIds.length > 0"
 						type="button"
 						class="flex-1 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						@click="selectAll"
 					>
 						{{ store.getTranslation('chat.tool_selector.select_all') }}
-					</button>
-					<button
+					</ShadButton>
+					<ShadButton
 						v-if="chatStore.enabledTools.length > 0"
 						type="button"
 						class="flex-1 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						@click="clearAll"
 					>
 						{{ store.getTranslation('chat.tool_selector.clear') }}
-					</button>
+					</ShadButton>
 				</div>
 				<div class="border-t border-border p-1">
-					<button
+					<ShadButton
 						type="button"
 						class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						@click="openMcpManager"
 					>
 						<Server class="h-3.5 w-3.5" />
 						{{ store.getTranslation('mcp.tool_selector.manage') }}
-					</button>
+					</ShadButton>
 				</div>
 			</div>
-		</PopoverContent>
-	</Popover>
+		</ShadPopoverContent>
+	</ShadPopover>
 </template>
 
 <script setup lang="ts">
 import {computed, onMounted, ref, watch} from 'vue';
 import {Check, ChevronRight, Minus, Search, Server, Wrench, Sparkles, Globe, Code} from 'lucide-vue-next';
-import {Popover, PopoverContent, PopoverTrigger} from '@/components/ui/popover';
-import {Input as ShadInput} from '@/components/ui/input';
-import {Collapsible, CollapsibleContent, CollapsibleTrigger} from '@/components/ui/collapsible';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
 import {cn} from '~/lib/utils';

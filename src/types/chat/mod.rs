@@ -197,6 +197,31 @@ pub struct Message {
 	pub is_active_fork: bool,
 }
 
+pub struct StreamingUserMessageCreate<'a> {
+	pub chat_id: &'a Uuid,
+	pub content: &'a str,
+	pub content_parts: Option<&'a serde_json::Value>,
+	pub model_id: &'a Uuid,
+	pub reasoning_details: &'a ReasoningDetails,
+	pub usage_details: &'a UsageDetails,
+	pub cost_details: &'a CostDetails,
+	pub request_settings: &'a RequestSettings,
+	pub parent_id: Option<Uuid>,
+}
+
+pub struct StreamingAssistantMessageCreate<'a> {
+	pub chat_id: &'a Uuid,
+	pub content: &'a str,
+	pub reasoning_content: Option<&'a str>,
+	pub model_id: &'a Uuid,
+	pub reasoning_details: &'a ReasoningDetails,
+	pub usage_details: &'a UsageDetails,
+	pub cost_details: &'a CostDetails,
+	pub request_settings: &'a RequestSettings,
+	pub parent_id: Option<Uuid>,
+	pub fork_index: i32,
+}
+
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct UserPreferences {
 	pub user_id: Uuid,

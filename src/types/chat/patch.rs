@@ -281,6 +281,28 @@ impl Message {
 		Ok(())
 	}
 
+	pub async fn deactivate_active_assistant_forks(pool: &PgPool, chat_id: &Uuid, parent_id: Option<Uuid>) -> Result<(), sqlx::Error> {
+		sqlx::query(
+			r#"
+			WITH RECURSIVE descendants AS (
+				SELECT id FROM messages
+				WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = 'assistant' AND is_active_fork = TRUE
+				UNION ALL
+				SELECT m.id FROM messages m
+				INNER JOIN descendants d ON m.parent_id = d.id
+				WHERE m.chat_id = $1
+			)
+			UPDATE messages SET is_active_fork = FALSE
+			WHERE id IN (SELECT id FROM descendants)
+			"#,
+		)
+		.bind(chat_id)
+		.bind(parent_id)
+		.execute(pool)
+		.await?;
+		Ok(())
+	}
+
 	/// Create a new fork of the given message with different content.
 	/// Deactivates all current siblings and their subtrees, then inserts the new fork.
 	pub async fn create_fork(pool: &PgPool, chat_id: &Uuid, original: &Message, new_content: &str) -> Result<Self, sqlx::Error> {

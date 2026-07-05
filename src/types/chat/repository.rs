@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use super::rows::{SiblingCountRow, ToolExecutionRow, WorkspaceWithCount};
 use super::{
-	Chat, CostDetails, Message, ReasoningDetails, RequestSettings, ToolExecutionResponse, UpdatePreferencesRequest, UsageDetails, UserPreferences, Workspace,
-	WorkspaceResponse,
+	Chat, CostDetails, Message, ReasoningDetails, RequestSettings, StreamingAssistantMessageCreate, StreamingUserMessageCreate, ToolExecutionResponse,
+	UpdatePreferencesRequest, UsageDetails, UserPreferences, Workspace, WorkspaceResponse,
 };
 
 impl Workspace {
@@ -246,6 +246,13 @@ impl Chat {
 }
 
 impl Message {
+	pub async fn last_active_id(pool: &PgPool, chat_id: &Uuid) -> Result<Option<Uuid>, sqlx::Error> {
+		sqlx::query_scalar("SELECT id FROM messages WHERE chat_id = $1 AND is_active_fork = TRUE ORDER BY created_at DESC LIMIT 1")
+			.bind(chat_id)
+			.fetch_optional(pool)
+			.await
+	}
+
 	pub async fn list_active_by_chat(pool: &PgPool, chat_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 AND is_active_fork = true ORDER BY created_at ASC")
 			.bind(chat_id)
@@ -308,6 +315,66 @@ impl Message {
 			.bind(chat_id)
 			.fetch_optional(pool)
 			.await
+	}
+
+	pub async fn create_streaming_user(pool: &PgPool, params: StreamingUserMessageCreate<'_>) -> Result<Self, sqlx::Error> {
+		sqlx::query_as::<_, Message>(
+			r#"
+			INSERT INTO messages (chat_id, role, content, content_parts, model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id)
+			VALUES ($1, 'user', $2, $3, $4, $5, $6, $7, $8, $9)
+			RETURNING *
+			"#,
+		)
+		.bind(params.chat_id)
+		.bind(params.content)
+		.bind(params.content_parts)
+		.bind(params.model_id)
+		.bind(sqlx::types::Json(params.reasoning_details))
+		.bind(sqlx::types::Json(params.usage_details))
+		.bind(sqlx::types::Json(params.cost_details))
+		.bind(sqlx::types::Json(params.request_settings))
+		.bind(params.parent_id)
+		.fetch_one(pool)
+		.await
+	}
+
+	pub async fn next_assistant_fork_index(pool: &PgPool, chat_id: &Uuid, parent_id: Option<Uuid>) -> Result<i32, sqlx::Error> {
+		let next = sqlx::query_scalar::<_, Option<i32>>(
+			r#"SELECT COALESCE(MAX(fork_index), 0) + 1 FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = 'assistant'"#,
+		)
+		.bind(chat_id)
+		.bind(parent_id)
+		.fetch_one(pool)
+		.await?;
+		Ok(next.unwrap_or(1))
+	}
+
+	pub async fn create_streaming_assistant(pool: &PgPool, params: StreamingAssistantMessageCreate<'_>) -> Result<Self, sqlx::Error> {
+		let message = sqlx::query_as::<_, Message>(
+			r#"
+			INSERT INTO messages (
+				chat_id, role, content, reasoning_content,
+				model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork
+			)
+			VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
+			RETURNING *
+			"#,
+		)
+		.bind(params.chat_id)
+		.bind(params.content)
+		.bind(params.reasoning_content)
+		.bind(params.model_id)
+		.bind(sqlx::types::Json(params.reasoning_details))
+		.bind(sqlx::types::Json(params.usage_details))
+		.bind(sqlx::types::Json(params.cost_details))
+		.bind(sqlx::types::Json(params.request_settings))
+		.bind(params.parent_id)
+		.bind(params.fork_index)
+		.fetch_one(pool)
+		.await?;
+
+		Chat::touch(pool, params.chat_id).await?;
+		Ok(message)
 	}
 
 	pub async fn create(

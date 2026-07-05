@@ -7,8 +7,8 @@ use crate::routes::public::auth::get_current_user;
 use crate::types::models::Model;
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
 use crate::types::{
-	ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, Tool, ToolExecutionInternal, ToolFunction,
-	UserToolSettings,
+	Chat, ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, StreamingAssistantMessageCreate,
+	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolFunction, UserToolSettings,
 };
 use crate::types::{CostDetails, JobState};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
@@ -221,10 +221,7 @@ async fn execute_tool_by_name(
 	let tool = tool.ok_or_else(|| format!("Tool '{}' not found", full_tool_name))?;
 
 	let function_entrypoint = if let Some(fn_name) = &function_name {
-		let func = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 AND name = $2")
-			.bind(tool.id)
-			.bind(fn_name)
-			.fetch_optional(db)
+		let func = ToolFunction::find_by_tool_and_name(db, &tool.id, fn_name)
 			.await
 			.map_err(|e| format!("Database error: {e}"))?
 			.ok_or_else(|| format!("Function '{}' not found in tool '{}'", fn_name, tool.name))?;
@@ -234,20 +231,12 @@ async fn execute_tool_by_name(
 		None
 	};
 
-	let settings = sqlx::query_as::<_, UserToolSettings>(
-		"SELECT * FROM user_tool_settings 
-		WHERE tool_id = $1 
-		ORDER BY (CASE WHEN user_id = ($2::uuid) THEN 0 ELSE 1 END) 
-		LIMIT 1",
-	)
-	.bind(tool.id)
-	.bind(user_id)
-	.fetch_optional(db)
-	.await
-	.ok()
-	.flatten()
-	.map(|s| s.settings)
-	.unwrap_or_else(|| serde_json::json!({}));
+	let settings = UserToolSettings::find_effective_for_user(db, &tool.id, &user_id)
+		.await
+		.ok()
+		.flatten()
+		.map(|s| s.settings)
+		.unwrap_or_else(|| serde_json::json!({}));
 
 	let ctx = ToolContext {
 		user_id: Some(user_id),
@@ -400,11 +389,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		return error_stream("not_authenticated", "Authentication required").into_response();
 	};
 
-	let chat = sqlx::query_as::<_, crate::types::Chat>("SELECT * FROM chats WHERE id = $1 AND user_id = $2")
-		.bind(chat_id)
-		.bind(user.id)
-		.fetch_optional(&state.db)
-		.await;
+	let chat = Chat::find_by_id_and_user(&state.db, &chat_id, &user.id).await;
 
 	let _chat = match chat {
 		Ok(Some(chat)) => chat,
@@ -415,10 +400,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	};
 
-	let model = sqlx::query_as::<_, Model>("SELECT * FROM models WHERE model_id = $1")
-		.bind(&req.model_key)
-		.fetch_optional(&state.db)
-		.await;
+	let model = Model::find_by_model_id(&state.db, &req.model_key).await;
 
 	let model = match model {
 		Ok(Some(m)) => m,
@@ -461,33 +443,24 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	let content_parts_json = req.parts.as_ref().map(|parts| serde_json::to_value(parts).ok()).flatten();
 
 	// Get the last active message to use as parent for the new user message
-	let last_active_message_id: Option<Uuid> =
-		sqlx::query_scalar("SELECT id FROM messages WHERE chat_id = $1 AND is_active_fork = TRUE ORDER BY created_at DESC LIMIT 1")
-			.bind(chat_id)
-			.fetch_optional(&state.db)
-			.await
-			.ok()
-			.flatten();
+	let last_active_message_id = Message::last_active_id(&state.db, &chat_id).await.ok().flatten();
 
 	// Only create user message if not regenerating/skipping
 	let user_message: Option<Message> = if !req.skip_user_message {
-		let msg = sqlx::query_as::<_, Message>(
-			r#"
-			INSERT INTO messages (chat_id, role, content, content_parts, model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id)
-			VALUES ($1, 'user', $2, $3, $4, $5, $6, $7, $8, $9)
-			RETURNING *
-			"#,
+		let msg = Message::create_streaming_user(
+			&state.db,
+			StreamingUserMessageCreate {
+				chat_id: &chat_id,
+				content: &req.content,
+				content_parts: content_parts_json.as_ref(),
+				model_id: &model.id,
+				reasoning_details: &reasoning_details,
+				usage_details: &usage_details,
+				cost_details: &cost_details,
+				request_settings: &request_settings,
+				parent_id: last_active_message_id,
+			},
 		)
-		.bind(chat_id)
-		.bind(&req.content)
-		.bind(content_parts_json)
-		.bind(model.id)
-		.bind(sqlx::types::Json(reasoning_details))
-		.bind(sqlx::types::Json(usage_details))
-		.bind(sqlx::types::Json(cost_details))
-		.bind(sqlx::types::Json(request_settings.clone()))
-		.bind(last_active_message_id)
-		.fetch_one(&state.db)
 		.await;
 
 		match msg {
@@ -502,10 +475,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	};
 
 	// Only fetch active fork messages for AI context
-	let messages = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE chat_id = $1 AND is_active_fork = TRUE ORDER BY created_at ASC")
-		.bind(chat_id)
-		.fetch_all(&state.db)
-		.await;
+	let messages = Message::list_active_by_chat(&state.db, &chat_id).await;
 
 	let messages = match messages {
 		Ok(msgs) => msgs,
@@ -524,11 +494,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		};
 
 		// Fetch the original assistant message to get its parent_id
-		let original_msg = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = $1 AND chat_id = $2")
-			.bind(regen_uuid)
-			.bind(chat_id)
-			.fetch_optional(&state.db)
-			.await;
+		let original_msg = Message::find_by_id_and_chat(&state.db, &regen_uuid, &chat_id).await;
 
 		let original = match original_msg {
 			Ok(Some(m)) => m,
@@ -542,34 +508,10 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		let parent_id = original.parent_id;
 
 		// Get the next fork_index for siblings with same parent_id and role
-		let next_fork_index: i32 = sqlx::query_scalar(
-			r#"SELECT COALESCE(MAX(fork_index), 0) + 1 FROM messages WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = 'assistant'"#,
-		)
-		.bind(chat_id)
-		.bind(parent_id)
-		.fetch_one(&state.db)
-		.await
-		.unwrap_or(1);
+		let next_fork_index = Message::next_assistant_fork_index(&state.db, &chat_id, parent_id).await.unwrap_or(1);
 
 		// Deactivate the old assistant message and all its descendants
-		let _ = sqlx::query(
-			r#"
-			WITH RECURSIVE descendants AS (
-				SELECT id FROM messages 
-				WHERE chat_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND role = 'assistant' AND is_active_fork = TRUE
-				UNION ALL
-				SELECT m.id FROM messages m
-				INNER JOIN descendants d ON m.parent_id = d.id
-				WHERE m.chat_id = $1
-			)
-			UPDATE messages SET is_active_fork = FALSE 
-			WHERE id IN (SELECT id FROM descendants)
-			"#,
-		)
-		.bind(chat_id)
-		.bind(parent_id)
-		.execute(&state.db)
-		.await;
+		let _ = Message::deactivate_active_assistant_forks(&state.db, &chat_id, parent_id).await;
 
 		// Filter messages to only include up to and including the parent_id
 		// This prevents context from other fork branches being included
@@ -921,70 +863,47 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									budget_tokens: reasoning_budget_tokens.map(|b| b as i32),
 								};
 
-								let message = sqlx::query_as::<_, Message>(
-									r#"
-										INSERT INTO messages (
-											chat_id, role, content, reasoning_content,
-											model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork
-										)
-										VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
-										RETURNING *
-										"#,
-								)
-								.bind(chat_id)
-								.bind(&full_content)
-								.bind(if reasoning_content.is_empty() { None } else { Some(&reasoning_content) })
-								.bind(&model.id)
-								.bind(sqlx::types::Json(reasoning_details))
-								.bind(sqlx::types::Json(usage_details))
-								.bind(sqlx::types::Json(cost_details))
-								.bind(sqlx::types::Json(request_settings.clone()))
-								.bind(assistant_parent_id)
-								.bind(assistant_fork_index)
-								.fetch_one(&db)
-								.await;
-
-								let _ = sqlx::query("UPDATE chats SET updated_at = NOW() WHERE id = $1")
-									.bind(chat_id)
-									.execute(&db)
+									let message = Message::create_streaming_assistant(
+										&db,
+										StreamingAssistantMessageCreate {
+											chat_id: &chat_id,
+											content: &full_content,
+											reasoning_content: if reasoning_content.is_empty() { None } else { Some(&reasoning_content) },
+											model_id: &model.id,
+											reasoning_details: &reasoning_details,
+											usage_details: &usage_details,
+											cost_details: &cost_details,
+											request_settings: &request_settings,
+											parent_id: assistant_parent_id,
+											fork_index: assistant_fork_index,
+										},
+									)
 									.await;
 
-								match message {
-									Ok(msg) => {
-									if !all_tool_executions.is_empty() {
-										for exec in &all_tool_executions {
-											let _ = sqlx::query(
-												"INSERT INTO tool_executions (message_id, tool_call_id, input_args, output, error, execution_ms, tool_id, tool_function) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
-											)
-											.bind(msg.id)
-											.bind(&exec.call_id)
-											.bind(&exec.args)
-											.bind(&exec.output)
-											.bind(&exec.error)
-											.bind(exec.execution_ms)
-											.bind(exec.tool_id)
-											.bind(exec.function_id)
-											.execute(&db)
-											.await;
-										}
-										eprintln!("[STREAM] Saved {} tool executions for message {}", all_tool_executions.len(), msg.id);
-									}
+									match message {
+										Ok(msg) => {
+											if !all_tool_executions.is_empty() {
+												if let Err(e) = ToolExecution::create_for_message_batch(&db, &msg.id, &all_tool_executions).await {
+													eprintln!("[STREAM] Failed to save tool executions for message {}: {e}", msg.id);
+												}
+												eprintln!("[STREAM] Saved {} tool executions for message {}", all_tool_executions.len(), msg.id);
+											}
 
-									let message_response: ChatMessageResponse = msg.into();
-									yield Ok::<_, Infallible>(Event::default().data(
-										serde_json::to_string(&StreamData::Done { message: message_response }).unwrap_or_default()
-										));
+											let message_response: ChatMessageResponse = msg.into();
+											yield Ok::<_, Infallible>(Event::default().data(
+												serde_json::to_string(&StreamData::Done { message: message_response }).unwrap_or_default()
+											));
+										}
+										Err(e) => {
+											eprintln!("[STREAM] Failed to save message: {e}");
+											yield Ok::<_, Infallible>(Event::default().data(
+												serde_json::to_string(&StreamData::Error {
+													code: "save_failed".to_string(),
+													message: "Failed to save response".to_string(),
+												}).unwrap_or_default()
+											));
+										}
 									}
-									Err(e) => {
-										eprintln!("[STREAM] Failed to save message: {e}");
-										yield Ok::<_, Infallible>(Event::default().data(
-											serde_json::to_string(&StreamData::Error {
-												code: "save_failed".to_string(),
-												message: "Failed to save response".to_string(),
-											}).unwrap_or_default()
-										));
-									}
-								}
 								break 'agentic_loop;
 							} else {
 								eprintln!("[STREAM] Continuing agentic loop with {} tool results", tool_results.len());

@@ -1,4 +1,6 @@
-use super::{McpHttpConfig, McpServer, McpSourceConfig, McpStdioConfig, Tool, ToolExecution, ToolFunction, ToolSourceKind, UserToolSettings, WasmBlob};
+use super::{
+	McpHttpConfig, McpServer, McpServerResponse, McpSourceConfig, McpStdioConfig, Tool, ToolExecution, ToolFunction, ToolSourceKind, UserToolSettings, WasmBlob,
+};
 use crate::utils::tools::mcp::{McpToolInfo, McpUrlPolicy};
 use crate::utils::tools::{McpClient, McpConnectionPool, ToolError};
 use sqlx::Row;
@@ -361,6 +363,22 @@ impl UserToolSettings {
 		}
 	}
 
+	pub async fn find_effective_for_user(pool: &sqlx::PgPool, tool_id: &Uuid, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, UserToolSettings>(
+			r#"
+			SELECT *
+			FROM user_tool_settings
+			WHERE tool_id = $1 AND (user_id = $2 OR user_id IS NULL)
+			ORDER BY user_id NULLS LAST
+			LIMIT 1
+			"#,
+		)
+		.bind(tool_id)
+		.bind(user_id)
+		.fetch_optional(pool)
+		.await
+	}
+
 	pub async fn upsert(pool: &sqlx::PgPool, tool_id: &Uuid, user_id: Option<&Uuid>, settings: &serde_json::Value) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
@@ -380,6 +398,13 @@ impl UserToolSettings {
 }
 
 impl McpServer {
+	pub async fn to_response_with_tools(self, pool: &sqlx::PgPool, owner_id: Option<&Uuid>) -> McpServerResponse {
+		let names = Tool::names_for_mcp_server(pool, &self.id, owner_id).await.unwrap_or_default();
+		let mut response = McpServerResponse::from_server(self, owner_id.is_some());
+		response.discovered_tools = names;
+		response
+	}
+
 	pub async fn list_system(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
 		sqlx::query_as::<_, McpServer>(
 			r#"
@@ -649,6 +674,33 @@ fn sanitize_tool_name(raw: &str) -> String {
 }
 
 impl ToolExecution {
+	pub async fn create_for_message_batch(pool: &sqlx::PgPool, message_id: &Uuid, executions: &[crate::types::ToolExecutionInternal]) -> Result<(), sqlx::Error> {
+		if executions.is_empty() {
+			return Ok(());
+		}
+
+		let mut tx = pool.begin().await?;
+		for exec in executions {
+			sqlx::query(
+				r#"
+				INSERT INTO tool_executions (message_id, tool_call_id, input_args, output, error, execution_ms, tool_id, tool_function)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+				"#,
+			)
+			.bind(message_id)
+			.bind(&exec.call_id)
+			.bind(&exec.args)
+			.bind(&exec.output)
+			.bind(&exec.error)
+			.bind(exec.execution_ms)
+			.bind(exec.tool_id)
+			.bind(exec.function_id)
+			.execute(&mut *tx)
+			.await?;
+		}
+		tx.commit().await
+	}
+
 	pub async fn create(
 		conn: &mut sqlx::PgConnection,
 		message_id: Option<&Uuid>,

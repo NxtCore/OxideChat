@@ -75,7 +75,6 @@
 									<div class="flex-1 min-w-0">
 										<div class="flex items-center gap-2 flex-wrap">
 											<span class="font-medium text-sm">{{ model.display_name }}</span>
-											<Star v-if="chatStore.isFavoriteModel(model)" class="h-3.5 w-3.5 text-yellow-500 fill-yellow-500" />
 											<span
 												v-for="cap in getDisplayCapabilities(model)"
 												:key="cap"

@@ -43,14 +43,6 @@ pub(crate) async fn validate_remote_config(connection_config: &serde_json::Value
 	validate_remote_mcp_url(&config.url, McpUrlPolicy::PublicOnly).await.is_ok()
 }
 
-/// Build a response for a server, populating its discovered tool names.
-pub(crate) async fn server_response(db: &sqlx::PgPool, server: McpServer, owner_id: Option<&Uuid>) -> McpServerResponse {
-	let names = Tool::names_for_mcp_server(db, &server.id, owner_id).await.unwrap_or_default();
-	let mut response = McpServerResponse::from_server(server, owner_id.is_some());
-	response.discovered_tools = names;
-	response
-}
-
 /// GET /api/v1/mcp-servers
 pub async fn list_servers(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
 	let Some(user) = get_current_user(&state.db, &cookies).await else {
@@ -67,7 +59,7 @@ pub async fn list_servers(State(state): State<Arc<JobState>>, cookies: Cookies) 
 
 	let mut responses = Vec::with_capacity(servers.len());
 	for server in servers {
-		responses.push(server_response(&state.db, server, Some(&user.id)).await);
+		responses.push(server.to_response_with_tools(&state.db, Some(&user.id)).await);
 	}
 	ResponseBuilder::new(ResponseBody::Json(responses)).build()
 }
@@ -87,7 +79,7 @@ pub async fn create_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 
 	match McpServer::create(&state.db, Some(&user.id), req.name.trim(), transport, &req.connection_config, req.is_enabled).await {
 		Ok(server) => {
-			let response = server_response(&state.db, server, Some(&user.id)).await;
+			let response = server.to_response_with_tools(&state.db, Some(&user.id)).await;
 			ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
 		}
 		Err(e) => {
@@ -109,7 +101,7 @@ pub async fn get_server(State(state): State<Arc<JobState>>, cookies: Cookies, Pa
 
 	match McpServer::find_scoped(&state.db, &id, Some(&user.id)).await {
 		Ok(Some(server)) => {
-			let response = server_response(&state.db, server, Some(&user.id)).await;
+			let response = server.to_response_with_tools(&state.db, Some(&user.id)).await;
 			ResponseBuilder::new(ResponseBody::Json(response)).build()
 		}
 		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
@@ -153,7 +145,7 @@ pub async fn update_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 	match updated {
 		Ok(Some(server)) => {
 			state.mcp_pool.evict(&id).await;
-			let response = server_response(&state.db, server, Some(&user.id)).await;
+			let response = server.to_response_with_tools(&state.db, Some(&user.id)).await;
 			ResponseBuilder::new(ResponseBody::Json(response)).build()
 		}
 		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),

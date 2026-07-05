@@ -56,6 +56,20 @@ impl Model {
 		Ok(rows.into_iter().collect())
 	}
 
+	pub async fn find_by_model_id(pool: &sqlx::PgPool, model_id: &str) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Model>(
+			r#"
+			SELECT id, provider_id, model_id, display_name, capabilities, input_modalities,
+			       output_modalities, context_length, max_tokens, is_enabled, created_at, updated_at
+			FROM models
+			WHERE model_id = $1
+			"#,
+		)
+		.bind(model_id)
+		.fetch_optional(pool)
+		.await
+	}
+
 	pub async fn list_for_user(
 		pool: &sqlx::PgPool,
 		viewer: ModelViewer<'_>,
