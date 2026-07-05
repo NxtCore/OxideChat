@@ -7,9 +7,11 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::lookup_host;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -141,6 +143,103 @@ impl McpTransport for StdioTransport {
 /// MCP protocol version advertised on initialize and on every subsequent request.
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpUrlPolicy {
+	PublicOnly,
+	TrustedAdmin,
+}
+
+#[must_use]
+pub fn is_remote_mcp_url_syntax_allowed(url: &str, policy: McpUrlPolicy) -> bool {
+	parse_remote_mcp_url(url, policy).is_ok()
+}
+
+pub async fn validate_remote_mcp_url(url: &str, policy: McpUrlPolicy) -> Result<(), ToolError> {
+	let parsed = parse_remote_mcp_url(url, policy)?;
+
+	if policy == McpUrlPolicy::TrustedAdmin {
+		return Ok(());
+	}
+
+	let host = parsed.host_str().ok_or_else(|| ToolError::McpError("MCP URL must include a host".to_string()))?;
+	let port = parsed
+		.port_or_known_default()
+		.ok_or_else(|| ToolError::McpError("MCP URL must include a valid port".to_string()))?;
+	let addrs = lookup_host((host, port))
+		.await
+		.map_err(|e| ToolError::McpError(format!("Failed to resolve MCP URL host: {e}")))?;
+
+	let mut resolved_any = false;
+	for addr in addrs {
+		resolved_any = true;
+		if !is_public_ip(addr.ip()) {
+			return Err(ToolError::McpError("MCP URL resolves to a restricted network address".to_string()));
+		}
+	}
+
+	if resolved_any {
+		Ok(())
+	} else {
+		Err(ToolError::McpError("MCP URL host did not resolve".to_string()))
+	}
+}
+
+fn parse_remote_mcp_url(url: &str, policy: McpUrlPolicy) -> Result<reqwest::Url, ToolError> {
+	let parsed = reqwest::Url::parse(url.trim()).map_err(|e| ToolError::McpError(format!("Invalid MCP URL: {e}")))?;
+
+	match parsed.scheme() {
+		"http" | "https" => {}
+		_ => return Err(ToolError::McpError("MCP URL must use http or https".to_string())),
+	}
+
+	if parsed.host_str().is_none() {
+		return Err(ToolError::McpError("MCP URL must include a host".to_string()));
+	}
+	if !parsed.username().is_empty() || parsed.password().is_some() {
+		return Err(ToolError::McpError("MCP URL must not contain credentials".to_string()));
+	}
+
+	if policy == McpUrlPolicy::PublicOnly && parsed.host_str().is_some_and(is_restricted_hostname) {
+		return Err(ToolError::McpError("MCP URL host is restricted".to_string()));
+	}
+
+	Ok(parsed)
+}
+
+fn is_restricted_hostname(host: &str) -> bool {
+	let lower = host.trim_end_matches('.').to_ascii_lowercase();
+	lower == "localhost" || lower.ends_with(".localhost") || lower.ends_with(".local") || lower.ends_with(".internal")
+}
+
+fn is_public_ip(ip: IpAddr) -> bool {
+	match ip {
+		IpAddr::V4(ip) => is_public_ipv4(ip),
+		IpAddr::V6(ip) => is_public_ipv6(ip),
+	}
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+	!(ip.is_private()
+		|| ip.is_loopback()
+		|| ip.is_link_local()
+		|| ip.is_broadcast()
+		|| ip.is_documentation()
+		|| ip.is_unspecified()
+		|| ip.octets()[0] == 0
+		|| ip.octets()[0] >= 224
+		|| ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1]))
+}
+
+fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+	!(ip.is_loopback()
+		|| ip.is_unspecified()
+		|| ip.is_unique_local()
+		|| ip.is_unicast_link_local()
+		|| ip.segments()[0] & 0xffc0 == 0xfe80
+		|| ip.segments()[0] & 0xff00 == 0xff00
+		|| (ip.segments()[0] == 0x2001 && ip.segments()[1] == 0x0db8))
+}
+
 /// Streamable HTTP transport (MCP 2025-03-26+).
 ///
 /// A single endpoint receives JSON-RPC via `POST`. The server may answer with a
@@ -151,14 +250,17 @@ struct StreamableHttpTransport {
 	url: String,
 	headers: HashMap<String, String>,
 	client: reqwest::Client,
+	url_policy: McpUrlPolicy,
 	request_id: Arc<Mutex<u64>>,
 	session_id: Arc<Mutex<Option<String>>>,
 }
 
 impl StreamableHttpTransport {
-	pub fn new(url: String, headers: HashMap<String, String>) -> Result<Self, ToolError> {
+	pub fn new(url: String, headers: HashMap<String, String>, url_policy: McpUrlPolicy) -> Result<Self, ToolError> {
+		parse_remote_mcp_url(&url, url_policy)?;
 		let client = reqwest::Client::builder()
 			.timeout(std::time::Duration::from_secs(30))
+			.redirect(reqwest::redirect::Policy::none())
 			.build()
 			.map_err(|e| ToolError::McpError(format!("Failed to create HTTP client: {e}")))?;
 
@@ -166,6 +268,7 @@ impl StreamableHttpTransport {
 			url,
 			headers,
 			client,
+			url_policy,
 			request_id: Arc::new(Mutex::new(1)),
 			session_id: Arc::new(Mutex::new(None)),
 		})
@@ -221,6 +324,8 @@ fn parse_sse_response(body: &str, expected_id: u64) -> Result<JsonRpcResponse, T
 #[async_trait]
 impl McpTransport for StreamableHttpTransport {
 	async fn send(&self, mut request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError> {
+		validate_remote_mcp_url(&self.url, self.url_policy).await?;
+
 		let expected_id = {
 			let mut id = self.request_id.lock().await;
 			request.id = *id;
@@ -260,8 +365,7 @@ impl McpTransport for StreamableHttpTransport {
 			.to_lowercase();
 
 		if !status.is_success() {
-			let body = response.text().await.unwrap_or_default();
-			return Err(ToolError::McpError(format!("HTTP {status}: {body}")));
+			return Err(ToolError::McpError(format!("MCP server returned HTTP {status}")));
 		}
 
 		if status == reqwest::StatusCode::ACCEPTED {
@@ -283,6 +387,7 @@ impl McpTransport for StreamableHttpTransport {
 
 	async fn close(&self) -> Result<(), ToolError> {
 		if let Some(session_id) = self.session_id.lock().await.clone() {
+			validate_remote_mcp_url(&self.url, self.url_policy).await?;
 			let _ = self.client.delete(&self.url).header("Mcp-Session-Id", session_id).send().await;
 		}
 		Ok(())
@@ -309,8 +414,9 @@ impl McpClient {
 	/// Create a new MCP client with the Streamable HTTP transport.
 	///
 	/// The connection is initialized before returning so the client is ready to use.
-	pub async fn new_http(server_name: String, url: String, headers: HashMap<String, String>) -> Result<Self, ToolError> {
-		let transport = StreamableHttpTransport::new(url, headers)?;
+	pub async fn new_http(server_name: String, url: String, headers: HashMap<String, String>, url_policy: McpUrlPolicy) -> Result<Self, ToolError> {
+		validate_remote_mcp_url(&url, url_policy).await?;
+		let transport = StreamableHttpTransport::new(url, headers, url_policy)?;
 		let client = Self {
 			transport: Box::new(transport),
 			server_name,

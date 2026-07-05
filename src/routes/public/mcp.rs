@@ -8,7 +8,7 @@ use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
 use crate::types::tools::*;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use crate::utils::tools::mcp::McpToolInfo;
+use crate::utils::tools::mcp::{McpToolInfo, McpUrlPolicy, is_remote_mcp_url_syntax_allowed, validate_remote_mcp_url};
 use axum::{
 	Json,
 	extract::{Path, State},
@@ -28,11 +28,19 @@ pub(crate) fn normalize_remote_transport(transport: &str) -> Option<&'static str
 	}
 }
 
-/// Validate that a remote transport's connection config contains a usable URL.
-pub(crate) fn validate_remote_config(connection_config: &serde_json::Value) -> bool {
+/// Validate that an admin remote transport's connection config contains a usable URL.
+pub(crate) fn validate_admin_remote_config(connection_config: &serde_json::Value) -> bool {
 	serde_json::from_value::<McpHttpConfig>(connection_config.clone())
-		.map(|c| !c.url.trim().is_empty())
+		.map(|c| is_remote_mcp_url_syntax_allowed(&c.url, McpUrlPolicy::TrustedAdmin))
 		.unwrap_or(false)
+}
+
+/// Validate that a user-owned remote transport points to a public HTTP(S) URL.
+pub(crate) async fn validate_remote_config(connection_config: &serde_json::Value) -> bool {
+	let Ok(config) = serde_json::from_value::<McpHttpConfig>(connection_config.clone()) else {
+		return false;
+	};
+	validate_remote_mcp_url(&config.url, McpUrlPolicy::PublicOnly).await.is_ok()
 }
 
 /// Build a response for a server, populating its discovered tool names.
@@ -73,7 +81,7 @@ pub async fn create_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 	let Some(transport) = normalize_remote_transport(&req.transport) else {
 		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
 	};
-	if req.name.trim().is_empty() || !validate_remote_config(&req.connection_config) {
+	if req.name.trim().is_empty() || !validate_remote_config(&req.connection_config).await {
 		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
 	}
 
@@ -126,7 +134,7 @@ pub async fn update_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 		None => None,
 	};
 	if let Some(config) = &req.connection_config {
-		if !validate_remote_config(config) {
+		if !validate_remote_config(config).await {
 			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
 		}
 	}

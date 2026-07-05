@@ -3,6 +3,7 @@ mod tests {
 	use crate::types::ClientToolPending;
 	use crate::types::tools::McpServerResponse;
 	use crate::types::tools::{McpServer, Tool, ToolSourceKind};
+	use crate::utils::tools::mcp::{McpUrlPolicy, is_remote_mcp_url_syntax_allowed, validate_remote_mcp_url};
 	use sqlx::PgPool;
 	use uuid::Uuid;
 
@@ -27,6 +28,22 @@ mod tests {
 
 	fn http_config_with_secret(url: &str) -> serde_json::Value {
 		serde_json::json!({ "url": url, "headers": { "Authorization": "Bearer secret" } })
+	}
+
+	#[tokio::test]
+	async fn public_mcp_url_policy_rejects_restricted_targets() {
+		assert!(validate_remote_mcp_url("http://localhost:8080/mcp", McpUrlPolicy::PublicOnly).await.is_err());
+		assert!(validate_remote_mcp_url("http://127.0.0.1:8080/mcp", McpUrlPolicy::PublicOnly).await.is_err());
+		assert!(validate_remote_mcp_url("http://10.0.0.4/mcp", McpUrlPolicy::PublicOnly).await.is_err());
+		assert!(validate_remote_mcp_url("http://169.254.169.254/latest", McpUrlPolicy::PublicOnly).await.is_err());
+		assert!(validate_remote_mcp_url("file:///tmp/mcp", McpUrlPolicy::PublicOnly).await.is_err());
+	}
+
+	#[test]
+	fn admin_mcp_url_policy_allows_local_http_syntax() {
+		assert!(is_remote_mcp_url_syntax_allowed("http://127.0.0.1:8080/mcp", McpUrlPolicy::TrustedAdmin));
+		assert!(is_remote_mcp_url_syntax_allowed("https://mcp.example.test/rpc", McpUrlPolicy::TrustedAdmin));
+		assert!(!is_remote_mcp_url_syntax_allowed("file:///tmp/mcp", McpUrlPolicy::TrustedAdmin));
 	}
 
 	async fn insert_tool(pool: &PgPool, owner_id: Option<&Uuid>, name: &str) -> Uuid {

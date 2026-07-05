@@ -3,6 +3,7 @@ pub mod base;
 pub mod catalog;
 pub mod config;
 pub mod i18n;
+pub mod images;
 pub mod logging;
 pub mod mcp;
 pub mod models;

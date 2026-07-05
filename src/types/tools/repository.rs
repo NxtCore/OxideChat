@@ -1,5 +1,5 @@
 use super::{McpHttpConfig, McpServer, McpSourceConfig, McpStdioConfig, Tool, ToolExecution, ToolFunction, ToolSourceKind, UserToolSettings, WasmBlob};
-use crate::utils::tools::mcp::McpToolInfo;
+use crate::utils::tools::mcp::{McpToolInfo, McpUrlPolicy};
 use crate::utils::tools::{McpClient, McpConnectionPool, ToolError};
 use sqlx::Row;
 use std::sync::Arc;
@@ -540,7 +540,12 @@ impl McpServer {
 			"http" | "streamable-http" | "streamable_http" => {
 				let config: McpHttpConfig =
 					serde_json::from_value(self.connection_config.clone()).map_err(|e| ToolError::McpError(format!("Invalid HTTP config: {e}")))?;
-				McpClient::new_http(self.name.clone(), config.url, config.headers).await
+				let url_policy = if self.owner_id.is_some() {
+					McpUrlPolicy::PublicOnly
+				} else {
+					McpUrlPolicy::TrustedAdmin
+				};
+				McpClient::new_http(self.name.clone(), config.url, config.headers, url_policy).await
 			}
 			"stdio" => {
 				let config: McpStdioConfig =

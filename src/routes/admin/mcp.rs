@@ -7,7 +7,7 @@
 
 use crate::config::Config;
 use crate::routes::public::auth::get_current_user;
-use crate::routes::public::mcp::{normalize_remote_transport, run_discovery, server_response, validate_remote_config};
+use crate::routes::public::mcp::{normalize_remote_transport, run_discovery, server_response, validate_admin_remote_config};
 use crate::types::JobState;
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
@@ -35,7 +35,7 @@ fn normalize_admin_transport(transport: &str, connection_config: &serde_json::Va
 	}
 
 	match normalize_remote_transport(transport) {
-		Some(norm) if validate_remote_config(connection_config) => Ok(norm),
+		Some(norm) if validate_admin_remote_config(connection_config) => Ok(norm),
 		_ => Err(ErrorCode::ValidationFailed),
 	}
 }
