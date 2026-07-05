@@ -18,12 +18,65 @@
 		</div>
 
 		<McpManagerDialog v-model:open="mcpManagerOpen" :admin="true" @changed="loadTools" />
+		<McpServerEditDialog v-model:open="mcpServerEditOpen" :server="editingMcpServer" :admin="true" @changed="loadTools" />
 
 		<div v-if="loading" class="flex items-center justify-center py-12">
 			<Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
 		</div>
 
-		<div v-else-if="displayTools.length === 0" class="rounded-lg border border-dashed border-border bg-muted/20 p-12 text-center">
+		<div v-else class="space-y-4">
+		<div v-if="mcpServerGroups.length > 0" class="space-y-3 mb-4">
+			<h3 class="text-sm font-medium text-muted-foreground px-1">{{ store.getTranslation('mcp.manage_title') }}</h3>
+			<div
+				v-for="group in mcpServerGroups"
+				:key="group.server_id"
+				class="rounded-lg border border-border bg-card"
+			>
+				<div class="flex items-center gap-2 p-4">
+					<button
+						type="button"
+						class="flex items-center gap-4 min-w-0 flex-1 text-left"
+						@click="toggleMcpServerExpanded(group.server_id)"
+					>
+						<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-500/10">
+							<Server class="h-5 w-5 text-green-600" />
+						</div>
+						<div class="min-w-0">
+							<div class="flex items-center gap-2">
+								<h3 class="font-medium text-foreground">{{ group.server_name }}</h3>
+								<span class="inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-500">MCP</span>
+							</div>
+							<p class="text-sm text-muted-foreground">{{ group.tools.length }} {{ store.getTranslation('mcp.discovered_tools') }}</p>
+						</div>
+					</button>
+					<div class="shrink-0 flex items-center gap-2">
+						<ShadButton variant="outline" size="sm" @click.stop="openMcpServerEdit(group.server_id)">
+							<Pencil class="h-4 w-4" />
+						</ShadButton>
+						<ChevronDown
+							class="h-4 w-4 text-muted-foreground transition-transform cursor-pointer"
+							:class="isMcpServerExpanded(group.server_id) ? 'rotate-180' : ''"
+							@click="toggleMcpServerExpanded(group.server_id)"
+						/>
+					</div>
+				</div>
+				<div v-if="isMcpServerExpanded(group.server_id)" class="border-t border-border">
+					<div
+						v-for="tool in group.tools"
+						:key="tool.id"
+						class="flex items-center justify-between gap-4 px-4 py-3 border-b border-border/50 last:border-0"
+					>
+						<div class="min-w-0">
+							<p class="text-sm font-medium text-foreground">{{ tool.display_name || tool.name }}</p>
+							<p v-if="tool.description" class="text-xs text-muted-foreground truncate">{{ tool.description }}</p>
+						</div>
+						<Switch :modelValue="tool.is_enabled" @update:modelValue="(val: boolean) => toggleTool(tool, val)" />
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div v-else-if="displayTools.length === 0 && mcpServerGroups.length === 0" class="rounded-lg border border-dashed border-border bg-muted/20 p-12 text-center">
 			<Wrench class="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
 			<h3 class="text-lg font-medium text-foreground mb-2">{{ store.getTranslation('settings.tools.no_tools') }}</h3>
 			<p class="text-sm text-muted-foreground mb-4">{{ store.getTranslation('settings.tools.no_tools_description') }}</p>
@@ -33,7 +86,7 @@
 			</ShadButton>
 		</div>
 
-		<div v-else class="space-y-3">
+		<div v-if="displayTools.length > 0" class="space-y-3">
 			<div
 				v-for="tool in displayTools"
 				:key="tool.id"
@@ -86,6 +139,7 @@
 					</div>
 				</div>
 			</div>
+		</div>
 		</div>
 
 		<Dialog v-model:open="dialogOpen">
@@ -321,11 +375,12 @@
 
 <script setup lang="ts">
 import {ref, reactive, onMounted, computed} from 'vue';
-import {Plus, Settings2, Loader2, Wrench, Globe, Code, Server, Sparkles, Key, Play, Trash2, Check} from 'lucide-vue-next';
+import {Plus, Settings2, Loader2, Wrench, Globe, Code, Server, Sparkles, Key, Play, Trash2, Check, ChevronDown, Pencil} from 'lucide-vue-next';
 import SchemaBuilder from '@/components/settings/SchemaBuilder.vue';
 import HeaderEditor from '@/components/settings/HeaderEditor.vue';
 import ToolTestDialog from '@/components/settings/ToolTestDialog.vue';
 import McpManagerDialog from '@/components/mcp/McpManagerDialog.vue';
+import McpServerEditDialog from '@/components/mcp/McpServerEditDialog.vue';
 import {useMainStore} from '@/stores';
 import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog';
 import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
@@ -360,6 +415,8 @@ interface Tool {
 	settings_schema?: any;
 	is_enabled: boolean;
 	has_user_settings?: boolean;
+	mcp_server_id?: string | null;
+	mcp_server_name?: string | null;
 }
 
 const loading = ref(true);
@@ -367,6 +424,18 @@ const saving = ref(false);
 const uploading = ref(false);
 const tools = ref<Tool[]>([]);
 const mcpManagerOpen = ref(false);
+const mcpServerEditOpen = ref(false);
+const editingMcpServer = ref<any | null>(null);
+
+async function openMcpServerEdit(serverId: string) {
+	try {
+		const server = await $customFetch(`/api/v1/admin/mcp-servers/${serverId}`);
+		editingMcpServer.value = server;
+		mcpServerEditOpen.value = true;
+	} catch (e: any) {
+		store.toast('Failed to load MCP server', {type: 'error'});
+	}
+}
 const dialogOpen = ref(false);
 const settingsDialogOpen = ref(false);
 const editingTool = ref<Tool | null>(null);
@@ -516,8 +585,44 @@ const builtinToolTemplates = [
 	},
 ];
 
+interface McpServerGroup {
+	server_id: string;
+	server_name: string;
+	tools: Tool[];
+	expanded: boolean;
+}
+
+const mcpServerGroups = computed<McpServerGroup[]>(() => {
+	const groups = new Map<string, McpServerGroup>();
+	for (const tool of tools.value) {
+		if (tool.mcp_server_id) {
+			if (!groups.has(tool.mcp_server_id)) {
+				groups.set(tool.mcp_server_id, {
+					server_id: tool.mcp_server_id,
+					server_name: tool.mcp_server_name || tool.mcp_server_id,
+					tools: [],
+					expanded: false,
+				});
+			}
+			groups.get(tool.mcp_server_id)!.tools.push(tool);
+		}
+	}
+	return Array.from(groups.values());
+});
+
+const expandedMcpServers = ref<Record<string, boolean>>({});
+
+function toggleMcpServerExpanded(serverId: string) {
+	expandedMcpServers.value = {...expandedMcpServers.value, [serverId]: !expandedMcpServers.value[serverId]};
+}
+
+function isMcpServerExpanded(serverId: string) {
+	return expandedMcpServers.value[serverId] ?? false;
+}
+
 const displayTools = computed(() => {
-	const result: any[] = [...tools.value];
+	const regularTools = tools.value.filter(t => !t.mcp_server_id);
+	const result: any[] = [...regularTools];
 
 	for (const template of builtinToolTemplates) {
 		const exists = tools.value.some(t => t.name === template.name);
@@ -629,7 +734,11 @@ async function loadTools() {
 	try {
 		const result = await $customFetch('/api/v1/admin/tools');
 		if (Array.isArray(result)) {
-			tools.value = result;
+			tools.value = result.map((t: any) => ({
+				...t,
+				mcp_server_id: t.mcp_server_id ?? null,
+				mcp_server_name: t.mcp_server_name ?? null,
+			}));
 		}
 	} catch (e: any) {
 		console.error('Failed to load tools:', e);
@@ -739,6 +848,17 @@ function openEditDialog(tool: Tool) {
 	}
 	if (tool.source_kind === 'BUILTIN' && tool.source_config) {
 		builtinConfig.builtin_id = tool.source_config.builtin_id || 'exa_search';
+	}
+	if (tool.source_kind === 'MCP' && tool.source_config) {
+		const transport = tool.source_config.transport || 'stdio';
+		Object.assign(mcpConfig, {
+			transport,
+			command: tool.source_config.command || '',
+			args: (tool.source_config.args || []).join(', '),
+			url: tool.source_config.url || '',
+			headers_json: JSON.stringify(tool.source_config.headers || {}, null, 2),
+			tool_name: tool.source_config.tool_name || '',
+		});
 	}
 
 	activeFunctionIdx.value = 0;

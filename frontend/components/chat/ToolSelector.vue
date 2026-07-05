@@ -194,6 +194,7 @@ interface ToolItem {
 	description?: string;
 	source_kind: string;
 	mcp_server_id?: string | null;
+	mcp_server_name?: string | null;
 	functions?: ToolFunction[];
 }
 
@@ -252,9 +253,10 @@ const sourceMeta: Record<string, {label: string; icon: any}> = {
 	WASM: {label: 'WASM', icon: Code},
 };
 
-function serverNameFor(serverId: string | null | undefined): string | undefined {
-	if (!serverId) return undefined;
-	return chatStore.userMcpServers.find(s => s.id === serverId)?.name;
+function serverNameFor(tool: ToolItem): string | undefined {
+	if (tool.mcp_server_name) return tool.mcp_server_name;
+	if (!tool.mcp_server_id) return undefined;
+	return chatStore.userMcpServers.find(s => s.id === tool.mcp_server_id)?.name;
 }
 
 function selectedCountFor(items: SubItem[]): number {
@@ -277,7 +279,7 @@ function buildHeads(tools: ToolItem[]): Head[] {
 				existing.items.push(subItem);
 				existing.itemCount = existing.items.length;
 			} else {
-				const serverName = serverNameFor(tool.mcp_server_id);
+				const serverName = serverNameFor(tool);
 				heads.push({
 					id: `mcp:${tool.mcp_server_id}`,
 					label: serverName ?? store.getTranslation('chat.tool_selector.unknown_server'),
@@ -379,6 +381,7 @@ async function loadTools() {
 				description: tool.description,
 				source_kind: tool.source_kind || 'HTTP',
 				mcp_server_id: tool.mcp_server_id ?? null,
+				mcp_server_name: tool.mcp_server_name ?? null,
 				functions: tool.functions,
 			}));
 		}

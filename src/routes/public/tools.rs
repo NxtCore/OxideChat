@@ -4,6 +4,7 @@ use crate::types::tools::*;
 
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{extract::State, response::IntoResponse};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tower_cookies::Cookies;
 use uuid::Uuid;
@@ -33,18 +34,40 @@ pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) ->
 			.unwrap_or_default()
 	};
 
-	let mut functions_by_tool: std::collections::HashMap<Uuid, Vec<ToolFunction>> = std::collections::HashMap::new();
+	let mut functions_by_tool: HashMap<Uuid, Vec<ToolFunction>> = HashMap::new();
 	for f in functions {
 		functions_by_tool.entry(f.tool_id).or_default().push(f);
 	}
 
-	let responses: Vec<ToolResponse> = tools
+	let mut responses: Vec<ToolResponse> = tools
 		.into_iter()
 		.map(|t| {
 			let funcs = functions_by_tool.remove(&t.id).unwrap_or_default();
 			ToolResponse::from_tool_with_functions(t, funcs)
 		})
 		.collect();
+
+	let server_ids: Vec<Uuid> = responses
+		.iter()
+		.filter_map(|r| r.mcp_server_id)
+		.collect::<std::collections::HashSet<_>>()
+		.into_iter()
+		.collect();
+
+	if !server_ids.is_empty() {
+		let server_names: HashMap<Uuid, String> =
+			sqlx::query_as::<_, (Uuid, String)>("SELECT id, name FROM mcp_servers WHERE id = ANY($1)")
+				.bind(&server_ids)
+				.fetch_all(&state.db)
+				.await
+				.unwrap_or_default()
+				.into_iter()
+				.collect();
+
+		for r in &mut responses {
+			r.mcp_server_name = r.mcp_server_id.and_then(|id| server_names.get(&id).cloned());
+		}
+	}
 
 	ResponseBuilder::new(ResponseBody::Json(responses)).build()
 }

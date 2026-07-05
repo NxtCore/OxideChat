@@ -169,10 +169,18 @@ function startEdit(server: McpServer) {
 	editingId.value = server.id;
 	form.name = server.name;
 	form.transport = server.transport;
-	form.url = '';
-	form.headers = '';
-	form.command = '';
-	form.args = '';
+	if (server.transport === 'stdio') {
+		form.command = server.connection_config?.command ?? '';
+		form.args = (server.connection_config?.args ?? []).join('\n');
+		form.url = '';
+		form.headers = '';
+	} else {
+		form.url = server.connection_config?.url ?? '';
+		const rawHeaders = server.connection_config?.headers;
+		form.headers = rawHeaders && Object.keys(rawHeaders).length > 0 ? JSON.stringify(rawHeaders, null, 2) : '';
+		form.command = '';
+		form.args = '';
+	}
 }
 
 async function save() {

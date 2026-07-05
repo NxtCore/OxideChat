@@ -42,7 +42,7 @@
 - Each file uses section comments for clarity:
     - Request Types (structs with `Deserialize`)
     - Response Types (structs with `Serialize`)
-    - Internal Types (DB row structs, helpers)
+    - Internal Types (DB row structs, helper functions)
 
 ### Tests Module (`src/tests/`)
 
@@ -57,6 +57,7 @@
 - Contain only handler functions, no struct definitions
 - Import types from `crate::types::{...}`
 - Keep handlers thin: validate → delegate → respond
+- ABSOLUTLY NO direct database access in route files, all database access is handled via the data/types model
 
 ### Data Model Pattern
 

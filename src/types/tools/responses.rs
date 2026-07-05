@@ -41,6 +41,7 @@ pub struct ToolResponse {
 	pub is_enabled: bool,
 	pub has_user_settings: bool,
 	pub mcp_server_id: Option<Uuid>,
+	pub mcp_server_name: Option<String>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }
@@ -62,6 +63,7 @@ impl ToolResponse {
 			is_enabled: t.is_enabled,
 			has_user_settings: false,
 			mcp_server_id,
+			mcp_server_name: None,
 			created_at: t.created_at,
 			updated_at: t.updated_at,
 		}
@@ -85,6 +87,7 @@ impl From<Tool> for ToolResponse {
 			is_enabled: t.is_enabled,
 			has_user_settings: false,
 			mcp_server_id,
+			mcp_server_name: None,
 			created_at: t.created_at,
 			updated_at: t.updated_at,
 		}
