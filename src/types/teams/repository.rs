@@ -154,14 +154,11 @@ impl Team {
 	/// Resolve the effective default model key for a user.
 	///
 	/// Precedence: user preference → specific team default → default team default → global default.
-	pub async fn resolve_default_model_key(pool: &PgPool, user_id: &Uuid) -> Option<String> {
+	pub async fn resolve_default_model_key(pool: &PgPool, user_id: &Uuid, user_default_model_key: Option<String>) -> Option<String> {
 		use crate::config::Config;
-		use crate::types::UserPreferences;
 
-		if let Ok(Some(prefs)) = UserPreferences::find_by_user_id(pool, user_id).await {
-			if prefs.default_model_key.is_some() {
-				return prefs.default_model_key;
-			}
+		if user_default_model_key.is_some() {
+			return user_default_model_key;
 		}
 
 		let team_default: Option<String> = sqlx::query_scalar(

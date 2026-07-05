@@ -12,15 +12,15 @@ pub async fn get_preferences(State(state): State<Arc<JobState>>, cookies: Cookie
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
-	let effective = Team::resolve_default_model_key(&state.db, &user.id).await;
-
 	match UserPreferences::find_by_user_id(&state.db, &user.id).await {
 		Ok(Some(prefs)) => {
+			let effective = Team::resolve_default_model_key(&state.db, &user.id, prefs.default_model_key.clone()).await;
 			let mut response = PreferencesResponse::from(prefs);
 			response.effective_default_model_key = effective;
 			ResponseBuilder::new(ResponseBody::Json(response)).build()
 		}
 		Ok(None) => {
+			let effective = Team::resolve_default_model_key(&state.db, &user.id, None).await;
 			let mut response = PreferencesResponse::default();
 			response.effective_default_model_key = effective;
 			ResponseBuilder::new(ResponseBody::Json(response)).build()
@@ -44,10 +44,9 @@ pub async fn update_preferences(State(state): State<Arc<JobState>>, cookies: Coo
 		}
 	}
 
-	let effective = Team::resolve_default_model_key(&state.db, &user.id).await;
-
 	match UserPreferences::upsert(&state.db, &user.id, &req).await {
 		Ok(prefs) => {
+			let effective = Team::resolve_default_model_key(&state.db, &user.id, prefs.default_model_key.clone()).await;
 			let mut response = PreferencesResponse::from(prefs);
 			response.effective_default_model_key = effective;
 			ResponseBuilder::new(ResponseBody::Json(response)).build()

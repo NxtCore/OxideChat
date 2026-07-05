@@ -294,7 +294,7 @@ function isDefaultModel(model: Model): boolean {
 
 async function toggleDefault(model: Model) {
 	const newKey = isDefaultModel(model) ? null : model.model_id;
-	await chatStore.updatePreferences({default_model_key: newKey ?? undefined});
+	await chatStore.updatePreferences({default_model_key: newKey});
 }
 
 </script>
