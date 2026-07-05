@@ -71,6 +71,8 @@ pub struct ConfigValues {
 	/// When enabled, admins may register global MCP servers that run over
 	/// server-side `stdio` (arbitrary commands on the host). Off by default.
 	pub allow_server_stdio_mcp: bool,
+	/// Instance-wide default model key. Applied when neither user nor team default is set.
+	pub default_model_key: Option<String>,
 }
 
 impl Default for ConfigValues {
@@ -84,6 +86,7 @@ impl Default for ConfigValues {
 			oauth_discord_client_secret: None,
 			enable_provider_selector: false,
 			allow_server_stdio_mcp: false,
+			default_model_key: None,
 		}
 	}
 }
@@ -157,6 +160,12 @@ impl Config {
 		self.values.load().allow_server_stdio_mcp
 	}
 
+	/// Get the instance-wide default model key, if configured.
+	#[must_use]
+	pub fn default_model_key(&self) -> Option<String> {
+		self.values.load().default_model_key.clone()
+	}
+
 	/// Get current configuration values.
 	#[must_use]
 	pub fn values(&self) -> std::sync::Arc<ConfigValues> {
@@ -201,6 +210,67 @@ impl Config {
 			.collect()
 	}
 
+	/// Set the default theme in the database and reload config.
+	///
+	/// # Errors
+	/// Returns an error if serialization or the database write fails.
+	pub async fn set_default_theme(&self, pool: &PgPool, theme: &ThemeCssVars) -> Result<(), String> {
+		let json = serde_json::to_string(theme).map_err(|e| e.to_string())?;
+		Self::upsert_config(pool, "default_theme", &json).await.map_err(|e| e.to_string())?;
+		self.reload(pool).await;
+		Ok(())
+	}
+
+	/// Set the `enable_provider_selector` flag in the database and reload config.
+	///
+	/// # Errors
+	/// Returns an error if the database write fails.
+	pub async fn set_enable_provider_selector(&self, pool: &PgPool, value: bool) -> Result<(), sqlx::Error> {
+		Self::upsert_config(pool, "enable_provider_selector", if value { "true" } else { "false" }).await?;
+		self.reload(pool).await;
+		Ok(())
+	}
+
+	/// Set the `allow_server_stdio_mcp` flag in the database and reload config.
+	///
+	/// # Errors
+	/// Returns an error if the database write fails.
+	pub async fn set_allow_server_stdio_mcp(&self, pool: &PgPool, value: bool) -> Result<(), sqlx::Error> {
+		Self::upsert_config(pool, "allow_server_stdio_mcp", if value { "true" } else { "false" }).await?;
+		self.reload(pool).await;
+		Ok(())
+	}
+
+	/// Set or clear the instance-wide default model key in the database and reload config.
+	///
+	/// # Errors
+	/// Returns an error if the database write fails.
+	pub async fn set_default_model_key(&self, pool: &PgPool, key: Option<&str>) -> Result<(), sqlx::Error> {
+		match key {
+			Some(k) => Self::upsert_config(pool, "default_model_key", k).await?,
+			None => {
+				sqlx::query("DELETE FROM app_config WHERE key = 'default_model_key'").execute(pool).await?;
+			}
+		}
+		self.reload(pool).await;
+		Ok(())
+	}
+
+	async fn upsert_config(pool: &PgPool, key: &str, value: &str) -> Result<(), sqlx::Error> {
+		sqlx::query(
+			r#"
+			INSERT INTO app_config (key, value)
+			VALUES ($1, $2)
+			ON CONFLICT (key) DO UPDATE SET value = $2
+			"#,
+		)
+		.bind(key)
+		.bind(value)
+		.execute(pool)
+		.await?;
+		Ok(())
+	}
+
 	/// Load configuration from database.
 	async fn load_from_db(pool: &PgPool) -> ConfigValues {
 		let rows: Vec<ConfigRow> = sqlx::query_as("SELECT key, value FROM app_config").fetch_all(pool).await.unwrap_or_default();
@@ -221,6 +291,7 @@ impl Config {
 				"oauth_discord_client_secret" => values.oauth_discord_client_secret = Some(row.value),
 				"enable_provider_selector" => values.enable_provider_selector = row.value == "true",
 				"allow_server_stdio_mcp" => values.allow_server_stdio_mcp = row.value == "true",
+				"default_model_key" => values.default_model_key = Some(row.value),
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}
 		}

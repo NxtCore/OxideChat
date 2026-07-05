@@ -1,6 +1,6 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::{PreferencesResponse, UpdatePreferencesRequest, UserPreferences};
+use crate::types::{PreferencesResponse, Team, UpdatePreferencesRequest, UserPreferences};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{Json, extract::State, response::IntoResponse};
 use std::sync::Arc;
@@ -12,9 +12,19 @@ pub async fn get_preferences(State(state): State<Arc<JobState>>, cookies: Cookie
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
+	let effective = Team::resolve_default_model_key(&state.db, &user.id).await;
+
 	match UserPreferences::find_by_user_id(&state.db, &user.id).await {
-		Ok(Some(prefs)) => ResponseBuilder::new(ResponseBody::Json(PreferencesResponse::from(prefs))).build(),
-		Ok(None) => ResponseBuilder::new(ResponseBody::Json(PreferencesResponse::default())).build(),
+		Ok(Some(prefs)) => {
+			let mut response = PreferencesResponse::from(prefs);
+			response.effective_default_model_key = effective;
+			ResponseBuilder::new(ResponseBody::Json(response)).build()
+		}
+		Ok(None) => {
+			let mut response = PreferencesResponse::default();
+			response.effective_default_model_key = effective;
+			ResponseBuilder::new(ResponseBody::Json(response)).build()
+		}
 		Err(e) => {
 			eprintln!("[PREFERENCES] Failed to get preferences: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
@@ -34,8 +44,14 @@ pub async fn update_preferences(State(state): State<Arc<JobState>>, cookies: Coo
 		}
 	}
 
+	let effective = Team::resolve_default_model_key(&state.db, &user.id).await;
+
 	match UserPreferences::upsert(&state.db, &user.id, &req).await {
-		Ok(prefs) => ResponseBuilder::new(ResponseBody::Json(PreferencesResponse::from(prefs))).build(),
+		Ok(prefs) => {
+			let mut response = PreferencesResponse::from(prefs);
+			response.effective_default_model_key = effective;
+			ResponseBuilder::new(ResponseBody::Json(response)).build()
+		}
 		Err(e) => {
 			eprintln!("[PREFERENCES] Failed to update preferences: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()

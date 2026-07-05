@@ -1,7 +1,7 @@
 <template>
 	<ShadPopover v-model:open="open">
 		<ShadPopoverTrigger as-child>
-			<ShadButton
+			<button
 				type="button"
 				:class="
 					cn(
@@ -13,7 +13,7 @@
 			>
 				<Wrench class="h-4 w-4" />
 				<span v-if="chatStore.enabledTools.length > 0">{{ chatStore.enabledTools.length }}</span>
-			</ShadButton>
+			</button>
 		</ShadPopoverTrigger>
 		<ShadPopoverContent align="start" class="w-80 p-0">
 			<div class="flex flex-col">
@@ -48,7 +48,7 @@
 							</div>
 
 							<template v-for="head in group.heads" :key="head.id">
-								<ShadButton
+								<button
 									v-if="!head.collapsible"
 									type="button"
 									class="group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted"
@@ -67,12 +67,12 @@
 										</div>
 										<p v-if="head.description" class="truncate text-[11px] text-muted-foreground">{{ head.description }}</p>
 									</div>
-								</ShadButton>
+								</button>
 
 								<ShadCollapsible v-else :open="isExpanded(head.id)" @update:open="val => setExpanded(head.id, val)" as-child>
 									<div class="rounded-md transition-colors hover:bg-muted/50">
 										<div class="flex items-center gap-1.5 px-2 py-1.5">
-											<ShadButton type="button" class="shrink-0" :aria-label="store.getTranslation('chat.tool_selector.select_all')" @click="toggleHead(head)">
+											<button type="button" class="shrink-0" :aria-label="store.getTranslation('chat.tool_selector.select_all')" @click="toggleHead(head)">
 												<div
 													class="flex h-4 w-4 items-center justify-center rounded border transition-colors"
 													:class="headSelectionState(head) === 'unchecked' ? 'border-input bg-background' : 'border-primary bg-primary text-primary-foreground'"
@@ -80,9 +80,9 @@
 													<Check v-if="headSelectionState(head) === 'checked'" class="h-3 w-3" />
 													<Minus v-else-if="headSelectionState(head) === 'indeterminate'" class="h-3 w-3" />
 												</div>
-											</ShadButton>
+											</button>
 											<ShadCollapsibleTrigger as-child>
-												<ShadButton type="button" class="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+												<button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 text-left">
 													<ChevronRight class="h-3 w-3 shrink-0 text-muted-foreground transition-transform" :class="isExpanded(head.id) ? 'rotate-90' : ''" />
 													<div class="min-w-0 flex-1">
 														<div class="flex items-center justify-between gap-2">
@@ -91,7 +91,7 @@
 														</div>
 														<p v-if="head.description" class="truncate text-[11px] text-muted-foreground">{{ head.description }}</p>
 													</div>
-												</ShadButton>
+												</button>
 											</ShadCollapsibleTrigger>
 										</div>
 										<ShadCollapsibleContent>
@@ -129,32 +129,42 @@
 				</div>
 
 				<div class="flex items-center gap-1 border-t border-border p-1">
-					<ShadButton
+					<button
 						v-if="allToolIds.length > 0"
 						type="button"
 						class="flex-1 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						@click="selectAll"
 					>
 						{{ store.getTranslation('chat.tool_selector.select_all') }}
-					</ShadButton>
-					<ShadButton
+					</button>
+					<button
 						v-if="chatStore.enabledTools.length > 0"
 						type="button"
 						class="flex-1 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						@click="clearAll"
 					>
 						{{ store.getTranslation('chat.tool_selector.clear') }}
-					</ShadButton>
+					</button>
+					<button
+						v-if="allToolIds.length > 0"
+						type="button"
+						class="flex-1 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-muted"
+						:class="isCurrentSelectionDefault ? 'text-primary' : 'text-muted-foreground hover:text-foreground'"
+						@click="saveAsDefaults"
+					>
+						<Bookmark class="h-3 w-3 inline-block mr-1" :class="isCurrentSelectionDefault ? 'fill-primary' : ''" />
+						{{ store.getTranslation('chat.tool_selector.save_as_defaults') }}
+					</button>
 				</div>
 				<div class="border-t border-border p-1">
-					<ShadButton
+					<button
 						type="button"
 						class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						@click="openMcpManager"
 					>
 						<Server class="h-3.5 w-3.5" />
 						{{ store.getTranslation('mcp.tool_selector.manage') }}
-					</ShadButton>
+					</button>
 				</div>
 			</div>
 		</ShadPopoverContent>
@@ -163,7 +173,7 @@
 
 <script setup lang="ts">
 import {computed, onMounted, ref, watch} from 'vue';
-import {Check, ChevronRight, Minus, Search, Server, Wrench, Sparkles, Globe, Code} from 'lucide-vue-next';
+import {Bookmark, Check, ChevronRight, Minus, Search, Server, Wrench, Sparkles, Globe, Code} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
 import {cn} from '~/lib/utils';
@@ -364,6 +374,17 @@ function clearAll() {
 function openMcpManager() {
 	open.value = false;
 	chatStore.mcpManagerOpen = true;
+}
+
+const isCurrentSelectionDefault = computed(() => {
+	const defaults = store.preferences?.default_tools ?? [];
+	const current = chatStore.enabledTools;
+	if (defaults.length !== current.length) return false;
+	return current.every(id => defaults.includes(id));
+});
+
+async function saveAsDefaults() {
+	await chatStore.updatePreferences({default_tools: [...chatStore.enabledTools]});
 }
 
 async function loadTools() {

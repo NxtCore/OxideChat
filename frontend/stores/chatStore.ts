@@ -442,7 +442,18 @@ export const useChatStore = defineStore('chat', {
 				this.messages = [];
 				this.setContextTokens(0);
 				this.activeChat = null;
+				this.resetComposerToDefaults();
 			}
+		},
+
+		resetComposerToDefaults() {
+			const prefs = useMainStore().preferences;
+			const key = prefs?.effective_default_model_key;
+			const match = key ? this.models.find(m => m.model_id === key) : null;
+			this.setSelectedModel(match || this.models[0] || null);
+			this.selectedProviderSlug = prefs?.default_provider_slug ?? null;
+			this.providerRoutingMode = 'prefer';
+			this.enabledTools = prefs?.default_tools ? [...prefs.default_tools] : [];
 		},
 
 		async callLocalMcpTool(mcp_server_id: string, mcp_tool_name: string, args: any): Promise<any> {
@@ -818,9 +829,17 @@ export const useChatStore = defineStore('chat', {
 				this.models = models.items;
 
 				if (!this.selectedModel && this.models.length > 0) {
-					const defaultKey = mainStore.preferences?.default_model_key;
-					const defaultModel = defaultKey ? this.models.find(m => m.model_id === defaultKey) : null;
-					this.selectedModel = defaultModel || this.models[0] || null;
+					const key = mainStore.preferences?.effective_default_model_key;
+					const match = key ? this.models.find(m => m.model_id === key) : null;
+					this.selectedModel = match || this.models[0] || null;
+
+					const prefs = mainStore.preferences;
+					if (prefs?.default_provider_slug) {
+						this.selectedProviderSlug = prefs.default_provider_slug;
+					}
+					if (prefs?.default_tools?.length) {
+						this.enabledTools = [...prefs.default_tools];
+					}
 				}
 			} catch (e) {
 				console.error('Failed to fetch models:', e);
@@ -888,7 +907,12 @@ export const useChatStore = defineStore('chat', {
 			this.selectedModel = model;
 
 			if (modelChanged) {
-				this.selectedProviderSlug = null;
+				const prefs = useMainStore().preferences;
+				if (model && prefs?.default_model_key && model.model_id === prefs.default_model_key) {
+					this.selectedProviderSlug = prefs.default_provider_slug ?? null;
+				} else {
+					this.selectedProviderSlug = null;
+				}
 			}
 
 			if (!model) {

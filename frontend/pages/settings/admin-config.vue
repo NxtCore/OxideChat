@@ -21,6 +21,20 @@
 				</div>
 				<Switch :modelValue="allowServerStdioMcp" :disabled="saving" @update:modelValue="toggleAllowStdioMcp" />
 			</div>
+
+			<div class="mt-4 rounded-lg border border-border p-4 space-y-2">
+				<div class="min-w-0">
+					<p class="text-sm font-medium text-foreground">{{ store.getTranslation('settings.admin.default_model') }}</p>
+					<p class="text-xs text-muted-foreground mt-0.5">{{ store.getTranslation('settings.admin.default_model_hint') }}</p>
+				</div>
+				<DefaultModelPicker
+					:model-value="defaultModelKey"
+					:disabled="saving"
+					endpoint="/api/v1/admin/models"
+					:placeholder="store.getTranslation('settings.teams.use_global_default')"
+					@update:model-value="setDefaultModel"
+				/>
+			</div>
 		</div>
 	</div>
 </template>
@@ -29,18 +43,20 @@
 import {ref} from 'vue';
 import {useMainStore} from '@/stores';
 import {Switch} from '@/components/ui/switch';
+import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
 
 const store = useMainStore();
+const {$customFetch} = useNuxtApp();
 const saving = ref(false);
 const enableProviderSelector = ref(store.base?.enable_provider_selector ?? false);
 const allowServerStdioMcp = ref(store.base?.allow_server_stdio_mcp ?? false);
+const defaultModelKey = ref<string | null>(store.base?.default_model_key ?? null);
 
 async function toggleProviderSelector(val: boolean) {
 	const previous = enableProviderSelector.value;
 	enableProviderSelector.value = val;
 	saving.value = true;
 	try {
-		const {$customFetch} = useNuxtApp();
 		await $customFetch('/api/v1/admin/config', {
 			method: 'PATCH',
 			body: {enable_provider_selector: val},
@@ -59,7 +75,6 @@ async function toggleAllowStdioMcp(val: boolean) {
 	allowServerStdioMcp.value = val;
 	saving.value = true;
 	try {
-		const {$customFetch} = useNuxtApp();
 		await $customFetch('/api/v1/admin/config', {
 			method: 'PATCH',
 			body: {allow_server_stdio_mcp: val},
@@ -72,4 +87,24 @@ async function toggleAllowStdioMcp(val: boolean) {
 		saving.value = false;
 	}
 }
+
+async function setDefaultModel(val: string | null) {
+	const previous = defaultModelKey.value;
+	const newKey = val;
+	defaultModelKey.value = newKey;
+	saving.value = true;
+	try {
+		await $customFetch('/api/v1/admin/config', {
+			method: 'PATCH',
+			body: {default_model_key: newKey},
+		});
+		if (store.base) store.base.default_model_key = newKey;
+	} catch (error) {
+		console.error('Failed to update default model key:', error);
+		defaultModelKey.value = previous;
+	} finally {
+		saving.value = false;
+	}
+}
+
 </script>

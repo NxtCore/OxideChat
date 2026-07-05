@@ -51,6 +51,7 @@ interface Base {
 	roles: Role[];
 	enable_provider_selector: boolean;
 	allow_server_stdio_mcp: boolean;
+	default_model_key: string | null;
 }
 
 export const useMainStore = defineStore('main', {

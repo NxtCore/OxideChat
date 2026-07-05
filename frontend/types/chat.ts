@@ -28,6 +28,7 @@ export interface TeamMember {
 }
 
 export interface TeamDetailed extends Omit<TeamList, 'member_count'> {
+	default_model_key: string | null;
 	members: TeamMember[];
 	model_access: {
 		provider_ids: string[];
@@ -176,6 +177,9 @@ export interface ThemeCssVars {
 
 export interface UserPreferences {
 	default_model_key: string | null;
+	effective_default_model_key: string | null;
+	default_provider_slug: string | null;
+	default_tools: string[];
 	favorite_model_keys: string[];
 	streaming_animation: StreamingAnimation;
 	use_remend: boolean;
@@ -185,6 +189,7 @@ export interface UserPreferences {
 
 export interface GlobalConfig {
 	default_theme: ThemeCssVars;
+	default_model_key: string | null;
 }
 
 export interface FetchedTheme {
@@ -238,7 +243,9 @@ export interface SendMessageRequest {
 }
 
 export interface UpdatePreferencesRequest {
-	default_model_key?: string;
+	default_model_key?: string | null;
+	default_provider_slug?: string | null;
+	default_tools?: string[];
 	favorite_model_keys?: string[];
 	streaming_animation?: StreamingAnimation;
 	use_remend?: boolean;

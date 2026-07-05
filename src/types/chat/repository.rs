@@ -542,26 +542,33 @@ impl UserPreferences {
 		sqlx::query_as::<_, UserPreferences>(
 			r#"
 			INSERT INTO user_preferences (user_id, default_model_key, favorite_model_keys,
-			                              streaming_animation, use_remend, theme_css_vars, custom_theme_urls)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			                              streaming_animation, use_remend, theme_css_vars, custom_theme_urls,
+			                              default_provider_slug, default_tools)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			ON CONFLICT (user_id) DO UPDATE
-				SET default_model_key = COALESCE($2, user_preferences.default_model_key),
+				SET default_model_key = CASE WHEN $10 THEN $2 ELSE user_preferences.default_model_key END,
 				    favorite_model_keys = CASE WHEN $3::jsonb = 'null'::jsonb THEN user_preferences.favorite_model_keys ELSE $3::jsonb END,
 				    streaming_animation = COALESCE($4, user_preferences.streaming_animation),
 				    use_remend = COALESCE($5, user_preferences.use_remend),
 				    theme_css_vars = CASE WHEN $6::jsonb = 'null'::jsonb THEN user_preferences.theme_css_vars ELSE $6::jsonb END,
 				    custom_theme_urls = CASE WHEN $7::jsonb = 'null'::jsonb THEN user_preferences.custom_theme_urls ELSE $7::jsonb END,
+				    default_provider_slug = CASE WHEN $11 THEN $8 ELSE user_preferences.default_provider_slug END,
+				    default_tools = CASE WHEN $9::jsonb = 'null'::jsonb THEN user_preferences.default_tools ELSE $9::jsonb END,
 				    updated_at = NOW()
 			RETURNING *
 			"#,
 		)
 		.bind(user_id)
-		.bind(&prefs.default_model_key)
+		.bind(prefs.default_model_key.as_ref().and_then(|v| v.as_deref()))
 		.bind(json_or_null(&prefs.favorite_model_keys))
 		.bind(&prefs.streaming_animation)
 		.bind(prefs.use_remend)
 		.bind(json_or_null(&prefs.theme_css_vars))
 		.bind(json_or_null(&prefs.custom_theme_urls))
+		.bind(prefs.default_provider_slug.as_ref().and_then(|v| v.as_deref()))
+		.bind(json_or_null(&prefs.default_tools))
+		.bind(prefs.default_model_key.is_some())
+		.bind(prefs.default_provider_slug.is_some())
 		.fetch_one(pool)
 		.await
 	}

@@ -226,6 +226,8 @@ pub struct StreamingAssistantMessageCreate<'a> {
 pub struct UserPreferences {
 	pub user_id: Uuid,
 	pub default_model_key: Option<String>,
+	pub default_provider_slug: Option<String>,
+	pub default_tools: serde_json::Value,
 	pub favorite_model_keys: serde_json::Value,
 	pub streaming_animation: String,
 	pub use_remend: bool,
@@ -242,6 +244,8 @@ impl UserPreferences {
 		Self {
 			user_id,
 			default_model_key: None,
+			default_provider_slug: None,
+			default_tools: serde_json::json!([]),
 			favorite_model_keys: serde_json::json!([]),
 			streaming_animation: String::from("fade"),
 			use_remend: true,
