@@ -392,7 +392,13 @@
 								class="grid grid-cols-[minmax(10rem,1fr)_4.75rem_4.75rem_4.75rem_4.75rem_5.25rem_6.25rem] items-center gap-1 border-b border-border/40 px-4 py-2.5 text-sm last:border-0"
 							>
 								<div class="flex items-center gap-2 min-w-0">
-									<span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{backgroundColor: row.color}" />
+									<img v-if="row.icon?.type === 'png'" :src="row.icon.icon" class="h-5 w-5 shrink-0 rounded-md bg-muted object-cover" alt="" />
+									<div
+										v-else-if="row.icon?.type === 'svg'"
+										class="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:h-full [&>svg]:w-full"
+										v-html="row.icon.icon"
+									/>
+									<span v-else class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{backgroundColor: row.color}" />
 									<span class="truncate font-medium">{{ row.label }}</span>
 								</div>
 								<span class="text-right text-xs text-muted-foreground">{{ exploreFormatValue(row.min) }}</span>
@@ -731,6 +737,12 @@ function getModelIcon(label: string, id: string | null) {
 	return iconStore.getProviderIcon(label, id ?? undefined);
 }
 
+function getExploreIcon(label: string) {
+	if (exploreGroup.value !== 'model') return null;
+	const model = byModel.value.find(row => row.label === label);
+	return getModelIcon(label, model?.id ?? null);
+}
+
 function getMetricValue(row: AnalyticsDayModelRow): number {
 	switch (exploreMetric.value) {
 		case 'cost': return Number(row.cost_total);
@@ -853,6 +865,7 @@ const exploreTableData = computed(() => {
 		return rows.slice(0, exploreTopN.value).map((row, i) => ({
 			label: row.label,
 			color: CHART_COLORS[i % CHART_COLORS.length],
+			icon: null,
 			min: row.value,
 			max: row.value,
 			avg: row.value,
@@ -881,6 +894,7 @@ const exploreTableData = computed(() => {
 	return modelTotals.slice(0, exploreTopN.value).map((m, i) => ({
 		label: m.label,
 		color: CHART_COLORS[i % CHART_COLORS.length],
+		icon: getExploreIcon(m.label),
 		min: Math.min(...m.vals),
 		max: Math.max(...m.vals),
 		avg: m.sum / Math.max(1, m.vals.length),
