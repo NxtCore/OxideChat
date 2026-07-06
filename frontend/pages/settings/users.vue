@@ -80,6 +80,14 @@
 					<ShadButton
 						variant="outline"
 						size="sm"
+						:title="store.getTranslation('settings.admin_users.view_analytics')"
+						@click="router.push(`/settings/analytics?user_id=${user.id}`)"
+					>
+						<BarChart2 class="h-4 w-4" />
+					</ShadButton>
+					<ShadButton
+						variant="outline"
+						size="sm"
 						:disabled="user.id === store.auth.user?.id || !store.hasPermission('admin.users.edit')"
 						:title="user.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
 						@click="openEditDialog(user)"
@@ -243,12 +251,13 @@
 
 <script setup lang="ts">
 import {ref, reactive, computed, watch, onMounted} from 'vue';
-import {Users, Plus, Pencil, Trash2, Loader2} from 'lucide-vue-next';
+import {Users, Plus, Pencil, Trash2, Loader2, BarChart2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import type {PaginatedResponse, TeamList, TeamSummary} from '~/types/chat';
 
 const {$customFetch} = useNuxtApp();
 const store = useMainStore();
+const router = useRouter();
 
 interface UserResponse {
 	id: string;

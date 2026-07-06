@@ -17,6 +17,24 @@ pub async fn get_analytics(State(state): State<Arc<JobState>>, cookies: Cookies,
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 	let group_by = params.group_by.as_deref().unwrap_or("model");
+	if let Some(ref user_id) = params.user_id {
+		if group_by == "day_model" {
+			return match UsageEvent::day_model_analytics(&state.db, params.from, params.to, Some(user_id)).await {
+				Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
+				Err(e) => {
+					eprintln!("[ANALYTICS] Failed to load day_model analytics: {e}");
+					ErrorBuilder::new(ErrorCode::DatabaseError).build()
+				}
+			};
+		}
+		return match UsageEvent::analytics_for_user(&state.db, user_id, params.from, params.to, group_by).await {
+			Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
+			Err(e) => {
+				eprintln!("[ANALYTICS] Failed to load user analytics: {e}");
+				ErrorBuilder::new(ErrorCode::DatabaseError).build()
+			}
+		};
+	}
 	if group_by == "day_model" {
 		return match UsageEvent::day_model_analytics(&state.db, params.from, params.to, None).await {
 			Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),

@@ -37,6 +37,7 @@ pub struct AnalyticsQuery {
 	pub from: Option<DateTime<Utc>>,
 	pub to: Option<DateTime<Utc>>,
 	pub group_by: Option<String>,
+	pub user_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]

@@ -18,6 +18,11 @@ export const useBudgetStore = defineStore('budget', {
 			byDay: [] as AnalyticsRow[],
 			byDayModel: [] as AnalyticsDayModelRow[],
 		},
+		userAnalytics: {
+			byModel: [] as AnalyticsRow[],
+			byDay: [] as AnalyticsRow[],
+			byDayModel: [] as AnalyticsDayModelRow[],
+		},
 		assignments: [] as BudgetAssignmentInfo[],
 		loading: false,
 	}),
@@ -94,6 +99,17 @@ export const useBudgetStore = defineStore('budget', {
 			this.analytics.byTeam = byTeam ?? [];
 			this.analytics.byDay = byDay ?? [];
 			this.analytics.byDayModel = byDayModel ?? [];
+		},
+		async fetchUserAnalytics(userId: string, params: {from?: string; to?: string} = {}) {
+			const {$customFetch} = useNuxtApp();
+			const [byModel, byDay, byDayModel] = await Promise.all([
+				$customFetch<AnalyticsRow[]>('/api/v1/admin/analytics', {params: {...params, group_by: 'model', user_id: userId}}),
+				$customFetch<AnalyticsRow[]>('/api/v1/admin/analytics', {params: {...params, group_by: 'day', user_id: userId}}),
+				$customFetch<AnalyticsDayModelRow[]>('/api/v1/admin/analytics', {params: {...params, group_by: 'day_model', user_id: userId}}),
+			]);
+			this.userAnalytics.byModel = byModel ?? [];
+			this.userAnalytics.byDay = byDay ?? [];
+			this.userAnalytics.byDayModel = byDayModel ?? [];
 		},
 		async fetchMyAnalytics(params: {from?: string; to?: string} = {}) {
 			const {$customFetch} = useNuxtApp();

@@ -6,7 +6,47 @@
 				<h2 class="text-lg font-semibold text-foreground">{{ title }}</h2>
 				<p class="text-sm text-muted-foreground">{{ description }}</p>
 			</div>
-			<SettingsAnalyticsDateFilter @change="onDateChange" />
+			<div class="flex flex-col gap-2 sm:flex-row sm:items-start">
+				<Popover v-if="isAdmin" v-model:open="userPickerOpen">
+					<PopoverTrigger as-child>
+						<ShadButton variant="outline" class="w-full justify-between font-normal sm:w-48" @click="userPickerOpen = true">
+							<span :class="selectedUserId ? 'text-foreground' : 'text-muted-foreground'">
+								{{ selectedUserId ? (userList.find(u => u.id === selectedUserId)?.label ?? selectedUserId) : tx('settings.analytics.all_users', 'All users') }}
+							</span>
+							<ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+						</ShadButton>
+					</PopoverTrigger>
+					<PopoverContent class="w-56 p-2" align="start">
+						<ShadInput v-model="userSearch" :placeholder="tx('settings.admin_users.search', 'Search users...')" class="mb-2 h-8 text-sm" />
+						<div class="max-h-52 overflow-y-auto space-y-0.5">
+							<button
+								type="button"
+								class="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent text-left"
+								:class="!selectedUserId ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'"
+								@click="selectedUserId = null; userPickerOpen = false; userSearch = ''"
+							>
+								<Check v-if="!selectedUserId" class="h-3.5 w-3.5 shrink-0" />
+								<span v-else class="h-3.5 w-3.5 shrink-0" />
+								<span>{{ tx('settings.analytics.all_users', 'All users') }}</span>
+							</button>
+							<button
+								v-for="u in filteredUserList"
+								:key="u.id"
+								type="button"
+								class="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent text-left"
+								:class="selectedUserId === u.id ? 'bg-accent text-accent-foreground' : 'text-foreground'"
+								@click="selectedUserId = u.id; userPickerOpen = false; userSearch = ''"
+							>
+								<Check v-if="selectedUserId === u.id" class="h-3.5 w-3.5 shrink-0" />
+								<span v-else class="h-3.5 w-3.5 shrink-0" />
+								<span class="truncate">{{ u.label }}</span>
+							</button>
+							<p v-if="filteredUserList.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">{{ tx('settings.admin_users.no_users', 'No users found') }}</p>
+						</div>
+					</PopoverContent>
+				</Popover>
+				<SettingsAnalyticsDateFilter @change="onDateChange" />
+			</div>
 		</div>
 
 		<div v-if="loading" class="flex items-center justify-center py-20 text-muted-foreground">
@@ -451,8 +491,9 @@
 </template>
 
 <script setup lang="ts">
-import {Loader2, TrendingUp, TrendingDown, KeyRound} from 'lucide-vue-next';
+import {Loader2, TrendingUp, TrendingDown, KeyRound, ChevronsUpDown, Check} from 'lucide-vue-next';
 import {AreaChart, BarChart} from 'vue-chrts';
+import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import {useMainStore} from '@/stores';
 import {useBudgetStore} from '@/stores/budgetStore';
 import {useIconsStore} from '@/stores/icons';
@@ -460,14 +501,30 @@ import type {AnalyticsDayModelRow, AnalyticsRow} from '~/types/budgets';
 
 const props = defineProps<{
 	isAdmin: boolean;
+	userId?: string;
 }>();
+
+interface UserEntry {
+	id: string;
+	label: string;
+}
 
 const store = useMainStore();
 const budgetStore = useBudgetStore();
 const iconStore = useIconsStore();
+const {$customFetch} = useNuxtApp();
 const loading = ref(false);
 const from = ref('');
 const to = ref('');
+const selectedUserId = ref<string | null>(props.userId ?? null);
+const userList = ref<UserEntry[]>([]);
+const userPickerOpen = ref(false);
+const userSearch = ref('');
+
+const filteredUserList = computed(() => {
+	const q = userSearch.value.trim().toLowerCase();
+	return q ? userList.value.filter(u => u.label.toLowerCase().includes(q)) : userList.value;
+});
 const activeTab = ref('overview');
 const exploreMetric = ref('cost');
 const exploreGroup = ref('model');
@@ -514,9 +571,15 @@ const CHART_COLORS = [
 	'#a855f7', '#6366f1', '#d946ef', '#0ea5e9', '#84cc16',
 ];
 
-const title = computed(() => props.isAdmin
-	? store.getTranslation('settings.tabs.analytics')
-	: store.getTranslation('settings.analytics.my_usage'));
+const title = computed(() => {
+	if (props.isAdmin && selectedUserId.value) {
+		const user = userList.value.find(u => u.id === selectedUserId.value);
+		return user?.label ?? store.getTranslation('settings.tabs.analytics');
+	}
+	return props.isAdmin
+		? store.getTranslation('settings.tabs.analytics')
+		: store.getTranslation('settings.analytics.my_usage');
+});
 
 const description = computed(() => store.getTranslation('settings.analytics.description'));
 
@@ -532,11 +595,23 @@ function onDateChange(range: {from: string; to: string; label: string}) {
 	load();
 }
 
-const byModel = computed(() => props.isAdmin ? budgetStore.analytics.byModel : budgetStore.myAnalytics.byModel);
-const byDay = computed(() => props.isAdmin ? budgetStore.analytics.byDay : budgetStore.myAnalytics.byDay);
-const byDayModel = computed(() => props.isAdmin ? budgetStore.analytics.byDayModel : budgetStore.myAnalytics.byDayModel);
-const byUser = computed(() => props.isAdmin ? budgetStore.analytics.byUser : []);
-const byTeam = computed(() => props.isAdmin ? budgetStore.analytics.byTeam : []);
+const byModel = computed(() => {
+	if (props.isAdmin && selectedUserId.value) return budgetStore.userAnalytics.byModel;
+	if (props.isAdmin) return budgetStore.analytics.byModel;
+	return budgetStore.myAnalytics.byModel;
+});
+const byDay = computed(() => {
+	if (props.isAdmin && selectedUserId.value) return budgetStore.userAnalytics.byDay;
+	if (props.isAdmin) return budgetStore.analytics.byDay;
+	return budgetStore.myAnalytics.byDay;
+});
+const byDayModel = computed(() => {
+	if (props.isAdmin && selectedUserId.value) return budgetStore.userAnalytics.byDayModel;
+	if (props.isAdmin) return budgetStore.analytics.byDayModel;
+	return budgetStore.myAnalytics.byDayModel;
+});
+const byUser = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byUser : []);
+const byTeam = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byTeam : []);
 
 function tokenTotal(row: AnalyticsRow) {
 	return row.input_tokens + row.output_tokens + row.reasoning_tokens;
@@ -927,6 +1002,11 @@ function formatNumber(n: number) {
 	return n.toLocaleString();
 }
 
+async function loadUsers() {
+	const res = await $customFetch<{users: {id: string; username: string; email: string}[]}>('/api/v1/admin/users', {params: {per_page: 200}});
+	userList.value = (res?.users ?? []).map(u => ({id: u.id, label: u.username || u.email}));
+}
+
 async function load() {
 	loading.value = true;
 	try {
@@ -934,7 +1014,9 @@ async function load() {
 			from: from.value ? `${from.value}T00:00:00Z` : undefined,
 			to: to.value ? `${to.value}T23:59:59Z` : undefined,
 		};
-		if (props.isAdmin) {
+		if (props.isAdmin && selectedUserId.value) {
+			await budgetStore.fetchUserAnalytics(selectedUserId.value, params);
+		} else if (props.isAdmin) {
 			await budgetStore.fetchAllAnalytics(params);
 		} else {
 			await budgetStore.fetchMyAnalytics(params);
@@ -943,4 +1025,16 @@ async function load() {
 		loading.value = false;
 	}
 }
+
+watch(() => props.userId, (v) => {
+	selectedUserId.value = v ?? null;
+});
+
+watch(selectedUserId, () => {
+	load();
+});
+
+onMounted(() => {
+	if (props.isAdmin) loadUsers();
+});
 </script>
