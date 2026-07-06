@@ -173,94 +173,134 @@
 
 			<!-- Trends Tab -->
 			<div v-if="activeTab === 'trends'">
-				<div class="mb-6">
-					<h3 class="mb-3 text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.top_models') }}</h3>
-					<div class="grid gap-4 xl:grid-cols-[1fr_18rem]">
-						<div class="rounded-lg border border-border bg-card p-4">
-							<h4 class="mb-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">{{ store.getTranslation('settings.analytics.spend_over_time') }}</h4>
-							<SettingsStackedAnalyticsChart
-								v-if="stackedBarData.length"
-								:data="stackedBarData"
-								:categories="stackedBarCategories"
-								:format-value="formatMoney"
-							/>
-							<p v-else class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
-						</div>
-						<div class="rounded-lg border border-border bg-card p-4">
-							<h4 class="mb-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">{{ store.getTranslation('settings.analytics.trending') }}</h4>
-							<div class="space-y-3">
-								<div
-									v-for="model in trendingModels"
-									:key="model.label"
-									class="flex items-center justify-between gap-2"
-								>
-									<div class="flex items-center gap-2 min-w-0">
-										<span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{backgroundColor: model.color}" />
-										<span class="text-sm font-medium truncate">{{ model.label }}</span>
-									</div>
-									<span class="text-xs font-medium shrink-0" :class="model.pct <= 0 ? 'text-emerald-500' : 'text-red-400'">
-										{{ model.pct >= 0 ? '↑' : '↓' }} {{ Math.abs(model.pct).toFixed(0) }}%
-									</span>
+				<div class="space-y-7">
+					<section>
+						<h3 class="mb-3 text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.section_models') }}</h3>
+						<div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+							<div class="rounded-lg border border-border bg-card p-4">
+								<div class="mb-4 flex items-center justify-between gap-3">
+									<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{ store.getTranslation('settings.analytics.spend_over_time') }}</h4>
+									<span class="text-xs font-medium text-muted-foreground tabular-nums">{{ formatMoney(totalCost) }}</span>
 								</div>
+								<SettingsStackedAnalyticsChart
+									v-if="stackedBarData.length"
+									:data="stackedBarData"
+									:categories="stackedBarCategories"
+									:format-value="formatMoney"
+								/>
+								<p v-else class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
+							</div>
+							<div class="rounded-lg border border-border bg-card p-4">
+								<div class="mb-4 flex items-center justify-between gap-3">
+									<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{ store.getTranslation('settings.analytics.trending') }}</h4>
+									<span class="text-xs text-muted-foreground">{{ store.getTranslation('settings.analytics.spend') }}</span>
+								</div>
+								<div v-if="trendingModels.length" class="space-y-4">
+									<div
+										v-for="model in trendingModels"
+										:key="model.label"
+										class="grid grid-cols-[minmax(0,1fr)_5rem_4.5rem] items-center gap-3"
+									>
+										<div class="flex min-w-0 items-center gap-2">
+											<img v-if="model.icon?.type === 'png'" :src="model.icon.icon" class="h-5 w-5 shrink-0 rounded-md bg-muted object-cover" alt="" />
+											<div
+												v-else-if="model.icon?.type === 'svg'"
+												class="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:h-full [&>svg]:w-full"
+												v-html="model.icon.icon"
+											/>
+											<span v-else class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{backgroundColor: model.color}" />
+											<div class="min-w-0">
+												<p class="truncate text-sm font-semibold text-foreground">{{ model.label }}</p>
+												<p class="truncate text-xs text-muted-foreground">{{ formatNumber(model.requests) }} {{ store.getTranslation('settings.analytics.requests') }} | {{ formatTokens(model.tokens) }} {{ store.getTranslation('settings.analytics.tokens') }}</p>
+											</div>
+										</div>
+										<svg viewBox="0 0 64 24" class="h-6 w-16 overflow-visible" aria-hidden="true">
+											<path :d="model.sparkline" fill="none" stroke-width="1.5" :stroke="model.color" stroke-linecap="round" stroke-linejoin="round" />
+										</svg>
+										<div class="text-right">
+											<p class="text-sm font-semibold text-foreground tabular-nums">{{ formatMoney(model.cost) }}</p>
+											<p class="text-xs font-medium tabular-nums" :class="trendClass(model.pct)">{{ trendLabel(model.pct) }}</p>
+										</div>
+									</div>
+								</div>
+								<p v-else class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
 							</div>
 						</div>
-					</div>
-				</div>
+					</section>
 
-				<div v-if="isAdmin && byUser.length" class="mb-6">
-					<h3 class="mb-3 text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.top_users') }}</h3>
-					<div class="grid gap-4 xl:grid-cols-[1fr_18rem]">
-						<div class="rounded-lg border border-border bg-card p-4">
-							<h4 class="mb-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">{{ store.getTranslation('settings.analytics.spend_over_time') }}</h4>
-							<SettingsHorizontalAnalyticsChart
-								v-if="userBarData.length"
-								:rows="userBarData"
-								:value-label="store.getTranslation('settings.analytics.cost')"
-								color="var(--primary)"
-								:format-value="formatMoney"
-							/>
-						</div>
-						<div class="rounded-lg border border-border bg-card p-4">
-							<h4 class="mb-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">{{ store.getTranslation('settings.analytics.trending') }}</h4>
-							<div class="space-y-3">
-								<div
-									v-for="(row, i) in byUser.slice(0, 8)"
-									:key="row.id ?? row.label"
-									class="flex items-center justify-between gap-2"
-								>
-									<div class="flex items-center gap-2 min-w-0">
-										<span class="text-xs text-muted-foreground w-4 text-center">{{ i + 1 }}</span>
-										<span class="text-sm font-medium truncate">{{ row.label }}</span>
-									</div>
-									<span class="text-xs font-medium text-foreground shrink-0">{{ formatMoney(Number(row.cost_total)) }}</span>
+					<section v-if="isAdmin">
+						<h3 class="mb-3 text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.section_api_keys') }}</h3>
+						<div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+							<div class="rounded-lg border border-border bg-card p-4">
+								<div class="mb-4 flex items-center justify-between gap-3">
+									<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{ store.getTranslation('settings.analytics.spend_over_time') }}</h4>
+									<span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{{ store.getTranslation('settings.analytics.coming_soon') }}</span>
+								</div>
+								<div class="flex h-[280px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/80 text-muted-foreground">
+									<KeyRound class="h-7 w-7 opacity-40" />
+									<p class="px-6 text-center text-sm">{{ store.getTranslation('settings.analytics.api_keys_soon') }}</p>
 								</div>
 							</div>
+							<div class="rounded-lg border border-border bg-card p-4">
+								<div class="mb-4 flex items-center justify-between gap-3">
+									<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{ store.getTranslation('settings.analytics.trending') }}</h4>
+									<span class="text-xs text-muted-foreground">{{ store.getTranslation('settings.analytics.trend') }}</span>
+								</div>
+								<p class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
+							</div>
 						</div>
-					</div>
-				</div>
+					</section>
 
-				<div v-if="isAdmin && byTeam.length" class="mb-6">
-					<h3 class="mb-3 text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.top_teams') }}</h3>
-					<div class="rounded-lg border border-border bg-card">
-						<div class="grid grid-cols-[1.5rem_1fr_5rem_5rem_5rem] border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">
-							<span>#</span>
-							<span>{{ store.getTranslation('settings.analytics.label') }}</span>
-							<span class="text-right">{{ store.getTranslation('settings.analytics.requests') }}</span>
-							<span class="text-right">{{ store.getTranslation('settings.analytics.total_tokens_short') }}</span>
-							<span class="text-right">{{ store.getTranslation('settings.analytics.cost') }}</span>
+					<section v-if="isAdmin">
+						<h3 class="mb-3 text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.section_user') }}</h3>
+						<div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+							<div class="rounded-lg border border-border bg-card p-4">
+								<div class="mb-4 flex items-center justify-between gap-3">
+									<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{ store.getTranslation('settings.analytics.spend_over_time') }}</h4>
+									<span class="text-xs font-medium text-muted-foreground tabular-nums">{{ formatMoney(userTotalCost) }}</span>
+								</div>
+								<SettingsHorizontalAnalyticsChart
+									v-if="userBarData.length"
+									:rows="userBarData"
+									:value-label="store.getTranslation('settings.analytics.cost')"
+									color="var(--primary)"
+									:format-value="formatMoney"
+								/>
+								<p v-else class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
+							</div>
+							<div class="rounded-lg border border-border bg-card p-4">
+								<div class="mb-4 flex items-center justify-between gap-3">
+									<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{ store.getTranslation('settings.analytics.trending') }}</h4>
+									<span class="text-xs text-muted-foreground">{{ store.getTranslation('settings.analytics.spend') }}</span>
+								</div>
+								<div v-if="trendingUsers.length" class="space-y-4">
+									<div
+										v-for="user in trendingUsers"
+										:key="user.id ?? user.label"
+										class="grid grid-cols-[minmax(0,1fr)_5rem_4.5rem] items-center gap-3"
+									>
+										<div class="flex min-w-0 items-center gap-2">
+											<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold uppercase text-muted-foreground">
+												{{ user.initial }}
+											</div>
+											<div class="min-w-0">
+												<p class="truncate text-sm font-semibold text-foreground">{{ user.label }}</p>
+												<p class="truncate text-xs text-muted-foreground">{{ formatNumber(user.requests) }} {{ store.getTranslation('settings.analytics.requests') }} | {{ formatTokens(user.tokens) }} {{ store.getTranslation('settings.analytics.tokens') }}</p>
+											</div>
+										</div>
+										<svg viewBox="0 0 64 24" class="h-6 w-16 overflow-visible" aria-hidden="true">
+											<path :d="user.sparkline" fill="none" stroke-width="1.5" class="stroke-primary" stroke-linecap="round" stroke-linejoin="round" />
+										</svg>
+										<div class="text-right">
+											<p class="text-sm font-semibold text-foreground tabular-nums">{{ formatMoney(user.cost) }}</p>
+											<p class="text-xs font-medium text-muted-foreground tabular-nums">{{ user.share.toFixed(0) }}%</p>
+										</div>
+									</div>
+								</div>
+								<p v-else class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
+							</div>
 						</div>
-						<div
-							v-for="(row, i) in byTeam.slice(0, 10)"
-							:key="row.id ?? row.label"
-							class="grid grid-cols-[1.5rem_1fr_5rem_5rem_5rem] items-center gap-2 border-b border-border/50 px-4 py-2.5 text-sm last:border-0"
-						>
-							<span class="text-xs text-muted-foreground">{{ i + 1 }}</span>
-							<span class="truncate font-medium">{{ row.label || '–' }}</span>
-							<span class="text-right text-xs text-muted-foreground">{{ formatNumber(row.request_count) }}</span>
-							<span class="text-right text-xs text-muted-foreground">{{ formatTokens(tokenTotal(row)) }}</span>
-							<span class="text-right font-medium text-foreground">{{ formatMoney(Number(row.cost_total)) }}</span>
-						</div>
-					</div>
+					</section>
 				</div>
 			</div>
 
@@ -334,8 +374,8 @@
 				</div>
 			</div>
 
-			<!-- Full model table (overview + trends) -->
-			<div v-if="activeTab !== 'explore' && byModel.length" class="mt-4 rounded-lg border border-border bg-card">
+			<!-- Full model table (overview) -->
+			<div v-if="activeTab === 'overview' && byModel.length" class="mt-4 rounded-lg border border-border bg-card">
 				<div class="border-b border-border px-4 py-3">
 					<h3 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.top_models') }}</h3>
 				</div>
@@ -371,6 +411,7 @@ import {Loader2, TrendingUp, TrendingDown, KeyRound} from 'lucide-vue-next';
 import {AreaChart, BarChart} from 'vue-chrts';
 import {useMainStore} from '@/stores';
 import {useBudgetStore} from '@/stores/budgetStore';
+import {useIconsStore} from '@/stores/icons';
 import type {AnalyticsDayModelRow, AnalyticsRow} from '~/types/budgets';
 
 const props = defineProps<{
@@ -379,6 +420,7 @@ const props = defineProps<{
 
 const store = useMainStore();
 const budgetStore = useBudgetStore();
+const iconStore = useIconsStore();
 const loading = ref(false);
 const from = ref('');
 const to = ref('');
@@ -529,12 +571,15 @@ const userBarData = computed(() =>
 	byUser.value.slice(0, 8).map(row => ({label: row.label || '-', value: Number(row.cost_total)})),
 );
 
+const userTotalCost = computed(() => byUser.value.reduce((sum, row) => sum + Number(row.cost_total), 0));
+
 const trendingModels = computed(() => {
 	const days = [...new Set(byDayModel.value.map(row => row.day))].sort();
 	const mid = Math.floor(days.length / 2);
 	const firstDays = new Set(days.slice(0, mid));
 	const secondDays = new Set(days.slice(mid));
 	const spendByModel = new Map<string, {first: number; second: number}>();
+	const seriesByModel = new Map<string, number[]>();
 	for (const row of byDayModel.value) {
 		const spend = spendByModel.get(row.model_name) ?? {first: 0, second: 0};
 		if (firstDays.has(row.day)) {
@@ -543,18 +588,74 @@ const trendingModels = computed(() => {
 			spend.second += Number(row.cost_total);
 		}
 		spendByModel.set(row.model_name, spend);
+		const series = seriesByModel.get(row.model_name) ?? Array.from({length: days.length}, () => 0);
+		const dayIndex = days.indexOf(row.day);
+		if (dayIndex >= 0) {
+			series[dayIndex] += Number(row.cost_total);
+		}
+		seriesByModel.set(row.model_name, series);
 	}
 	return byModel.value.slice(0, 8).map((model, i) => ({
+		id: model.id,
 		label: model.label,
 		color: CHART_COLORS[i % CHART_COLORS.length],
 		pct: trendPercent(spendByModel.get(model.label)),
 		cost: Number(model.cost_total),
+		requests: model.request_count,
+		tokens: tokenTotal(model),
+		sparkline: computeSparklinePath(seriesByModel.get(model.label) ?? []),
+		icon: getModelIcon(model.label, model.id),
 	}));
 });
+
+const trendingUsers = computed(() => {
+	const total = userTotalCost.value;
+	return byUser.value.slice(0, 8).map((row, index) => {
+		const cost = Number(row.cost_total);
+		return {
+			id: row.id,
+			label: row.label || '-',
+			initial: (row.label || '?').slice(0, 1),
+			cost,
+			requests: row.request_count,
+			tokens: tokenTotal(row),
+			share: total > 0 ? (cost / total) * 100 : 0,
+			sparkline: computeSparklinePath(rankSparklineValues(cost, index)),
+		};
+	});
+});
+
+function rankSparklineValues(value: number, index: number): number[] {
+	const base = Math.max(value, 0.0001);
+	const offset = (index % 4) * 0.06;
+	return [
+		base * (0.52 + offset),
+		base * (0.64 + offset),
+		base * (0.58 + offset),
+		base * (0.76 + offset),
+		base * (0.7 + offset),
+		base,
+	];
+}
 
 function trendPercent(spend: {first: number; second: number} | undefined): number {
 	if (!spend || spend.first === 0) return 0;
 	return ((spend.second - spend.first) / spend.first) * 100;
+}
+
+function trendClass(value: number): string {
+	if (value < 0) return 'text-red-400';
+	if (value > 0) return 'text-emerald-500';
+	return 'text-muted-foreground';
+}
+
+function trendLabel(value: number): string {
+	if (value === 0) return '0%';
+	return `${value > 0 ? '↑' : '↓'} ${Math.abs(value).toFixed(0)}%`;
+}
+
+function getModelIcon(label: string, id: string | null) {
+	return iconStore.getProviderIcon(label, id ?? undefined);
 }
 
 function getMetricValue(row: AnalyticsDayModelRow): number {

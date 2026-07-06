@@ -3,7 +3,7 @@ VALUES
     ('en', 'settings.analytics.spend', 'Spend'),
     ('en', 'settings.analytics.section_models', 'Models'),
     ('en', 'settings.analytics.section_api_keys', 'API Keys'),
-    ('en', 'settings.analytics.section_user', 'User'),
+    ('en', 'settings.analytics.section_user', 'Users'),
     ('en', 'settings.analytics.trend', 'Trend'),
 
     ('de', 'settings.analytics.spend', 'Ausgaben'),
