@@ -49,8 +49,11 @@
 						:width="bar.width"
 						:height="plotHeight"
 						fill="transparent"
+						tabindex="0"
 						class="cursor-pointer"
 						@mousemove="setHoveredBar($event, bar)"
+						@focus="setHoveredBarFocus(bar)"
+						@blur="hoveredBar = null"
 					/>
 					<text
 						:x="bar.x + bar.width / 2"
@@ -251,6 +254,17 @@ function setHoveredBar(event: MouseEvent, bar: {day: string; segments: ChartSegm
 		total,
 		x,
 		y,
+	};
+}
+
+function setHoveredBarFocus(bar: {day: string; segments: ChartSegment[]; x: number; width: number}) {
+	const total = bar.segments.reduce((sum, s) => sum + s.value, 0);
+	hoveredBar.value = {
+		day: bar.day,
+		segments: bar.segments,
+		total,
+		x: bar.x + bar.width + 8,
+		y: chartPadding.top,
 	};
 }
 

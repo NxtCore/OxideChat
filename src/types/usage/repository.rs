@@ -58,14 +58,14 @@ impl UsageEvent {
 	async fn by_model(pool: &PgPool, start: DateTime<Utc>, end: DateTime<Utc>, user_id: Option<&Uuid>) -> Result<Vec<AnalyticsRow>, sqlx::Error> {
 		sqlx::query_as::<_, AnalyticsRow>(
 			r#"
-			SELECT m.id, m.display_name AS label,
+			SELECT m.id, COALESCE(m.display_name, '[deleted]') AS label,
 			       COALESCE(SUM(ue.input_tokens), 0)::bigint AS input_tokens,
 			       COALESCE(SUM(ue.output_tokens), 0)::bigint AS output_tokens,
 			       COALESCE(SUM(ue.reasoning_tokens), 0)::bigint AS reasoning_tokens,
 			       COALESCE(SUM(ue.cost_total), 0)::numeric AS cost_total,
 			       COUNT(*)::bigint AS request_count
 			FROM usage_events ue
-			JOIN models m ON m.id = ue.model_id
+			LEFT JOIN models m ON m.id = ue.model_id
 			WHERE ue.created_at >= $1 AND ue.created_at <= $2
 			  AND ($3::uuid IS NULL OR ue.user_id = $3)
 			GROUP BY m.id, m.display_name
@@ -150,14 +150,14 @@ impl UsageEvent {
 		sqlx::query_as::<_, AnalyticsDayModelRow>(
 			r#"
 			SELECT to_char(date_trunc('day', ue.created_at), 'YYYY-MM-DD') AS day,
-			       m.id AS model_id, m.display_name AS model_name,
+			       m.id AS model_id, COALESCE(m.display_name, '[deleted]') AS model_name,
 			       COALESCE(SUM(ue.input_tokens), 0)::bigint AS input_tokens,
 			       COALESCE(SUM(ue.output_tokens), 0)::bigint AS output_tokens,
 			       COALESCE(SUM(ue.reasoning_tokens), 0)::bigint AS reasoning_tokens,
 			       COALESCE(SUM(ue.cost_total), 0)::numeric AS cost_total,
 			       COUNT(*)::bigint AS request_count
 			FROM usage_events ue
-			JOIN models m ON m.id = ue.model_id
+			LEFT JOIN models m ON m.id = ue.model_id
 			WHERE ue.created_at >= $1 AND ue.created_at <= $2
 			  AND ($3::uuid IS NULL OR ue.user_id = $3)
 			GROUP BY date_trunc('day', ue.created_at), m.id, m.display_name

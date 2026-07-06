@@ -1,19 +1,16 @@
 CREATE TABLE IF NOT EXISTS budget_reset_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    assignment_id UUID REFERENCES budget_assignments(id) ON DELETE SET NULL,
-    budget_id UUID REFERENCES budgets(id) ON DELETE SET NULL,
-    team_id UUID REFERENCES teams(id) ON DELETE SET NULL,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    assignment_id UUID REFERENCES budget_assignments(id) ON DELETE CASCADE,
+    budget_id UUID REFERENCES budgets(id) ON DELETE CASCADE,
+    team_id UUID REFERENCES teams(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     kind budget_kind,
     reason TEXT,
     reset_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT budget_reset_events_scope_check CHECK (
-        assignment_id IS NOT NULL OR
-        budget_id IS NOT NULL OR
-        team_id IS NOT NULL OR
-        user_id IS NOT NULL
+        num_nonnulls(assignment_id, budget_id, team_id, user_id) = 1
     )
 );
 

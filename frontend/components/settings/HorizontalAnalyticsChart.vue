@@ -47,10 +47,12 @@
 						:height="row.height"
 						:fill="color"
 						rx="4"
+						tabindex="0"
 						class="cursor-pointer transition-opacity"
 						:class="hoveredRow && hoveredRow.label !== row.label ? 'opacity-55' : 'opacity-100'"
 						@mousemove="setHoveredRow($event, row)"
 						@focus="setHoveredRow($event, row)"
+						@blur="hoveredRow = null"
 					/>
 				</template>
 			</g>

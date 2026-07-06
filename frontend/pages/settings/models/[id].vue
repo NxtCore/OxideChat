@@ -1053,12 +1053,22 @@ async function savePricingOverride() {
 		const trimmed = value.trim();
 		return trimmed === '' ? undefined : Number(trimmed);
 	};
+	const isValidPrice = (v: number | undefined): boolean => v === undefined || (Number.isFinite(v) && v >= 0);
+	const input = Number(pricingForm.input || 0);
+	const output = Number(pricingForm.output || 0);
+	const reasoning = optional(pricingForm.reasoning);
+	const cacheRead = optional(pricingForm.cache_read);
+	const cacheWrite = optional(pricingForm.cache_write);
+	if (!isValidPrice(input) || !isValidPrice(output) || !isValidPrice(reasoning) || !isValidPrice(cacheRead) || !isValidPrice(cacheWrite)) {
+		store.toast(store.getTranslation('common.error'), {type: 'error'});
+		return;
+	}
 	const overridePricing: Record<string, number | undefined | never[]> = {
-		input: Number(pricingForm.input || 0),
-		output: Number(pricingForm.output || 0),
-		reasoning: optional(pricingForm.reasoning),
-		cache_read: optional(pricingForm.cache_read),
-		cache_write: optional(pricingForm.cache_write),
+		input,
+		output,
+		reasoning,
+		cache_read: cacheRead,
+		cache_write: cacheWrite,
 		tiers: [],
 	};
 	pricing.value = await $customFetch(`/api/v1/admin/models/${modelId}/pricing`, {

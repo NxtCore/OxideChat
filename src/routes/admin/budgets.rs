@@ -153,24 +153,6 @@ pub async fn delete_assignment(State(state): State<Arc<JobState>>, cookies: Cook
 	}
 }
 
-pub async fn unassign_budget(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<BudgetAssignmentRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-	if req.team_id.is_none() && req.user_id.is_none() {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
-	}
-	match Budget::unassign(&state.db, &req).await {
-		Ok(()) => ResponseBuilder::<()>::new(ResponseBody::Empty).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to unassign budget: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
-}
 
 pub async fn user_overview(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
 	let Some(user) = get_current_user(&state.db, &cookies).await else {

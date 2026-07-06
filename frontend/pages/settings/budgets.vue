@@ -532,13 +532,17 @@ function resetUserRow(row: UserBudgetOverview) {
 }
 
 async function confirmReset() {
-	await budgetStore.resetBudget({
-		...resetPayload.value,
-		kind: resetKind.value === 'all' ? null : resetKind.value,
-		reason: resetReason.value || null,
-	});
-	resetOpen.value = false;
-	if (selected.value) await budgetStore.fetchAssignments(selected.value.id);
+	try {
+		await budgetStore.resetBudget({
+			...resetPayload.value,
+			kind: resetKind.value === 'all' ? null : resetKind.value,
+			reason: resetReason.value || null,
+		});
+		resetOpen.value = false;
+		if (selected.value) await budgetStore.fetchAssignments(selected.value.id);
+	} catch {
+		store.toast(store.getTranslation('common.error'), {type: 'error'});
+	}
 }
 
 function resetScopeLabel(event: BudgetResetEvent) {
@@ -549,44 +553,68 @@ function resetScopeLabel(event: BudgetResetEvent) {
 }
 
 async function createBudget() {
-	const budget = await budgetStore.createBudget({...form, name: form.name || store.getTranslation('settings.tabs.budgets')});
-	await selectBudget(budget);
-	await loadOperationalData();
+	try {
+		const budget = await budgetStore.createBudget({...form, name: form.name || store.getTranslation('settings.tabs.budgets')});
+		await selectBudget(budget);
+		await loadOperationalData();
+	} catch {
+		store.toast(store.getTranslation('common.error'), {type: 'error'});
+	}
 }
 
 async function saveBudget() {
 	if (!selected.value) return;
-	const budget = await budgetStore.updateBudget(selected.value.id, {...form});
-	await selectBudget(budget);
-	await loadOperationalData();
+	try {
+		const budget = await budgetStore.updateBudget(selected.value.id, {...form});
+		await selectBudget(budget);
+		await loadOperationalData();
+	} catch {
+		store.toast(store.getTranslation('common.error'), {type: 'error'});
+	}
 }
 
 async function deleteBudget() {
 	if (!selected.value) return;
-	await budgetStore.deleteBudget(selected.value.id);
-	selected.value = budgetStore.budgets[0] ?? null;
-	if (selected.value) await selectBudget(selected.value);
-	await loadOperationalData();
+	try {
+		await budgetStore.deleteBudget(selected.value.id);
+		selected.value = budgetStore.budgets[0] ?? null;
+		if (selected.value) await selectBudget(selected.value);
+		await loadOperationalData();
+	} catch {
+		store.toast(store.getTranslation('common.error'), {type: 'error'});
+	}
 }
 
 async function assignTeam() {
 	if (!selected.value || !selectedTeamId.value) return;
-	await budgetStore.assignBudget(selected.value.id, {team_id: selectedTeamId.value});
-	selectedTeamId.value = null;
-	await loadOperationalData();
+	try {
+		await budgetStore.assignBudget(selected.value.id, {team_id: selectedTeamId.value});
+		selectedTeamId.value = null;
+		await loadOperationalData();
+	} catch {
+		store.toast(store.getTranslation('common.error'), {type: 'error'});
+	}
 }
 
 async function assignUser() {
 	if (!selected.value || !selectedUserId.value) return;
-	await budgetStore.assignBudget(selected.value.id, {user_id: selectedUserId.value});
-	selectedUserId.value = null;
-	await loadOperationalData();
+	try {
+		await budgetStore.assignBudget(selected.value.id, {user_id: selectedUserId.value});
+		selectedUserId.value = null;
+		await loadOperationalData();
+	} catch {
+		store.toast(store.getTranslation('common.error'), {type: 'error'});
+	}
 }
 
 async function removeAssignment(a: BudgetAssignmentInfo) {
 	if (!selected.value) return;
-	await budgetStore.removeAssignment(selected.value.id, a.id);
-	await loadOperationalData();
+	try {
+		await budgetStore.removeAssignment(selected.value.id, a.id);
+		await loadOperationalData();
+	} catch {
+		store.toast(store.getTranslation('common.error'), {type: 'error'});
+	}
 }
 
 async function loadTeamsAndUsers() {

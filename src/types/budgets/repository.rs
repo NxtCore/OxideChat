@@ -179,6 +179,8 @@ impl Budget {
 
 	pub async fn assign_to_team(&self, pool: &PgPool, team_id: &Uuid) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
+		let lock_key = Self::advisory_lock_key(self.kind.as_str(), Some(team_id), None);
+		sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(lock_key).execute(&mut *tx).await?;
 		sqlx::query(
 			r#"
 			DELETE FROM budget_assignments ba
@@ -202,6 +204,8 @@ impl Budget {
 
 	pub async fn assign_to_user(&self, pool: &PgPool, user_id: &Uuid) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
+		let lock_key = Self::advisory_lock_key(self.kind.as_str(), None, Some(user_id));
+		sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(lock_key).execute(&mut *tx).await?;
 		sqlx::query(
 			r#"
 			DELETE FROM budget_assignments ba
@@ -221,6 +225,19 @@ impl Budget {
 			.execute(&mut *tx)
 			.await?;
 		tx.commit().await
+	}
+
+	fn advisory_lock_key(kind: &str, team_id: Option<&Uuid>, user_id: Option<&Uuid>) -> i64 {
+		use std::hash::{Hash, Hasher};
+		let mut h = std::collections::hash_map::DefaultHasher::new();
+		kind.hash(&mut h);
+		if let Some(id) = team_id {
+			id.hash(&mut h);
+		}
+		if let Some(id) = user_id {
+			id.hash(&mut h);
+		}
+		h.finish() as i64
 	}
 
 	pub async fn assign(&self, pool: &PgPool, req: &BudgetAssignmentRequest) -> Result<(), sqlx::Error> {

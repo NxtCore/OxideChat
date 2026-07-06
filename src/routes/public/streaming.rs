@@ -904,13 +904,16 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									budget_tokens: reasoning_budget_tokens.map(|b| b as i32),
 								};
 
-								let provider_cost_total = Decimal::from_f64(cost_details.total.unwrap_or(0.0)).unwrap_or(Decimal::ZERO);
-								let final_cost_total = match ModelPricing::usage_cost(&db, &model.id, input_tokens as i32, output_tokens as i32, reasoning_tokens as i32).await {
-									Ok(Some(cost)) => cost,
-									Ok(None) => provider_cost_total,
-									Err(e) => {
-										eprintln!("[STREAM] Failed to compute local usage cost for model {}: {e}", model.id);
-										provider_cost_total
+								let final_cost_total = if let Some(provider_total) = cost_details.total {
+									Decimal::from_f64(provider_total).unwrap_or(Decimal::ZERO)
+								} else {
+									match ModelPricing::usage_cost(&db, &model.id, input_tokens as i32, output_tokens as i32, reasoning_tokens as i32).await {
+										Ok(Some(cost)) => cost,
+										Ok(None) => Decimal::ZERO,
+										Err(e) => {
+											eprintln!("[STREAM] Failed to compute local usage cost for model {}: {e}", model.id);
+											Decimal::ZERO
+										}
 									}
 								};
 
@@ -933,7 +936,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 
 									match message {
 										Ok(msg) => {
-											if let Err(e) = UsageEvent::record(&db, UsageEventRecord {
+											let usage_recorded = UsageEvent::record(&db, UsageEventRecord {
 												user_id: &user.id,
 												team_id: Budget::primary_team_id(&db, &user.id).await.ok().flatten(),
 												model_id: &model.id,
@@ -943,12 +946,24 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 												output_tokens: output_tokens as i32,
 												reasoning_tokens: reasoning_tokens as i32,
 												cost_total: final_cost_total,
-											}).await {
-												eprintln!("[STREAM] Failed to record usage event for message {}: {e}", msg.id);
-											}
-											if let Some(lock) = budget_lock.take() {
-												if let Err(e) = lock.commit().await {
-													eprintln!("[STREAM] Failed to release budget lock for message {}: {e}", msg.id);
+											}).await;
+											match usage_recorded {
+												Ok(_) => {
+													if let Some(lock) = budget_lock.take() {
+														if let Err(e) = lock.commit().await {
+															eprintln!("[STREAM] Failed to release budget lock for message {}: {e}", msg.id);
+														}
+													}
+												}
+												Err(e) => {
+													eprintln!("[STREAM] Failed to record usage event for message {}: {e}", msg.id);
+													yield Ok::<_, Infallible>(Event::default().data(
+														serde_json::to_string(&StreamData::Error {
+															code: "accounting_failed".to_string(),
+															message: "Failed to record usage".to_string(),
+														}).unwrap_or_default()
+													));
+													break 'agentic_loop;
 												}
 											}
 											if !all_tool_executions.is_empty() {

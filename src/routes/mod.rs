@@ -69,7 +69,6 @@ pub fn build_router() -> Router<Arc<JobState>> {
 			"/api/v1/admin/budgets/{id}/assignments",
 			get(admin::budgets::get_budget_assignments).post(admin::budgets::assign_budget),
 		)
-		.route("/api/v1/admin/budgets/assignments", delete(admin::budgets::unassign_budget))
 		.route("/api/v1/admin/budgets/{id}/assignments/{assignment_id}", delete(admin::budgets::delete_assignment))
 		.route("/api/v1/admin/analytics", get(admin::analytics::get_analytics))
 		// Admin Users

@@ -1021,6 +1021,8 @@ async function load() {
 		} else {
 			await budgetStore.fetchMyAnalytics(params);
 		}
+	} catch {
+		store.toast(store.getTranslation('common.error'), {type: 'error'});
 	} finally {
 		loading.value = false;
 	}

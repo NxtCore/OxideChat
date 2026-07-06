@@ -629,7 +629,9 @@ impl ModelPricing {
 		let Some(pricing) = Self::effective(pool, model_id).await? else {
 			return Ok(false);
 		};
-		let override_free = pricing.override_pricing.is_some() && pricing.effective_input.is_zero() && pricing.effective_output.is_zero();
+		let reasoning_rate = pricing.override_pricing.as_ref().and_then(|v| Self::decimal_from_json(v.get("reasoning")));
+		let reasoning_free = reasoning_rate.map_or(true, |r| r.is_zero());
+		let override_free = pricing.override_pricing.is_some() && pricing.effective_input.is_zero() && pricing.effective_output.is_zero() && reasoning_free;
 		let reported_free = pricing.override_pricing.is_none()
 			&& pricing.reported_input.is_some()
 			&& pricing.reported_output.is_some()
@@ -648,7 +650,10 @@ impl ModelPricing {
 			LEFT JOIN gateway_model_provider_options gmpo ON gmpo.catalog_model_id = gcm.id
 			GROUP BY m.id, mpo.pricing
 			HAVING CASE
-				WHEN mpo.pricing IS NOT NULL THEN (mpo.pricing->>'input')::numeric > 0 OR (mpo.pricing->>'output')::numeric > 0
+				WHEN mpo.pricing IS NOT NULL THEN
+					(mpo.pricing->>'input')::numeric > 0 OR
+					(mpo.pricing->>'output')::numeric > 0 OR
+					(mpo.pricing->>'reasoning' IS NOT NULL AND (mpo.pricing->>'reasoning')::numeric > 0)
 				WHEN MIN(gmpo.price_input) IS NOT NULL AND MIN(gmpo.price_output) IS NOT NULL THEN MIN(gmpo.price_input) > 0 OR MIN(gmpo.price_output) > 0
 				ELSE TRUE
 			END

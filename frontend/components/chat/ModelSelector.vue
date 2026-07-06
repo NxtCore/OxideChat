@@ -311,14 +311,16 @@ async function toggleDefault(model: ModelList) {
 		const currentProviderSlug = store.preferences?.default_provider_slug ?? null;
 		if (currentProviderSlug) {
 			let available = false;
+			let checkedAvailability = false;
 			try {
 				const {$customFetch} = useNuxtApp();
 				const res = await $customFetch<{options?: {provider_slug: string | null}[]}>(`/api/v1/models/${model.id}/provider-options`);
 				available = (res.options ?? []).some(o => (o.provider_slug ?? '') === currentProviderSlug);
+				checkedAvailability = true;
 			} catch (e) {
 				console.error('Failed to check provider availability for default model:', e);
 			}
-			if (!available) {
+			if (checkedAvailability && !available) {
 				update.default_provider_slug = null;
 			}
 		}

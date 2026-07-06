@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS budgets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(120) NOT NULL,
     description TEXT,
-    amount NUMERIC(12,4) NOT NULL,
+    amount NUMERIC(12,4) NOT NULL CHECK (amount >= 0),
     kind budget_kind NOT NULL,
     interval budget_interval NOT NULL,
     reset_strategy budget_reset_strategy NOT NULL DEFAULT 'calendar',
@@ -62,10 +62,10 @@ CREATE TABLE IF NOT EXISTS usage_events (
     model_id UUID REFERENCES models(id) ON DELETE SET NULL,
     provider_id UUID REFERENCES providers(id) ON DELETE SET NULL,
     request_type VARCHAR(50) NOT NULL,
-    input_tokens INTEGER NOT NULL DEFAULT 0,
-    output_tokens INTEGER NOT NULL DEFAULT 0,
-    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
-    cost_total NUMERIC(12,6) NOT NULL DEFAULT 0,
+    input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+    output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0 CHECK (reasoning_tokens >= 0),
+    cost_total NUMERIC(12,6) NOT NULL DEFAULT 0 CHECK (cost_total >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -75,7 +75,12 @@ CREATE INDEX IF NOT EXISTS idx_usage_events_team_created ON usage_events(team_id
 
 CREATE TABLE IF NOT EXISTS model_pricing_overrides (
     model_id UUID PRIMARY KEY REFERENCES models(id) ON DELETE CASCADE,
-    pricing JSONB NOT NULL,
+    pricing JSONB NOT NULL CHECK (
+        (pricing->>'input') IS NOT NULL AND
+        (pricing->>'output') IS NOT NULL AND
+        (pricing->>'input')::numeric >= 0 AND
+        (pricing->>'output')::numeric >= 0
+    ),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
