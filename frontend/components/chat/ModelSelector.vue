@@ -200,7 +200,7 @@
 
 <script setup lang="ts">
 import {Bot, Star, Bookmark, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2} from 'lucide-vue-next';
-import type {ModelList} from '~/types/chat';
+import type {ModelList, UpdatePreferencesRequest} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
 import {useModelPicker} from '~/composables/useModelPicker';
@@ -301,8 +301,30 @@ function isDefaultModel(model: ModelList): boolean {
 }
 
 async function toggleDefault(model: ModelList) {
-	const newKey = isDefaultModel(model) ? null : model.model_id;
-	await chatStore.updatePreferences({default_model_key: newKey});
+	const wasDefault = isDefaultModel(model);
+	const newKey = wasDefault ? null : model.model_id;
+	const update: UpdatePreferencesRequest = {default_model_key: newKey};
+
+	if (wasDefault) {
+		update.default_provider_slug = null;
+	} else {
+		const currentProviderSlug = store.preferences?.default_provider_slug ?? null;
+		if (currentProviderSlug) {
+			let available = false;
+			try {
+				const {$customFetch} = useNuxtApp();
+				const res = await $customFetch<{options?: {provider_slug: string | null}[]}>(`/api/v1/models/${model.id}/provider-options`);
+				available = (res.options ?? []).some(o => (o.provider_slug ?? '') === currentProviderSlug);
+			} catch (e) {
+				console.error('Failed to check provider availability for default model:', e);
+			}
+			if (!available) {
+				update.default_provider_slug = null;
+			}
+		}
+	}
+
+	await chatStore.updatePreferences(update);
 }
 
 </script>

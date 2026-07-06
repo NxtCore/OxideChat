@@ -4,7 +4,7 @@
 			:viewBox="`0 0 ${chartWidth} ${chartHeight}`"
 			class="h-[280px] w-full overflow-visible"
 			role="img"
-			@mouseleave="hoveredSegment = null"
+			@mouseleave="hoveredBar = null"
 		>
 			<g class="text-muted-foreground">
 				<line
@@ -39,11 +39,18 @@
 						:width="bar.width"
 						:height="segment.height"
 						:fill="segment.color"
-						class="cursor-pointer transition-opacity"
-						:class="hoveredSegment && hoveredSegment.key !== segment.key ? 'opacity-55' : 'opacity-100'"
+						class="transition-opacity"
+						:class="hoveredBar && hoveredBar.day !== bar.day ? 'opacity-35' : 'opacity-100'"
 						rx="3"
-						@mousemove="setHoveredSegment($event, segment)"
-						@focus="setHoveredSegment($event, segment)"
+					/>
+					<rect
+						:x="bar.x"
+						:y="chartPadding.top"
+						:width="bar.width"
+						:height="plotHeight"
+						fill="transparent"
+						class="cursor-pointer"
+						@mousemove="setHoveredBar($event, bar)"
 					/>
 					<text
 						:x="bar.x + bar.width / 2"
@@ -58,17 +65,27 @@
 		</svg>
 
 		<div
-			v-if="hoveredSegment"
-			class="pointer-events-none absolute z-20 min-w-48 rounded-lg border border-border bg-popover px-4 py-3 text-popover-foreground shadow-lg"
-			:style="{left: `${hoveredSegment.x}px`, top: `${hoveredSegment.y}px`}"
+			v-if="hoveredBar"
+			class="pointer-events-none absolute z-20 min-w-52 rounded-lg border border-border bg-popover px-4 py-3 text-popover-foreground shadow-lg"
+			:style="{left: `${hoveredBar.x}px`, top: `${hoveredBar.y}px`}"
 		>
-			<p class="mb-2 text-sm font-semibold text-muted-foreground">{{ hoveredSegment.day }}</p>
-			<div class="flex items-center justify-between gap-6 text-sm">
-				<div class="flex min-w-0 items-center gap-2">
-					<span class="h-2 w-2 shrink-0 rounded-full" :style="{backgroundColor: hoveredSegment.color}" />
-					<span class="truncate font-medium">{{ hoveredSegment.name }}</span>
+			<p class="mb-2.5 text-sm font-semibold text-muted-foreground">{{ hoveredBar.day }}</p>
+			<div class="space-y-1.5">
+				<div
+					v-for="segment in hoveredBarSortedSegments"
+					:key="segment.key"
+					class="flex items-center justify-between gap-6 text-sm"
+				>
+					<div class="flex min-w-0 items-center gap-2">
+						<span class="h-2 w-2 shrink-0 rounded-full" :style="{backgroundColor: segment.color}" />
+						<span class="truncate text-muted-foreground">{{ segment.name }}</span>
+					</div>
+					<span class="font-medium tabular-nums">{{ formatValue(segment.value) }}</span>
 				</div>
-				<span class="font-bold">{{ formatValue(hoveredSegment.value) }}</span>
+			</div>
+			<div class="mt-2.5 flex items-center justify-between border-t border-border pt-2.5 text-sm">
+				<span class="font-medium text-foreground">Total</span>
+				<span class="font-bold tabular-nums">{{ formatValue(hoveredBar.total) }}</span>
 			</div>
 		</div>
 
@@ -106,7 +123,10 @@ type ChartSegment = {
 	height: number;
 };
 
-type HoveredSegment = ChartSegment & {
+type HoveredBar = {
+	day: string;
+	segments: ChartSegment[];
+	total: number;
 	x: number;
 	y: number;
 };
@@ -119,7 +139,7 @@ const props = defineProps<{
 
 const chartRef = ref<HTMLElement | null>(null);
 const disabledKeys = ref<string[]>([]);
-const hoveredSegment = ref<HoveredSegment | null>(null);
+const hoveredBar = ref<HoveredBar | null>(null);
 
 const chartWidth = 1000;
 const chartHeight = 280;
@@ -184,6 +204,11 @@ const chartBars = computed(() => {
 	});
 });
 
+const hoveredBarSortedSegments = computed(() => {
+	if (!hoveredBar.value) return [];
+	return [...hoveredBar.value.segments].sort((a, b) => b.value - a.value);
+});
+
 const yTicks = computed(() => {
 	const ticks = 3;
 	return Array.from({length: ticks + 1}, (_, index) => {
@@ -213,16 +238,20 @@ function categoryColor(category?: ChartCategory): string {
 	return color ?? '#6b7280';
 }
 
-function setHoveredSegment(event: MouseEvent | FocusEvent, segment: ChartSegment) {
-	if (!(event instanceof MouseEvent) || !chartRef.value) {
-		hoveredSegment.value = {...segment, x: 16, y: 16};
-		return;
-	}
+function setHoveredBar(event: MouseEvent, bar: {day: string; segments: ChartSegment[]; x: number; width: number}) {
+	if (!chartRef.value) return;
 	const bounds = chartRef.value.getBoundingClientRect();
-	const tooltipWidth = 220;
+	const tooltipWidth = 230;
 	const x = Math.min(event.clientX - bounds.left + 14, Math.max(14, bounds.width - tooltipWidth));
-	const y = Math.max(8, event.clientY - bounds.top - 82);
-	hoveredSegment.value = {...segment, x, y};
+	const y = Math.max(8, event.clientY - bounds.top - 100);
+	const total = bar.segments.reduce((sum, s) => sum + s.value, 0);
+	hoveredBar.value = {
+		day: bar.day,
+		segments: bar.segments,
+		total,
+		x,
+		y,
+	};
 }
 
 function toggleKey(key: string) {
@@ -236,7 +265,7 @@ function toggleKey(key: string) {
 		disabled.delete(key);
 	}
 	disabledKeys.value = Array.from(disabled);
-	hoveredSegment.value = null;
+	hoveredBar.value = null;
 }
 
 function formatTick(value: number): string {
