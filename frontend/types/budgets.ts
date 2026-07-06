@@ -73,3 +73,66 @@ export interface BudgetPayload {
 	on_exceed: 'block' | 'warn' | 'allow';
 	is_enabled?: boolean;
 }
+
+export interface BudgetTeamSummary {
+	id: string;
+	name: string;
+	is_default: boolean;
+}
+
+export interface UserBudgetOverview {
+	user_id: string;
+	user_label: string;
+	teams: BudgetTeamSummary[];
+	budgets: EffectiveBudget[];
+	spent: string;
+	remaining: string;
+	decision: 'block' | 'warn' | 'allow';
+	blocked_model_ids: string[];
+}
+
+export interface TeamBudgetAssignmentOverview {
+	assignment_id: string;
+	budget: Budget;
+	spent: string;
+	remaining: string;
+	window_start: string;
+	resets_at: string | null;
+	affected_users: number;
+	exhausted_users: number;
+}
+
+export interface TeamBudgetOverview {
+	team_id: string;
+	team_name: string;
+	member_count: number;
+	budgets: TeamBudgetAssignmentOverview[];
+	spent: string;
+	remaining: string;
+	exhausted_count: number;
+}
+
+export interface BudgetResetEvent {
+	id: string;
+	assignment_id: string | null;
+	budget_id: string | null;
+	budget_name: string | null;
+	team_id: string | null;
+	team_name: string | null;
+	user_id: string | null;
+	user_label: string | null;
+	kind: 'pooled' | 'per_user' | null;
+	reason: string | null;
+	reset_at: string;
+	created_by: string | null;
+	created_by_label: string | null;
+}
+
+export interface BudgetResetPayload {
+	assignment_id?: string | null;
+	budget_id?: string | null;
+	team_id?: string | null;
+	user_id?: string | null;
+	kind?: 'pooled' | 'per_user' | null;
+	reason?: string | null;
+}

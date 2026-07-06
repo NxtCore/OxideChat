@@ -60,9 +60,15 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		// Admin Budgets
 		.route("/api/v1/admin/budgets", get(admin::budgets::list_budgets))
 		.route("/api/v1/admin/budgets", post(admin::budgets::create_budget))
+		.route("/api/v1/admin/budgets/overview/users", get(admin::budgets::user_overview))
+		.route("/api/v1/admin/budgets/overview/teams", get(admin::budgets::team_overview))
+		.route("/api/v1/admin/budgets/resets", get(admin::budgets::reset_history).post(admin::budgets::reset_budget))
 		.route("/api/v1/admin/budgets/{id}", patch(admin::budgets::update_budget))
 		.route("/api/v1/admin/budgets/{id}", delete(admin::budgets::delete_budget))
-		.route("/api/v1/admin/budgets/{id}/assignments", get(admin::budgets::get_budget_assignments).post(admin::budgets::assign_budget))
+		.route(
+			"/api/v1/admin/budgets/{id}/assignments",
+			get(admin::budgets::get_budget_assignments).post(admin::budgets::assign_budget),
+		)
 		.route("/api/v1/admin/budgets/assignments", delete(admin::budgets::unassign_budget))
 		.route("/api/v1/admin/budgets/{id}/assignments/{assignment_id}", delete(admin::budgets::delete_assignment))
 		.route("/api/v1/admin/analytics", get(admin::analytics::get_analytics))

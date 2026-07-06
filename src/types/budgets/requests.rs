@@ -38,3 +38,13 @@ pub struct BudgetAssignmentRequest {
 	pub team_id: Option<Uuid>,
 	pub user_id: Option<Uuid>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct BudgetResetRequest {
+	pub assignment_id: Option<Uuid>,
+	pub budget_id: Option<Uuid>,
+	pub team_id: Option<Uuid>,
+	pub user_id: Option<Uuid>,
+	pub kind: Option<String>,
+	pub reason: Option<String>,
+}

@@ -1,6 +1,6 @@
 use crate::routes::public::auth::get_current_user;
 use crate::types::consts::{ADMIN_BUDGETS_EDIT, ADMIN_BUDGETS_VIEW};
-use crate::types::{Budget, BudgetAssignmentRequest, CreateBudgetRequest, JobState, ListBudgetsQuery, UpdateBudgetRequest};
+use crate::types::{Budget, BudgetAssignmentRequest, BudgetResetRequest, CreateBudgetRequest, JobState, ListBudgetsQuery, UpdateBudgetRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -167,6 +167,74 @@ pub async fn unassign_budget(State(state): State<Arc<JobState>>, cookies: Cookie
 		Ok(()) => ResponseBuilder::<()>::new(ResponseBody::Empty).build(),
 		Err(e) => {
 			eprintln!("[BUDGETS] Failed to unassign budget: {e}");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
+	}
+}
+
+pub async fn user_overview(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	match Budget::user_overview(&state.db).await {
+		Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
+		Err(e) => {
+			eprintln!("[BUDGETS] Failed to load user overview: {e}");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
+	}
+}
+
+pub async fn team_overview(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	match Budget::team_overview(&state.db).await {
+		Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
+		Err(e) => {
+			eprintln!("[BUDGETS] Failed to load team overview: {e}");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
+	}
+}
+
+pub async fn reset_history(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	match Budget::reset_history(&state.db).await {
+		Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
+		Err(e) => {
+			eprintln!("[BUDGETS] Failed to load reset history: {e}");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
+	}
+}
+
+pub async fn reset_budget(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<BudgetResetRequest>) -> impl IntoResponse {
+	let Some(user) = get_current_user(&state.db, &cookies).await else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	let valid_kind = req.kind.as_deref().map_or(true, |kind| matches!(kind, "pooled" | "per_user"));
+	if !valid_kind || (req.assignment_id.is_none() && req.budget_id.is_none() && req.team_id.is_none() && req.user_id.is_none()) {
+		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+	}
+	match Budget::reset(&state.db, &req, &user.id).await {
+		Ok(row) => ResponseBuilder::new(ResponseBody::Json(row)).status(StatusCode::CREATED).build(),
+		Err(e) => {
+			eprintln!("[BUDGETS] Failed to reset budget: {e}");
 			ErrorBuilder::new(ErrorCode::DatabaseError).build()
 		}
 	}

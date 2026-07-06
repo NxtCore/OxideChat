@@ -62,6 +62,65 @@ pub struct UserBudgetStatus {
 	pub blocked_model_ids: Vec<Uuid>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct UserBudgetOverviewResponse {
+	pub user_id: Uuid,
+	pub user_label: String,
+	pub teams: Vec<BudgetTeamSummaryResponse>,
+	pub budgets: Vec<EffectiveBudgetResponse>,
+	pub spent: Decimal,
+	pub remaining: Decimal,
+	pub decision: String,
+	pub blocked_model_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct BudgetTeamSummaryResponse {
+	pub id: Uuid,
+	pub name: String,
+	pub is_default: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TeamBudgetOverviewResponse {
+	pub team_id: Uuid,
+	pub team_name: String,
+	pub member_count: i64,
+	pub budgets: Vec<TeamBudgetAssignmentOverviewResponse>,
+	pub spent: Decimal,
+	pub remaining: Decimal,
+	pub exhausted_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TeamBudgetAssignmentOverviewResponse {
+	pub assignment_id: Uuid,
+	pub budget: BudgetResponse,
+	pub spent: Decimal,
+	pub remaining: Decimal,
+	pub window_start: DateTime<Utc>,
+	pub resets_at: Option<DateTime<Utc>>,
+	pub affected_users: i64,
+	pub exhausted_users: i64,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct BudgetResetEventResponse {
+	pub id: Uuid,
+	pub assignment_id: Option<Uuid>,
+	pub budget_id: Option<Uuid>,
+	pub budget_name: Option<String>,
+	pub team_id: Option<Uuid>,
+	pub team_name: Option<String>,
+	pub user_id: Option<Uuid>,
+	pub user_label: Option<String>,
+	pub kind: Option<String>,
+	pub reason: Option<String>,
+	pub reset_at: DateTime<Utc>,
+	pub created_by: Option<Uuid>,
+	pub created_by_label: Option<String>,
+}
+
 impl From<Budget> for BudgetResponse {
 	fn from(budget: Budget) -> Self {
 		Self {

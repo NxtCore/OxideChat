@@ -1,5 +1,16 @@
 import {defineStore} from 'pinia';
-import type {AnalyticsDayModelRow, AnalyticsRow, Budget, BudgetAssignmentInfo, BudgetPayload, UserBudgetStatus} from '~/types/budgets';
+import type {
+	AnalyticsDayModelRow,
+	AnalyticsRow,
+	Budget,
+	BudgetAssignmentInfo,
+	BudgetPayload,
+	BudgetResetEvent,
+	BudgetResetPayload,
+	TeamBudgetOverview,
+	UserBudgetOverview,
+	UserBudgetStatus,
+} from '~/types/budgets';
 import type {PaginatedResponse} from '~/types/chat';
 
 export const useBudgetStore = defineStore('budget', {
@@ -24,6 +35,9 @@ export const useBudgetStore = defineStore('budget', {
 			byDayModel: [] as AnalyticsDayModelRow[],
 		},
 		assignments: [] as BudgetAssignmentInfo[],
+		userOverview: [] as UserBudgetOverview[],
+		teamOverview: [] as TeamBudgetOverview[],
+		resetHistory: [] as BudgetResetEvent[],
 		loading: false,
 	}),
 	getters: {
@@ -74,6 +88,27 @@ export const useBudgetStore = defineStore('budget', {
 			const {$customFetch} = useNuxtApp();
 			this.assignments = await $customFetch<BudgetAssignmentInfo[]>(`/api/v1/admin/budgets/${budgetId}/assignments`);
 			return this.assignments;
+		},
+		async fetchUserOverview() {
+			const {$customFetch} = useNuxtApp();
+			this.userOverview = await $customFetch<UserBudgetOverview[]>('/api/v1/admin/budgets/overview/users');
+			return this.userOverview;
+		},
+		async fetchTeamOverview() {
+			const {$customFetch} = useNuxtApp();
+			this.teamOverview = await $customFetch<TeamBudgetOverview[]>('/api/v1/admin/budgets/overview/teams');
+			return this.teamOverview;
+		},
+		async fetchResetHistory() {
+			const {$customFetch} = useNuxtApp();
+			this.resetHistory = await $customFetch<BudgetResetEvent[]>('/api/v1/admin/budgets/resets');
+			return this.resetHistory;
+		},
+		async resetBudget(payload: BudgetResetPayload) {
+			const {$customFetch} = useNuxtApp();
+			const reset = await $customFetch<BudgetResetEvent>('/api/v1/admin/budgets/resets', {method: 'POST', body: payload});
+			await Promise.all([this.fetchUserOverview(), this.fetchTeamOverview(), this.fetchResetHistory()]);
+			return reset;
 		},
 		async assignBudget(id: string, body: {team_id?: string | null; user_id?: string | null}) {
 			const {$customFetch} = useNuxtApp();
