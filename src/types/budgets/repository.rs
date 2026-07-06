@@ -52,6 +52,47 @@ struct TeamBudgetRow {
 	assigned_at: DateTime<Utc>,
 }
 
+#[derive(sqlx::FromRow)]
+struct UserEffectiveBudgetRow {
+	target_user_id: Uuid,
+	id: Uuid,
+	name: String,
+	description: Option<String>,
+	amount: Decimal,
+	kind: String,
+	interval: String,
+	reset_strategy: String,
+	on_exceed: String,
+	is_enabled: bool,
+	created_at: DateTime<Utc>,
+	updated_at: DateTime<Utc>,
+	assignment_id: Uuid,
+	team_id: Option<Uuid>,
+	user_id: Option<Uuid>,
+	assigned_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+struct UserTeamRow {
+	user_id: Uuid,
+	id: Uuid,
+	name: String,
+	is_default: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct TeamWindowResetRow {
+	assignment_id: Uuid,
+	reset_at: Option<DateTime<Utc>>,
+}
+
+#[derive(sqlx::FromRow)]
+struct TeamMemberSpentRow {
+	assignment_id: Uuid,
+	member_user_id: Uuid,
+	spent: Decimal,
+}
+
 impl Budget {
 	fn escape_like_pattern(s: &str) -> String {
 		s.replace('\\', r"\\").replace('%', r"\%").replace('_', r"\_")
@@ -565,24 +606,141 @@ impl Budget {
 		)
 		.fetch_all(pool)
 		.await?;
+		if users.is_empty() {
+			return Ok(Vec::new());
+		}
+		let user_ids: Vec<Uuid> = users.iter().map(|u| u.id).collect();
+		let mut all_budgets = Self::budgets_for_all_users(pool, &user_ids).await?;
+		let mut all_teams = Self::teams_for_all_users(pool, &user_ids).await?;
+		let priced_model_ids = ModelPricing::priced_model_ids(pool).await?;
 		let mut rows = Vec::with_capacity(users.len());
 		for user in users {
-			let status = Self::status_for_user(pool, &user.id).await?;
-			let teams = Self::teams_for_user(pool, &user.id).await?;
-			let spent = status.budgets.iter().map(|budget| budget.spent).sum();
-			let remaining = status.budgets.iter().map(|budget| budget.remaining).sum();
+			let effective = all_budgets.remove(&user.id).unwrap_or_default();
+			let teams = all_teams.remove(&user.id).unwrap_or_default();
+			let mut window_starts = Vec::with_capacity(effective.len());
+			let mut resets_at_vec = Vec::with_capacity(effective.len());
+			let reset_by_assignment = Self::latest_resets_for_user(pool, &user.id, &effective).await?;
+			for budget in &effective {
+				let (window_start, resets) = Self::window(budget);
+				let window_start = reset_by_assignment
+					.get(&budget.assignment_id)
+					.copied()
+					.filter(|reset_at| *reset_at > window_start)
+					.unwrap_or(window_start);
+				window_starts.push(window_start);
+				resets_at_vec.push(resets);
+			}
+			let spent_by_assignment = Self::spent_by_assignment(pool, &user.id, &effective, &window_starts).await?;
+			let mut budget_responses = Vec::with_capacity(effective.len());
+			let mut should_block = false;
+			let mut should_warn = false;
+			for (index, budget) in effective.into_iter().enumerate() {
+				let window_start = window_starts[index];
+				let resets_at = resets_at_vec[index];
+				let spent = spent_by_assignment.get(&budget.assignment_id).copied().unwrap_or(Decimal::ZERO);
+				let remaining = (budget.budget.amount - spent).max(Decimal::ZERO);
+				let exhausted = spent >= budget.budget.amount;
+				should_block |= exhausted && budget.budget.on_exceed == "block";
+				should_warn |= exhausted && budget.budget.on_exceed == "warn";
+				budget_responses.push(EffectiveBudgetResponse {
+					amount: budget.budget.amount,
+					spent,
+					remaining,
+					window_start,
+					resets_at,
+					on_exceed: budget.budget.on_exceed.clone(),
+					exhausted,
+					assignment_id: budget.assignment_id,
+					team_id: budget.team_id,
+					user_id: budget.user_id,
+					budget: BudgetResponse::from(budget.budget),
+				});
+			}
+			let blocked_model_ids = if should_block { priced_model_ids.clone() } else { Vec::new() };
+			let decision = if should_block { "block" } else if should_warn { "warn" } else { "allow" };
+			let total_spent = budget_responses.iter().map(|b| b.spent).sum();
+			let total_remaining = budget_responses.iter().map(|b| b.remaining).sum();
 			rows.push(UserBudgetOverviewResponse {
 				user_id: user.id,
 				user_label: if user.username.is_empty() { user.email } else { user.username },
 				teams,
-				budgets: status.budgets,
-				spent,
-				remaining,
-				decision: status.decision,
-				blocked_model_ids: status.blocked_model_ids,
+				budgets: budget_responses,
+				spent: total_spent,
+				remaining: total_remaining,
+				decision: decision.to_string(),
+				blocked_model_ids,
 			});
 		}
 		Ok(rows)
+	}
+
+	async fn budgets_for_all_users(pool: &PgPool, user_ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<EffectiveBudget>>, sqlx::Error> {
+		let rows = sqlx::query_as::<_, UserEffectiveBudgetRow>(
+			r#"
+			SELECT u.id AS target_user_id,
+			       b.id, b.name, b.description, b.amount, b.kind::text AS kind, b.interval::text AS interval,
+			       b.reset_strategy::text AS reset_strategy, b.on_exceed::text AS on_exceed, b.is_enabled, b.created_at, b.updated_at,
+			       ba.id AS assignment_id, ba.team_id, ba.user_id, ba.assigned_at
+			FROM UNNEST($1::uuid[]) AS u(id)
+			JOIN budget_assignments ba ON (
+			    ba.user_id = u.id
+			    OR EXISTS (
+			        SELECT 1 FROM team_members tm
+			        WHERE tm.team_id = ba.team_id AND tm.user_id = u.id
+			    )
+			)
+			JOIN budgets b ON b.id = ba.budget_id
+			WHERE b.is_enabled = true
+			ORDER BY u.id, b.name ASC
+			"#,
+		)
+		.bind(user_ids)
+		.fetch_all(pool)
+		.await?;
+		let mut map: HashMap<Uuid, Vec<EffectiveBudget>> = HashMap::new();
+		for row in rows {
+			let budget = EffectiveBudget {
+				budget: Budget {
+					id: row.id,
+					name: row.name,
+					description: row.description,
+					amount: row.amount,
+					kind: row.kind,
+					interval: row.interval,
+					reset_strategy: row.reset_strategy,
+					on_exceed: row.on_exceed,
+					is_enabled: row.is_enabled,
+					created_at: row.created_at,
+					updated_at: row.updated_at,
+				},
+				assignment_id: row.assignment_id,
+				team_id: row.team_id,
+				user_id: row.user_id,
+				assigned_at: row.assigned_at,
+			};
+			map.entry(row.target_user_id).or_default().push(budget);
+		}
+		Ok(map)
+	}
+
+	async fn teams_for_all_users(pool: &PgPool, user_ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<BudgetTeamSummaryResponse>>, sqlx::Error> {
+		let rows = sqlx::query_as::<_, UserTeamRow>(
+			r#"
+			SELECT tm.user_id, t.id, t.name, t.is_default
+			FROM team_members tm
+			JOIN teams t ON t.id = tm.team_id
+			WHERE tm.user_id = ANY($1)
+			ORDER BY tm.user_id, t.is_default DESC, t.name ASC
+			"#,
+		)
+		.bind(user_ids)
+		.fetch_all(pool)
+		.await?;
+		let mut map: HashMap<Uuid, Vec<BudgetTeamSummaryResponse>> = HashMap::new();
+		for row in rows {
+			map.entry(row.user_id).or_default().push(BudgetTeamSummaryResponse { id: row.id, name: row.name, is_default: row.is_default });
+		}
+		Ok(map)
 	}
 
 	async fn teams_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<BudgetTeamSummaryResponse>, sqlx::Error> {
@@ -618,18 +776,21 @@ impl Budget {
 		)
 		.fetch_all(pool)
 		.await?;
-		let mut overview = Vec::<TeamBudgetOverviewResponse>::new();
-		for row in rows {
-			let effective = EffectiveBudget {
+		if rows.is_empty() {
+			return Ok(Vec::new());
+		}
+		let effective_budgets: Vec<EffectiveBudget> = rows
+			.iter()
+			.map(|row| EffectiveBudget {
 				budget: Budget {
 					id: row.budget_id,
-					name: row.budget_name,
-					description: row.description,
+					name: row.budget_name.clone(),
+					description: row.description.clone(),
 					amount: row.amount,
-					kind: row.kind,
-					interval: row.interval,
-					reset_strategy: row.reset_strategy,
-					on_exceed: row.on_exceed,
+					kind: row.kind.clone(),
+					interval: row.interval.clone(),
+					reset_strategy: row.reset_strategy.clone(),
+					on_exceed: row.on_exceed.clone(),
 					is_enabled: row.is_enabled,
 					created_at: row.created_at,
 					updated_at: row.updated_at,
@@ -638,16 +799,42 @@ impl Budget {
 				team_id: Some(row.team_id),
 				user_id: None,
 				assigned_at: row.assigned_at,
-			};
-			let (window_start, resets_at) = Self::team_window(pool, &effective).await?;
-			let spent = Self::team_assignment_spent(pool, row.team_id, window_start).await?;
-			let amount = if effective.budget.kind == "per_user" {
-				effective.budget.amount * Decimal::from(row.member_count)
+			})
+			.collect();
+		let window_resets = Self::batch_team_window_resets(pool, &effective_budgets).await?;
+		let mut window_starts: Vec<DateTime<Utc>> = Vec::with_capacity(effective_budgets.len());
+		let mut resets_at_vec: Vec<Option<DateTime<Utc>>> = Vec::with_capacity(effective_budgets.len());
+		for budget in &effective_budgets {
+			let (base_window, resets) = Self::window(budget);
+			let window_start = window_resets
+				.get(&budget.assignment_id)
+				.and_then(|r| *r)
+				.filter(|reset| *reset > base_window)
+				.unwrap_or(base_window);
+			window_starts.push(window_start);
+			resets_at_vec.push(resets);
+		}
+		let member_spent = Self::batch_team_member_spent(pool, &effective_budgets, &window_starts).await?;
+		let mut overview = Vec::<TeamBudgetOverviewResponse>::new();
+		for (index, (row, effective)) in rows.into_iter().zip(effective_budgets.into_iter()).enumerate() {
+			let window_start = window_starts[index];
+			let resets_at = resets_at_vec[index];
+			let per_member_spends: Vec<Decimal> = member_spent
+				.get(&effective.assignment_id)
+				.map(|map| map.values().copied().collect())
+				.unwrap_or_default();
+			let (spent, remaining, exhausted_users) = if effective.budget.kind == "per_user" {
+				let per_user_amount = effective.budget.amount;
+				let exhausted = per_member_spends.iter().filter(|&&s| s >= per_user_amount).count() as i64;
+				let total_spent: Decimal = per_member_spends.iter().copied().sum();
+				let total_remaining = (per_user_amount * Decimal::from(row.member_count) - total_spent).max(Decimal::ZERO);
+				(total_spent, total_remaining, exhausted)
 			} else {
-				effective.budget.amount
+				let total_spent: Decimal = per_member_spends.iter().copied().sum();
+				let total_remaining = (effective.budget.amount - total_spent).max(Decimal::ZERO);
+				let exhausted = if total_spent >= effective.budget.amount && row.member_count > 0 { row.member_count } else { 0 };
+				(total_spent, total_remaining, exhausted)
 			};
-			let remaining = (amount - spent).max(Decimal::ZERO);
-			let exhausted_users = if spent >= amount && row.member_count > 0 { row.member_count } else { 0 };
 			let assignment = TeamBudgetAssignmentOverviewResponse {
 				assignment_id: effective.assignment_id,
 				budget: BudgetResponse::from(effective.budget),
@@ -676,6 +863,73 @@ impl Budget {
 			}
 		}
 		Ok(overview)
+	}
+
+	async fn batch_team_window_resets(pool: &PgPool, budgets: &[EffectiveBudget]) -> Result<HashMap<Uuid, Option<DateTime<Utc>>>, sqlx::Error> {
+		let mut assignment_ids = Vec::with_capacity(budgets.len());
+		let mut budget_ids = Vec::with_capacity(budgets.len());
+		let mut team_ids = Vec::with_capacity(budgets.len());
+		let mut kinds = Vec::with_capacity(budgets.len());
+		for budget in budgets {
+			assignment_ids.push(budget.assignment_id);
+			budget_ids.push(budget.budget.id);
+			team_ids.push(budget.team_id.unwrap_or_else(Uuid::nil));
+			kinds.push(budget.budget.kind.clone());
+		}
+		let rows = sqlx::query_as::<_, TeamWindowResetRow>(
+			r#"
+			SELECT bw.assignment_id, MAX(bre.reset_at) AS reset_at
+			FROM UNNEST($1::uuid[], $2::uuid[], $3::uuid[], $4::text[]) AS bw(assignment_id, budget_id, team_id, kind)
+			LEFT JOIN budget_reset_events bre
+			  ON (bre.assignment_id = bw.assignment_id AND bre.user_id IS NULL)
+			  OR bre.budget_id = bw.budget_id
+			  OR (bre.team_id = bw.team_id AND bw.team_id <> $5 AND (bre.kind IS NULL OR bre.kind::text = bw.kind))
+			GROUP BY bw.assignment_id
+			"#,
+		)
+		.bind(&assignment_ids)
+		.bind(&budget_ids)
+		.bind(&team_ids)
+		.bind(&kinds)
+		.bind(Uuid::nil())
+		.fetch_all(pool)
+		.await?;
+		Ok(rows.into_iter().map(|row| (row.assignment_id, row.reset_at)).collect())
+	}
+
+	async fn batch_team_member_spent(
+		pool: &PgPool,
+		budgets: &[EffectiveBudget],
+		window_starts: &[DateTime<Utc>],
+	) -> Result<HashMap<Uuid, HashMap<Uuid, Decimal>>, sqlx::Error> {
+		if budgets.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let mut assignment_ids = Vec::with_capacity(budgets.len());
+		let mut team_ids = Vec::with_capacity(budgets.len());
+		for budget in budgets {
+			assignment_ids.push(budget.assignment_id);
+			team_ids.push(budget.team_id.unwrap_or_else(Uuid::nil));
+		}
+		let rows = sqlx::query_as::<_, TeamMemberSpentRow>(
+			r#"
+			SELECT bw.assignment_id, tm.user_id AS member_user_id, COALESCE(SUM(ue.cost_total), 0)::numeric AS spent
+			FROM UNNEST($1::uuid[], $2::uuid[], $3::timestamptz[]) AS bw(assignment_id, team_id, window_start)
+			JOIN team_members tm ON tm.team_id = bw.team_id
+			LEFT JOIN usage_events ue ON ue.user_id = tm.user_id AND ue.created_at >= bw.window_start
+			GROUP BY bw.assignment_id, tm.user_id
+			"#,
+		)
+		.bind(&assignment_ids)
+		.bind(&team_ids)
+		.bind(window_starts)
+		.fetch_all(pool)
+		.await?;
+		let mut map: HashMap<Uuid, HashMap<Uuid, Decimal>> = HashMap::new();
+		for row in rows {
+			map.entry(row.assignment_id).or_default().insert(row.member_user_id, row.spent);
+		}
+		Ok(map)
 	}
 
 	async fn team_window(pool: &PgPool, budget: &EffectiveBudget) -> Result<(DateTime<Utc>, Option<DateTime<Utc>>), sqlx::Error> {
