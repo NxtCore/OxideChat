@@ -307,35 +307,64 @@
 			<!-- Explore Tab -->
 			<div v-if="activeTab === 'explore'">
 				<div class="mb-4 flex flex-wrap items-center gap-2">
-					<div class="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5">
-						<span class="text-xs text-muted-foreground">{{ store.getTranslation('settings.analytics.metric') }}</span>
-						<select v-model="exploreMetric" class="bg-transparent text-sm font-medium text-foreground outline-none cursor-pointer">
-							<option value="cost">{{ store.getTranslation('settings.analytics.total_cost') }}</option>
-							<option value="requests">{{ store.getTranslation('settings.analytics.requests') }}</option>
-							<option value="tokens_total">{{ store.getTranslation('settings.analytics.total_tokens') }}</option>
-							<option value="tokens_input">{{ store.getTranslation('settings.analytics.tokens_input') }}</option>
-							<option value="tokens_output">{{ store.getTranslation('settings.analytics.tokens_output') }}</option>
-							<option value="tokens_reasoning">{{ store.getTranslation('settings.analytics.tokens_reasoning') }}</option>
-						</select>
-					</div>
-					<div class="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5">
-						<span class="text-xs text-muted-foreground">{{ store.getTranslation('settings.analytics.group_by') }}</span>
-						<select v-model="exploreGroup" class="bg-transparent text-sm font-medium text-foreground outline-none cursor-pointer">
-							<option value="model">{{ store.getTranslation('settings.analytics.model') }}</option>
-							<option value="none">{{ store.getTranslation('settings.analytics.none') }}</option>
-						</select>
-					</div>
-					<div class="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5">
-						<span class="text-xs text-muted-foreground">Top</span>
-						<select v-model.number="exploreTopN" class="bg-transparent text-sm font-medium text-foreground outline-none cursor-pointer">
-							<option :value="5">5</option>
-							<option :value="10">10</option>
-							<option :value="20">20</option>
-						</select>
-					</div>
+					<ShadSelect v-model="exploreMetric">
+						<ShadSelectTrigger size="sm" class="h-8 max-w-full min-w-0 bg-card sm:min-w-52">
+							<ShadSelectValue>
+								<span class="text-xs font-medium text-muted-foreground">{{ tx('settings.analytics.metric', 'Metric') }}</span>
+								<span class="font-semibold text-foreground">{{ selectedExploreMetricLabel }}</span>
+							</ShadSelectValue>
+						</ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem v-for="option in exploreMetricOptions" :key="option.value" :value="option.value">
+								{{ option.label }}
+							</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+
+					<ShadSelect v-model="exploreGroup">
+						<ShadSelectTrigger size="sm" class="h-8 max-w-full min-w-0 bg-card sm:min-w-44">
+							<ShadSelectValue>
+								<span class="text-xs font-medium text-muted-foreground">{{ tx('settings.analytics.group_by', 'Group by') }}</span>
+								<span class="font-semibold text-foreground">{{ selectedExploreGroupLabel }}</span>
+							</ShadSelectValue>
+						</ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem v-for="option in exploreGroupOptions" :key="option.value" :value="option.value">
+								{{ option.label }}
+							</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+
+					<ShadSelect v-model="exploreTopN">
+						<ShadSelectTrigger size="sm" class="h-8 max-w-full min-w-0 bg-card sm:min-w-24">
+							<ShadSelectValue>
+								<span class="text-xs font-medium text-muted-foreground">{{ tx('settings.analytics.top', 'Top') }}</span>
+								<span class="font-semibold text-foreground">{{ exploreTopN }}</span>
+							</ShadSelectValue>
+						</ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem v-for="option in exploreTopOptions" :key="option" :value="option">
+								{{ option }}
+							</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+
+					<ShadSelect v-model="exploreRollup">
+						<ShadSelectTrigger size="sm" class="h-8 max-w-full min-w-0 bg-card sm:min-w-36">
+							<ShadSelectValue>
+								<span class="text-xs font-medium text-muted-foreground">{{ tx('settings.analytics.rollup', 'Rollup') }}</span>
+								<span class="font-semibold text-foreground">{{ selectedExploreRollupLabel }}</span>
+							</ShadSelectValue>
+						</ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem v-for="option in exploreRollupOptions" :key="option.value" :value="option.value">
+								{{ option.label }}
+							</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
 				</div>
 
-				<div class="mb-6 rounded-lg border border-border bg-card p-4">
+				<div class="mb-6 rounded-lg border border-border bg-card px-4 py-5">
 					<SettingsStackedAnalyticsChart
 						v-if="exploreChartData.length"
 						:data="exploreChartData"
@@ -346,30 +375,39 @@
 				</div>
 
 				<div v-if="exploreTableData.length" class="rounded-lg border border-border bg-card">
-					<div class="grid grid-cols-[1fr_5rem_5rem_5rem_5rem_5rem_4rem] border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">
-						<span>{{ store.getTranslation('settings.analytics.label') }}</span>
-						<span class="text-right">Min</span>
-						<span class="text-right">Max</span>
-						<span class="text-right">Avg</span>
-						<span class="text-right">Sum</span>
-						<span class="text-right">{{ store.getTranslation('settings.analytics.value') }}</span>
-						<span class="text-right">%</span>
-					</div>
-					<div
-						v-for="row in exploreTableData"
-						:key="row.label"
-						class="grid grid-cols-[1fr_5rem_5rem_5rem_5rem_5rem_4rem] items-center gap-1 border-b border-border/40 px-4 py-2.5 text-sm last:border-0"
-					>
-						<div class="flex items-center gap-2 min-w-0">
-							<span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{backgroundColor: row.color}" />
-							<span class="truncate font-medium">{{ row.label }}</span>
+					<div class="overflow-x-auto">
+						<div class="min-w-[38rem]">
+							<div class="grid grid-cols-[minmax(10rem,1fr)_4.75rem_4.75rem_4.75rem_4.75rem_5.25rem_6.25rem] border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">
+								<span>{{ tx('settings.analytics.label', 'Label') }}</span>
+								<span class="text-right">{{ tx('settings.analytics.min', 'Min') }}</span>
+								<span class="text-right">{{ tx('settings.analytics.max', 'Max') }}</span>
+								<span class="text-right">{{ tx('settings.analytics.avg', 'Avg') }}</span>
+								<span class="text-right">{{ tx('settings.analytics.sum', 'Sum') }}</span>
+								<span class="text-right">{{ tx('settings.analytics.value', 'Value') }}</span>
+								<span class="text-right">%</span>
+							</div>
+							<div
+								v-for="row in exploreTableData"
+								:key="row.label"
+								class="grid grid-cols-[minmax(10rem,1fr)_4.75rem_4.75rem_4.75rem_4.75rem_5.25rem_6.25rem] items-center gap-1 border-b border-border/40 px-4 py-2.5 text-sm last:border-0"
+							>
+								<div class="flex items-center gap-2 min-w-0">
+									<span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{backgroundColor: row.color}" />
+									<span class="truncate font-medium">{{ row.label }}</span>
+								</div>
+								<span class="text-right text-xs text-muted-foreground">{{ exploreFormatValue(row.min) }}</span>
+								<span class="text-right text-xs text-muted-foreground">{{ exploreFormatValue(row.max) }}</span>
+								<span class="text-right text-xs text-muted-foreground">{{ exploreFormatValue(row.avg) }}</span>
+								<span class="text-right text-xs text-muted-foreground">{{ exploreFormatValue(row.sum) }}</span>
+								<span class="text-right font-medium text-foreground">{{ exploreFormatValue(row.value) }}</span>
+								<div class="flex items-center justify-end gap-2">
+									<div class="h-2 w-12 overflow-hidden rounded-full bg-muted">
+										<div class="h-full rounded-full" :style="{width: `${Math.min(100, row.pct)}%`, backgroundColor: row.color}" />
+									</div>
+									<span class="w-9 text-right text-xs text-muted-foreground tabular-nums">{{ row.pct.toFixed(1) }}%</span>
+								</div>
+							</div>
 						</div>
-						<span class="text-right text-xs text-muted-foreground">{{ exploreFormatValue(row.min) }}</span>
-						<span class="text-right text-xs text-muted-foreground">{{ exploreFormatValue(row.max) }}</span>
-						<span class="text-right text-xs text-muted-foreground">{{ exploreFormatValue(row.avg) }}</span>
-						<span class="text-right text-xs text-muted-foreground">{{ exploreFormatValue(row.sum) }}</span>
-						<span class="text-right font-medium text-foreground">{{ exploreFormatValue(row.value) }}</span>
-						<span class="text-right text-xs text-muted-foreground">{{ row.pct.toFixed(1) }}%</span>
 					</div>
 				</div>
 			</div>
@@ -428,6 +466,41 @@ const activeTab = ref('overview');
 const exploreMetric = ref('cost');
 const exploreGroup = ref('model');
 const exploreTopN = ref(10);
+const exploreRollup = ref('hourly');
+
+const exploreTopOptions = [5, 10, 20];
+
+function tx(key: string, fallback: string): string {
+	const value = store.getTranslation(key);
+	return value === key ? fallback : value;
+}
+
+const exploreMetricOptions = computed(() => [
+	{value: 'requests', label: tx('settings.analytics.request_count', 'Request count')},
+	{value: 'cost', label: tx('settings.analytics.total_usage_dollars', 'Total usage ($)')},
+	{value: 'tokens_total', label: tx('settings.analytics.tokens_total', 'Tokens (total)')},
+	{value: 'tokens_input', label: tx('settings.analytics.tokens_prompt', 'Tokens (prompt)')},
+	{value: 'tokens_output', label: tx('settings.analytics.tokens_completion', 'Tokens (completion)')},
+	{value: 'tokens_reasoning', label: tx('settings.analytics.reasoning_tokens', 'Reasoning tokens')},
+	{value: 'latency', label: tx('settings.analytics.latency', 'Latency')},
+]);
+
+const exploreGroupOptions = computed(() => [
+	{value: 'model', label: tx('settings.analytics.model', 'Model')},
+	{value: 'api_key', label: tx('settings.analytics.api_key', 'API key')},
+	{value: 'provider', label: tx('settings.analytics.provider', 'Provider')},
+	{value: 'user', label: tx('settings.analytics.user', 'User')},
+]);
+
+const exploreRollupOptions = computed(() => [
+	{value: 'hourly', label: tx('settings.analytics.hourly', 'Hourly')},
+	{value: 'daily', label: tx('settings.analytics.daily', 'Daily')},
+	{value: 'weekly', label: tx('settings.analytics.weekly', 'Weekly')},
+]);
+
+const selectedExploreMetricLabel = computed(() => exploreMetricOptions.value.find(option => option.value === exploreMetric.value)?.label ?? '');
+const selectedExploreGroupLabel = computed(() => exploreGroupOptions.value.find(option => option.value === exploreGroup.value)?.label ?? '');
+const selectedExploreRollupLabel = computed(() => exploreRollupOptions.value.find(option => option.value === exploreRollup.value)?.label ?? '');
 
 const CHART_COLORS = [
 	'#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4',
@@ -666,24 +739,55 @@ function getMetricValue(row: AnalyticsDayModelRow): number {
 		case 'tokens_input': return row.input_tokens;
 		case 'tokens_output': return row.output_tokens;
 		case 'tokens_reasoning': return row.reasoning_tokens;
+		case 'latency': return 0;
 		default: return Number(row.cost_total);
 	}
 }
 
+function getSummaryMetricValue(row: AnalyticsRow): number {
+	switch (exploreMetric.value) {
+		case 'cost': return Number(row.cost_total);
+		case 'requests': return row.request_count;
+		case 'tokens_total': return row.input_tokens + row.output_tokens + row.reasoning_tokens;
+		case 'tokens_input': return row.input_tokens;
+		case 'tokens_output': return row.output_tokens;
+		case 'tokens_reasoning': return row.reasoning_tokens;
+		case 'latency': return 0;
+		default: return Number(row.cost_total);
+	}
+}
+
+function exploreBucket(day: string): string {
+	if (exploreRollup.value !== 'weekly') return day;
+	const date = new Date(`${day}T00:00:00Z`);
+	if (Number.isNaN(date.getTime())) return day;
+	const weekStart = new Date(date);
+	const dayOfWeek = weekStart.getUTCDay() || 7;
+	weekStart.setUTCDate(weekStart.getUTCDate() - dayOfWeek + 1);
+	return weekStart.toISOString().slice(0, 10);
+}
+
+const exploreAggregateRows = computed(() => {
+	if (exploreGroup.value === 'user') return byUser.value;
+	return [] as AnalyticsRow[];
+});
+
 const exploreChartData = computed(() => {
+	if (exploreGroup.value === 'user') {
+		const rows = exploreTableData.value;
+		if (!rows.length) return [];
+		return [
+			rows.reduce((entry, row) => {
+				entry[row.label] = row.value;
+				return entry;
+			}, {day: store.getTranslation('settings.analytics.total')} as Record<string, number | string>),
+		];
+	}
+
+	if (exploreGroup.value !== 'model') return [];
+
 	const rows = byDayModel.value;
 	if (!rows.length) return [];
-
-	if (exploreGroup.value === 'none') {
-		const dayMap = new Map<string, Record<string, number>>();
-		for (const row of rows) {
-			if (!dayMap.has(row.day)) dayMap.set(row.day, {} as any);
-			const entry = dayMap.get(row.day)!;
-			(entry as any).day = row.day;
-			entry['total'] = (entry['total'] || 0) + getMetricValue(row);
-		}
-		return Array.from(dayMap.values());
-	}
 
 	const modelTotals = new Map<string, number>();
 	for (const row of rows) {
@@ -698,18 +802,26 @@ const exploreChartData = computed(() => {
 	const dayMap = new Map<string, Record<string, number>>();
 	for (const row of rows) {
 		const bucket = topSet.has(row.model_name) ? row.model_name : 'Other';
-		if (!dayMap.has(row.day)) dayMap.set(row.day, {} as any);
-		const entry = dayMap.get(row.day)!;
-		(entry as any).day = row.day;
+		const day = exploreBucket(row.day);
+		if (!dayMap.has(day)) dayMap.set(day, {} as any);
+		const entry = dayMap.get(day)!;
+		(entry as any).day = day;
 		entry[bucket] = (entry[bucket] || 0) + getMetricValue(row);
 	}
 	return Array.from(dayMap.values());
 });
 
 const exploreChartCategories = computed(() => {
-	if (exploreGroup.value === 'none') {
-		return {total: {name: 'Total', color: 'var(--primary)'}};
+	if (exploreGroup.value === 'user') {
+		const cats: Record<string, {name: string; color: string}> = {};
+		exploreTableData.value.forEach((row, i) => {
+			cats[row.label] = {name: row.label, color: CHART_COLORS[i % CHART_COLORS.length]};
+		});
+		return cats;
 	}
+
+	if (exploreGroup.value !== 'model') return {};
+
 	const modelTotals = new Map<string, number>();
 	for (const row of byDayModel.value) {
 		modelTotals.set(row.model_name, (modelTotals.get(row.model_name) || 0) + getMetricValue(row));
@@ -724,13 +836,31 @@ const exploreChartCategories = computed(() => {
 		cats[name] = {name, color: CHART_COLORS[i % CHART_COLORS.length]};
 	});
 	if (byDayModel.value.some(r => !topNames.includes(r.model_name))) {
-		cats['Other'] = {name: 'Other', color: '#6b7280'};
+		cats['Other'] = {name: store.getTranslation('settings.analytics.other'), color: '#6b7280'};
 	}
 	return cats;
 });
 
 const exploreTableData = computed(() => {
-	if (exploreGroup.value === 'none') return [];
+	if (exploreGroup.value !== 'model') {
+		const rows = exploreAggregateRows.value
+			.map(row => ({
+				label: row.label || '-',
+				value: getSummaryMetricValue(row),
+			}))
+			.sort((a, b) => b.value - a.value);
+		const total = rows.reduce((sum, row) => sum + row.value, 0);
+		return rows.slice(0, exploreTopN.value).map((row, i) => ({
+			label: row.label,
+			color: CHART_COLORS[i % CHART_COLORS.length],
+			min: row.value,
+			max: row.value,
+			avg: row.value,
+			sum: row.value,
+			value: row.value,
+			pct: total > 0 ? (row.value / total) * 100 : 0,
+		}));
+	}
 
 	const modelDailyValues = new Map<string, number[]>();
 	for (const row of byDayModel.value) {
@@ -762,6 +892,7 @@ const exploreTableData = computed(() => {
 
 function exploreFormatValue(v: number): string {
 	if (exploreMetric.value === 'cost') return formatMoney(v);
+	if (exploreMetric.value === 'latency') return `${v.toFixed(0)} ms`;
 	return formatNumber(v);
 }
 
