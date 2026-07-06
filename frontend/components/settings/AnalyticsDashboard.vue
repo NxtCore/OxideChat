@@ -545,13 +545,10 @@ const exploreMetricOptions = computed(() => [
 	{value: 'tokens_input', label: tx('settings.analytics.tokens_prompt', 'Tokens (prompt)')},
 	{value: 'tokens_output', label: tx('settings.analytics.tokens_completion', 'Tokens (completion)')},
 	{value: 'tokens_reasoning', label: tx('settings.analytics.reasoning_tokens', 'Reasoning tokens')},
-	{value: 'latency', label: tx('settings.analytics.latency', 'Latency')},
 ]);
 
 const exploreGroupOptions = computed(() => [
 	{value: 'model', label: tx('settings.analytics.model', 'Model')},
-	{value: 'api_key', label: tx('settings.analytics.api_key', 'API key')},
-	{value: 'provider', label: tx('settings.analytics.provider', 'Provider')},
 	{value: 'user', label: tx('settings.analytics.user', 'User')},
 ]);
 
@@ -818,7 +815,15 @@ function getExploreIcon(label: string) {
 	return getModelIcon(label, model?.id ?? null);
 }
 
-function getMetricValue(row: AnalyticsDayModelRow): number {
+type ExploreMetricRow = {
+	cost_total: string;
+	request_count: number;
+	input_tokens: number;
+	output_tokens: number;
+	reasoning_tokens: number;
+};
+
+function getExploreMetricValue(row: ExploreMetricRow): number {
 	switch (exploreMetric.value) {
 		case 'cost': return Number(row.cost_total);
 		case 'requests': return row.request_count;
@@ -831,17 +836,12 @@ function getMetricValue(row: AnalyticsDayModelRow): number {
 	}
 }
 
+function getMetricValue(row: AnalyticsDayModelRow): number {
+	return getExploreMetricValue(row);
+}
+
 function getSummaryMetricValue(row: AnalyticsRow): number {
-	switch (exploreMetric.value) {
-		case 'cost': return Number(row.cost_total);
-		case 'requests': return row.request_count;
-		case 'tokens_total': return row.input_tokens + row.output_tokens + row.reasoning_tokens;
-		case 'tokens_input': return row.input_tokens;
-		case 'tokens_output': return row.output_tokens;
-		case 'tokens_reasoning': return row.reasoning_tokens;
-		case 'latency': return 0;
-		default: return Number(row.cost_total);
-	}
+	return getExploreMetricValue(row);
 }
 
 function exploreBucket(day: string): string {

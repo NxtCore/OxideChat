@@ -540,8 +540,9 @@ async function confirmReset() {
 		});
 		resetOpen.value = false;
 		if (selected.value) await budgetStore.fetchAssignments(selected.value.id);
+		store.toast(tx('settings.budgets.reset_success', 'Budget reset'), {type: 'success'});
 	} catch {
-		store.toast(store.getTranslation('common.error'), {type: 'error'});
+		store.toast(tx('settings.budgets.reset_error', 'Failed to reset budget'), {type: 'error'});
 	}
 }
 
@@ -557,8 +558,9 @@ async function createBudget() {
 		const budget = await budgetStore.createBudget({...form, name: form.name || store.getTranslation('settings.tabs.budgets')});
 		await selectBudget(budget);
 		await loadOperationalData();
+		store.toast(tx('settings.budgets.create_success', 'Budget created'), {type: 'success'});
 	} catch {
-		store.toast(store.getTranslation('common.error'), {type: 'error'});
+		store.toast(tx('settings.budgets.create_error', 'Failed to create budget'), {type: 'error'});
 	}
 }
 
@@ -568,8 +570,9 @@ async function saveBudget() {
 		const budget = await budgetStore.updateBudget(selected.value.id, {...form});
 		await selectBudget(budget);
 		await loadOperationalData();
+		store.toast(tx('settings.budgets.save_success', 'Budget saved'), {type: 'success'});
 	} catch {
-		store.toast(store.getTranslation('common.error'), {type: 'error'});
+		store.toast(tx('settings.budgets.save_error', 'Failed to save budget'), {type: 'error'});
 	}
 }
 
@@ -580,8 +583,9 @@ async function deleteBudget() {
 		selected.value = budgetStore.budgets[0] ?? null;
 		if (selected.value) await selectBudget(selected.value);
 		await loadOperationalData();
+		store.toast(tx('settings.budgets.delete_success', 'Budget deleted'), {type: 'success'});
 	} catch {
-		store.toast(store.getTranslation('common.error'), {type: 'error'});
+		store.toast(tx('settings.budgets.delete_error', 'Failed to delete budget'), {type: 'error'});
 	}
 }
 
@@ -591,8 +595,9 @@ async function assignTeam() {
 		await budgetStore.assignBudget(selected.value.id, {team_id: selectedTeamId.value});
 		selectedTeamId.value = null;
 		await loadOperationalData();
+		store.toast(tx('settings.budgets.assign_success', 'Budget assigned'), {type: 'success'});
 	} catch {
-		store.toast(store.getTranslation('common.error'), {type: 'error'});
+		store.toast(tx('settings.budgets.assign_error', 'Failed to assign budget'), {type: 'error'});
 	}
 }
 
@@ -602,8 +607,9 @@ async function assignUser() {
 		await budgetStore.assignBudget(selected.value.id, {user_id: selectedUserId.value});
 		selectedUserId.value = null;
 		await loadOperationalData();
+		store.toast(tx('settings.budgets.assign_success', 'Budget assigned'), {type: 'success'});
 	} catch {
-		store.toast(store.getTranslation('common.error'), {type: 'error'});
+		store.toast(tx('settings.budgets.assign_error', 'Failed to assign budget'), {type: 'error'});
 	}
 }
 
@@ -612,8 +618,9 @@ async function removeAssignment(a: BudgetAssignmentInfo) {
 	try {
 		await budgetStore.removeAssignment(selected.value.id, a.id);
 		await loadOperationalData();
+		store.toast(tx('settings.budgets.remove_success', 'Assignment removed'), {type: 'success'});
 	} catch {
-		store.toast(store.getTranslation('common.error'), {type: 'error'});
+		store.toast(tx('settings.budgets.remove_error', 'Failed to remove assignment'), {type: 'error'});
 	}
 }
 

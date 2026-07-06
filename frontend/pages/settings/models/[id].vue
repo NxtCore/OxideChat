@@ -858,23 +858,23 @@
 						</div>
 						<div class="space-y-1.5">
 							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_input') }}</ShadLabel>
-							<ShadInput v-model="pricingForm.input" type="number" step="0.000001" />
+							<ShadInput v-model="pricingForm.input" type="number" min="0" step="0.000001" />
 						</div>
 						<div class="space-y-1.5">
 							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_output') }}</ShadLabel>
-							<ShadInput v-model="pricingForm.output" type="number" step="0.000001" />
+							<ShadInput v-model="pricingForm.output" type="number" min="0" step="0.000001" />
 						</div>
 						<div class="space-y-1.5">
 							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_reasoning') }}</ShadLabel>
-							<ShadInput v-model="pricingForm.reasoning" type="number" step="0.000001" />
+							<ShadInput v-model="pricingForm.reasoning" type="number" min="0" step="0.000001" />
 						</div>
 						<div class="space-y-1.5">
 							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_cache_read') }}</ShadLabel>
-							<ShadInput v-model="pricingForm.cache_read" type="number" step="0.000001" />
+							<ShadInput v-model="pricingForm.cache_read" type="number" min="0" step="0.000001" />
 						</div>
 						<div class="space-y-1.5">
 							<ShadLabel>{{ store.getTranslation('settings.models.editor.override_cache_write') }}</ShadLabel>
-							<ShadInput v-model="pricingForm.cache_write" type="number" step="0.000001" />
+							<ShadInput v-model="pricingForm.cache_write" type="number" min="0" step="0.000001" />
 						</div>
 					</div>
 					<p class="mt-2 text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.pricing_unit') }}</p>

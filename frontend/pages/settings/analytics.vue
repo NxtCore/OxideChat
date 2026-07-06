@@ -6,5 +6,8 @@
 
 <script setup lang="ts">
 const route = useRoute();
-const userId = computed(() => route.query.user_id as string | undefined);
+const userId = computed(() => {
+	const value = route.query.user_id;
+	return Array.isArray(value) ? value[0] : value;
+});
 </script>

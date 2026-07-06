@@ -38,6 +38,12 @@ pub async fn create_budget(State(state): State<Arc<JobState>>, cookies: Cookies,
 	if req.name.trim().is_empty() {
 		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
 	}
+	if req.amount <= rust_decimal::Decimal::ZERO {
+		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+	}
+	if !req.has_valid_enums() {
+		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+	}
 	match Budget::create(&state.db, &req).await {
 		Ok(budget) => ResponseBuilder::new(ResponseBody::Json(crate::types::BudgetResponse::from(budget)))
 			.status(StatusCode::CREATED)
@@ -55,6 +61,12 @@ pub async fn update_budget(State(state): State<Arc<JobState>>, cookies: Cookies,
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	if req.amount.is_some_and(|amount| amount <= rust_decimal::Decimal::ZERO) {
+		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+	}
+	if !req.has_valid_enums() {
+		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
 	}
 	let budget = match Budget::find_by_id(&state.db, &id).await {
 		Ok(Some(budget)) => budget,
@@ -103,6 +115,9 @@ pub async fn assign_budget(State(state): State<Arc<JobState>>, cookies: Cookies,
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	if req.team_id.is_none() && req.user_id.is_none() {
+		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
 	}
 	let budget = match Budget::find_by_id(&state.db, &id).await {
 		Ok(Some(budget)) => budget,
