@@ -38,7 +38,7 @@
 						<input ref="fileInputRef" type="file" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
 						<ModelSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
 						<ReasoningSelector
-							v-if="chatStore.hasReasoningCapability(chatStore.selectedModel)"
+							v-if="chatStore.hasConfigurableReasoningCapability(chatStore.selectedModel)"
 							class="border-none! bg-transparent! shadow-none! hover:bg-muted/50"
 						/>
 						<ToolSelector v-if="chatStore.hasToolCapability(chatStore.selectedModel)" />

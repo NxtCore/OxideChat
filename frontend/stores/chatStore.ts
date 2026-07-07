@@ -164,7 +164,13 @@ export const useChatStore = defineStore('chat', {
 		hasReasoningCapability: state => (model: ModelList | null) => {
 			if (!model) model = state.selectedModel;
 			if (!model) return false;
-			return model.capabilities.some(c => c.startsWith('REASONING_'));
+			return model.capabilities.some(c => c === 'REASONING' || c.startsWith('REASONING_'));
+		},
+
+		hasConfigurableReasoningCapability: state => (model: ModelList | null) => {
+			if (!model) model = state.selectedModel;
+			if (!model) return false;
+			return model.capabilities.some(c => c.startsWith('REASONING_EFFORT_') || c.startsWith('REASONING_BUDGET_TOKENS_'));
 		},
 
 		hasToolCapability: state => (model: ModelList | null) => {
@@ -925,7 +931,7 @@ export const useChatStore = defineStore('chat', {
 			}
 
 			const hasNone = model.capabilities.some(c => c === 'REASONING_EFFORT_NONE');
-			const hasReasoningCap = model.capabilities.some(c => c.startsWith('REASONING_'));
+			const hasReasoningCap = model.capabilities.some(c => c === 'REASONING' || c.startsWith('REASONING_'));
 
 			if (!hasReasoningCap) {
 				this.reasoningEffort = null;

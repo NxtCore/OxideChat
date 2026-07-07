@@ -29,17 +29,36 @@
 			<PopoverTrigger as-child>
 				<ShadButton
 					variant="outline"
-					:class="cn('w-auto justify-between font-normal', props.class, tokenBudget ? 'text-primary border-primary/50' : 'text-muted-foreground')"
+					:class="
+						cn(
+							'w-auto justify-between font-normal',
+							props.class,
+							tokenBudget || (effortLevel && effortLevel !== 'NONE') ? 'text-primary border-primary/50' : 'text-muted-foreground'
+						)
+					"
 				>
 					<div class="flex items-center gap-2">
 						<Brain class="h-4 w-4" />
-						<span v-if="tokenBudget" class="text-xs font-medium">{{ displayLabel }}</span>
+						<span v-if="tokenBudget || (effortLevel && effortLevel !== 'NONE')" class="text-xs font-medium">{{ displayLabel }}</span>
 						<span v-else class="text-xs">{{ store.getTranslation('chat.reasoning_selector.disabled') }}</span>
 					</div>
 				</ShadButton>
 			</PopoverTrigger>
 			<PopoverContent class="w-80">
 				<div class="space-y-4">
+					<ShadSelect v-if="availableEffortLevels.length > 0" v-model="effortLevel" @update:modelValue="handleEffortChange" :disabled="availableEffortLevels.length < 2">
+						<ShadSelectTrigger>
+							<Brain class="h-4 w-4" />
+							<ShadSelectValue :placeholder="store.getTranslation('chat.reasoning_selector.disabled')" />
+						</ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectGroup>
+								<ShadSelectItem v-for="(label, index) in effortLabels" :key="availableEffortLevels[index]" :value="availableEffortLevels[index]">
+									{{ label }}
+								</ShadSelectItem>
+							</ShadSelectGroup>
+						</ShadSelectContent>
+					</ShadSelect>
 					<div class="flex justify-between items-center">
 						<h4 class="font-medium leading-none">{{ store.getTranslation('chat.reasoning_selector.token_limit') }}</h4>
 						<span class="text-xs text-muted-foreground">{{ minTokens }}-{{ maxTokens }}</span>
@@ -146,13 +165,19 @@ const minTokens = computed(() => tokenBudgetRange.value.min);
 const maxTokens = computed(() => tokenBudgetRange.value.max);
 
 const displayLabel = computed(() => {
-	if (isTokenBudget.value && tokenBudget.value) {
-		return `${Math.round(tokenBudget.value / 1024)}K ${store.getTranslation('chat.reasoning_selector.tokens')}`;
+	const labels: string[] = [];
+
+	if (effortLevel.value && effortLevel.value !== 'NONE') {
+		const index = availableEffortLevels.value.indexOf(effortLevel.value);
+		labels.push(effortLabels.value[index] || store.getTranslation('chat.reasoning_selector.medium'));
 	}
 
-	if (effortLevel.value) {
-		const index = availableEffortLevels.value.indexOf(effortLevel.value);
-		return effortLabels.value[index] || store.getTranslation('chat.reasoning_selector.medium');
+	if (isTokenBudget.value && tokenBudget.value) {
+		labels.push(`${Math.round(tokenBudget.value / 1024)}K ${store.getTranslation('chat.reasoning_selector.tokens')}`);
+	}
+
+	if (labels.length > 0) {
+		return labels.join(' / ');
 	}
 
 	return store.getTranslation('chat.reasoning_selector.disabled');
@@ -165,28 +190,26 @@ onMounted(() => {
 function syncFromStore() {
 	const currentEffort = chatStore.reasoningEffort;
 	if (currentEffort) {
-		if (isTokenBudget.value) {
-			const num = parseInt(currentEffort);
-			if (!isNaN(num)) {
-				tokenBudget.value = num;
-				tempTokenInput.value = num;
-			}
-		} else {
-			const upperEffort = currentEffort.toUpperCase().replace(/-/g, '_');
-			if (availableEffortLevels.value.includes(upperEffort)) {
-				effortLevel.value = upperEffort;
-			}
+		const upperEffort = currentEffort.toUpperCase().replace(/-/g, '_');
+		if (availableEffortLevels.value.includes(upperEffort)) {
+			effortLevel.value = upperEffort;
 		}
+	} else {
+		effortLevel.value = '';
+	}
+
+	if (chatStore.reasoningBudget !== null) {
+		tokenBudget.value = chatStore.reasoningBudget;
+		tempTokenInput.value = chatStore.reasoningBudget;
 	} else {
 		tokenBudget.value = undefined;
 		tempTokenInput.value = undefined;
-		effortLevel.value = '';
 	}
 }
 
 // Keep UI in sync when the store changes
 watch(
-	() => chatStore.reasoningEffort,
+	() => [chatStore.reasoningEffort, chatStore.reasoningBudget],
 	() => {
 		syncFromStore();
 	}
@@ -223,7 +246,7 @@ function handleInputChange() {
 		if (val > maxTokens.value) val = maxTokens.value;
 
 		tokenBudget.value = val;
-		chatStore.setReasoningEffort(val.toString());
+		chatStore.setReasoningEffort(val.toString(), true);
 	} else {
 		resetToDisabled();
 	}
