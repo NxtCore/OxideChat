@@ -1,6 +1,7 @@
 import {defineStore} from 'pinia';
 import {useMainStore} from './index';
 import {useThemeStore} from './theme';
+import {useBudgetStore} from './budgetStore';
 import type {
 	McpServer,
 	Workspace,
@@ -767,6 +768,8 @@ export const useChatStore = defineStore('chat', {
 											chat.message_count += 2;
 											chat.updated_at = new Date().toISOString();
 										}
+										const budgetStore = useBudgetStore();
+										budgetStore.fetchMyBudget().catch(() => {});
 										break;
 									case 'error':
 										const store = useMainStore();

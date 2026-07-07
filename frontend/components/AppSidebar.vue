@@ -67,6 +67,25 @@
 						</ShadDropdownMenuSubContent>
 					</ShadDropdownMenuSub>
 
+					<template v-if="budgetStore.myStatus?.budgets.length">
+						<ShadDropdownMenuSeparator class="bg-border" />
+						<div class="px-2 py-2">
+							<div class="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
+								<span>{{ store.getTranslation('settings.tabs.budgets') }}</span>
+								<span :class="budgetStore.highestUsagePercent >= 90 ? 'text-destructive' : ''">
+									{{ store.getTranslation('sidebar.budget.remaining', {amount: formatMoney(budgetStore.lowestRemaining ?? 0)}) }}
+								</span>
+							</div>
+							<div class="h-1.5 rounded-full bg-muted">
+								<div
+									class="h-1.5 rounded-full transition-all"
+									:class="budgetStore.highestUsagePercent >= 90 ? 'bg-destructive' : 'bg-primary'"
+									:style="{width: `${budgetStore.highestUsagePercent}%`}"
+								/>
+							</div>
+						</div>
+					</template>
+
 					<ShadDropdownMenuSeparator class="bg-border" />
 					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="goToSettings">
 						<Settings class="mr-2 h-4 w-4" />
@@ -88,9 +107,11 @@
 import {ChevronUp, LogOut, Settings, Settings2, Layers} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useChatStore} from '@/stores/chatStore';
+import {useBudgetStore} from '@/stores/budgetStore';
 
 const store = useMainStore();
 const chatStore = useChatStore();
+const budgetStore = useBudgetStore();
 const router = useRouter();
 
 const showWorkspaceManager = ref(false);
@@ -108,4 +129,14 @@ async function handleLogout() {
 	await store.logout();
 	router.push('/auth/login');
 }
+
+function formatMoney(value: number) {
+	return `$${value.toFixed(2)}`;
+}
+
+onMounted(() => {
+	if (store.auth.isAuthenticated) {
+		budgetStore.fetchMyBudget().catch(() => {});
+	}
+});
 </script>

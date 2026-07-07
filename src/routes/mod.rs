@@ -57,6 +57,20 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/teams/{id}/members", put(admin::teams::set_team_members))
 		.route("/api/v1/admin/teams/{id}/models", put(admin::teams::set_team_models))
 		.route("/api/v1/admin/teams/{id}/budget", patch(admin::teams::update_team_budget))
+		// Admin Budgets
+		.route("/api/v1/admin/budgets", get(admin::budgets::list_budgets))
+		.route("/api/v1/admin/budgets", post(admin::budgets::create_budget))
+		.route("/api/v1/admin/budgets/overview/users", get(admin::budgets::user_overview))
+		.route("/api/v1/admin/budgets/overview/teams", get(admin::budgets::team_overview))
+		.route("/api/v1/admin/budgets/resets", get(admin::budgets::reset_history).post(admin::budgets::reset_budget))
+		.route("/api/v1/admin/budgets/{id}", patch(admin::budgets::update_budget))
+		.route("/api/v1/admin/budgets/{id}", delete(admin::budgets::delete_budget))
+		.route(
+			"/api/v1/admin/budgets/{id}/assignments",
+			get(admin::budgets::get_budget_assignments).post(admin::budgets::assign_budget),
+		)
+		.route("/api/v1/admin/budgets/{id}/assignments/{assignment_id}", delete(admin::budgets::delete_assignment))
+		.route("/api/v1/admin/analytics", get(admin::analytics::get_analytics))
 		// Admin Users
 		.route("/api/v1/admin/users", get(admin::users::list_users))
 		.route("/api/v1/admin/users", post(admin::users::create_user))
@@ -70,6 +84,9 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/models", get(admin::models::list_models))
 		.route("/api/v1/admin/models/{id}", get(admin::models::get_model))
 		.route("/api/v1/admin/models/{id}", patch(admin::models::patch_model))
+		.route("/api/v1/admin/models/{id}/pricing", get(admin::models::get_model_pricing))
+		.route("/api/v1/admin/models/{id}/pricing", put(admin::models::put_model_pricing))
+		.route("/api/v1/admin/models/{id}/pricing", delete(admin::models::delete_model_pricing))
 		.route("/api/v1/admin/models/{id}/provider-options", get(admin::catalog::list_provider_options))
 		.route("/api/v1/admin/models/{id}/provider-options/refresh", post(admin::catalog::refresh_provider_options))
 		// Admin Config
@@ -85,6 +102,8 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/auth/oauth/{provider}/callback", get(public::oauth::oauth_callback))
 		// Users
 		.route("/api/v1/users/@me", get(public::users::get_me))
+		.route("/api/v1/me/budget", get(public::users::get_my_budget))
+		.route("/api/v1/me/analytics", get(public::users::get_my_analytics))
 		.route("/api/v1/users/@me/preferences", get(public::preferences::get_preferences))
 		.route("/api/v1/users/@me/preferences", patch(public::preferences::update_preferences))
 		// Workspaces

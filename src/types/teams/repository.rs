@@ -2,8 +2,8 @@ use super::{
 	CreateTeamRequest, Team, TeamDetailedResponse, TeamMemberResponse, TeamModelAccessResponse, TeamResponse, TeamSummaryResponse, UpdateTeamBudgetRequest,
 	UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest,
 };
-use crate::types::BaseType;
 use crate::types::axum::PaginatedResponse;
+use crate::types::{BaseType, Budget};
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -183,7 +183,7 @@ impl Team {
 	}
 
 	pub async fn update_budget(&self, pool: &PgPool, req: &UpdateTeamBudgetRequest) -> Result<Self, sqlx::Error> {
-		sqlx::query_as::<_, Self>(
+		let updated = sqlx::query_as::<_, Self>(
 			r#"
 			UPDATE teams
 			SET budget_id = $2,
@@ -195,7 +195,9 @@ impl Team {
 		.bind(self.id)
 		.bind(req.budget_id)
 		.fetch_one(pool)
-		.await
+		.await?;
+		Budget::replace_team_budget_from_legacy(pool, &self.id, req.budget_id).await?;
+		Ok(updated)
 	}
 
 	pub async fn delete(&self, pool: &PgPool) -> Result<bool, sqlx::Error> {

@@ -1,6 +1,6 @@
 [package]
 name = "OxideChat"
-version = "0.1.8"
+version = "0.2.0"
 edition = "2024"
 description = "A modern, performance and on customization focused AI chat application"
 license = "MIT"
@@ -37,7 +37,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "multipart",
 ] }
 tower-http = { version = "0.5", features = ["cors"] }
-omniference = "0.1.8"
+omniference = "0.2"
 aes-gcm = "0.10"
 rand = "0.8"
 rust_decimal = { version = "1.39.0", features = ["db-postgres", "serde"] }

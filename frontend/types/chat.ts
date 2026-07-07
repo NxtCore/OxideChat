@@ -272,6 +272,7 @@ export interface ModelList {
 	provider_name: string;
 	icon: string | null;
 	is_favorite: boolean;
+	budget_blocked: boolean;
 }
 
 export interface ModelListAdmin {

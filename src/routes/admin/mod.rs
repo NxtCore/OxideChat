@@ -1,3 +1,5 @@
+pub mod analytics;
+pub mod budgets;
 pub mod catalog;
 pub mod config;
 pub mod i18n;

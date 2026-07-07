@@ -34,3 +34,8 @@ pub struct AdminModelPatchBody {
 	pub reasoning_effort: Option<Option<String>>,
 	pub reasoning_budget_tokens: Option<Option<u32>>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ModelPricingOverrideRequest {
+	pub pricing: omniference::catalog::ModelPricing,
+}

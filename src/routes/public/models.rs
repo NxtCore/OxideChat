@@ -4,17 +4,17 @@
 
 use crate::config::Config;
 use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
 use crate::types::catalog::{AvailabilityState, GatewayCatalogModel};
 use crate::types::models::{Model, ModelListParams, ModelViewer};
 use crate::types::models_configs::ModelConfig;
+use crate::types::{Budget, JobState};
 use crate::utils::providers::sync_endpoint_options;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::Json;
 use axum::extract::{Path, Query};
 use axum::{extract::State, response::IntoResponse};
 use serde::Deserialize;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
@@ -33,7 +33,7 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 	};
 
 	let viewer = ModelViewer { user_id: &user.id };
-	let models = match Model::list_for_user(
+	let mut models = match Model::list_for_user(
 		&state.db,
 		viewer,
 		params.page.unwrap_or(1),
@@ -51,6 +51,17 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	};
+
+	let blocked_ids: HashSet<Uuid> = match Budget::status_for_user(&state.db, &user.id).await {
+		Ok(status) => status.blocked_model_ids.into_iter().collect(),
+		Err(e) => {
+			eprintln!("[PUBLIC] Failed to load budget status for model list: {e}");
+			HashSet::new()
+		}
+	};
+	for model in &mut models.items {
+		model.budget_blocked = blocked_ids.contains(&model.id);
+	}
 
 	ResponseBuilder::new(ResponseBody::Json(models)).build()
 }

@@ -86,7 +86,6 @@
 					<ShadTabsList>
 						<ShadTabsTrigger value="members">{{ store.getTranslation('settings.teams.members') }}</ShadTabsTrigger>
 						<ShadTabsTrigger value="models">{{ store.getTranslation('settings.teams.models') }}</ShadTabsTrigger>
-						<ShadTabsTrigger value="budget">{{ store.getTranslation('settings.teams.budget') }}</ShadTabsTrigger>
 					</ShadTabsList>
 
 					<!-- Members -->
@@ -223,35 +222,6 @@
 						</div>
 						</template>
 					</ShadTabsContent>
-
-					<!-- Budget -->
-					<ShadTabsContent value="budget" class="mt-4 rounded-lg border border-border bg-card p-4">
-						<div class="mb-4 flex items-start gap-3">
-							<div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
-								<Wallet class="h-4 w-4 text-muted-foreground" />
-							</div>
-							<div class="space-y-0.5">
-								<h3 class="text-sm font-medium text-foreground">{{ store.getTranslation('settings.teams.budget_link_title') }}</h3>
-								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.budget_link_hint') }}</p>
-							</div>
-						</div>
-
-						<div v-if="budgetId" class="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2.5">
-							<div class="min-w-0">
-								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.budget_linked') }}</p>
-								<p class="truncate font-mono text-sm text-foreground">{{ budgetId }}</p>
-							</div>
-							<ShadButton variant="outline" size="sm" :disabled="!canEdit || saving" @click="budgetId = null">
-								{{ store.getTranslation('settings.teams.budget_unlink') }}
-							</ShadButton>
-						</div>
-
-						<div v-else class="flex flex-col items-center justify-center gap-1 rounded-md border border-dashed border-border py-8 text-center">
-							<p class="text-sm font-medium text-foreground">{{ store.getTranslation('settings.teams.budget_not_linked') }}</p>
-							<p class="max-w-sm text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.budget_none_available') }}</p>
-						</div>
-
-					</ShadTabsContent>
 				</ShadTabs>
 			</div>
 
@@ -314,7 +284,7 @@
 
 <script setup lang="ts">
 import {computed, onMounted, onUnmounted, reactive, ref, watch} from 'vue';
-import {Bot, Loader2, Network, Plus, Search, Trash2, Users, Wallet} from 'lucide-vue-next';
+import {Bot, Loader2, Network, Plus, Search, Trash2, Users} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
@@ -355,7 +325,6 @@ const deleteOpen = ref(false);
 const form = reactive({name: '', description: '', allow_all_models: false});
 const teamDefaultModelKey = ref<string | null>(null);
 const createForm = reactive({name: '', description: '', allow_all_models: false});
-const budgetId = ref<string | null>(null);
 const selectedMemberIds = ref<string[]>([]);
 const selectedProviderIds = ref<string[]>([]);
 const selectedModelIds = ref<string[]>([]);
@@ -471,7 +440,6 @@ function applySelected(team: TeamDetailed) {
 	form.description = team.description ?? '';
 	form.allow_all_models = team.allow_all_models;
 	teamDefaultModelKey.value = team.default_model_key ?? null;
-	budgetId.value = team.budget_id;
 	selectedMemberIds.value = team.members.map(member => member.id);
 	selectedProviderIds.value = [...team.model_access.provider_ids];
 	selectedModelIds.value = [...team.model_access.model_ids];
@@ -575,13 +543,8 @@ async function saveAll() {
 			body: {provider_ids: providerIds, model_ids: modelIds},
 		});
 
-		const withBudget = await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${id}/budget`, {
-			method: 'PATCH',
-			body: {budget_id: budgetId.value},
-		});
-
-		selectedTeam.value = withBudget;
-		applySelected(withBudget);
+		selectedTeam.value = withModels;
+		applySelected(withModels);
 
 		await loadTeams();
 		store.toast(store.getTranslation('settings.teams.save_success'), {type: 'success'});

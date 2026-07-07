@@ -88,6 +88,7 @@ impl From<ModelListPublicRow> for ModelListPublic {
 			},
 			icon: row.icon,
 			is_favorite: row.is_favorite,
+			budget_blocked: false,
 		}
 	}
 }
