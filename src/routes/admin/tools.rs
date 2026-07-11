@@ -2,6 +2,8 @@ use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
+use crate::types::models::Model;
+use crate::types::providers::{Provider, ProviderKind};
 
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use crate::utils::tools::ToolExecutor;
@@ -402,15 +404,36 @@ pub async fn set_tool_settings(
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let tool_exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM tools WHERE id = $1 AND owner_id IS NULL")
+	let tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
 		.bind(tool_id)
 		.fetch_optional(&state.db)
 		.await
 		.ok()
 		.flatten();
 
-	if tool_exists.is_none() {
+	let Some(tool) = tool else {
 		return ErrorBuilder::new(ErrorCode::NotFound).build();
+	};
+	if tool.source_kind == ToolSourceKind::Builtin && tool.source_config.get("builtin_id").and_then(serde_json::Value::as_str) == Some("imagegen") {
+		let Some(value) = req.settings.get("image_model_id").and_then(serde_json::Value::as_str) else {
+			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		};
+		let Ok(model_id) = Uuid::parse_str(value) else {
+			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		};
+		let model = match Model::find_by_id(&state.db, &model_id).await {
+			Ok(Some(model)) => model,
+			Ok(None) | Err(_) => return ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
+		};
+		let provider = match Provider::find_for_admin(&state.db, &model.provider_id).await {
+			Ok(Some(provider)) => provider,
+			Ok(None) | Err(_) => return ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
+		};
+		let is_image_model = model.capabilities.0.iter().any(|capability| capability == "IMAGE_GENERATION")
+			&& model.output_modalities.0.iter().any(|modality| modality.eq_ignore_ascii_case("IMAGE"));
+		if !model.is_enabled || !provider.is_enabled || !is_image_model || !matches!(provider.kind, ProviderKind::Openai | ProviderKind::Openrouter | ProviderKind::Google) {
+			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		}
 	}
 
 	let result = sqlx::query(

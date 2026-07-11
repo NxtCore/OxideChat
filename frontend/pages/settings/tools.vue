@@ -326,21 +326,36 @@
 		</Dialog>
 
 		<Dialog v-model:open="settingsDialogOpen">
-			<DialogContent class="sm:max-w-[400px]">
+			<DialogContent class="sm:max-w-[440px]">
 				<DialogHeader>
 					<DialogTitle class="flex items-center gap-3">
-						<Key class="h-5 w-5 text-primary" />
-						<span>{{ store.getTranslation('settings.tools.settings') }}</span>
+						<Sparkles v-if="isImagegenSettings" class="h-5 w-5 text-primary" />
+						<Key v-else class="h-5 w-5 text-primary" />
+						<span>{{ isImagegenSettings ? imageModelTitle : store.getTranslation('settings.tools.settings') }}</span>
 					</DialogTitle>
-					<DialogDescription>{{
-						store.getTranslation('settings.tools.settings_description', {name: settingsTool?.display_name || settingsTool?.name})
-					}}</DialogDescription>
+					<DialogDescription>
+						{{
+							isImagegenSettings
+								? imageModelDescription
+								: store.getTranslation('settings.tools.settings_description', {name: settingsTool?.display_name || settingsTool?.name})
+						}}
+					</DialogDescription>
 				</DialogHeader>
 
 				<div class="space-y-4 py-4">
 					<div v-for="(field, key) in settingsFields" :key="key" class="space-y-2">
 						<Label :for="`setting-${key}`">{{ field.title || key }}</Label>
-						<template v-if="field.enum && field.enum.length > 0">
+						<template v-if="field.format === 'model-picker'">
+							<DefaultModelPicker
+								v-model="userSettings[key]"
+								endpoint="/api/v1/admin/image-models"
+								provider-endpoint="/api/v1/admin/image-model-providers"
+								selected-model-endpoint="/api/v1/admin/models"
+								value-mode="uuid"
+								:placeholder="imageModelPlaceholder"
+							/>
+						</template>
+						<template v-else-if="field.enum && field.enum.length > 0">
 							<ShadSelect v-model="userSettings[key]">
 								<ShadSelectTrigger :id="`setting-${key}`">
 									<ShadSelectValue :placeholder="field.description || store.getTranslation('settings.tools.select_placeholder')" />
@@ -381,6 +396,7 @@ import HeaderEditor from '@/components/settings/HeaderEditor.vue';
 import ToolTestDialog from '@/components/settings/ToolTestDialog.vue';
 import McpManagerDialog from '@/components/mcp/McpManagerDialog.vue';
 import McpServerEditDialog from '@/components/mcp/McpServerEditDialog.vue';
+import DefaultModelPicker from '@/components/settings/DefaultModelPicker.vue';
 import {useMainStore} from '@/stores';
 import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog';
 import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
@@ -523,7 +539,7 @@ const builtinToolTemplates = [
 	{
 		name: 'imagegen',
 		display_name: 'Image Generation',
-		description: 'Generate and edit images using OpenAI, Replicate, or Google APIs',
+		description: 'Generate and edit images using an admin-selected provider model',
 		source_kind: 'BUILTIN',
 		icon: Sparkles,
 		source_config: {builtin_id: 'imagegen'},
@@ -566,20 +582,9 @@ const builtinToolTemplates = [
 		],
 		settings_schema: {
 			type: 'object',
-			required: ['api_key', 'provider'],
+			required: ['image_model_id'],
 			properties: {
-				api_key: {type: 'string', title: 'API Key', secret: true, description: 'API key for the selected provider'},
-				provider: {
-					type: 'string',
-					title: 'Provider',
-					enum: ['openai', 'replicate', 'google'],
-					description: 'Image generation provider to use',
-				},
-				model: {
-					type: 'string',
-					title: 'Model',
-					description: 'Model to use (optional, defaults: dall-e-3, flux-schnell, imagen-3)',
-				},
+				image_model_id: {type: 'string', title: 'Image model', format: 'model-picker', description: 'Select an enabled image model'},
 			},
 		},
 	},
@@ -680,6 +685,17 @@ const settingsFields = computed(() => {
 	if (!settingsTool.value?.settings_schema?.properties) return {};
 	return settingsTool.value.settings_schema.properties;
 });
+
+const isImagegenSettings = computed(() => settingsTool.value?.source_config?.builtin_id === 'imagegen');
+
+function translatedOrFallback(key: string, fallback: string) {
+	const translation = store.getTranslation(key);
+	return translation === key ? fallback : translation;
+}
+
+const imageModelTitle = computed(() => translatedOrFallback('settings.tools.image_model_title', store.getTranslation('settings.tools.settings')));
+const imageModelDescription = computed(() => translatedOrFallback('settings.tools.image_model_description', ''));
+const imageModelPlaceholder = computed(() => translatedOrFallback('settings.tools.image_model_placeholder', store.getTranslation('settings.tools.select_placeholder')));
 
 async function handleWasmUpload(event: Event) {
 	const target = event.target as HTMLInputElement;

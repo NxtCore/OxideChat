@@ -2,9 +2,10 @@ import type {ModelList, PaginatedResponse, ProviderTab} from '~/types/chat';
 
 export type ModelFilter = 'all' | 'favorites' | string;
 
-export function useModelPicker(options: {endpoint?: string} = {}) {
+export function useModelPicker(options: {endpoint?: string; providerEndpoint?: string} = {}) {
 	const {$customFetch} = useNuxtApp();
 	const endpoint = options.endpoint ?? '/api/v1/models';
+	const providerEndpoint = options.providerEndpoint ?? '/api/v1/providers';
 
 	const models = ref<ModelList[]>([]);
 	const providers = ref<ProviderTab[]>([]);
@@ -38,7 +39,7 @@ export function useModelPicker(options: {endpoint?: string} = {}) {
 
 	async function loadProviders() {
 		try {
-			const res = await $customFetch<ProviderTab[]>('/api/v1/providers');
+			const res = await $customFetch<ProviderTab[]>(providerEndpoint);
 			providers.value = res ?? [];
 		} catch (e) {
 			console.error('Failed to fetch model providers:', e);

@@ -78,6 +78,31 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 	ResponseBuilder::new(ResponseBody::Json(models)).build()
 }
 
+pub async fn list_image_models(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ModelListParams>) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+	if !user.has_permission(&state.db, ADMIN_MODELS_VIEW).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	match Model::list_image_models_for_admin(
+		&state.db,
+		params.page.unwrap_or(1),
+		params.size.unwrap_or(0),
+		params.query,
+		params.provider_id,
+	)
+	.await
+	{
+		Ok(models) => ResponseBuilder::new(ResponseBody::Json(models)).build(),
+		Err(error) => {
+			eprintln!("[ADMIN] Failed to list image models: {error}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+	}
+}
+
 /// GET /api/v1/admin/models/:id
 pub async fn get_model(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
 	let user = match get_current_user(&state.db, &cookies).await {
@@ -99,6 +124,23 @@ pub async fn get_model(State(state): State<Arc<JobState>>, cookies: Cookies, Pat
 	};
 
 	ResponseBuilder::new(ResponseBody::Json(row)).build()
+}
+
+pub async fn list_image_model_providers(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
+	let user = match get_current_user(&state.db, &cookies).await {
+		Some(user) => user,
+		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+	};
+	if !user.has_permission(&state.db, ADMIN_MODELS_VIEW).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+	match Model::list_image_providers_for_admin(&state.db).await {
+		Ok(providers) => ResponseBuilder::new(ResponseBody::Json(providers)).build(),
+		Err(error) => {
+			eprintln!("[ADMIN] Failed to list image-model providers: {error}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+	}
 }
 
 pub async fn get_model_pricing(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {

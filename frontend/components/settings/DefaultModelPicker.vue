@@ -3,7 +3,7 @@
 		<PopoverTrigger as-child>
 			<button
 				:disabled="disabled"
-				class="flex items-center gap-2 px-3 py-2 rounded-md border border-input bg-background hover:bg-accent transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed w-full max-w-sm"
+				class="flex w-full items-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				<template v-if="selectedModel">
 					<img v-if="selectedModel.icon" :src="selectedModel.icon" class="h-4 w-4 rounded object-cover shrink-0" />
@@ -59,7 +59,7 @@
 								v-for="model in pickerModels"
 								:key="model.id"
 								class="px-3 py-2 hover:bg-accent/50 cursor-pointer transition-colors border-b border-border/50 last:border-0"
-								:class="model.model_id === modelValue ? 'bg-accent/30' : ''"
+				:class="modelValueFor(model) === modelValue ? 'bg-accent/30' : ''"
 								@click="selectModel(model)"
 							>
 								<div class="flex items-start gap-3">
@@ -81,7 +81,7 @@
 										<p class="text-xs text-muted-foreground mt-0.5 truncate">{{ model.model_id }}</p>
 									</div>
 
-									<Check v-if="model.model_id === modelValue" class="h-4 w-4 shrink-0 text-primary mt-0.5" />
+							<Check v-if="modelValueFor(model) === modelValue" class="h-4 w-4 shrink-0 text-primary mt-0.5" />
 								</div>
 							</div>
 
@@ -136,12 +136,18 @@ import type {ModelList} from '~/types/chat';
 const props = withDefaults(defineProps<{
 	modelValue: string | null;
 	endpoint?: string;
+	providerEndpoint?: string;
+	selectedModelEndpoint?: string;
 	disabled?: boolean;
 	placeholder?: string;
+	valueMode?: 'model_id' | 'uuid';
 }>(), {
 	endpoint: '/api/v1/models',
+	providerEndpoint: undefined,
+	selectedModelEndpoint: undefined,
 	disabled: false,
 	placeholder: undefined,
+	valueMode: 'model_id',
 });
 
 const emit = defineEmits<{
@@ -166,20 +172,41 @@ const {
 	onSearchInput: pickerOnSearch,
 	selectFilter: pickerSelectFilter,
 	init: pickerInit,
-} = useModelPicker({endpoint: props.endpoint});
+} = useModelPicker({endpoint: props.endpoint, providerEndpoint: props.providerEndpoint});
 
 const scrollContainer = ref<HTMLElement | null>(null);
 const sentinel = ref<HTMLElement | null>(null);
 let observer: IntersectionObserver | null = null;
+const selectedModel = ref<ModelList | null>(null);
 
-const selectedModel = computed<ModelList | null>(() => {
-	if (!props.modelValue) return null;
-	return pickerModels.value.find(m => m.model_id === props.modelValue) ?? null;
-});
+watch(
+	() => props.modelValue,
+	async value => {
+		if (!value) {
+			selectedModel.value = null;
+			return;
+		}
+		const loaded = pickerModels.value.find(model => modelValueFor(model) === value);
+		if (loaded) {
+			selectedModel.value = loaded;
+			return;
+		}
+		if (props.valueMode !== 'uuid' || !props.selectedModelEndpoint) return;
+		try {
+			const {$customFetch} = useNuxtApp();
+			const model = await $customFetch<ModelList>(`${props.selectedModelEndpoint}/${value}`);
+			if (props.modelValue === value) selectedModel.value = model;
+		} catch {
+			if (props.modelValue === value) selectedModel.value = null;
+		}
+	},
+	{immediate: true},
+);
 
 watch(isOpen, async open => {
 	if (open) {
 		await pickerInit();
+		if (props.modelValue) selectedModel.value = pickerModels.value.find(model => modelValueFor(model) === props.modelValue) ?? selectedModel.value;
 		setupObserver();
 	} else {
 		teardownObserver();
@@ -210,7 +237,11 @@ function teardownObserver() {
 onUnmounted(teardownObserver);
 
 function selectModel(model: ModelList | null) {
-	emit('update:modelValue', model?.model_id ?? null);
+	emit('update:modelValue', model ? modelValueFor(model) : null);
 	isOpen.value = false;
+}
+
+function modelValueFor(model: ModelList) {
+	return props.valueMode === 'uuid' ? model.id : model.model_id;
 }
 </script>

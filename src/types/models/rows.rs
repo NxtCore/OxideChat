@@ -23,6 +23,7 @@ pub(super) struct ModelListPublicRow {
 	pub is_favorite: bool,
 }
 
+#[derive(sqlx::FromRow)]
 pub(super) struct ModelListAdminRow {
 	pub id: Uuid,
 	pub model_id: String,
