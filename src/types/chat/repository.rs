@@ -353,15 +353,16 @@ impl Message {
 		let message = sqlx::query_as::<_, Message>(
 			r#"
 			INSERT INTO messages (
-				chat_id, role, content, reasoning_content,
+				chat_id, role, content, content_parts, reasoning_content,
 				model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork
 			)
-			VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
+			VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, TRUE)
 			RETURNING *
 			"#,
 		)
 		.bind(params.chat_id)
 		.bind(params.content)
+		.bind(params.content_parts)
 		.bind(params.reasoning_content)
 		.bind(params.model_id)
 		.bind(sqlx::types::Json(params.reasoning_details))

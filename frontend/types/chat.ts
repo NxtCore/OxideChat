@@ -135,7 +135,7 @@ export interface ChatMessage {
 	reasoning_content: string | null;
 	model_id: string | null;
 	model_key: string | null;
-	content_parts?: Array<{type: string; text?: string; image_id?: string}> | null;
+	content_parts?: Array<{type: string; text?: string; image_id?: string; id?: string; name?: string; arguments?: string; tool_call_id?: string}> | null;
 	cost_details: {
 		input: string | null;
 		output: string | null;

@@ -212,6 +212,7 @@ pub struct StreamingUserMessageCreate<'a> {
 pub struct StreamingAssistantMessageCreate<'a> {
 	pub chat_id: &'a Uuid,
 	pub content: &'a str,
+	pub content_parts: Option<&'a serde_json::Value>,
 	pub reasoning_content: Option<&'a str>,
 	pub model_id: &'a Uuid,
 	pub reasoning_details: &'a ReasoningDetails,

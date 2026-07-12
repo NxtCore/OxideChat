@@ -34,6 +34,30 @@ pub async fn start_job_scheduler(state: Arc<super::JobState>) {
 	}
 }
 
+/// Sync models for every enabled system provider once.
+pub async fn sync_provider_models_once(state: &super::JobState) {
+	match Provider::list_enabled_system(&state.db).await {
+		Ok(providers) => {
+			for provider in providers {
+				match sync_provider_models(&state.db, &provider).await {
+					Ok(summary) => {
+						println!(
+							"[JOBS] Synced provider '{}': +{}/~{}/-{} models",
+							provider.name, summary.models_added, summary.models_updated, summary.models_removed
+						);
+					}
+					Err(e) => {
+						eprintln!("[JOBS] Failed to sync provider '{}': {e}", provider.name);
+					}
+				}
+			}
+		}
+		Err(e) => {
+			eprintln!("[JOBS] Failed to list providers for sync: {e}");
+		}
+	}
+}
+
 /// Periodically close idle pooled MCP clients and refresh system server health.
 ///
 /// Reaping frees idle `stdio` subprocesses and stale remote connections while
@@ -101,26 +125,7 @@ async fn provider_sync_job(state: Arc<super::JobState>) {
 	println!("[JOBS] Provider model sync job started");
 
 	loop {
-		match Provider::list_enabled_system(&state.db).await {
-			Ok(providers) => {
-				for provider in providers {
-					match sync_provider_models(&state.db, &provider).await {
-						Ok(summary) => {
-							println!(
-								"[JOBS] Synced provider '{}': +{}/~{}/-{} models",
-								provider.name, summary.models_added, summary.models_updated, summary.models_removed
-							);
-						}
-						Err(e) => {
-							eprintln!("[JOBS] Failed to sync provider '{}': {e}", provider.name);
-						}
-					}
-				}
-			}
-			Err(e) => {
-				eprintln!("[JOBS] Failed to list providers for sync: {e}");
-			}
-		}
 		tokio::time::sleep(Duration::from_secs(PROVIDER_SYNC_INTERVAL_SECS)).await;
+		sync_provider_models_once(&state).await;
 	}
 }

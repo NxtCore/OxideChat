@@ -11,7 +11,7 @@
 
 		<div class="flex flex-1 flex-col gap-2" :class="isUser ? 'items-end' : 'items-start'">
 			<div
-				v-if="!isUser && message.reasoning_content"
+				v-if="!isUser && !hasInterleavedParts && message.reasoning_content"
 				class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none"
 				@click="showReasoning = !showReasoning"
 			>
@@ -21,7 +21,7 @@
 			</div>
 
 			<Transition name="expand">
-				<div v-if="showReasoning && (message.reasoning_content || isStreamingReasoning)" class="w-full max-w-3xl rounded-xl bg-muted/50 border p-4">
+				<div v-if="!hasInterleavedParts && showReasoning && (message.reasoning_content || isStreamingReasoning)" class="w-full max-w-3xl rounded-xl bg-muted/50 border p-4">
 					<div class="prose prose-sm dark:prose-invert max-w-none opacity-80" v-html="renderedReasoning" @click="handleCodeBlockClick" />
 					<div v-if="isStreamingReasoning && !message.reasoning_content" class="flex items-center gap-1 py-1">
 						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" />
@@ -31,7 +31,53 @@
 				</div>
 			</Transition>
 
-			<div v-if="!isUser && message.tool_calls && message.tool_calls.length > 0" class="flex flex-col gap-2 mt-2 w-full max-w-3xl">
+			<div v-if="!isUser && hasInterleavedParts" class="flex flex-col gap-2 mt-2 w-full max-w-3xl">
+				<template v-for="(part, idx) in orderedParts" :key="idx">
+					<div v-if="part.type === 'reasoning'" class="w-full max-w-3xl">
+						<div
+							class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none"
+							@click="toggleReasoning(idx)"
+						>
+							<Brain class="h-3.5 w-3.5 fill-current" />
+							<span class="text-[10px] font-bold uppercase tracking-widest">{{ store.getTranslation('chat.message_item.reasoning') }}</span>
+							<ChevronDown class="h-3 w-3 transition-transform" :class="isReasoningOpen(idx) ? 'rotate-180' : ''" />
+						</div>
+						<Transition name="expand">
+							<div v-if="isReasoningOpen(idx)" class="mt-2 rounded-xl bg-muted/50 border p-4">
+								<div class="prose prose-sm dark:prose-invert max-w-none opacity-80" v-html="part.html" @click="handleCodeBlockClick" />
+							</div>
+						</Transition>
+					</div>
+					<div
+						v-else-if="part.type === 'text'"
+						class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl"
+						v-html="part.html"
+						@click="handleCodeBlockClick"
+					/>
+					<ToolExecutionDisplay
+						v-else-if="part.type === 'tool_call' && part.tool"
+						:id="part.tool.tool_call_id"
+						:name="part.tool.tool_name"
+						:args="part.tool.input_args"
+						:output="part.tool.output"
+						:error="part.tool.error || undefined"
+						:is-executing="!part.tool.output && !part.tool.error"
+					/>
+					<div
+						v-else-if="part.type === 'image'"
+						class="w-fit max-w-full overflow-hidden rounded-lg border border-border cursor-pointer hover:opacity-90 transition-opacity"
+						@click="openImagePreview(part.url, `${part.imageId}.png`)"
+					>
+						<img
+							:src="part.url"
+							class="max-h-96 max-w-full object-contain"
+							:alt="store.getTranslation('chat.tool_execution.generated_image')"
+						/>
+					</div>
+				</template>
+			</div>
+
+			<div v-else-if="!isUser && message.tool_calls && message.tool_calls.length > 0" class="flex flex-col gap-2 mt-2 w-full max-w-3xl">
 				<ToolExecutionDisplay
 					v-for="tool in message.tool_calls"
 					:key="tool.tool_call_id"
@@ -148,13 +194,13 @@
 
 			<!-- Assistant message content -->
 			<div
-				v-else-if="!isUser && (message.content || !isStreaming)"
+				v-else-if="!isUser && !hasInterleavedParts && (message.content || !isStreaming)"
 				class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl"
 				v-html="renderedContent"
 				@click="handleCodeBlockClick"
 			/>
 
-			<div v-else-if="!isUser && isStreaming && !message.content" class="flex items-center gap-1 py-2">
+			<div v-else-if="!isUser && !hasInterleavedParts && isStreaming && !message.content" class="flex items-center gap-1 py-2">
 				<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" />
 				<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.15s" />
 				<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.3s" />
@@ -280,6 +326,49 @@ const renderedContent = computed(() => {
 	}
 	return renderComplete(props.message.content);
 });
+
+const hasInterleavedParts = computed(() => {
+	if (isUser.value) return false;
+	const parts = props.message.content_parts;
+	return Array.isArray(parts) && parts.some(p => p.type === 'tool_call');
+});
+
+const orderedParts = computed(() => {
+	const parts = props.message.content_parts;
+	if (!Array.isArray(parts)) return [];
+	return parts.filter(part => part.type !== 'tool_result').map(part => {
+		if (part.type === 'tool_call') {
+			const tool = props.message.tool_calls?.find(tc => tc.tool_call_id === part.id);
+			return {type: 'tool_call' as const, tool};
+		}
+		if (part.type === 'image' && part.image_id) {
+			return {
+				type: 'image' as const,
+				imageId: part.image_id,
+				url: `/api/v1/images/${part.image_id}`,
+			};
+		}
+		if (part.type === 'reasoning') {
+			const text = part.text || '';
+			const html = isStreaming.value ? renderStreaming(text) : renderComplete(text);
+			return {type: 'reasoning' as const, html};
+		}
+		const text = part.text || '';
+		const html = isStreaming.value ? renderStreaming(text) : renderComplete(text);
+		return {type: 'text' as const, html};
+	});
+});
+
+const reasoningToggles = ref<Record<number, boolean>>({});
+
+function isReasoningOpen(idx: number): boolean {
+	if (idx in reasoningToggles.value) return reasoningToggles.value[idx];
+	return isStreaming.value && idx === orderedParts.value.length - 1;
+}
+
+function toggleReasoning(idx: number) {
+	reasoningToggles.value[idx] = !isReasoningOpen(idx);
+}
 
 const renderedReasoning = computed(() => {
 	if (!props.message.reasoning_content) return '';

@@ -141,7 +141,7 @@ impl Tool {
 		sqlx::query_as::<_, Tool>(
 			r#"
 			SELECT id, owner_id, name, display_name, description, icon, source_kind,
-			       source_config, input_schema, settings_schema, is_enabled, created_at, updated_at
+			       source_config, input_schema, settings_schema, is_enabled, system_prompt, created_at, updated_at
 			FROM tools
 			WHERE id = ANY($1) AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)
 			"#,
@@ -158,7 +158,7 @@ impl Tool {
 		sqlx::query_as::<_, Tool>(
 			r#"
 			SELECT id, owner_id, name, display_name, description, icon, source_kind,
-			       source_config, input_schema, settings_schema, is_enabled, created_at, updated_at
+			       source_config, input_schema, settings_schema, is_enabled, system_prompt, created_at, updated_at
 			FROM tools
 			WHERE name = $1 AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)
 			ORDER BY owner_id NULLS LAST
@@ -189,7 +189,7 @@ impl Tool {
 		sqlx::query_as::<_, Tool>(
 			r#"
 			SELECT id, owner_id, name, display_name, description, icon, source_kind,
-			       source_config, input_schema, settings_schema, is_enabled, created_at, updated_at
+			       source_config, input_schema, settings_schema, is_enabled, system_prompt, created_at, updated_at
 			FROM tools
 			WHERE is_enabled = true AND (owner_id = $1 OR owner_id IS NULL)
 			ORDER BY created_at DESC
@@ -628,7 +628,7 @@ impl McpServer {
 				INSERT INTO tools (owner_id, name, display_name, description, icon,
 				                   source_kind, source_config, input_schema, settings_schema, is_enabled)
 				VALUES ($1, $2, $3, $4, NULL, 'MCP', $5, $6, '{}'::jsonb, true)
-				RETURNING id, owner_id, name, display_name, description, icon, source_kind, source_config, input_schema, settings_schema, is_enabled, created_at, updated_at
+				RETURNING id, owner_id, name, display_name, description, icon, source_kind, source_config, input_schema, settings_schema, is_enabled, system_prompt, created_at, updated_at
 				"#,
 			)
 			.bind(owner_id)

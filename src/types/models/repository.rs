@@ -21,7 +21,6 @@ impl Model {
 			WHERE p.is_enabled = true
 			  AND p.kind IN ('OPENAI', 'OPENROUTER', 'GOOGLE')
 			  AND m.is_enabled = true
-			  AND COALESCE(m.capabilities, '[]'::jsonb) @> '["IMAGE_GENERATION"]'::jsonb
 			  AND COALESCE(m.output_modalities, '[]'::jsonb) @> '["IMAGE"]'::jsonb
 			ORDER BY p.name
 			"#,
@@ -55,7 +54,6 @@ impl Model {
 			FROM models m
 			JOIN providers p ON p.id = m.provider_id
 			WHERE m.is_enabled = true AND p.is_enabled = true
-			  AND COALESCE(m.capabilities, '[]'::jsonb) @> '["IMAGE_GENERATION"]'::jsonb
 			  AND COALESCE(m.output_modalities, '[]'::jsonb) @> '["IMAGE"]'::jsonb
 			  AND ($3::text IS NULL OR m.display_name ILIKE $3 ESCAPE '\\' OR m.model_id ILIKE $3 ESCAPE '\\' OR p.name ILIKE $3 ESCAPE '\\')
 			  AND ($4::uuid IS NULL OR p.id = $4)

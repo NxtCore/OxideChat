@@ -239,6 +239,17 @@
 								<Input v-model="mcpConfig.tool_name" :placeholder="store.getTranslation('settings.tools.tool_name_placeholder')" />
 							</div>
 
+							<div class="space-y-2 pt-2 border-t border-border">
+								<Label for="tool-system-prompt" class="text-xs text-muted-foreground">{{ store.getTranslation('settings.tools.system_prompt') }}</Label>
+								<Textarea
+									id="tool-system-prompt"
+									v-model="toolForm.system_prompt"
+									:placeholder="store.getTranslation('settings.tools.system_prompt_placeholder')"
+									rows="3"
+								/>
+								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.tools.system_prompt_hint') }}</p>
+							</div>
+
 							<div v-if="!isBuiltinTool" class="space-y-2 pt-2 border-t border-border">
 								<Label class="text-xs text-muted-foreground">{{ store.getTranslation('settings.tools.settings_schema') }}</Label>
 								<SchemaBuilder v-model="toolForm.settings_schema_json" :is-settings="true" />
@@ -430,6 +441,7 @@ interface Tool {
 	functions: ToolFunction[];
 	settings_schema?: any;
 	is_enabled: boolean;
+	system_prompt?: string | null;
 	has_user_settings?: boolean;
 	mcp_server_id?: string | null;
 	mcp_server_name?: string | null;
@@ -560,8 +572,8 @@ const builtinToolTemplates = [
 						quality: {
 							type: 'string',
 							description: 'Image quality',
-							enum: ['standard', 'hd'],
-							default: 'standard',
+							enum: ['auto', 'low', 'medium', 'high'],
+							default: 'auto',
 						},
 					},
 					required: ['prompt'],
@@ -569,14 +581,15 @@ const builtinToolTemplates = [
 			},
 			{
 				name: 'edit',
-				description: 'Edit an existing image using a text prompt',
+				description: 'Edit a previously generated image using a text prompt',
 				input_schema: {
 					type: 'object',
 					properties: {
-						image_url: {type: 'string', description: 'URL of the image to edit'},
+						image_id: {type: 'string', description: 'The image_id of a previously generated image to edit (shown in the conversation). Preferred over image_url.'},
+						image_url: {type: 'string', description: 'URL of an external image to edit. Only use when no image_id is available.'},
 						prompt: {type: 'string', description: 'The text prompt describing the desired edit'},
 					},
-					required: ['image_url', 'prompt'],
+					required: ['prompt'],
 				},
 			},
 		],
@@ -653,6 +666,7 @@ const toolForm = reactive({
 	functions: [] as {id?: string; name: string; description: string; input_schema_json: string; entrypoint: string}[],
 	settings_schema_json: '',
 	is_enabled: true,
+	system_prompt: '',
 });
 
 const httpConfig = reactive({
@@ -780,6 +794,7 @@ function openCreateDialog() {
 		],
 		settings_schema_json: '',
 		is_enabled: true,
+		system_prompt: '',
 	});
 	Object.assign(httpConfig, {method: 'GET', url: '', headers_json: '{}', body_template: ''});
 	activeFunctionIdx.value = 0;
@@ -852,6 +867,7 @@ function openEditDialog(tool: Tool) {
 		functions: funcs,
 		settings_schema_json: tool.settings_schema ? JSON.stringify(tool.settings_schema, null, 2) : '',
 		is_enabled: tool.is_enabled,
+		system_prompt: tool.system_prompt || '',
 	});
 
 	if (tool.source_kind === 'HTTP' && tool.source_config) {
@@ -950,6 +966,7 @@ async function saveTool() {
 			functions,
 			settings_schema: toolForm.settings_schema_json ? JSON.parse(toolForm.settings_schema_json) : null,
 			is_enabled: toolForm.is_enabled,
+			system_prompt: toolForm.system_prompt?.trim() ? toolForm.system_prompt.trim() : null,
 		};
 
 		if (editingTool.value) {

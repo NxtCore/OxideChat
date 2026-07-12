@@ -45,6 +45,8 @@ futures-util = "0.3.31"
 async-stream = "0.3.6"
 tokio-util = "0.7.17"
 extism = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.10"
 base64 = "0.22"
 thiserror = "2"
@@ -80,3 +82,6 @@ multiple_crate_versions = "allow"
 [lints.rust]
 unsafe_code = "warn"
 missing_docs = "allow"
+
+[patch.crates-io]
+omniference = { path = "../omniference" }

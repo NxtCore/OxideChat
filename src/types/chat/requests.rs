@@ -141,7 +141,12 @@ pub struct BranchFromMessageRequest {
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum MessagePart {
 	Text { text: String },
+	Reasoning { text: String },
 	Image { image_id: String },
+	#[serde(rename = "tool_call")]
+	ToolCall { id: String, name: String, arguments: String },
+	#[serde(rename = "tool_result")]
+	ToolResult { tool_call_id: String },
 }
 
 #[derive(Debug, Deserialize)]

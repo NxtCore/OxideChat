@@ -8,7 +8,7 @@ use crate::types::models::{Model, ModelPricing};
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
 use crate::types::{
 	Budget, Chat, ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, StreamingAssistantMessageCreate,
-	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolFunction, UsageEvent, UsageEventRecord, UserToolSettings,
+	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolExecutionResponse, ToolFunction, UsageEvent, UsageEventRecord, UserToolSettings,
 };
 use crate::types::{CostDetails, JobState};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
@@ -73,7 +73,7 @@ fn interpolate_system_prompt(template: &str, user: &crate::types::User, model: &
 /// 1. Request-level (highest priority)
 /// 2. model_configs (user preferences)
 /// 3. models table (defaults)
-fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>, model: &Model) -> Sampling {
+fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>) -> Sampling {
 	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.0.clone()).ok());
 
 	macro_rules! priority_field {
@@ -91,8 +91,7 @@ fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_confi
 		max_tokens: request_sampling
 			.and_then(|s| s.max_tokens)
 			.or_else(|| config_sampling.as_ref().and_then(|s| s.max_tokens))
-			.or_else(|| model_config.and_then(|mc| mc.max_output_tokens.map(|t| t as u32)))
-			.or_else(|| model.max_tokens.map(|t| t as u32)),
+			.or_else(|| model_config.and_then(|mc| mc.max_output_tokens.map(|t| t as u32))),
 		presence_penalty: priority_field!(presence_penalty),
 		frequency_penalty: priority_field!(frequency_penalty),
 		stop: request_sampling
@@ -140,20 +139,20 @@ fn merge_reasoning_with_priority(
 	}
 }
 
-async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[String]) -> (Vec<ToolSpec>, ToolChoice) {
+async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[String]) -> (Vec<ToolSpec>, ToolChoice, Vec<String>) {
 	if enabled_tool_ids.is_empty() {
-		return (vec![], ToolChoice::None);
+		return (vec![], ToolChoice::None, vec![]);
 	}
 
 	let tool_uuids: Vec<Uuid> = enabled_tool_ids.iter().filter_map(|id| Uuid::parse_str(id).ok()).collect();
 	if tool_uuids.is_empty() {
-		return (vec![], ToolChoice::None);
+		return (vec![], ToolChoice::None, vec![]);
 	}
 
 	let tools = Tool::find_enabled_for_user(db, &tool_uuids, &user_id).await.unwrap_or_default();
 
 	if tools.is_empty() {
-		return (vec![], ToolChoice::None);
+		return (vec![], ToolChoice::None, vec![]);
 	}
 
 	let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
@@ -165,15 +164,20 @@ async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[Str
 	}
 
 	let mut tool_specs: Vec<ToolSpec> = vec![];
+	let mut system_prompts: Vec<String> = vec![];
 	for tool in tools {
+		if let Some(prompt) = tool.system_prompt.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+			let label = if tool.display_name.trim().is_empty() { tool.name.as_str() } else { tool.display_name.trim() };
+			system_prompts.push(format!("Instructions for the \"{label}\" tool:\n{prompt}"));
+		}
 		let funcs = functions_by_tool.get(&tool.id).map(|v| v.as_slice()).unwrap_or(&[]);
 		tool_specs.extend(tool.to_tool_specs(funcs));
 	}
 
 	if tool_specs.is_empty() {
-		(vec![], ToolChoice::None)
+		(vec![], ToolChoice::None, system_prompts)
 	} else {
-		(tool_specs, ToolChoice::Auto)
+		(tool_specs, ToolChoice::Auto, system_prompts)
 	}
 }
 
@@ -352,42 +356,130 @@ async fn execute_mcp_tool(
 	}
 }
 
-async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>) -> Vec<OmniMessage> {
+/// Hydrate a stored image into content parts. `generated` distinguishes an assistant-
+/// generated image (gets an editable `image_id` handle) from a user-uploaded one.
+async fn hydrate_image(db: &sqlx::PgPool, image_id: &str, vision: bool, generated: bool) -> Vec<ContentPart> {
+	let Ok(uuid) = uuid::Uuid::parse_str(image_id) else {
+		return Vec::new();
+	};
+	let mut parts = Vec::new();
+	if vision {
+		if let Ok(Some((data, mime))) = crate::utils::images::get_image(db, uuid).await {
+			use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+			let data_uri = format!("data:{};base64,{}", mime, BASE64.encode(&data));
+			parts.push(ContentPart::ImageUrl { url: data_uri, mime: Some(mime) });
+		}
+		if generated {
+			parts.push(ContentPart::Text(format!(
+				"[The image above was generated earlier (image_id: {image_id}) and is already displayed to the user. To modify it, call imagegen_edit with image_id \"{image_id}\".]"
+			)));
+		}
+	} else if generated {
+		let caption = crate::utils::images::image_caption(db, uuid).await.ok().flatten();
+		let text = match caption {
+			Some(c) if !c.trim().is_empty() => format!(
+				"[An image was generated earlier (image_id: {image_id}) from the prompt: \"{}\". It is already displayed to the user. To modify it, call imagegen_edit with image_id \"{image_id}\".]",
+				c.trim()
+			),
+			_ => format!("[An image was generated earlier (image_id: {image_id}) and is already displayed to the user. To modify it, call imagegen_edit with image_id \"{image_id}\".]"),
+		};
+		parts.push(ContentPart::Text(text));
+	} else {
+		parts.push(ContentPart::Text(format!("[User-provided image {image_id} is not visible to this model.]")));
+	}
+	parts
+}
+
+/// Build the `tool` role message for a given tool call, pulling its result from the
+/// stored executions (or a placeholder if it was never recorded).
+fn tool_message(execs: Option<&Vec<ToolExecutionResponse>>, call_names: &HashMap<String, String>, call_id: &str) -> OmniMessage {
+	let exec = execs.and_then(|list| list.iter().find(|e| e.tool_call_id == call_id));
+	let content = match exec {
+		Some(e) if e.error.is_some() => format!("Error: {}", e.error.as_deref().unwrap_or_default()),
+		Some(e) => match &e.output {
+			Some(output) => serde_json::to_string(output).unwrap_or_else(|_| output.to_string()),
+			None => "{}".to_string(),
+		},
+		None => "{\"error\":\"tool result was not recorded\"}".to_string(),
+	};
+	let name = call_names.get(call_id).map(String::as_str).unwrap_or("tool");
+	OmniMessage {
+		role: Role::Tool,
+		parts: vec![ContentPart::Text(content)],
+		name: Some(format!("{name}:{call_id}")),
+	}
+}
+
+async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>, vision: bool) -> Vec<OmniMessage> {
+	let assistant_ids: Vec<uuid::Uuid> = messages.iter().filter(|m| m.role == "assistant").map(|m| m.id).collect();
+	let executions = Message::tool_executions_for_messages(db, &assistant_ids).await.unwrap_or_default();
+
 	let mut result = Vec::with_capacity(messages.len());
 	for m in messages.into_iter().filter(|m| m.role == "user" || m.role == "assistant") {
-		let parts = if let Some(content_parts_json) = m.content_parts {
-			if let Ok(stored_parts) = serde_json::from_value::<Vec<MessagePart>>(content_parts_json) {
-				let mut omni_parts = Vec::new();
-				for part in stored_parts {
-					match part {
-						MessagePart::Text { text } => {
-							omni_parts.push(ContentPart::Text(text));
-						}
-						MessagePart::Image { image_id } => {
-							if let Ok(uuid) = uuid::Uuid::parse_str(&image_id) {
-								if let Ok(Some((data, mime))) = crate::utils::images::get_image(db, uuid).await {
-									use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-									let b64 = BASE64.encode(&data);
-									let data_uri = format!("data:{};base64,{}", mime, b64);
-									omni_parts.push(ContentPart::ImageUrl { url: data_uri, mime: Some(mime) });
-								}
-							}
-						}
-					}
-				}
-				omni_parts
-			} else {
-				vec![ContentPart::Text(m.content)]
-			}
-		} else {
-			vec![ContentPart::Text(m.content)]
+		let message_id = m.id;
+		let is_assistant = m.role == "assistant";
+
+		let Some(stored_parts) = m.content_parts.and_then(|json| serde_json::from_value::<Vec<MessagePart>>(json).ok()) else {
+			result.push(OmniMessage {
+				role: if is_assistant { Role::Assistant } else { Role::User },
+				parts: vec![ContentPart::Text(m.content)],
+				name: None,
+			});
+			continue;
 		};
 
-		result.push(OmniMessage {
-			role: if m.role == "user" { Role::User } else { Role::Assistant },
-			parts,
-			name: None,
-		});
+		if !is_assistant {
+			let mut parts = Vec::new();
+			for part in stored_parts {
+				match part {
+					MessagePart::Text { text } => parts.push(ContentPart::Text(text)),
+					MessagePart::Image { image_id } => parts.extend(hydrate_image(db, &image_id, vision, false).await),
+					_ => {}
+				}
+			}
+			if parts.is_empty() {
+				parts.push(ContentPart::Text(m.content));
+			}
+			result.push(OmniMessage { role: Role::User, parts, name: None });
+			continue;
+		}
+
+		// Assistant turn: walk parts in stored order and flush an assistant message at each
+		// tool-result boundary, so a sequence of retries (call -> error -> call -> success)
+		// replays as separate steps instead of collapsing into one parallel batch.
+		let execs = executions.get(&message_id);
+		let mut call_names: HashMap<String, String> = HashMap::new();
+		let mut unresolved_calls: Vec<String> = Vec::new();
+		let mut buffer: Vec<ContentPart> = Vec::new();
+
+		for part in stored_parts {
+			match part {
+				MessagePart::Text { text } => buffer.push(ContentPart::Text(text)),
+				MessagePart::Reasoning { .. } => {}
+				MessagePart::Image { image_id } => buffer.extend(hydrate_image(db, &image_id, vision, true).await),
+				MessagePart::ToolCall { id, name, arguments } => {
+					call_names.insert(id.clone(), name.clone());
+					unresolved_calls.push(id.clone());
+					buffer.push(ContentPart::ToolCall { id, name, arguments });
+				}
+				MessagePart::ToolResult { tool_call_id } => {
+					if !buffer.is_empty() {
+						result.push(OmniMessage { role: Role::Assistant, parts: std::mem::take(&mut buffer), name: None });
+					}
+					unresolved_calls.retain(|c| c != &tool_call_id);
+					result.push(tool_message(execs, &call_names, &tool_call_id));
+				}
+			}
+		}
+
+		if !buffer.is_empty() {
+			result.push(OmniMessage { role: Role::Assistant, parts: buffer, name: None });
+		}
+		// Legacy messages (saved before tool-result markers) and any call whose result marker
+		// is missing: emit their `tool` messages here so no assistant tool_call is left dangling.
+		for call_id in unresolved_calls {
+			result.push(tool_message(execs, &call_names, &call_id));
+		}
 	}
 	result
 }
@@ -594,7 +686,8 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	};
 
-	let omni_messages = get_omni_messages(&state.db, messages).await;
+	let vision = omni_model.input_modalities.iter().any(|m| matches!(m, omniference::types::Modality::Image));
+	let omni_messages = get_omni_messages(&state.db, messages, vision).await;
 	eprintln!("[STREAM] Messages built");
 	let mut ir = ChatRequestIR::default();
 	ir.model.alias = omni_model.id.clone();
@@ -606,7 +699,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	ir.stream = true;
 	ir.metadata.insert("user_id".to_string(), user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), chat_id.to_string());
-	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), user_model_config.as_ref(), &model);
+	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), user_model_config.as_ref());
 	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, system_model_config.as_ref());
 
 	// Apply the user-picked upstream provider (OpenRouter routing), only when the instance owner
@@ -629,25 +722,31 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	}
 
+	let mut tool_system_prompts: Vec<String> = Vec::new();
+	if let Some(ref enabled_tool_ids) = req.tools_enabled {
+		let (specs, choice, prompts) = resolve_tools(&state.db, user.id, enabled_tool_ids).await;
+		if !specs.is_empty() {
+			ir.tools = specs;
+			ir.tool_choice = choice;
+			tool_system_prompts = prompts;
+		}
+	}
+
+	let mut system_segments: Vec<String> = Vec::new();
 	let system_prompt_text = system_model_config.as_ref().and_then(|mc| mc.system_prompt.as_deref()).unwrap_or("");
 	if !system_prompt_text.is_empty() {
-		let interpolated = interpolate_system_prompt(system_prompt_text, &user, &model);
+		system_segments.push(interpolate_system_prompt(system_prompt_text, &user, &model));
+	}
+	system_segments.extend(tool_system_prompts);
+	if !system_segments.is_empty() {
 		ir.messages.insert(
 			0,
 			OmniMessage {
 				role: Role::System,
-				parts: vec![ContentPart::Text(interpolated)],
+				parts: vec![ContentPart::Text(system_segments.join("\n\n"))],
 				name: None,
 			},
 		);
-	}
-
-	if let Some(ref enabled_tool_ids) = req.tools_enabled {
-		let (specs, choice) = resolve_tools(&state.db, user.id, enabled_tool_ids).await;
-		if !specs.is_empty() {
-			ir.tools = specs;
-			ir.tool_choice = choice;
-		}
 	}
 
 	let omni_messages_for_stream = ir.messages.clone();
@@ -689,6 +788,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	const MAX_ITERATIONS: usize = 10;
 
 	let mut all_tool_executions: Vec<ToolExecutionInternal> = Vec::new();
+	let mut assistant_message_parts: Vec<MessagePart> = Vec::new();
 	let request_settings = stream_request_settings;
 
 	let engine = ai::get();
@@ -715,6 +815,25 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 				base_ir.tools = tool_specs.clone();
 				base_ir.tool_choice = tool_choice.clone();
 
+				for (i, m) in base_ir.messages.iter().enumerate() {
+					let role = match m.role {
+						Role::System => "system",
+						Role::User => "user",
+						Role::Assistant => "assistant",
+						Role::Tool => "tool",
+						Role::Developer => "developer",
+					};
+					let tool_calls: Vec<&str> = m
+						.parts
+						.iter()
+						.filter_map(|p| match p {
+							ContentPart::ToolCall { id, .. } => Some(id.as_str()),
+							_ => None,
+						})
+						.collect();
+					eprintln!("[STREAM] msg[{i}] role={role} name={:?} tool_calls={:?}", m.name, tool_calls);
+				}
+
 				let engine_read = engine.read().await;
 				let stream_result = engine_read.chat(base_ir.clone()).await;
 				drop(engine_read);
@@ -738,6 +857,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 				let mut pending_tool_calls: HashMap<String, (String, String)> = HashMap::new();
 				let mut tool_results: Vec<ToolExecutionInternal> = Vec::new();
 				let mut iteration_content = String::new();
+				let mut iteration_reasoning = String::new();
 				let mut completed_tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
 
 				let mut event_count = 0;
@@ -759,6 +879,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 								reasoning_start = Some(Instant::now());
 							}
 							reasoning_content.push_str(&content);
+							iteration_reasoning.push_str(&content);
 							yield Ok::<_, Infallible>(Event::default().data(
 								serde_json::to_string(&StreamData::ReasoningDelta { content }).unwrap_or_default()
 							));
@@ -917,11 +1038,25 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									}
 								};
 
+									if !iteration_reasoning.is_empty() {
+										assistant_message_parts.push(MessagePart::Reasoning { text: iteration_reasoning.clone() });
+									}
+									if !iteration_content.is_empty() {
+										assistant_message_parts.push(MessagePart::Text { text: iteration_content.clone() });
+									}
+									let has_tool_calls = assistant_message_parts.iter().any(|p| matches!(p, MessagePart::ToolCall { .. }));
+									let content_parts_json = if has_tool_calls {
+										serde_json::to_value(&assistant_message_parts).ok()
+									} else {
+										None
+									};
+
 									let message = Message::create_streaming_assistant(
 										&db,
 										StreamingAssistantMessageCreate {
 											chat_id: &chat_id,
 											content: &full_content,
+											content_parts: content_parts_json.as_ref(),
 											reasoning_content: if reasoning_content.is_empty() { None } else { Some(&reasoning_content) },
 											model_id: &model.id,
 											reasoning_details: &reasoning_details,
@@ -993,14 +1128,23 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 								eprintln!("[STREAM] Continuing agentic loop with {} tool results", tool_results.len());
 
 								let mut assistant_parts: Vec<ContentPart> = Vec::new();
+								if !iteration_reasoning.is_empty() {
+									assistant_message_parts.push(MessagePart::Reasoning { text: iteration_reasoning.clone() });
+								}
 								if !iteration_content.is_empty() {
 									assistant_parts.push(ContentPart::Text(iteration_content.clone()));
+									assistant_message_parts.push(MessagePart::Text { text: iteration_content.clone() });
 								}
 								for (call_id, tool_name, args) in completed_tool_calls.drain(..) {
 									let arguments = match &args {
 										serde_json::Value::String(s) => s.clone(),
 										other => other.to_string(),
 									};
+									assistant_message_parts.push(MessagePart::ToolCall {
+										id: call_id.clone(),
+										name: tool_name.clone(),
+										arguments: arguments.clone(),
+									});
 									assistant_parts.push(ContentPart::ToolCall {
 										id: call_id,
 										name: tool_name,
@@ -1016,17 +1160,26 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 								}
 
 								for exec in tool_results.drain(..) {
+									if matches!(exec.tool_name.as_str(), "imagegen" | "imagegen_generate" | "imagegen_edit")
+										&& exec.error.is_none()
+										&& let Some(image_id) = exec.output.get("image_id").and_then(serde_json::Value::as_str)
+										&& Uuid::parse_str(image_id).is_ok()
+									{
+										assistant_message_parts.push(MessagePart::Image { image_id: image_id.to_string() });
+									}
 									let result_text = if let Some(ref err) = exec.error {
 										format!("Error: {}", err)
 									} else {
 										serde_json::to_string(&exec.output).unwrap_or_else(|_| exec.output.to_string())
 									};
 
+									eprintln!("[STREAM] Tool result -> role=tool name=\"{}:{}\" ({} bytes)", exec.tool_name, exec.call_id, result_text.len());
 									current_messages.push(OmniMessage {
 										role: Role::Tool,
 										parts: vec![ContentPart::Text(result_text)],
-										name: Some(exec.call_id.clone()),
+										name: Some(format!("{}:{}", exec.tool_name, exec.call_id)),
 									});
+									assistant_message_parts.push(MessagePart::ToolResult { tool_call_id: exec.call_id.clone() });
 
 									all_tool_executions.push(exec);
 								}

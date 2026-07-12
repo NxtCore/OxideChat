@@ -55,6 +55,7 @@ definePageMeta({
 const store = useMainStore();
 const route = useRoute();
 const router = useRouter();
+const settingsReturnPath = useState<string>('settings-return-path', () => '/');
 
 const tabs = [
 	{id: 'profile', label: 'settings.tabs.profile', icon: User, permission: 'settings.profile.view'},
@@ -77,7 +78,9 @@ const activeTab = computed(() => {
 });
 
 function goBack() {
-	router.push('/');
+	const returnPath = settingsReturnPath.value;
+	settingsReturnPath.value = '/';
+	router.push(returnPath === '/' || returnPath.startsWith('/chats/') ? returnPath : '/');
 }
 
 onMounted(() => {

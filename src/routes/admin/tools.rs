@@ -139,9 +139,9 @@ pub async fn create_tool(State(state): State<Arc<JobState>>, cookies: Cookies, J
         INSERT INTO tools (
             owner_id, name, display_name, description, icon,
             source_kind, source_config, input_schema, settings_schema,
-            is_enabled
+            is_enabled, system_prompt
         )
-        VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
         "#,
 	)
@@ -154,6 +154,7 @@ pub async fn create_tool(State(state): State<Arc<JobState>>, cookies: Cookies, J
 	.bind(&legacy_schema)
 	.bind(&req.settings_schema)
 	.bind(req.is_enabled)
+	.bind(&req.system_prompt)
 	.fetch_one(&state.db)
 	.await;
 
@@ -250,6 +251,7 @@ pub async fn update_tool(State(state): State<Arc<JobState>>, cookies: Cookies, P
             input_schema = COALESCE($7, input_schema),
             settings_schema = COALESCE($8, settings_schema),
             is_enabled = COALESCE($9, is_enabled),
+            system_prompt = COALESCE($10, system_prompt),
             updated_at = NOW()
         WHERE id = $1 AND owner_id IS NULL
         RETURNING *
@@ -264,6 +266,7 @@ pub async fn update_tool(State(state): State<Arc<JobState>>, cookies: Cookies, P
 	.bind(&req.input_schema)
 	.bind(&req.settings_schema)
 	.bind(req.is_enabled)
+	.bind(&req.system_prompt)
 	.fetch_one(&state.db)
 	.await;
 
@@ -429,8 +432,7 @@ pub async fn set_tool_settings(
 			Ok(Some(provider)) => provider,
 			Ok(None) | Err(_) => return ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
 		};
-		let is_image_model = model.capabilities.0.iter().any(|capability| capability == "IMAGE_GENERATION")
-			&& model.output_modalities.0.iter().any(|modality| modality.eq_ignore_ascii_case("IMAGE"));
+		let is_image_model = model.output_modalities.0.iter().any(|modality| modality.eq_ignore_ascii_case("IMAGE"));
 		if !model.is_enabled || !provider.is_enabled || !is_image_model || !matches!(provider.kind, ProviderKind::Openai | ProviderKind::Openrouter | ProviderKind::Google) {
 			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
 		}

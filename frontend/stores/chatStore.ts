@@ -442,22 +442,22 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
-		setActiveChat(chat: Chat | null) {
+		async setActiveChat(chat: Chat | null) {
 			if (chat) {
 				this.fetchChat(chat.id);
 			} else {
 				this.messages = [];
 				this.setContextTokens(0);
 				this.activeChat = null;
-				this.resetComposerToDefaults();
+				if (this.initialized) await this.resetComposerToDefaults();
 			}
 		},
 
-		resetComposerToDefaults() {
+		async resetComposerToDefaults() {
 			const prefs = useMainStore().preferences;
 			const key = prefs?.effective_default_model_key;
-			const match = key ? this.models.find(m => m.model_id === key) : null;
-			this.setSelectedModel(match || this.models[0] || null);
+			const model = key ? await this.findModelByKey(key) : (this.models[0] ?? null);
+			this.setSelectedModel(model);
 			this.selectedProviderSlug = prefs?.default_provider_slug ?? null;
 			this.providerRoutingMode = 'prefer';
 			this.enabledTools = prefs?.default_tools ? [...prefs.default_tools] : [];
@@ -594,6 +594,7 @@ export const useChatStore = defineStore('chat', {
 					enabled_tools: [...this.enabledTools],
 				},
 				tool_calls: [],
+				content_parts: [],
 				created_at: new Date().toISOString(),
 				parent_id: null,
 				fork_index: 1,
@@ -676,12 +677,28 @@ export const useChatStore = defineStore('chat', {
 										}
 										break;
 									case 'text_delta':
-										if (msg) msg.content += data.content;
+										if (msg) {
+											msg.content += data.content;
+											if (!msg.content_parts) msg.content_parts = [];
+											const lastPart = msg.content_parts[msg.content_parts.length - 1];
+											if (lastPart && lastPart.type === 'text') {
+												lastPart.text = (lastPart.text || '') + data.content;
+											} else {
+												msg.content_parts.push({type: 'text', text: data.content});
+											}
+										}
 										break;
 									case 'reasoning_delta':
 										if (msg) {
 											if (msg.reasoning_content === null) msg.reasoning_content = '';
 											msg.reasoning_content += data.content;
+											if (!msg.content_parts) msg.content_parts = [];
+											const lastReasoningPart = msg.content_parts[msg.content_parts.length - 1];
+											if (lastReasoningPart && lastReasoningPart.type === 'reasoning') {
+												lastReasoningPart.text = (lastReasoningPart.text || '') + data.content;
+											} else {
+												msg.content_parts.push({type: 'reasoning', text: data.content});
+											}
 										}
 										break;
 									case 'tool_call_start':
@@ -692,6 +709,8 @@ export const useChatStore = defineStore('chat', {
 												input_args: '',
 											};
 											msg.tool_calls.push(toolCall as any);
+											if (!msg.content_parts) msg.content_parts = [];
+											msg.content_parts.push({type: 'tool_call', id: data.id, name: data.name});
 										}
 										break;
 									case 'tool_call_delta': {
@@ -704,7 +723,13 @@ export const useChatStore = defineStore('chat', {
 												tool_name: data.name,
 												input_args: data.args_delta,
 											};
-											if (msg) msg.tool_calls.push(newToolCall as any);
+											if (msg) {
+												msg.tool_calls.push(newToolCall as any);
+												if (!msg.content_parts) msg.content_parts = [];
+												if (!msg.content_parts.some(p => p.type === 'tool_call' && p.id === data.id)) {
+													msg.content_parts.push({type: 'tool_call', id: data.id, name: data.name});
+												}
+											}
 										}
 
 										break;
@@ -717,6 +742,18 @@ export const useChatStore = defineStore('chat', {
 										if (toolCall) {
 											toolCall.output = data.output ? JSON.stringify(data.output) : null;
 											toolCall.error = data.error || null;
+										}
+										const imageId = data.output?.image_id;
+										if (
+											msg &&
+											!data.error &&
+											(data.tool_name === 'imagegen' || data.tool_name === 'imagegen_generate') &&
+											typeof imageId === 'string'
+										) {
+											if (!msg.content_parts) msg.content_parts = [];
+											if (!msg.content_parts.some(part => part.type === 'image' && part.image_id === imageId)) {
+												msg.content_parts.push({type: 'image', image_id: imageId});
+											}
 										}
 										break;
 									}
@@ -833,22 +870,11 @@ export const useChatStore = defineStore('chat', {
 			this.modelsLoading = true;
 			try {
 				const {$customFetch} = useNuxtApp();
-				const mainStore = useMainStore();
 				const models = await $customFetch<PaginatedResponse<ModelList>>('/api/v1/models?size=100');
 				this.models = models.items;
 
 				if (!this.selectedModel && this.models.length > 0) {
-					const key = mainStore.preferences?.effective_default_model_key;
-					const match = key ? this.models.find(m => m.model_id === key) : null;
-					this.selectedModel = match || this.models[0] || null;
-
-					const prefs = mainStore.preferences;
-					if (prefs?.default_provider_slug) {
-						this.selectedProviderSlug = prefs.default_provider_slug;
-					}
-					if (prefs?.default_tools?.length) {
-						this.enabledTools = [...prefs.default_tools];
-					}
+					await this.resetComposerToDefaults();
 				}
 			} catch (e) {
 				console.error('Failed to fetch models:', e);
@@ -1083,6 +1109,7 @@ export const useChatStore = defineStore('chat', {
 			await this.fetchChats({workspace_id: this.activeWorkspaceId || undefined});
 			this.applyWorkspaceAccent();
 			await this.fetchModels();
+			if (!this.activeChat) await this.resetComposerToDefaults();
 			this.initialized = true;
 		},
 	},

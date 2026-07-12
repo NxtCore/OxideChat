@@ -32,6 +32,8 @@ dependencies = [
  "tokio-util",
  "tower-cookies",
  "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

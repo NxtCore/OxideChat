@@ -26,6 +26,8 @@ pub struct CreateToolRequest {
 	pub settings_schema: serde_json::Value,
 	#[serde(default = "default_true")]
 	pub is_enabled: bool,
+	#[serde(default)]
+	pub system_prompt: Option<String>,
 }
 
 pub(super) fn default_true() -> bool {
@@ -53,6 +55,7 @@ pub struct UpdateToolRequest {
 	pub delete_function_ids: Option<Vec<Uuid>>,
 	pub settings_schema: Option<serde_json::Value>,
 	pub is_enabled: Option<bool>,
+	pub system_prompt: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

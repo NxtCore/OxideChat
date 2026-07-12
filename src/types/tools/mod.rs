@@ -69,6 +69,7 @@ pub struct Tool {
 	pub input_schema: serde_json::Value,
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
+	pub system_prompt: Option<String>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }
