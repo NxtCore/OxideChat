@@ -2249,6 +2249,7 @@ dependencies = [
 [[package]]
 name = "omniference"
 version = "0.3.0"
+source = "git+https://github.com/Henrik-3/omniference.git?rev=fd69edd438430d68f9b81b5570033b12d33a4fd2#fd69edd438430d68f9b81b5570033b12d33a4fd2"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5241,3 +5242,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "omniference"
+version = "0.3.0"

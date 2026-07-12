@@ -27,7 +27,7 @@ use omniference::{
 	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec},
 };
 use rust_decimal::{Decimal, prelude::FromPrimitive};
-use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
+use std::{collections::{HashMap, HashSet}, convert::Infallible, sync::Arc, time::Instant};
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
@@ -73,7 +73,7 @@ fn interpolate_system_prompt(template: &str, user: &crate::types::User, model: &
 /// 1. Request-level (highest priority)
 /// 2. model_configs (user preferences)
 /// 3. models table (defaults)
-fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>) -> Sampling {
+fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>, model: &Model) -> Sampling {
 	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.0.clone()).ok());
 
 	macro_rules! priority_field {
@@ -91,7 +91,8 @@ fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_confi
 		max_tokens: request_sampling
 			.and_then(|s| s.max_tokens)
 			.or_else(|| config_sampling.as_ref().and_then(|s| s.max_tokens))
-			.or_else(|| model_config.and_then(|mc| mc.max_output_tokens.map(|t| t as u32))),
+			.or_else(|| model_config.and_then(|mc| mc.max_output_tokens.map(|t| t as u32)))
+			.or_else(|| model.max_tokens.map(|tokens| tokens as u32)),
 		presence_penalty: priority_field!(presence_penalty),
 		frequency_penalty: priority_field!(frequency_penalty),
 		stop: request_sampling
@@ -406,11 +407,39 @@ fn tool_message(execs: Option<&Vec<ToolExecutionResponse>>, call_names: &HashMap
 	OmniMessage {
 		role: Role::Tool,
 		parts: vec![ContentPart::Text(content)],
-		name: Some(format!("{name}:{call_id}")),
+		name: Some(tool_message_name(name, call_id)),
 	}
 }
 
+fn tool_message_name(tool_name: &str, call_id: &str) -> String {
+	format!("{tool_name}:{call_id}")
+}
+
 async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>, vision: bool) -> Vec<OmniMessage> {
+	const MAX_HYDRATED_IMAGES: usize = 4;
+	let mut hydrated_image_ids = HashSet::with_capacity(MAX_HYDRATED_IMAGES);
+	if vision {
+		for message in messages.iter().rev() {
+			let Some(parts) = message
+				.content_parts
+				.as_ref()
+				.and_then(|value| serde_json::from_value::<Vec<MessagePart>>(value.clone()).ok())
+			else {
+				continue;
+			};
+			for part in parts.into_iter().rev() {
+				if let MessagePart::Image { image_id } = part {
+					hydrated_image_ids.insert(image_id);
+					if hydrated_image_ids.len() == MAX_HYDRATED_IMAGES {
+						break;
+					}
+				}
+			}
+			if hydrated_image_ids.len() == MAX_HYDRATED_IMAGES {
+				break;
+			}
+		}
+	}
 	let assistant_ids: Vec<uuid::Uuid> = messages.iter().filter(|m| m.role == "assistant").map(|m| m.id).collect();
 	let executions = Message::tool_executions_for_messages(db, &assistant_ids).await.unwrap_or_default();
 
@@ -433,7 +462,7 @@ async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>, vision: bo
 			for part in stored_parts {
 				match part {
 					MessagePart::Text { text } => parts.push(ContentPart::Text(text)),
-					MessagePart::Image { image_id } => parts.extend(hydrate_image(db, &image_id, vision, false).await),
+					MessagePart::Image { image_id } => parts.extend(hydrate_image(db, &image_id, vision && hydrated_image_ids.contains(&image_id), false).await),
 					_ => {}
 				}
 			}
@@ -456,7 +485,7 @@ async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>, vision: bo
 			match part {
 				MessagePart::Text { text } => buffer.push(ContentPart::Text(text)),
 				MessagePart::Reasoning { .. } => {}
-				MessagePart::Image { image_id } => buffer.extend(hydrate_image(db, &image_id, vision, true).await),
+				MessagePart::Image { image_id } => buffer.extend(hydrate_image(db, &image_id, vision && hydrated_image_ids.contains(&image_id), true).await),
 				MessagePart::ToolCall { id, name, arguments } => {
 					call_names.insert(id.clone(), name.clone());
 					unresolved_calls.push(id.clone());
@@ -699,7 +728,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	ir.stream = true;
 	ir.metadata.insert("user_id".to_string(), user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), chat_id.to_string());
-	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), user_model_config.as_ref());
+	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), user_model_config.as_ref(), &model);
 	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, system_model_config.as_ref());
 
 	// Apply the user-picked upstream provider (OpenRouter routing), only when the instance owner
@@ -1177,7 +1206,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 									current_messages.push(OmniMessage {
 										role: Role::Tool,
 										parts: vec![ContentPart::Text(result_text)],
-										name: Some(format!("{}:{}", exec.tool_name, exec.call_id)),
+										name: Some(tool_message_name(&exec.tool_name, &exec.call_id)),
 									});
 									assistant_message_parts.push(MessagePart::ToolResult { tool_call_id: exec.call_id.clone() });
 

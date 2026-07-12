@@ -8,6 +8,66 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 impl Tool {
+	pub async fn set_system_settings(
+		pool: &sqlx::PgPool,
+		tool_id: &Uuid,
+		settings: &serde_json::Value,
+	) -> Result<(), super::ToolSettingsError> {
+		let mut tx = pool.begin().await?;
+		let tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
+			.bind(tool_id)
+			.fetch_optional(&mut *tx)
+			.await?
+			.ok_or(super::ToolSettingsError::NotFound)?;
+
+		if tool.source_kind == ToolSourceKind::Builtin && tool.source_config.get("builtin_id").and_then(serde_json::Value::as_str) == Some("imagegen") {
+			let model_id = settings
+				.get("image_model_id")
+				.and_then(serde_json::Value::as_str)
+				.and_then(|value| Uuid::parse_str(value).ok())
+				.ok_or(super::ToolSettingsError::Invalid)?;
+			let valid = sqlx::query_scalar::<_, bool>(
+				r#"
+				SELECT EXISTS (
+					SELECT 1
+					FROM models m
+					JOIN providers p ON p.id = m.provider_id
+					WHERE m.id = $1
+					  AND m.is_enabled = true
+					  AND p.is_enabled = true
+					  AND p.kind IN ('OPENAI', 'OPENROUTER', 'GOOGLE')
+					  AND EXISTS (
+						  SELECT 1
+						  FROM jsonb_array_elements_text(COALESCE(m.output_modalities, '[]'::jsonb)) AS modality(value)
+						  WHERE LOWER(modality.value) = 'image'
+					  )
+				)
+				"#,
+			)
+			.bind(model_id)
+			.fetch_one(&mut *tx)
+			.await?;
+			if !valid {
+				return Err(super::ToolSettingsError::Invalid);
+			}
+		}
+
+		sqlx::query(
+			r#"
+			INSERT INTO user_tool_settings (user_id, tool_id, settings)
+			VALUES (NULL, $1, $2)
+			ON CONFLICT (tool_id) WHERE user_id IS NULL
+			DO UPDATE SET settings = EXCLUDED.settings, updated_at = NOW()
+			"#,
+		)
+		.bind(tool_id)
+		.bind(settings)
+		.execute(&mut *tx)
+		.await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
 	#[deprecated(note = "Use to_tool_specs with functions instead")]
 	pub fn to_tool_spec(&self) -> omniference::types::ToolSpec {
 		omniference::types::ToolSpec::JsonSchema {

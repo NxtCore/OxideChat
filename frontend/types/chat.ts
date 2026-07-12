@@ -127,6 +127,13 @@ export interface ChatMessageRequestSettings {
 	enabled_tools?: string[];
 }
 
+export type ChatMessageContentPart =
+	| {type: 'text'; text: string}
+	| {type: 'reasoning'; text: string}
+	| {type: 'image'; image_id: string}
+	| {type: 'tool_call'; id: string; name: string; arguments: string}
+	| {type: 'tool_result'; tool_call_id: string};
+
 export interface ChatMessage {
 	id: string;
 	client_id?: string;
@@ -135,7 +142,7 @@ export interface ChatMessage {
 	reasoning_content: string | null;
 	model_id: string | null;
 	model_key: string | null;
-	content_parts?: Array<{type: string; text?: string; image_id?: string; id?: string; name?: string; arguments?: string; tool_call_id?: string}> | null;
+	content_parts?: ChatMessageContentPart[] | null;
 	cost_details: {
 		input: string | null;
 		output: string | null;

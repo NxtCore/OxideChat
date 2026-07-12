@@ -131,7 +131,9 @@ function isValidImageProtocol(url: string): boolean {
 const imageUrl = computed(() => {
 	if (!props.output) return null;
 	const out = typeof props.output === 'string' ? tryParseJson(props.output) : props.output;
-	if (out?.image_id && typeof out.image_id === 'string') return `/api/v1/images/${out.image_id}`;
+	if (out?.image_id && typeof out.image_id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(out.image_id)) {
+		return `/api/v1/images/${encodeURIComponent(out.image_id)}`;
+	}
 	if (out?.image_url && isValidImageProtocol(out.image_url)) return out.image_url;
 	if (out?.image_reference && isValidImageProtocol(out.image_reference)) return out.image_reference;
 	if (out?.url && isImageUrl(out.url)) return out.url;

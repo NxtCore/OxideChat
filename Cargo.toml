@@ -37,7 +37,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "multipart",
 ] }
 tower-http = { version = "0.5", features = ["cors"] }
-omniference = "0.3"
+omniference = { git = "https://github.com/Henrik-3/omniference.git", rev = "fd69edd438430d68f9b81b5570033b12d33a4fd2" }
 aes-gcm = "0.10"
 rand = "0.8"
 rust_decimal = { version = "1.39.0", features = ["db-postgres", "serde"] }
@@ -82,6 +82,3 @@ multiple_crate_versions = "allow"
 [lints.rust]
 unsafe_code = "warn"
 missing_docs = "allow"
-
-[patch.crates-io]
-omniference = { path = "../omniference" }

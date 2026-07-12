@@ -125,7 +125,7 @@ async fn provider_sync_job(state: Arc<super::JobState>) {
 	println!("[JOBS] Provider model sync job started");
 
 	loop {
-		tokio::time::sleep(Duration::from_secs(PROVIDER_SYNC_INTERVAL_SECS)).await;
 		sync_provider_models_once(&state).await;
+		tokio::time::sleep(Duration::from_secs(PROVIDER_SYNC_INTERVAL_SECS)).await;
 	}
 }

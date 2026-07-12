@@ -11,6 +11,16 @@ mod responses;
 pub use requests::*;
 pub use responses::*;
 
+#[derive(Debug, thiserror::Error)]
+pub enum ToolSettingsError {
+	#[error("tool not found")]
+	NotFound,
+	#[error("invalid tool settings")]
+	Invalid,
+	#[error("database error: {0}")]
+	Database(#[from] sqlx::Error),
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "tool_source_kind", rename_all = "SCREAMING_SNAKE_CASE")]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

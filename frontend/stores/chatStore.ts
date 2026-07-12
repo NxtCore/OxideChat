@@ -710,7 +710,7 @@ export const useChatStore = defineStore('chat', {
 											};
 											msg.tool_calls.push(toolCall as any);
 											if (!msg.content_parts) msg.content_parts = [];
-											msg.content_parts.push({type: 'tool_call', id: data.id, name: data.name});
+											msg.content_parts.push({type: 'tool_call', id: data.id, name: data.name, arguments: ''});
 										}
 										break;
 									case 'tool_call_delta': {
@@ -727,7 +727,7 @@ export const useChatStore = defineStore('chat', {
 												msg.tool_calls.push(newToolCall as any);
 												if (!msg.content_parts) msg.content_parts = [];
 												if (!msg.content_parts.some(p => p.type === 'tool_call' && p.id === data.id)) {
-													msg.content_parts.push({type: 'tool_call', id: data.id, name: data.name});
+													msg.content_parts.push({type: 'tool_call', id: data.id, name: data.name, arguments: data.args_delta ?? ''});
 												}
 											}
 										}
@@ -747,7 +747,7 @@ export const useChatStore = defineStore('chat', {
 										if (
 											msg &&
 											!data.error &&
-											(data.tool_name === 'imagegen' || data.tool_name === 'imagegen_generate') &&
+											['imagegen', 'imagegen_generate', 'imagegen_edit'].includes(data.tool_name) &&
 											typeof imageId === 'string'
 										) {
 											if (!msg.content_parts) msg.content_parts = [];

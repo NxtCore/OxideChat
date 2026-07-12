@@ -131,7 +131,7 @@ import {Bot, ChevronDown, Check, Loader2, Search, X} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import {useModelPicker} from '~/composables/useModelPicker';
 import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
-import type {ModelList} from '~/types/chat';
+import type {ModelList, PaginatedResponse} from '~/types/chat';
 
 const props = withDefaults(defineProps<{
 	modelValue: string | null;
@@ -191,10 +191,11 @@ watch(
 			selectedModel.value = loaded;
 			return;
 		}
-		if (props.valueMode !== 'uuid' || !props.selectedModelEndpoint) return;
 		try {
 			const {$customFetch} = useNuxtApp();
-			const model = await $customFetch<ModelList>(`${props.selectedModelEndpoint}/${value}`);
+			const model = props.valueMode === 'uuid' && props.selectedModelEndpoint
+				? await $customFetch<ModelList>(`${props.selectedModelEndpoint}/${value}`)
+				: (await $customFetch<PaginatedResponse<ModelList>>(props.endpoint, {params: {query: value, size: '50'}})).items.find(item => modelValueFor(item) === value) ?? null;
 			if (props.modelValue === value) selectedModel.value = model;
 		} catch {
 			if (props.modelValue === value) selectedModel.value = null;

@@ -114,7 +114,6 @@ const chatStore = useChatStore();
 const budgetStore = useBudgetStore();
 const router = useRouter();
 const route = useRoute();
-const settingsReturnPath = useState<string>('settings-return-path', () => '/');
 
 const showWorkspaceManager = ref(false);
 
@@ -124,7 +123,7 @@ const userInitials = computed(() => {
 });
 
 function goToSettings() {
-	settingsReturnPath.value = route.path.startsWith('/chats/') ? route.fullPath : '/';
+	store.settingsReturnPath = route.path.startsWith('/chats/') ? route.fullPath : '/';
 	router.push('/settings');
 }
 

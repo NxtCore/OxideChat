@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use futures_util::StreamExt;
 use omniference::types::{ImageInput, ImageOperation, ImageOptions, ImageRequestIR, ImageResponse, ModelRef};
-use reqwest::{Client, header::CONTENT_TYPE};
+use reqwest::{Client, Url, header::CONTENT_TYPE, redirect::Policy};
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 use uuid::Uuid;
 
 use super::super::executor::{ToolContext, ToolError, ToolExecutor};
@@ -34,17 +35,27 @@ struct EditImageInput {
 	prompt: String,
 }
 
-pub struct ImageGenExecutor {
-	client: Client,
+const MAX_REMOTE_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+
+pub struct ImageGenExecutor;
+
+fn is_blocked_address(address: IpAddr) -> bool {
+	match address {
+		IpAddr::V4(address) => address.is_private() || address.is_loopback() || address.is_link_local() || address.is_multicast() || address.is_unspecified() || address.is_broadcast(),
+		IpAddr::V6(address) => {
+			address.to_ipv4_mapped().is_some_and(|address| is_blocked_address(IpAddr::V4(address)))
+				|| address.is_unique_local()
+				|| address.is_loopback()
+				|| address.is_unicast_link_local()
+				|| address.is_multicast()
+				|| address.is_unspecified()
+		}
+	}
 }
 
 impl ImageGenExecutor {
 	pub fn new() -> Result<Self, ToolError> {
-		let client = Client::builder()
-			.timeout(Duration::from_secs(120))
-			.build()
-			.map_err(|error| ToolError::Internal(format!("Failed to create HTTP client: {error}")))?;
-		Ok(Self { client })
+		Ok(Self)
 	}
 
 	async fn load_model(&self, model_id: &str, ctx: &ToolContext) -> Result<(Model, Provider), ToolError> {
@@ -66,14 +77,6 @@ impl ImageGenExecutor {
 		}
 		if !model.output_modalities.0.iter().any(|modality| modality.eq_ignore_ascii_case("IMAGE")) {
 			return Err(ToolError::ExecutionFailed("Configured model does not support image generation".to_string()));
-		}
-		if let Some(user_id) = ctx.user_id {
-			let allowed = Model::can_user_use_model(db, &user_id, &model.id)
-				.await
-				.map_err(|error| ToolError::Internal(format!("Failed to check image-model access: {error}")))?;
-			if !allowed {
-				return Err(ToolError::ExecutionFailed("You do not have access to the configured image model".to_string()));
-			}
 		}
 		Ok((model, provider))
 	}
@@ -98,11 +101,41 @@ impl ImageGenExecutor {
 			return Ok(ImageInput { bytes, media_type: media_type.to_string() });
 		}
 
-		let response = self.client.get(value).send().await.map_err(|error| ToolError::HttpError(format!("Failed to download image: {error}")))?;
-		if !response.status().is_success() { return Err(ToolError::HttpError(format!("Failed to download image: HTTP {}", response.status()))); }
+		let fetch_error = || ToolError::HttpError("Failed to fetch image".to_string());
+		let url = Url::parse(value).map_err(|_| fetch_error())?;
+		if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() || url.password().is_some() {
+			return Err(fetch_error());
+		}
+		let host = url.host_str().ok_or_else(fetch_error)?.to_string();
+		let port = url.port_or_known_default().ok_or_else(fetch_error)?;
+		let addresses: Vec<_> = tokio::net::lookup_host((host.as_str(), port)).await.map_err(|_| fetch_error())?.collect();
+		if addresses.is_empty() || addresses.iter().any(|address| is_blocked_address(address.ip())) {
+			return Err(fetch_error());
+		}
+		let client = Client::builder()
+			.timeout(Duration::from_secs(120))
+			.redirect(Policy::none())
+			.resolve(&host, addresses[0])
+			.build()
+			.map_err(|_| fetch_error())?;
+		let response = client.get(url).send().await.map_err(|_| fetch_error())?;
+		if !response.status().is_success() || response.remote_addr().is_some_and(|address| is_blocked_address(address.ip())) {
+			return Err(fetch_error());
+		}
+		if response.content_length().is_some_and(|length| length > MAX_REMOTE_IMAGE_BYTES as u64) {
+			return Err(fetch_error());
+		}
 		let mime = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()).and_then(|value| value.split(';').next()).unwrap_or_default().to_string();
-		let bytes = response.bytes().await.map_err(|error| ToolError::HttpError(format!("Failed to read image: {error}")))?.to_vec();
-		let media_type = safe_image_mime(&bytes, &mime).ok_or_else(|| ToolError::InvalidInput("Unsupported image content".to_string()))?;
+		let mut bytes = Vec::with_capacity(response.content_length().unwrap_or(0).min(MAX_REMOTE_IMAGE_BYTES as u64) as usize);
+		let mut stream = response.bytes_stream();
+		while let Some(chunk) = stream.next().await {
+			let chunk = chunk.map_err(|_| fetch_error())?;
+			if bytes.len().saturating_add(chunk.len()) > MAX_REMOTE_IMAGE_BYTES {
+				return Err(fetch_error());
+			}
+			bytes.extend_from_slice(&chunk);
+		}
+		let media_type = safe_image_mime(&bytes, &mime).ok_or_else(fetch_error)?;
 		Ok(ImageInput { bytes, media_type: media_type.to_string() })
 	}
 
@@ -136,17 +169,19 @@ impl ImageGenExecutor {
 		)
 		.await
 		{
-			eprintln!("[IMAGEGEN] Failed to record usage event: {error}");
+			tracing::error!(%error, "Failed to record image generation usage event");
 		}
 	}
 
 	async fn store_response(&self, response: ImageResponse, ctx: &ToolContext, caption: &str) -> Result<Value, ToolError> {
 		let db = ctx.db.as_ref().ok_or_else(|| ToolError::Internal("Database not available".to_string()))?;
-		let (bytes, declared_mime) = response.images.into_iter().next().ok_or_else(|| ToolError::ExecutionFailed("Image provider returned no images".to_string()))?;
-		let mime = safe_image_mime(&bytes, &declared_mime).ok_or_else(|| ToolError::ExecutionFailed("Image provider returned unsupported image content".to_string()))?;
-		let stored = store_image(db, &bytes, mime, ctx.user_id, Some("imagegen")).await.map_err(ToolError::Internal)?;
+		let image = response.images.into_iter().next().ok_or_else(|| ToolError::ExecutionFailed("Image provider returned no images".to_string()))?;
+		let mime = safe_image_mime(&image.bytes, &image.media_type).ok_or_else(|| ToolError::ExecutionFailed("Image provider returned unsupported image content".to_string()))?;
+		let stored = store_image(db, &image.bytes, mime, ctx.user_id, Some("imagegen")).await.map_err(ToolError::Internal)?;
 		if !caption.is_empty() {
-			let _ = crate::utils::images::set_image_caption(db, stored.id, caption).await;
+			if let Err(error) = crate::utils::images::set_image_caption(db, stored.id, caption).await {
+				tracing::error!(image_id = %stored.id, %error, "Failed to store image caption");
+			}
 		}
 		Ok(json!({"success": true, "image_id": stored.id, "image_is_shown_to_user": true, "show_image_with_markdown_in_chat": false}))
 	}
@@ -187,6 +222,7 @@ impl ToolExecutor for ImageGenExecutor {
 			model: ModelRef { alias: model.display_name.clone(), provider: provider_to_config(&provider), model_id: model.model_id.clone(), input_modalities: Vec::new(), output_modalities: Vec::new() },
 			operation,
 			prompt,
+			request_id: None,
 			input_images,
 			options,
 		};

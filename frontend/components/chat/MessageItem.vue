@@ -270,8 +270,8 @@ const attachedImages = computed(() => {
 		return [];
 	}
 	return props.message.content_parts
-		.filter((part: any) => part.type === 'image' && part.image_id)
-		.map((part: any) => ({
+		.filter(part => part.type === 'image')
+		.map(part => ({
 			image_id: part.image_id,
 			url: `/api/v1/images/${part.image_id}`,
 		}));
@@ -333,10 +333,12 @@ const hasInterleavedParts = computed(() => {
 	return Array.isArray(parts) && parts.some(p => p.type === 'tool_call');
 });
 
+const partHtmlCache = new Map<number, {text: string; streaming: boolean; html: string}>();
+
 const orderedParts = computed(() => {
 	const parts = props.message.content_parts;
 	if (!Array.isArray(parts)) return [];
-	return parts.filter(part => part.type !== 'tool_result').map(part => {
+	return parts.filter(part => part.type !== 'tool_result').map((part, index) => {
 		if (part.type === 'tool_call') {
 			const tool = props.message.tool_calls?.find(tc => tc.tool_call_id === part.id);
 			return {type: 'tool_call' as const, tool};
@@ -349,12 +351,16 @@ const orderedParts = computed(() => {
 			};
 		}
 		if (part.type === 'reasoning') {
-			const text = part.text || '';
-			const html = isStreaming.value ? renderStreaming(text) : renderComplete(text);
+			const text = part.text;
+			const cached = partHtmlCache.get(index);
+			const html = cached?.text === text && cached.streaming === isStreaming.value ? cached.html : isStreaming.value ? renderStreaming(text) : renderComplete(text);
+			partHtmlCache.set(index, {text, streaming: isStreaming.value, html});
 			return {type: 'reasoning' as const, html};
 		}
-		const text = part.text || '';
-		const html = isStreaming.value ? renderStreaming(text) : renderComplete(text);
+		const text = part.text;
+		const cached = partHtmlCache.get(index);
+		const html = cached?.text === text && cached.streaming === isStreaming.value ? cached.html : isStreaming.value ? renderStreaming(text) : renderComplete(text);
+		partHtmlCache.set(index, {text, streaming: isStreaming.value, html});
 		return {type: 'text' as const, html};
 	});
 });
