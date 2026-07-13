@@ -1,5 +1,6 @@
 use super::{
-	McpHttpConfig, McpServer, McpServerResponse, McpSourceConfig, McpStdioConfig, Tool, ToolExecution, ToolFunction, ToolSourceKind, UserToolSettings, WasmBlob,
+	CreateToolRequest, McpHttpConfig, McpServer, McpServerResponse, McpSourceConfig, McpStdioConfig, Tool, ToolExecution, ToolFunction, ToolSourceKind,
+	UpdateToolRequest, UserToolSettings, WasmBlob,
 };
 use crate::utils::tools::mcp::{McpToolInfo, McpUrlPolicy};
 use crate::utils::tools::{McpClient, McpConnectionPool, ToolError};
@@ -8,11 +9,191 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 impl Tool {
-	pub async fn set_system_settings(
-		pool: &sqlx::PgPool,
-		tool_id: &Uuid,
-		settings: &serde_json::Value,
-	) -> Result<(), super::ToolSettingsError> {
+	/// Create a system tool and its functions atomically.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the transaction or a database operation fails.
+	pub async fn create_system(pool: &sqlx::PgPool, request: &CreateToolRequest) -> Result<(Self, Vec<ToolFunction>), sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let legacy_schema = request
+			.input_schema
+			.clone()
+			.unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
+		let tool = sqlx::query_as::<_, Tool>(
+			r#"
+			INSERT INTO tools (
+				owner_id, name, display_name, description, icon,
+				source_kind, source_config, input_schema, settings_schema,
+				is_enabled, system_prompt
+			)
+			VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			RETURNING *
+			"#,
+		)
+		.bind(&request.name)
+		.bind(&request.display_name)
+		.bind(&request.description)
+		.bind(&request.icon)
+		.bind(&request.source_kind)
+		.bind(&request.source_config)
+		.bind(&legacy_schema)
+		.bind(&request.settings_schema)
+		.bind(request.is_enabled)
+		.bind(&request.system_prompt)
+		.fetch_one(&mut *tx)
+		.await?;
+
+		let function_count = if request.functions.is_empty() && request.input_schema.is_some() {
+			1
+		} else {
+			request.functions.len()
+		};
+		let mut functions = Vec::with_capacity(function_count);
+		for (index, function) in request.functions.iter().enumerate() {
+			let created = sqlx::query_as::<_, ToolFunction>(
+				r#"
+				INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
+				VALUES ($1, $2, $3, $4, $5, $6)
+				RETURNING *
+				"#,
+			)
+			.bind(tool.id)
+			.bind(&function.name)
+			.bind(&function.description)
+			.bind(&function.input_schema)
+			.bind(&function.entrypoint)
+			.bind(index as i32)
+			.fetch_one(&mut *tx)
+			.await?;
+			functions.push(created);
+		}
+		if request.functions.is_empty() && request.input_schema.is_some() {
+			let created = sqlx::query_as::<_, ToolFunction>(
+				r#"
+				INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
+				VALUES ($1, $2, $3, $4, NULL, 0)
+				RETURNING *
+				"#,
+			)
+			.bind(tool.id)
+			.bind(&request.name)
+			.bind(&request.description)
+			.bind(&legacy_schema)
+			.fetch_one(&mut *tx)
+			.await?;
+			functions.push(created);
+		}
+
+		tx.commit().await?;
+		Ok((tool, functions))
+	}
+
+	/// Update a system tool and its functions atomically.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the transaction or a database operation fails.
+	pub async fn update_system(pool: &sqlx::PgPool, tool_id: &Uuid, request: &UpdateToolRequest) -> Result<Option<(Self, Vec<ToolFunction>)>, sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let tool = sqlx::query_as::<_, Tool>(
+			r#"
+			UPDATE tools SET
+				name = COALESCE($2, name),
+				display_name = COALESCE($3, display_name),
+				description = COALESCE($4, description),
+				icon = COALESCE($5, icon),
+				source_config = COALESCE($6, source_config),
+				input_schema = COALESCE($7, input_schema),
+				settings_schema = COALESCE($8, settings_schema),
+				is_enabled = COALESCE($9, is_enabled),
+				system_prompt = COALESCE($10, system_prompt),
+				updated_at = NOW()
+			WHERE id = $1 AND owner_id IS NULL
+			RETURNING *
+			"#,
+		)
+		.bind(tool_id)
+		.bind(&request.name)
+		.bind(&request.display_name)
+		.bind(&request.description)
+		.bind(&request.icon)
+		.bind(&request.source_config)
+		.bind(&request.input_schema)
+		.bind(&request.settings_schema)
+		.bind(request.is_enabled)
+		.bind(&request.system_prompt)
+		.fetch_optional(&mut *tx)
+		.await?;
+		let Some(tool) = tool else {
+			tx.rollback().await?;
+			return Ok(None);
+		};
+
+		if let Some(delete_ids) = request.delete_function_ids.as_deref().filter(|ids| !ids.is_empty()) {
+			sqlx::query("DELETE FROM tool_functions WHERE id = ANY($1) AND tool_id = $2")
+				.bind(delete_ids)
+				.bind(tool_id)
+				.execute(&mut *tx)
+				.await?;
+		}
+
+		if let Some(functions) = &request.functions {
+			for (index, function) in functions.iter().enumerate() {
+				if let Some(function_id) = function.id {
+					sqlx::query(
+						r#"
+						UPDATE tool_functions SET
+							name = $2,
+							description = $3,
+							input_schema = $4,
+							entrypoint = $5,
+							sort_order = $6
+						WHERE id = $1 AND tool_id = $7
+						"#,
+					)
+					.bind(function_id)
+					.bind(&function.name)
+					.bind(&function.description)
+					.bind(&function.input_schema)
+					.bind(&function.entrypoint)
+					.bind(index as i32)
+					.bind(tool_id)
+					.execute(&mut *tx)
+					.await?;
+				} else {
+					sqlx::query(
+						r#"
+						INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
+						VALUES ($1, $2, $3, $4, $5, $6)
+						"#,
+					)
+					.bind(tool_id)
+					.bind(&function.name)
+					.bind(&function.description)
+					.bind(&function.input_schema)
+					.bind(&function.entrypoint)
+					.bind(index as i32)
+					.execute(&mut *tx)
+					.await?;
+				}
+			}
+		}
+
+		let functions = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 ORDER BY sort_order, created_at")
+			.bind(tool_id)
+			.fetch_all(&mut *tx)
+			.await?;
+		tx.commit().await?;
+		Ok(Some((tool, functions)))
+	}
+
+	/// Store validated settings for a system tool.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the tool does not exist, image model settings are invalid, or a database operation fails.
+	pub async fn set_system_settings(pool: &sqlx::PgPool, tool_id: &Uuid, settings: &serde_json::Value) -> Result<(), super::ToolSettingsError> {
 		let mut tx = pool.begin().await?;
 		let tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
 			.bind(tool_id)

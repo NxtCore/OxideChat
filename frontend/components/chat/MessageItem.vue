@@ -343,11 +343,11 @@ const orderedParts = computed(() => {
 			const tool = props.message.tool_calls?.find(tc => tc.tool_call_id === part.id);
 			return {type: 'tool_call' as const, tool};
 		}
-		if (part.type === 'image' && part.image_id) {
+		if (part.type === 'image') {
 			return {
 				type: 'image' as const,
 				imageId: part.image_id,
-				url: `/api/v1/images/${part.image_id}`,
+				url: `/api/v1/images/${encodeURIComponent(part.image_id)}`,
 			};
 		}
 		if (part.type === 'reasoning') {

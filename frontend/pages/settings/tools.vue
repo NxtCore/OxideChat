@@ -501,7 +501,7 @@ const sourceKinds = [
 	{value: 'MCP', label: 'MCP', icon: Server, disabled: false},
 ];
 
-const builtinToolTemplates = [
+const builtinToolTemplates = computed(() => [
 	{
 		name: 'websearch',
 		display_name: 'Web Search',
@@ -550,28 +550,28 @@ const builtinToolTemplates = [
 	},
 	{
 		name: 'imagegen',
-		display_name: 'Image Generation',
-		description: 'Generate and edit images using an admin-selected provider model',
+		display_name: store.getTranslation('settings.tools.imagegen.display_name'),
+		description: store.getTranslation('settings.tools.imagegen.description'),
 		source_kind: 'BUILTIN',
 		icon: Sparkles,
 		source_config: {builtin_id: 'imagegen'},
 		functions: [
 			{
 				name: 'generate',
-				description: 'Generate an image from a text prompt',
+				description: store.getTranslation('settings.tools.imagegen.generate.description'),
 				input_schema: {
 					type: 'object',
 					properties: {
-						prompt: {type: 'string', description: 'The text prompt describing the image to generate'},
+						prompt: {type: 'string', description: store.getTranslation('settings.tools.imagegen.generate.prompt')},
 						size: {
 							type: 'string',
-							description: 'Image size',
+							description: store.getTranslation('settings.tools.imagegen.generate.size'),
 							enum: ['1024x1024', '1792x1024', '1024x1792', '512x512', '256x256'],
 							default: '1024x1024',
 						},
 						quality: {
 							type: 'string',
-							description: 'Image quality',
+							description: store.getTranslation('settings.tools.imagegen.generate.quality'),
 							enum: ['auto', 'low', 'medium', 'high'],
 							default: 'auto',
 						},
@@ -581,13 +581,13 @@ const builtinToolTemplates = [
 			},
 			{
 				name: 'edit',
-				description: 'Edit a previously generated image using a text prompt',
+				description: store.getTranslation('settings.tools.imagegen.edit.description'),
 				input_schema: {
 					type: 'object',
 					properties: {
-						image_id: {type: 'string', description: 'The image_id of a previously generated image to edit (shown in the conversation). Preferred over image_url.'},
-						image_url: {type: 'string', description: 'URL of an external image to edit. Only use when no image_id is available.'},
-						prompt: {type: 'string', description: 'The text prompt describing the desired edit'},
+						image_id: {type: 'string', description: store.getTranslation('settings.tools.imagegen.edit.image_id')},
+						image_url: {type: 'string', description: store.getTranslation('settings.tools.imagegen.edit.image_url')},
+						prompt: {type: 'string', description: store.getTranslation('settings.tools.imagegen.edit.prompt')},
 					},
 					required: ['prompt'],
 				},
@@ -597,11 +597,16 @@ const builtinToolTemplates = [
 			type: 'object',
 			required: ['image_model_id'],
 			properties: {
-				image_model_id: {type: 'string', title: 'Image model', format: 'model-picker', description: 'Select an enabled image model'},
+				image_model_id: {
+					type: 'string',
+					title: store.getTranslation('settings.tools.image_model_title'),
+					format: 'model-picker',
+					description: store.getTranslation('settings.tools.imagegen.settings.description'),
+				},
 			},
 		},
 	},
-];
+]);
 
 interface McpServerGroup {
 	server_id: string;
@@ -642,7 +647,7 @@ const displayTools = computed(() => {
 	const regularTools = tools.value.filter(t => !t.mcp_server_id);
 	const result: any[] = [...regularTools];
 
-	for (const template of builtinToolTemplates) {
+	for (const template of builtinToolTemplates.value) {
 		const exists = tools.value.some(t => t.name === template.name);
 		if (!exists) {
 			result.push({

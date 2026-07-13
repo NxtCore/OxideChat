@@ -41,19 +41,19 @@ pub async fn sync_provider_models_once(state: &super::JobState) {
 			for provider in providers {
 				match sync_provider_models(&state.db, &provider).await {
 					Ok(summary) => {
-						println!(
+						tracing::info!(
 							"[JOBS] Synced provider '{}': +{}/~{}/-{} models",
 							provider.name, summary.models_added, summary.models_updated, summary.models_removed
 						);
 					}
 					Err(e) => {
-						eprintln!("[JOBS] Failed to sync provider '{}': {e}", provider.name);
+						tracing::error!("[JOBS] Failed to sync provider '{}': {e}", provider.name);
 					}
 				}
 			}
 		}
 		Err(e) => {
-			eprintln!("[JOBS] Failed to list providers for sync: {e}");
+			tracing::error!("[JOBS] Failed to list providers for sync: {e}");
 		}
 	}
 }
@@ -122,7 +122,7 @@ async fn cleanup_expired_sessions(pool: &PgPool) -> Result<u64, sqlx::Error> {
 /// Runs every `PROVIDER_SYNC_INTERVAL_SECS` so newly released models
 /// (e.g. a new Claude Sonnet) become available without a manual sync.
 async fn provider_sync_job(state: Arc<super::JobState>) {
-	println!("[JOBS] Provider model sync job started");
+	tracing::info!("[JOBS] Provider model sync job started");
 
 	loop {
 		sync_provider_models_once(&state).await;

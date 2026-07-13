@@ -860,7 +860,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 							_ => None,
 						})
 						.collect();
-					eprintln!("[STREAM] msg[{i}] role={role} name={:?} tool_calls={:?}", m.name, tool_calls);
+					tracing::debug!("[STREAM] msg[{i}] role={role} name={:?} tool_calls={:?}", m.name, tool_calls);
 				}
 
 				let engine_read = engine.read().await;
@@ -1202,7 +1202,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 										serde_json::to_string(&exec.output).unwrap_or_else(|_| exec.output.to_string())
 									};
 
-									eprintln!("[STREAM] Tool result -> role=tool name=\"{}:{}\" ({} bytes)", exec.tool_name, exec.call_id, result_text.len());
+									tracing::debug!("[STREAM] Tool result -> role=tool name=\"{}:{}\" ({} bytes)", exec.tool_name, exec.call_id, result_text.len());
 									current_messages.push(OmniMessage {
 										role: Role::Tool,
 										parts: vec![ContentPart::Text(result_text)],

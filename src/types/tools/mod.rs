@@ -12,6 +12,7 @@ pub use requests::*;
 pub use responses::*;
 
 #[derive(Debug, thiserror::Error)]
+/// Failures produced while loading or validating tool settings.
 pub enum ToolSettingsError {
 	#[error("tool not found")]
 	NotFound,

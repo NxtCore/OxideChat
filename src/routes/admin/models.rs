@@ -97,7 +97,7 @@ pub async fn list_image_models(State(state): State<Arc<JobState>>, cookies: Cook
 	{
 		Ok(models) => ResponseBuilder::new(ResponseBody::Json(models)).build(),
 		Err(error) => {
-			eprintln!("[ADMIN] Failed to list image models: {error}");
+			tracing::error!("[ADMIN] Failed to list image models: {error}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}
 	}
@@ -137,7 +137,7 @@ pub async fn list_image_model_providers(State(state): State<Arc<JobState>>, cook
 	match Model::list_image_providers_for_admin(&state.db).await {
 		Ok(providers) => ResponseBuilder::new(ResponseBody::Json(providers)).build(),
 		Err(error) => {
-			eprintln!("[ADMIN] Failed to list image-model providers: {error}");
+			tracing::error!("[ADMIN] Failed to list image-model providers: {error}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}
 	}
