@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
-	use crate::types::models::{Model, ModelViewer};
+	use crate::types::models::{Model, ModelSyncInput, ModelViewer};
 	use crate::types::models_configs::ModelConfig;
 	use crate::types::teams::Team;
+	use serde_json::json;
 	use sqlx::PgPool;
 	use sqlx::types::Json;
 	use uuid::Uuid;
@@ -403,5 +404,33 @@ mod tests {
 		add_user_to_team(&pool, user_id, team_id).await;
 		grant_model(&pool, team_id, model_id).await;
 		assert!(Model::can_user_use_model(&pool, &user_id, &model_id).await.unwrap());
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn sync_preserves_model_id_when_a_model_temporarily_disappears(pool: PgPool) {
+		let provider_id = create_provider(&pool, "Sync Provider", true).await;
+		let model_id = create_model(&pool, provider_id, "image-model", "Image Model", true).await;
+
+		let removed = Model::sync_provider_models(&pool, &provider_id, &[]).await.unwrap();
+		assert_eq!(removed.removed, 1);
+		let disabled = Model::find_by_id(&pool, &model_id).await.unwrap().unwrap();
+		assert!(!disabled.is_enabled);
+
+		let discovered = [ModelSyncInput {
+			provider_id,
+			model_id: "image-model".to_string(),
+			display_name: "Image Model".to_string(),
+			capabilities: json!(["IMAGE_GENERATION"]),
+			input_modalities: json!(["TEXT"]),
+			output_modalities: json!(["IMAGE"]),
+			context_length: None,
+			max_tokens: None,
+		}];
+		let restored = Model::sync_provider_models(&pool, &provider_id, &discovered).await.unwrap();
+		assert_eq!(restored.added, 0);
+
+		let reloaded = Model::find_by_id(&pool, &model_id).await.unwrap().unwrap();
+		assert_eq!(reloaded.id, model_id);
+		assert!(reloaded.is_enabled);
 	}
 }

@@ -12,6 +12,73 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
 impl Model {
+	pub async fn list_image_providers_for_admin(pool: &sqlx::PgPool) -> Result<Vec<ProviderTab>, sqlx::Error> {
+		sqlx::query_as::<_, ProviderTab>(
+			r#"
+			SELECT DISTINCT p.id, p.name
+			FROM providers p
+			JOIN models m ON m.provider_id = p.id
+			WHERE p.is_enabled = true
+			  AND p.kind IN ('OPENAI', 'OPENROUTER', 'GOOGLE')
+			  AND m.is_enabled = true
+			  AND EXISTS (
+				  SELECT 1
+				  FROM jsonb_array_elements_text(COALESCE(m.output_modalities, '[]'::jsonb)) AS modality(value)
+				  WHERE LOWER(modality.value) = 'image'
+			  )
+			ORDER BY p.name
+			"#,
+		)
+		.fetch_all(pool)
+		.await
+	}
+
+	pub async fn list_image_models_for_admin(
+		pool: &sqlx::PgPool,
+		page: i64,
+		size: i64,
+		search_query: Option<String>,
+		provider_id: Option<Uuid>,
+	) -> Result<PaginatedResponse<ModelListAdmin>, sqlx::Error> {
+		let pagination = Self::pagination(page, size);
+		let search = search_query
+			.as_deref()
+			.map(str::trim)
+			.filter(|value| !value.is_empty())
+			.map(|value| format!("%{}%", Self::escape_like_pattern(value)));
+		let rows = sqlx::query_as::<_, ModelListAdminRow>(
+			r#"
+			SELECT m.id, m.model_id, m.display_name,
+			       COALESCE(m.capabilities, '[]'::jsonb) AS capabilities,
+			       COALESCE(m.input_modalities, '[]'::jsonb) AS input_modalities,
+			       COALESCE(m.output_modalities, '[]'::jsonb) AS output_modalities,
+			       m.context_length, m.max_tokens, COALESCE(m.is_enabled, false) AS is_enabled,
+			       m.created_at, m.updated_at, p.id AS provider_id, p.name AS provider_name,
+			       p.kind AS provider_kind, NULL::text AS icon
+			FROM models m
+			JOIN providers p ON p.id = m.provider_id
+			WHERE m.is_enabled = true AND p.is_enabled = true
+			  AND EXISTS (
+				  SELECT 1
+				  FROM jsonb_array_elements_text(COALESCE(m.output_modalities, '[]'::jsonb)) AS modality(value)
+				  WHERE LOWER(modality.value) = 'image'
+			  )
+			  AND ($3::text IS NULL OR m.display_name ILIKE $3 ESCAPE '\' OR m.model_id ILIKE $3 ESCAPE '\' OR p.name ILIKE $3 ESCAPE '\')
+			  AND ($4::uuid IS NULL OR p.id = $4)
+			ORDER BY m.display_name, p.name
+			LIMIT $1 OFFSET $2
+			"#,
+		)
+		.bind(pagination.limit)
+		.bind(pagination.offset)
+		.bind(search)
+		.bind(provider_id)
+		.fetch_all(pool)
+		.await?;
+		let has_more = rows.len() > pagination.page_size;
+		let items = rows.into_iter().take(pagination.page_size).map(ModelListAdmin::from).collect();
+		Ok(PaginatedResponse { has_more, items })
+	}
 	fn escape_like_pattern(s: &str) -> String {
 		s.replace('\\', r"\\").replace('%', r"\%").replace('_', r"\_")
 	}
@@ -361,13 +428,14 @@ impl Model {
 	}
 
 	pub async fn sync_provider_models(pool: &sqlx::PgPool, provider_id: &Uuid, discovered: &[ModelSyncInput]) -> Result<ModelSyncSummary, sqlx::Error> {
-		let existing = Self::list_raw_by_provider(pool, provider_id).await?;
+		let mut transaction = pool.begin().await?;
+		let existing = Self::list_raw_by_provider(&mut *transaction, provider_id).await?;
 		let existing_map: BTreeMap<_, _> = existing.iter().map(|model| (model.model_id.as_str(), model)).collect();
 		let discovered_ids: HashSet<_> = discovered.iter().map(|model| model.model_id.as_str()).collect();
 
 		let mut to_insert = Vec::with_capacity(discovered.len());
 		let mut to_update = Vec::with_capacity(discovered.len());
-		let mut to_delete = Vec::with_capacity(existing.len());
+		let mut to_disable = Vec::with_capacity(existing.len());
 
 		for model in discovered {
 			if existing_map.contains_key(model.model_id.as_str()) {
@@ -379,18 +447,19 @@ impl Model {
 
 		for model in &existing {
 			if !discovered_ids.contains(model.model_id.as_str()) {
-				to_delete.push(model.id);
+				to_disable.push(model.id);
 			}
 		}
 
-		let added = Self::bulk_insert_sync_models(pool, &to_insert).await?;
-		let updated = Self::bulk_update_sync_models(pool, &to_update).await?;
-		let removed = Self::bulk_delete(pool, &to_delete).await?;
+		let added = Self::bulk_insert_sync_models(&mut *transaction, &to_insert).await?;
+		let updated = Self::bulk_update_sync_models(&mut *transaction, &to_update).await?;
+		let removed = Self::bulk_disable_sync_models(&mut *transaction, &to_disable).await?;
+		transaction.commit().await?;
 
 		Ok(ModelSyncSummary { added, updated, removed })
 	}
 
-	async fn list_raw_by_provider(pool: &sqlx::PgPool, provider_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+	async fn list_raw_by_provider(connection: &mut sqlx::PgConnection, provider_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
 			r#"
 			SELECT
@@ -411,11 +480,11 @@ impl Model {
 			"#,
 		)
 		.bind(provider_id)
-		.fetch_all(pool)
+		.fetch_all(connection)
 		.await
 	}
 
-	async fn bulk_insert_sync_models(pool: &sqlx::PgPool, items: &[&ModelSyncInput]) -> Result<usize, sqlx::Error> {
+	async fn bulk_insert_sync_models(connection: &mut sqlx::PgConnection, items: &[&ModelSyncInput]) -> Result<usize, sqlx::Error> {
 		if items.is_empty() {
 			return Ok(0);
 		}
@@ -436,11 +505,11 @@ impl Model {
 				.push_bind(item.max_tokens);
 		});
 
-		query_builder.build().execute(pool).await?;
+		query_builder.build().execute(connection).await?;
 		Ok(items.len())
 	}
 
-	async fn bulk_update_sync_models(pool: &sqlx::PgPool, items: &[&ModelSyncInput]) -> Result<usize, sqlx::Error> {
+	async fn bulk_update_sync_models(connection: &mut sqlx::PgConnection, items: &[&ModelSyncInput]) -> Result<usize, sqlx::Error> {
 		if items.is_empty() {
 			return Ok(0);
 		}
@@ -463,6 +532,7 @@ impl Model {
 				output_modalities = u.output_modalities,
 				context_length = u.context_length,
 				max_tokens = u.max_tokens,
+				is_enabled = true,
 				updated_at = NOW()
 			FROM (
 				SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::jsonb[], $5::jsonb[], $6::jsonb[], $7::int[], $8::int[])
@@ -479,19 +549,22 @@ impl Model {
 		.bind(&output_modalities)
 		.bind(&context_lengths)
 		.bind(&max_tokens)
-		.execute(pool)
+		.execute(connection)
 		.await?;
 
 		Ok(items.len())
 	}
 
-	async fn bulk_delete(pool: &sqlx::PgPool, ids: &[Uuid]) -> Result<usize, sqlx::Error> {
+	async fn bulk_disable_sync_models(connection: &mut sqlx::PgConnection, ids: &[Uuid]) -> Result<usize, sqlx::Error> {
 		if ids.is_empty() {
 			return Ok(0);
 		}
 
-		sqlx::query("DELETE FROM models WHERE id = ANY($1)").bind(ids).execute(pool).await?;
-		Ok(ids.len())
+		let result = sqlx::query("UPDATE models SET is_enabled = false, updated_at = NOW() WHERE id = ANY($1) AND is_enabled = true")
+			.bind(ids)
+			.execute(connection)
+			.await?;
+		Ok(result.rows_affected() as usize)
 	}
 
 	pub async fn find_name_and_model_id<'e, E>(executor: E, id: &Uuid) -> Result<Option<(String, String)>, sqlx::Error>

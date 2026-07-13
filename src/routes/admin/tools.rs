@@ -130,82 +130,13 @@ pub async fn create_tool(State(state): State<Arc<JobState>>, cookies: Cookies, J
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let legacy_schema = req.input_schema.clone().unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
-
-	let tool = sqlx::query_as::<_, Tool>(
-		r#"
-        INSERT INTO tools (
-            owner_id, name, display_name, description, icon,
-            source_kind, source_config, input_schema, settings_schema,
-            is_enabled
-        )
-        VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING *
-        "#,
-	)
-	.bind(&req.name)
-	.bind(&req.display_name)
-	.bind(&req.description)
-	.bind(&req.icon)
-	.bind(&req.source_kind)
-	.bind(&req.source_config)
-	.bind(&legacy_schema)
-	.bind(&req.settings_schema)
-	.bind(req.is_enabled)
-	.fetch_one(&state.db)
-	.await;
-
-	let tool = match tool {
-		Ok(t) => t,
+	let (tool, functions) = match Tool::create_system(&state.db, &req).await {
+		Ok(created) => created,
 		Err(e) => {
 			eprintln!("[TOOLS] Failed to create tool: {e}");
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	};
-
-	let mut functions: Vec<ToolFunction> = vec![];
-
-	if !req.functions.is_empty() {
-		for (idx, func) in req.functions.iter().enumerate() {
-			let f = sqlx::query_as::<_, ToolFunction>(
-				r#"
-				INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
-				VALUES ($1, $2, $3, $4, $5, $6)
-				RETURNING *
-				"#,
-			)
-			.bind(tool.id)
-			.bind(&func.name)
-			.bind(&func.description)
-			.bind(&func.input_schema)
-			.bind(&func.entrypoint)
-			.bind(idx as i32)
-			.fetch_one(&state.db)
-			.await;
-
-			if let Ok(f) = f {
-				functions.push(f);
-			}
-		}
-	} else if req.input_schema.is_some() {
-		let f = sqlx::query_as::<_, ToolFunction>(
-			r#"
-			INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
-			VALUES ($1, $2, $3, $4, NULL, 0)
-			RETURNING *
-			"#,
-		)
-		.bind(tool.id)
-		.bind(&req.name) // Use tool name as function name
-		.bind(&req.description)
-		.bind(&legacy_schema)
-		.fetch_one(&state.db)
-		.await;
-
-		if let Ok(f) = f {
-			functions.push(f);
-		}
-	}
 
 	ResponseBuilder::new(ResponseBody::Json(ToolResponse::from_tool_with_functions(tool, functions)))
 		.status(StatusCode::CREATED)
@@ -222,116 +153,14 @@ pub async fn update_tool(State(state): State<Arc<JobState>>, cookies: Cookies, P
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let existing = match sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
-		.bind(tool_id)
-		.fetch_optional(&state.db)
-		.await
-	{
-		Ok(existing) => existing,
-		Err(e) => {
-			eprintln!("[TOOLS] Failed to fetch tool for update: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-	if existing.is_none() {
-		return ErrorBuilder::new(ErrorCode::NotFound).build();
-	}
-
-	let tool = sqlx::query_as::<_, Tool>(
-		r#"
-        UPDATE tools SET
-            name = COALESCE($2, name),
-            display_name = COALESCE($3, display_name),
-            description = COALESCE($4, description),
-            icon = COALESCE($5, icon),
-            source_config = COALESCE($6, source_config),
-            input_schema = COALESCE($7, input_schema),
-            settings_schema = COALESCE($8, settings_schema),
-            is_enabled = COALESCE($9, is_enabled),
-            updated_at = NOW()
-        WHERE id = $1 AND owner_id IS NULL
-        RETURNING *
-        "#,
-	)
-	.bind(tool_id)
-	.bind(&req.name)
-	.bind(&req.display_name)
-	.bind(&req.description)
-	.bind(&req.icon)
-	.bind(&req.source_config)
-	.bind(&req.input_schema)
-	.bind(&req.settings_schema)
-	.bind(req.is_enabled)
-	.fetch_one(&state.db)
-	.await;
-
-	let tool = match tool {
-		Ok(t) => t,
+	let (tool, functions) = match Tool::update_system(&state.db, &tool_id, &req).await {
+		Ok(Some(updated)) => updated,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
 		Err(e) => {
 			eprintln!("[TOOLS] Failed to update tool: {e}");
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	};
-
-	if let Some(ref delete_ids) = req.delete_function_ids {
-		for func_id in delete_ids {
-			let _ = sqlx::query("DELETE FROM tool_functions WHERE id = $1 AND tool_id = $2")
-				.bind(func_id)
-				.bind(tool_id)
-				.execute(&state.db)
-				.await;
-		}
-	}
-
-	if let Some(ref funcs) = req.functions {
-		for (idx, func) in funcs.iter().enumerate() {
-			if let Some(func_id) = func.id {
-				// Update existing function
-				let _ = sqlx::query(
-					r#"
-					UPDATE tool_functions SET
-						name = $2,
-						description = $3,
-						input_schema = $4,
-						entrypoint = $5,
-						sort_order = $6
-					WHERE id = $1 AND tool_id = $7
-					"#,
-				)
-				.bind(func_id)
-				.bind(&func.name)
-				.bind(&func.description)
-				.bind(&func.input_schema)
-				.bind(&func.entrypoint)
-				.bind(idx as i32)
-				.bind(tool_id)
-				.execute(&state.db)
-				.await;
-			} else {
-				// Insert new function
-				let _ = sqlx::query(
-					r#"
-					INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
-					VALUES ($1, $2, $3, $4, $5, $6)
-					"#,
-				)
-				.bind(tool_id)
-				.bind(&func.name)
-				.bind(&func.description)
-				.bind(&func.input_schema)
-				.bind(&func.entrypoint)
-				.bind(idx as i32)
-				.execute(&state.db)
-				.await;
-			}
-		}
-	}
-
-	let functions = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 ORDER BY sort_order, created_at")
-		.bind(tool_id)
-		.fetch_all(&state.db)
-		.await
-		.unwrap_or_default();
 
 	ResponseBuilder::new(ResponseBody::Json(ToolResponse::from_tool_with_functions(tool, functions))).build()
 }
@@ -402,33 +231,11 @@ pub async fn set_tool_settings(
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let tool_exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM tools WHERE id = $1 AND owner_id IS NULL")
-		.bind(tool_id)
-		.fetch_optional(&state.db)
-		.await
-		.ok()
-		.flatten();
-
-	if tool_exists.is_none() {
-		return ErrorBuilder::new(ErrorCode::NotFound).build();
-	}
-
-	let result = sqlx::query(
-		r#"
-        INSERT INTO user_tool_settings (user_id, tool_id, settings)
-        VALUES (NULL, $1, $2)
-        ON CONFLICT (tool_id) WHERE user_id IS NULL
-        DO UPDATE SET settings = $2, updated_at = NOW()
-        "#,
-	)
-	.bind(tool_id)
-	.bind(&req.settings)
-	.execute(&state.db)
-	.await;
-
-	match result {
-		Ok(_) => (StatusCode::NO_CONTENT, "").into_response(),
-		Err(e) => {
+	match Tool::set_system_settings(&state.db, &tool_id, &req.settings).await {
+		Ok(()) => (StatusCode::NO_CONTENT, "").into_response(),
+		Err(ToolSettingsError::NotFound) => ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(ToolSettingsError::Invalid) => ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
+		Err(ToolSettingsError::Database(e)) => {
 			eprintln!("[TOOLS] Failed to save tool settings: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}

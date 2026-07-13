@@ -39,6 +39,8 @@ pub struct ToolResponse {
 	pub functions: Vec<ToolFunctionResponse>,
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub system_prompt: Option<String>,
 	pub has_user_settings: bool,
 	pub mcp_server_id: Option<Uuid>,
 	pub mcp_server_name: Option<String>,
@@ -47,6 +49,12 @@ pub struct ToolResponse {
 }
 
 impl ToolResponse {
+	#[must_use]
+	pub fn into_public(mut self) -> Self {
+		self.system_prompt = None;
+		self
+	}
+
 	pub fn from_tool_with_functions(t: Tool, functions: Vec<ToolFunction>) -> Self {
 		let mcp_server_id = super::McpSourceConfig::from_tool(&t).map(|c| c.mcp_server_id);
 		Self {
@@ -61,6 +69,7 @@ impl ToolResponse {
 			functions: functions.into_iter().map(ToolFunctionResponse::from).collect(),
 			settings_schema: t.settings_schema,
 			is_enabled: t.is_enabled,
+			system_prompt: t.system_prompt,
 			has_user_settings: false,
 			mcp_server_id,
 			mcp_server_name: None,
@@ -85,6 +94,7 @@ impl From<Tool> for ToolResponse {
 			functions: vec![],
 			settings_schema: t.settings_schema,
 			is_enabled: t.is_enabled,
+			system_prompt: t.system_prompt,
 			has_user_settings: false,
 			mcp_server_id,
 			mcp_server_name: None,

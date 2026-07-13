@@ -239,6 +239,17 @@
 								<Input v-model="mcpConfig.tool_name" :placeholder="store.getTranslation('settings.tools.tool_name_placeholder')" />
 							</div>
 
+							<div class="space-y-2 pt-2 border-t border-border">
+								<Label for="tool-system-prompt" class="text-xs text-muted-foreground">{{ store.getTranslation('settings.tools.system_prompt') }}</Label>
+								<Textarea
+									id="tool-system-prompt"
+									v-model="toolForm.system_prompt"
+									:placeholder="store.getTranslation('settings.tools.system_prompt_placeholder')"
+									rows="3"
+								/>
+								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.tools.system_prompt_hint') }}</p>
+							</div>
+
 							<div v-if="!isBuiltinTool" class="space-y-2 pt-2 border-t border-border">
 								<Label class="text-xs text-muted-foreground">{{ store.getTranslation('settings.tools.settings_schema') }}</Label>
 								<SchemaBuilder v-model="toolForm.settings_schema_json" :is-settings="true" />
@@ -326,21 +337,36 @@
 		</Dialog>
 
 		<Dialog v-model:open="settingsDialogOpen">
-			<DialogContent class="sm:max-w-[400px]">
+			<DialogContent class="sm:max-w-[440px]">
 				<DialogHeader>
 					<DialogTitle class="flex items-center gap-3">
-						<Key class="h-5 w-5 text-primary" />
-						<span>{{ store.getTranslation('settings.tools.settings') }}</span>
+						<Sparkles v-if="isImagegenSettings" class="h-5 w-5 text-primary" />
+						<Key v-else class="h-5 w-5 text-primary" />
+						<span>{{ isImagegenSettings ? imageModelTitle : store.getTranslation('settings.tools.settings') }}</span>
 					</DialogTitle>
-					<DialogDescription>{{
-						store.getTranslation('settings.tools.settings_description', {name: settingsTool?.display_name || settingsTool?.name})
-					}}</DialogDescription>
+					<DialogDescription>
+						{{
+							isImagegenSettings
+								? imageModelDescription
+								: store.getTranslation('settings.tools.settings_description', {name: settingsTool?.display_name || settingsTool?.name})
+						}}
+					</DialogDescription>
 				</DialogHeader>
 
 				<div class="space-y-4 py-4">
 					<div v-for="(field, key) in settingsFields" :key="key" class="space-y-2">
 						<Label :for="`setting-${key}`">{{ field.title || key }}</Label>
-						<template v-if="field.enum && field.enum.length > 0">
+						<template v-if="field.format === 'model-picker'">
+							<DefaultModelPicker
+								v-model="userSettings[key]"
+								endpoint="/api/v1/admin/image-models"
+								provider-endpoint="/api/v1/admin/image-model-providers"
+								selected-model-endpoint="/api/v1/admin/models"
+								value-mode="uuid"
+								:placeholder="imageModelPlaceholder"
+							/>
+						</template>
+						<template v-else-if="field.enum && field.enum.length > 0">
 							<ShadSelect v-model="userSettings[key]">
 								<ShadSelectTrigger :id="`setting-${key}`">
 									<ShadSelectValue :placeholder="field.description || store.getTranslation('settings.tools.select_placeholder')" />
@@ -381,6 +407,7 @@ import HeaderEditor from '@/components/settings/HeaderEditor.vue';
 import ToolTestDialog from '@/components/settings/ToolTestDialog.vue';
 import McpManagerDialog from '@/components/mcp/McpManagerDialog.vue';
 import McpServerEditDialog from '@/components/mcp/McpServerEditDialog.vue';
+import DefaultModelPicker from '@/components/settings/DefaultModelPicker.vue';
 import {useMainStore} from '@/stores';
 import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog';
 import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
@@ -414,6 +441,7 @@ interface Tool {
 	functions: ToolFunction[];
 	settings_schema?: any;
 	is_enabled: boolean;
+	system_prompt?: string | null;
 	has_user_settings?: boolean;
 	mcp_server_id?: string | null;
 	mcp_server_name?: string | null;
@@ -473,7 +501,7 @@ const sourceKinds = [
 	{value: 'MCP', label: 'MCP', icon: Server, disabled: false},
 ];
 
-const builtinToolTemplates = [
+const builtinToolTemplates = computed(() => [
 	{
 		name: 'websearch',
 		display_name: 'Web Search',
@@ -522,30 +550,30 @@ const builtinToolTemplates = [
 	},
 	{
 		name: 'imagegen',
-		display_name: 'Image Generation',
-		description: 'Generate and edit images using OpenAI, Replicate, or Google APIs',
+		display_name: store.getTranslation('settings.tools.imagegen.display_name'),
+		description: store.getTranslation('settings.tools.imagegen.description'),
 		source_kind: 'BUILTIN',
 		icon: Sparkles,
 		source_config: {builtin_id: 'imagegen'},
 		functions: [
 			{
 				name: 'generate',
-				description: 'Generate an image from a text prompt',
+				description: store.getTranslation('settings.tools.imagegen.generate.description'),
 				input_schema: {
 					type: 'object',
 					properties: {
-						prompt: {type: 'string', description: 'The text prompt describing the image to generate'},
+						prompt: {type: 'string', description: store.getTranslation('settings.tools.imagegen.generate.prompt')},
 						size: {
 							type: 'string',
-							description: 'Image size',
+							description: store.getTranslation('settings.tools.imagegen.generate.size'),
 							enum: ['1024x1024', '1792x1024', '1024x1792', '512x512', '256x256'],
 							default: '1024x1024',
 						},
 						quality: {
 							type: 'string',
-							description: 'Image quality',
-							enum: ['standard', 'hd'],
-							default: 'standard',
+							description: store.getTranslation('settings.tools.imagegen.generate.quality'),
+							enum: ['auto', 'low', 'medium', 'high'],
+							default: 'auto',
 						},
 					},
 					required: ['prompt'],
@@ -553,37 +581,32 @@ const builtinToolTemplates = [
 			},
 			{
 				name: 'edit',
-				description: 'Edit an existing image using a text prompt',
+				description: store.getTranslation('settings.tools.imagegen.edit.description'),
 				input_schema: {
 					type: 'object',
 					properties: {
-						image_url: {type: 'string', description: 'URL of the image to edit'},
-						prompt: {type: 'string', description: 'The text prompt describing the desired edit'},
+						image_id: {type: 'string', description: store.getTranslation('settings.tools.imagegen.edit.image_id')},
+						image_url: {type: 'string', description: store.getTranslation('settings.tools.imagegen.edit.image_url')},
+						prompt: {type: 'string', description: store.getTranslation('settings.tools.imagegen.edit.prompt')},
 					},
-					required: ['image_url', 'prompt'],
+					required: ['prompt'],
 				},
 			},
 		],
 		settings_schema: {
 			type: 'object',
-			required: ['api_key', 'provider'],
+			required: ['image_model_id'],
 			properties: {
-				api_key: {type: 'string', title: 'API Key', secret: true, description: 'API key for the selected provider'},
-				provider: {
+				image_model_id: {
 					type: 'string',
-					title: 'Provider',
-					enum: ['openai', 'replicate', 'google'],
-					description: 'Image generation provider to use',
-				},
-				model: {
-					type: 'string',
-					title: 'Model',
-					description: 'Model to use (optional, defaults: dall-e-3, flux-schnell, imagen-3)',
+					title: store.getTranslation('settings.tools.image_model_title'),
+					format: 'model-picker',
+					description: store.getTranslation('settings.tools.imagegen.settings.description'),
 				},
 			},
 		},
 	},
-];
+]);
 
 interface McpServerGroup {
 	server_id: string;
@@ -624,7 +647,7 @@ const displayTools = computed(() => {
 	const regularTools = tools.value.filter(t => !t.mcp_server_id);
 	const result: any[] = [...regularTools];
 
-	for (const template of builtinToolTemplates) {
+	for (const template of builtinToolTemplates.value) {
 		const exists = tools.value.some(t => t.name === template.name);
 		if (!exists) {
 			result.push({
@@ -648,6 +671,7 @@ const toolForm = reactive({
 	functions: [] as {id?: string; name: string; description: string; input_schema_json: string; entrypoint: string}[],
 	settings_schema_json: '',
 	is_enabled: true,
+	system_prompt: '',
 });
 
 const httpConfig = reactive({
@@ -680,6 +704,17 @@ const settingsFields = computed(() => {
 	if (!settingsTool.value?.settings_schema?.properties) return {};
 	return settingsTool.value.settings_schema.properties;
 });
+
+const isImagegenSettings = computed(() => settingsTool.value?.source_config?.builtin_id === 'imagegen');
+
+function translatedOrFallback(key: string, fallback: string) {
+	const translation = store.getTranslation(key);
+	return translation === key ? fallback : translation;
+}
+
+const imageModelTitle = computed(() => translatedOrFallback('settings.tools.image_model_title', store.getTranslation('settings.tools.settings')));
+const imageModelDescription = computed(() => translatedOrFallback('settings.tools.image_model_description', ''));
+const imageModelPlaceholder = computed(() => translatedOrFallback('settings.tools.image_model_placeholder', store.getTranslation('settings.tools.select_placeholder')));
 
 async function handleWasmUpload(event: Event) {
 	const target = event.target as HTMLInputElement;
@@ -764,6 +799,7 @@ function openCreateDialog() {
 		],
 		settings_schema_json: '',
 		is_enabled: true,
+		system_prompt: '',
 	});
 	Object.assign(httpConfig, {method: 'GET', url: '', headers_json: '{}', body_template: ''});
 	activeFunctionIdx.value = 0;
@@ -836,6 +872,7 @@ function openEditDialog(tool: Tool) {
 		functions: funcs,
 		settings_schema_json: tool.settings_schema ? JSON.stringify(tool.settings_schema, null, 2) : '',
 		is_enabled: tool.is_enabled,
+		system_prompt: tool.system_prompt || '',
 	});
 
 	if (tool.source_kind === 'HTTP' && tool.source_config) {
@@ -934,6 +971,7 @@ async function saveTool() {
 			functions,
 			settings_schema: toolForm.settings_schema_json ? JSON.parse(toolForm.settings_schema_json) : null,
 			is_enabled: toolForm.is_enabled,
+			system_prompt: toolForm.system_prompt?.trim() ? toolForm.system_prompt.trim() : null,
 		};
 
 		if (editingTool.value) {

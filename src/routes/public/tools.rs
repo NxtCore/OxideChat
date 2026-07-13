@@ -43,7 +43,7 @@ pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) ->
 		.into_iter()
 		.map(|t| {
 			let funcs = functions_by_tool.remove(&t.id).unwrap_or_default();
-			ToolResponse::from_tool_with_functions(t, funcs)
+			ToolResponse::from_tool_with_functions(t, funcs).into_public()
 		})
 		.collect();
 

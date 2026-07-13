@@ -61,6 +61,7 @@ export const useMainStore = defineStore('main', {
 		bootState: BootState;
 		retryCount: number;
 		lastBootError: string | null;
+		settingsReturnPath: string;
 		preferences: UserPreferences | null;
 		auth: AuthState;
 	} => {
@@ -70,6 +71,7 @@ export const useMainStore = defineStore('main', {
 			bootState: 'idle',
 			retryCount: 0,
 			lastBootError: null,
+			settingsReturnPath: '/',
 			preferences: null,
 			auth: {
 				user: null,

@@ -17,6 +17,10 @@ use std::sync::Arc;
 async fn main() {
 	dotenv::dotenv().ok();
 
+	let log_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+		.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,omniference=debug"));
+	tracing_subscriber::fmt().with_env_filter(log_filter).with_target(true).init();
+
 	let db_host = std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string());
 	let db_port = std::env::var("POSTGRES_PORT").unwrap_or_else(|_| "5432".to_string());
 	let db_name = std::env::var("POSTGRES_DB").expect("POSTGRES_DB must be set");

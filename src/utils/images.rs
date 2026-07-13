@@ -163,6 +163,37 @@ pub async fn get_image(db: &PgPool, id: Uuid) -> Result<Option<(Vec<u8>, String)
 	}
 }
 
+/// Store a caption (typically the generation prompt) for an image.
+///
+/// Used as a text stand-in when rehydrating history for non-vision models.
+///
+/// # Errors
+///
+/// Returns an error when the database update fails.
+pub async fn set_image_caption(db: &PgPool, id: Uuid, caption: &str) -> Result<(), String> {
+	sqlx::query("UPDATE images SET caption = $2 WHERE id = $1")
+		.bind(id)
+		.bind(caption)
+		.execute(db)
+		.await
+		.map_err(|e| format!("Failed to set image caption: {e}"))?;
+	Ok(())
+}
+
+/// Retrieve the stored caption for an image, if any.
+///
+/// # Errors
+///
+/// Returns an error when the database query fails.
+pub async fn image_caption(db: &PgPool, id: Uuid) -> Result<Option<String>, String> {
+	let row: Option<(Option<String>,)> = sqlx::query_as("SELECT caption FROM images WHERE id = $1")
+		.bind(id)
+		.fetch_optional(db)
+		.await
+		.map_err(|e| format!("Failed to fetch image caption: {e}"))?;
+	Ok(row.and_then(|r| r.0))
+}
+
 /// Parse a base64 data URI into (mime_type, decoded_bytes)
 pub(crate) fn parse_data_uri(data_uri: &str) -> Result<(String, Vec<u8>), String> {
 	if !data_uri.starts_with("data:") {

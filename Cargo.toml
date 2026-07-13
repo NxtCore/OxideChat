@@ -37,7 +37,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "multipart",
 ] }
 tower-http = { version = "0.5", features = ["cors"] }
-omniference = "0.2"
+omniference = { git = "https://github.com/Henrik-3/omniference.git", rev = "fd69edd438430d68f9b81b5570033b12d33a4fd2" }
 aes-gcm = "0.10"
 rand = "0.8"
 rust_decimal = { version = "1.39.0", features = ["db-postgres", "serde"] }
@@ -45,6 +45,8 @@ futures-util = "0.3.31"
 async-stream = "0.3.6"
 tokio-util = "0.7.17"
 extism = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.10"
 base64 = "0.22"
 thiserror = "2"

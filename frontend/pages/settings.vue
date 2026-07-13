@@ -77,7 +77,9 @@ const activeTab = computed(() => {
 });
 
 function goBack() {
-	router.push('/');
+	const returnPath = store.settingsReturnPath;
+	store.settingsReturnPath = '/';
+	router.push(returnPath === '/' || returnPath.startsWith('/chats/') ? returnPath : '/');
 }
 
 onMounted(() => {
