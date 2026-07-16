@@ -1,9 +1,38 @@
 use super::{AnalyticsDayModelRow, AnalyticsRow, UsageEvent, UsageEventRecord};
 use chrono::{DateTime, Duration, Utc};
+use rust_decimal::Decimal;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use uuid::Uuid;
 
+#[derive(sqlx::FromRow)]
+struct ProviderSpendRow {
+	provider_id: Uuid,
+	spent_amount: Decimal,
+}
+
 impl UsageEvent {
+	pub async fn current_month_spend_by_provider(pool: &PgPool, provider_ids: &[Uuid]) -> Result<HashMap<Uuid, Decimal>, sqlx::Error> {
+		if provider_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows = sqlx::query_as::<_, ProviderSpendRow>(
+			r#"SELECT provider_id AS provider_id, COALESCE(SUM(cost_total), 0)::numeric AS spent_amount
+			   FROM usage_events
+			   WHERE provider_id = ANY($1)
+			     AND created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+			     AND created_at < (date_trunc('month', NOW() AT TIME ZONE 'UTC') + INTERVAL '1 month') AT TIME ZONE 'UTC'
+			   GROUP BY provider_id"#,
+		)
+		.bind(provider_ids)
+		.fetch_all(pool)
+		.await?;
+		let mut result = HashMap::with_capacity(provider_ids.len());
+		result.extend(provider_ids.iter().copied().map(|id| (id, Decimal::ZERO)));
+		result.extend(rows.into_iter().map(|row| (row.provider_id, row.spent_amount)));
+		Ok(result)
+	}
+
 	pub async fn record(pool: &PgPool, params: UsageEventRecord<'_>) -> Result<Self, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
 			r#"
@@ -40,7 +69,13 @@ impl UsageEvent {
 		}
 	}
 
-	pub async fn analytics_for_user(pool: &PgPool, user_id: &Uuid, from: Option<DateTime<Utc>>, to: Option<DateTime<Utc>>, group_by: &str) -> Result<Vec<AnalyticsRow>, sqlx::Error> {
+	pub async fn analytics_for_user(
+		pool: &PgPool,
+		user_id: &Uuid,
+		from: Option<DateTime<Utc>>,
+		to: Option<DateTime<Utc>>,
+		group_by: &str,
+	) -> Result<Vec<AnalyticsRow>, sqlx::Error> {
 		let end = to.unwrap_or_else(Utc::now);
 		let start = from.unwrap_or(end - Duration::days(30));
 		match group_by {
@@ -49,7 +84,12 @@ impl UsageEvent {
 		}
 	}
 
-	pub async fn day_model_analytics(pool: &PgPool, from: Option<DateTime<Utc>>, to: Option<DateTime<Utc>>, user_id: Option<&Uuid>) -> Result<Vec<AnalyticsDayModelRow>, sqlx::Error> {
+	pub async fn day_model_analytics(
+		pool: &PgPool,
+		from: Option<DateTime<Utc>>,
+		to: Option<DateTime<Utc>>,
+		user_id: Option<&Uuid>,
+	) -> Result<Vec<AnalyticsDayModelRow>, sqlx::Error> {
 		let end = to.unwrap_or_else(Utc::now);
 		let start = from.unwrap_or(end - Duration::days(30));
 		Self::by_day_by_model(pool, start, end, user_id).await

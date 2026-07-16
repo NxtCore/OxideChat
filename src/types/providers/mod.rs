@@ -5,12 +5,15 @@ use serde_json::Value;
 use sqlx::types::Json;
 use uuid::Uuid;
 
+mod billing;
+mod billing_repository;
 mod patch;
 mod repository;
 mod requests;
 mod responses;
 mod rows;
 
+pub(crate) use billing::{ProviderBillingConnection, ProviderBillingMetric, ProviderBillingOverviewRow};
 pub use omniference::types::ProviderKind as OmniProviderKind;
 pub use requests::*;
 pub use responses::*;

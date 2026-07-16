@@ -1,8 +1,113 @@
 use super::{Provider, ProviderKind};
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProviderBillingStatus {
+	NotConfigured,
+	Available,
+	Unsupported,
+	Unauthorized,
+	UpstreamError,
+}
+
+impl ProviderBillingStatus {
+	#[must_use]
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::NotConfigured => "NOT_CONFIGURED",
+			Self::Available => "AVAILABLE",
+			Self::Unsupported => "UNSUPPORTED",
+			Self::Unauthorized => "UNAUTHORIZED",
+			Self::UpstreamError => "UPSTREAM_ERROR",
+		}
+	}
+
+	#[must_use]
+	pub fn from_str(value: &str) -> Option<Self> {
+		match value {
+			"NOT_CONFIGURED" => Some(Self::NotConfigured),
+			"AVAILABLE" => Some(Self::Available),
+			"UNSUPPORTED" => Some(Self::Unsupported),
+			"UNAUTHORIZED" => Some(Self::Unauthorized),
+			"UPSTREAM_ERROR" => Some(Self::UpstreamError),
+			_ => None,
+		}
+	}
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProviderBillingMetricKind {
+	CreditBalance,
+	KeyLimit,
+	SpendThreshold,
+	SpendOnly,
+}
+
+impl ProviderBillingMetricKind {
+	#[must_use]
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::CreditBalance => "CREDIT_BALANCE",
+			Self::KeyLimit => "KEY_LIMIT",
+			Self::SpendThreshold => "SPEND_THRESHOLD",
+			Self::SpendOnly => "SPEND_ONLY",
+		}
+	}
+
+	#[must_use]
+	pub fn from_str(value: &str) -> Option<Self> {
+		match value {
+			"CREDIT_BALANCE" => Some(Self::CreditBalance),
+			"KEY_LIMIT" => Some(Self::KeyLimit),
+			"SPEND_THRESHOLD" => Some(Self::SpendThreshold),
+			"SPEND_ONLY" => Some(Self::SpendOnly),
+			_ => None,
+		}
+	}
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProviderBillingOverviewResponse {
+	pub provider_id: Uuid,
+	pub provider_kind: ProviderKind,
+	pub status: ProviderBillingStatus,
+	pub is_enabled: bool,
+	pub has_billing_credential: bool,
+	pub external_scope_id: Option<String>,
+	pub external_scope_name: Option<String>,
+	pub upstream: Option<ProviderBillingMetricResponse>,
+	pub local: ProviderLocalSpendResponse,
+	pub last_synced_at: Option<DateTime<Utc>>,
+	pub is_stale: bool,
+	pub error_code: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProviderBillingMetricResponse {
+	pub metric_kind: ProviderBillingMetricKind,
+	pub currency: String,
+	pub period_start: Option<DateTime<Utc>>,
+	pub period_end: Option<DateTime<Utc>>,
+	pub limit_amount: Option<Decimal>,
+	pub spent_amount: Option<Decimal>,
+	pub remaining_amount: Option<Decimal>,
+	pub is_hard_limit: bool,
+	pub thresholds: Vec<Decimal>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProviderLocalSpendResponse {
+	pub currency: String,
+	pub period_start: DateTime<Utc>,
+	pub period_end: DateTime<Utc>,
+	pub spent_amount: Decimal,
+}
 
 #[derive(Debug, Serialize)]
 pub struct ProviderResponse {

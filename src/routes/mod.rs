@@ -22,6 +22,14 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		// Admin AI Providers
 		.route("/api/v1/admin/providers", get(admin::providers::list_providers))
 		.route("/api/v1/admin/providers", post(admin::providers::create_provider))
+		.route("/api/v1/admin/providers/billing", get(admin::provider_billing::list_billing))
+		.route(
+			"/api/v1/admin/providers/{id}/billing",
+			get(admin::provider_billing::get_billing)
+				.put(admin::provider_billing::update_billing)
+				.delete(admin::provider_billing::delete_billing),
+		)
+		.route("/api/v1/admin/providers/{id}/billing/refresh", post(admin::provider_billing::refresh_billing))
 		.route("/api/v1/admin/providers/test", post(admin::providers::test_provider_inline))
 		.route("/api/v1/admin/providers/{id}", get(admin::providers::get_provider))
 		.route("/api/v1/admin/providers/{id}", put(admin::providers::update_provider))

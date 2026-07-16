@@ -5,6 +5,7 @@ pub mod config;
 pub mod i18n;
 pub mod mcp;
 pub mod models;
+pub mod provider_billing;
 pub mod providers;
 pub mod teams;
 pub mod tools;
