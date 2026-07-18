@@ -69,7 +69,13 @@ pub async fn update_billing(State(state): State<Arc<JobState>>, cookies: Cookies
 				.build();
 		}
 	}
-	let encrypted = request.credential.as_deref().map(encrypt_api_key);
+	let encrypted = match request.credential.as_deref().map(encrypt_api_key).transpose() {
+		Ok(credential) => credential,
+		Err(error) => {
+			tracing::error!(provider_id=%id, "Failed to encrypt billing credential: {error}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
 	match Provider::upsert_billing_connection_for_admin(&state.db, &id, &request, encrypted.as_deref()).await {
 		Ok(Some(_)) => overview_response(&state, &id).await,
 		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),

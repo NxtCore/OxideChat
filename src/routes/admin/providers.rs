@@ -92,7 +92,13 @@ pub async fn create_provider(State(state): State<Arc<JobState>>, cookies: Cookie
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let api_key = req.api_key.as_ref().map(|k| encrypt_api_key(k));
+	let api_key = match req.api_key.as_deref().map(encrypt_api_key).transpose() {
+		Ok(api_key) => api_key,
+		Err(error) => {
+			tracing::error!("Failed to encrypt provider credential: {error}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
 	let base_url = req.base_url.trim_end_matches('/').to_string();
 
 	let provider = Provider::create_system(&state.db, &req.kind, &req.name, &base_url, api_key.as_deref(), &req.extra_headers, req.is_enabled).await;
@@ -128,7 +134,13 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, cookies: Cookie
 	}
 
 	let base_url = req.base_url.as_deref().map(|url| url.trim_end_matches('/').to_string());
-	let api_key = req.api_key.as_ref().map(|key| encrypt_api_key(key));
+	let api_key = match req.api_key.as_deref().map(encrypt_api_key).transpose() {
+		Ok(api_key) => api_key,
+		Err(error) => {
+			tracing::error!("Failed to encrypt provider credential: {error}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
 	let provider = Provider::patch_system(
 		&state.db,
 		&id,
@@ -204,7 +216,13 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, cookies: Cookies,
 		}
 	};
 
-	let api_key = provider.api_key.as_ref().map(|k| decrypt_api_key(k));
+	let api_key = match provider.api_key.as_deref().map(decrypt_api_key).transpose() {
+		Ok(api_key) => api_key,
+		Err(error) => {
+			tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
 	let extra_headers = parse_extra_headers(&provider.extra_headers.0);
 
 	let config = ProviderConfig {

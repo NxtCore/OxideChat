@@ -61,11 +61,12 @@ async fn main() {
 	i18n::I18n::init(&pool).await;
 	println!("[I18N] Translations loaded");
 
-	utils::encryption::init();
-	if utils::encryption::is_enabled() {
-		println!("[ENCRYPTION] API key encryption enabled");
-	} else {
-		println!("[ENCRYPTION] API key encryption disabled (set ENCRYPTION_KEY to enable)");
+	match utils::encryption::init() {
+		Ok(source) => println!("[ENCRYPTION] Credential encryption enabled using {}", source.as_str()),
+		Err(error) => {
+			eprintln!("[ENCRYPTION] Failed to initialize credential encryption: {error}");
+			std::process::exit(1);
+		}
 	}
 
 	ai::init(&pool).await;

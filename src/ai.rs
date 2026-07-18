@@ -33,7 +33,13 @@ pub async fn init(pool: &PgPool) {
 	let provider_count = providers.len();
 	let mut engine_write = engine.write().await;
 	for provider in providers {
-		let config = provider_to_config(&provider);
+		let config = match provider_to_config(&provider) {
+			Ok(config) => config,
+			Err(error) => {
+				tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
+				continue;
+			}
+		};
 
 		if let Err(e) = engine_write.register_provider(config).await {
 			eprintln!("[AI] Failed to register provider '{}': {}", provider.name, e);
@@ -79,7 +85,13 @@ pub async fn reload_providers(pool: &PgPool) {
 	*engine_write = new_engine;
 
 	for provider in providers {
-		let config = provider_to_config(&provider);
+		let config = match provider_to_config(&provider) {
+			Ok(config) => config,
+			Err(error) => {
+				tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
+				continue;
+			}
+		};
 		if let Err(e) = engine_write.register_provider(config).await {
 			eprintln!("[AI] Failed to register provider '{}': {}", provider.name, e);
 		}
@@ -90,11 +102,11 @@ pub async fn reload_providers(pool: &PgPool) {
 }
 
 /// Convert a database provider to omniference config
-pub fn provider_to_config(provider: &Provider) -> ProviderConfig {
-	let api_key = provider.api_key.as_ref().map(|k| decrypt_api_key(k));
+pub fn provider_to_config(provider: &Provider) -> Result<ProviderConfig, crate::utils::encryption::EncryptionError> {
+	let api_key = provider.api_key.as_deref().map(decrypt_api_key).transpose()?;
 	let extra_headers = parse_extra_headers(&provider.extra_headers.0);
 
-	ProviderConfig {
+	Ok(ProviderConfig {
 		name: provider.name.clone(),
 		endpoint: ProviderEndpoint {
 			kind: provider.kind.to_omni_kind(),
@@ -105,7 +117,7 @@ pub fn provider_to_config(provider: &Provider) -> ProviderConfig {
 		},
 		enabled: provider.is_enabled,
 		catalog_provider_slug: None,
-	}
+	})
 }
 
 pub fn parse_extra_headers(value: &serde_json::Value) -> BTreeMap<String, String> {

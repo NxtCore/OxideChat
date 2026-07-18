@@ -25,6 +25,8 @@ pub enum ProviderBillingError {
 	InvalidResponse,
 	#[error("request_failed")]
 	RequestFailed,
+	#[error("credential_decryption_failed")]
+	CredentialDecryptionFailed,
 }
 
 impl ProviderBillingError {
@@ -42,6 +44,7 @@ impl ProviderBillingError {
 			Self::RateLimited => "RATE_LIMITED",
 			Self::InvalidResponse => "INVALID_RESPONSE",
 			Self::RequestFailed => "REQUEST_FAILED",
+			Self::CredentialDecryptionFailed => "CREDENTIAL_DECRYPTION_FAILED",
 		}
 	}
 
@@ -51,7 +54,7 @@ impl ProviderBillingError {
 			Self::Unsupported => ProviderBillingStatus::Unsupported,
 			Self::MissingConfiguration => ProviderBillingStatus::NotConfigured,
 			Self::Unauthorized => ProviderBillingStatus::Unauthorized,
-			Self::RateLimited | Self::InvalidResponse | Self::RequestFailed => ProviderBillingStatus::UpstreamError,
+			Self::RateLimited | Self::InvalidResponse | Self::RequestFailed | Self::CredentialDecryptionFailed => ProviderBillingStatus::UpstreamError,
 		}
 	}
 }
@@ -89,10 +92,11 @@ pub async fn refresh_provider_billing(pool: &PgPool, provider: &Provider) -> Res
 		match provider.kind {
 			ProviderKind::Openrouter => {
 				if let Some(stored) = connection.credential.as_deref() {
-					let key = decrypt_api_key(stored);
+					let key = decrypt_api_key(stored).map_err(|_| ProviderBillingError::CredentialDecryptionFailed)?;
 					openrouter::fetch_account_metric(client()?, &key).await
 				} else {
-					let key = provider.api_key.as_deref().ok_or(ProviderBillingError::MissingConfiguration).map(decrypt_api_key)?;
+					let key = decrypt_api_key(provider.api_key.as_deref().ok_or(ProviderBillingError::MissingConfiguration)?)
+						.map_err(|_| ProviderBillingError::CredentialDecryptionFailed)?;
 					openrouter::fetch_key_metric(client()?, &key).await
 				}
 			}
@@ -101,7 +105,7 @@ pub async fn refresh_provider_billing(pool: &PgPool, provider: &Provider) -> Res
 					.credential
 					.as_deref()
 					.ok_or(ProviderBillingError::MissingConfiguration)
-					.map(decrypt_api_key)?;
+					.and_then(|stored| decrypt_api_key(stored).map_err(|_| ProviderBillingError::CredentialDecryptionFailed))?;
 				let project_id = connection
 					.external_scope_id
 					.as_deref()
