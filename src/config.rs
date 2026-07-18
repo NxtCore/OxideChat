@@ -11,6 +11,7 @@ use crate::utils::encryption::{decrypt_api_key, encrypt_secret_value};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
+use uuid::Uuid;
 
 /// Global config instance
 static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -72,8 +73,8 @@ pub struct ConfigValues {
 	/// When enabled, admins may register global MCP servers that run over
 	/// server-side `stdio` (arbitrary commands on the host). Off by default.
 	pub allow_server_stdio_mcp: bool,
-	/// Instance-wide default model key. Applied when neither user nor team default is set.
-	pub default_model_key: Option<String>,
+	/// Instance-wide default model. Applied when neither user nor team default is set.
+	pub default_model_id: Option<Uuid>,
 }
 
 impl Default for ConfigValues {
@@ -87,7 +88,7 @@ impl Default for ConfigValues {
 			oauth_discord_client_secret: None,
 			enable_provider_selector: false,
 			allow_server_stdio_mcp: false,
-			default_model_key: None,
+			default_model_id: None,
 		}
 	}
 }
@@ -161,10 +162,10 @@ impl Config {
 		self.values.load().allow_server_stdio_mcp
 	}
 
-	/// Get the instance-wide default model key, if configured.
+	/// Get the instance-wide default model ID, if configured.
 	#[must_use]
-	pub fn default_model_key(&self) -> Option<String> {
-		self.values.load().default_model_key.clone()
+	pub fn default_model_id(&self) -> Option<Uuid> {
+		self.values.load().default_model_id
 	}
 
 	/// Get current configuration values.
@@ -242,15 +243,15 @@ impl Config {
 		Ok(())
 	}
 
-	/// Set or clear the instance-wide default model key in the database and reload config.
+	/// Set or clear the instance-wide default model ID in the database and reload config.
 	///
 	/// # Errors
 	/// Returns an error if the database write fails.
-	pub async fn set_default_model_key(&self, pool: &PgPool, key: Option<&str>) -> Result<(), sqlx::Error> {
-		match key {
-			Some(k) => Self::upsert_config(pool, "default_model_key", k).await?,
+	pub async fn set_default_model_id(&self, pool: &PgPool, id: Option<Uuid>) -> Result<(), sqlx::Error> {
+		match id {
+			Some(id) => Self::upsert_config(pool, "default_model_id", &id.to_string()).await?,
 			None => {
-				sqlx::query("DELETE FROM app_config WHERE key = 'default_model_key'").execute(pool).await?;
+				sqlx::query("DELETE FROM app_config WHERE key = 'default_model_id'").execute(pool).await?;
 			}
 		}
 		self.reload(pool).await;
@@ -305,7 +306,7 @@ impl Config {
 				},
 				"enable_provider_selector" => values.enable_provider_selector = row.value == "true",
 				"allow_server_stdio_mcp" => values.allow_server_stdio_mcp = row.value == "true",
-				"default_model_key" => values.default_model_key = Some(row.value),
+				"default_model_id" => values.default_model_id = Uuid::parse_str(&row.value).ok(),
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}
 		}

@@ -23,7 +23,7 @@ pub async fn get_global_config() -> impl IntoResponse {
 		default_theme: config.default_theme(),
 		enable_provider_selector: config.enable_provider_selector(),
 		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
-		default_model_key: config.default_model_key(),
+		default_model_id: config.default_model_id(),
 	};
 	ResponseBuilder::new(ResponseBody::Json(response)).build()
 }
@@ -62,9 +62,9 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, cookies: C
 		}
 	}
 
-	if let Some(default_model_key) = req.default_model_key {
-		if let Err(e) = Config::get().set_default_model_key(&state.db, default_model_key.as_deref()).await {
-			eprintln!("[CONFIG] Failed to update default_model_key: {e}");
+	if let Some(default_model_id) = req.default_model_id {
+		if let Err(e) = Config::get().set_default_model_id(&state.db, default_model_id).await {
+			eprintln!("[CONFIG] Failed to update default_model_id: {e}");
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	}
@@ -74,7 +74,7 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, cookies: C
 		default_theme: config.default_theme(),
 		enable_provider_selector: config.enable_provider_selector(),
 		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
-		default_model_key: config.default_model_key(),
+		default_model_id: config.default_model_id(),
 	};
 	ResponseBuilder::new(ResponseBody::Json(response)).build()
 }

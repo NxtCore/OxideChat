@@ -125,11 +125,13 @@
 							<ShadLabel>{{ store.getTranslation('settings.teams.default_model') }}</ShadLabel>
 							<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.default_model_hint') }}</p>
 							<DefaultModelPicker
-								:model-value="teamDefaultModelKey"
+								v-model="teamDefaultModelId"
 								:disabled="!canEdit"
 								endpoint="/api/v1/admin/models"
+								selected-model-endpoint="/api/v1/admin/models"
+								value-mode="uuid"
 								:placeholder="store.getTranslation('settings.teams.use_global_default')"
-								@update:model-value="v => (teamDefaultModelKey = v)"
+								@update:model-value="v => (teamDefaultModelId = v)"
 							/>
 						</div>
 						<div class="flex items-center justify-between gap-3 border-b border-border p-3">
@@ -323,7 +325,7 @@ const createOpen = ref(false);
 const deleteOpen = ref(false);
 
 const form = reactive({name: '', description: '', allow_all_models: false});
-const teamDefaultModelKey = ref<string | null>(null);
+const teamDefaultModelId = ref<string | null>(null);
 const createForm = reactive({name: '', description: '', allow_all_models: false});
 const selectedMemberIds = ref<string[]>([]);
 const selectedProviderIds = ref<string[]>([]);
@@ -439,7 +441,7 @@ function applySelected(team: TeamDetailed) {
 	form.name = team.name;
 	form.description = team.description ?? '';
 	form.allow_all_models = team.allow_all_models;
-	teamDefaultModelKey.value = team.default_model_key ?? null;
+	teamDefaultModelId.value = team.default_model_id ?? null;
 	selectedMemberIds.value = team.members.map(member => member.id);
 	selectedProviderIds.value = [...team.model_access.provider_ids];
 	selectedModelIds.value = [...team.model_access.model_ids];
@@ -527,7 +529,7 @@ async function saveAll() {
 
 		await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${id}`, {
 			method: 'PATCH',
-			body: {name: form.name, description: form.description ? form.description : null, allow_all_models: form.allow_all_models, default_model_key: teamDefaultModelKey.value},
+			body: {name: form.name, description: form.description ? form.description : null, allow_all_models: form.allow_all_models, default_model_id: teamDefaultModelId.value},
 		});
 
 		await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${id}/members`, {

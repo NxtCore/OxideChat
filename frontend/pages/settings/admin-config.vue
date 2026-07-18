@@ -28,9 +28,11 @@
 					<p class="text-xs text-muted-foreground mt-0.5">{{ store.getTranslation('settings.admin.default_model_hint') }}</p>
 				</div>
 				<DefaultModelPicker
-					:model-value="defaultModelKey"
+					:model-value="defaultModelId"
 					:disabled="saving"
 					endpoint="/api/v1/admin/models"
+					selected-model-endpoint="/api/v1/admin/models"
+					value-mode="uuid"
 					:placeholder="store.getTranslation('settings.teams.use_global_default')"
 					@update:model-value="setDefaultModel"
 				/>
@@ -50,7 +52,7 @@ const {$customFetch} = useNuxtApp();
 const saving = ref(false);
 const enableProviderSelector = ref(store.base?.enable_provider_selector ?? false);
 const allowServerStdioMcp = ref(store.base?.allow_server_stdio_mcp ?? false);
-const defaultModelKey = ref<string | null>(store.base?.default_model_key ?? null);
+const defaultModelId = ref<string | null>(store.base?.default_model_id ?? null);
 
 async function toggleProviderSelector(val: boolean) {
 	const previous = enableProviderSelector.value;
@@ -89,19 +91,19 @@ async function toggleAllowStdioMcp(val: boolean) {
 }
 
 async function setDefaultModel(val: string | null) {
-	const previous = defaultModelKey.value;
-	const newKey = val;
-	defaultModelKey.value = newKey;
+	const previous = defaultModelId.value;
+	const newId = val;
+	defaultModelId.value = newId;
 	saving.value = true;
 	try {
 		await $customFetch('/api/v1/admin/config', {
 			method: 'PATCH',
-			body: {default_model_key: newKey},
+			body: {default_model_id: newId},
 		});
-		if (store.base) store.base.default_model_key = newKey;
+		if (store.base) store.base.default_model_id = newId;
 	} catch (error) {
-		console.error('Failed to update default model key:', error);
-		defaultModelKey.value = previous;
+		console.error('Failed to update default model:', error);
+		defaultModelId.value = previous;
 	} finally {
 		saving.value = false;
 	}

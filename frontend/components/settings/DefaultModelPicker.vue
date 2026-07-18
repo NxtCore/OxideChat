@@ -59,7 +59,7 @@
 								v-for="model in pickerModels"
 								:key="model.id"
 								class="px-3 py-2 hover:bg-accent/50 cursor-pointer transition-colors border-b border-border/50 last:border-0"
-				:class="modelValueFor(model) === modelValue ? 'bg-accent/30' : ''"
+								:class="modelValueFor(model) === modelValue ? 'bg-accent/30' : ''"
 								@click="selectModel(model)"
 							>
 								<div class="flex items-start gap-3">

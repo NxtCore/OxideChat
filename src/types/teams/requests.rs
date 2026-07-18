@@ -32,7 +32,7 @@ pub struct UpdateTeamRequest {
 	pub description: Option<Option<String>>,
 	pub allow_all_models: Option<bool>,
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
-	pub default_model_key: Option<Option<String>>,
+	pub default_model_id: Option<Option<Uuid>>,
 }
 
 #[derive(Debug, Deserialize)]

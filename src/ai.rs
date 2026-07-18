@@ -25,10 +25,6 @@ pub async fn init(pool: &PgPool) {
 	let engine = Arc::new(RwLock::new(OmniferenceEngine::new()));
 
 	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
-	if providers.is_empty() {
-		println!("[AI] No providers found in the database.");
-		return;
-	}
 
 	let provider_count = providers.len();
 	let mut engine_write = engine.write().await;

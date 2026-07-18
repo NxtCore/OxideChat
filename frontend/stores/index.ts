@@ -51,7 +51,7 @@ interface Base {
 	roles: Role[];
 	enable_provider_selector: boolean;
 	allow_server_stdio_mcp: boolean;
-	default_model_key: string | null;
+	default_model_id: string | null;
 }
 
 export const useMainStore = defineStore('main', {
@@ -203,6 +203,7 @@ export const useMainStore = defineStore('main', {
 		},
 		async setup(email: string, username: string, password: string) {
 			const {$customFetch} = useNuxtApp();
+			const chatStore = useChatStore();
 			const response = await $customFetch<{user: User}>('/api/v1/auth/setup', {
 				method: 'POST',
 				body: {email, username, password},
@@ -211,6 +212,7 @@ export const useMainStore = defineStore('main', {
 				this.auth.user = response.user;
 				this.auth.isAuthenticated = true;
 				await this.getBaseData();
+				await chatStore.init();
 			}
 			return response;
 		},

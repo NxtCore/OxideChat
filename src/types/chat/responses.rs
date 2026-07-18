@@ -170,7 +170,7 @@ pub struct GlobalConfigResponse {
 	pub default_theme: ThemeCssVars,
 	pub enable_provider_selector: bool,
 	pub allow_server_stdio_mcp: bool,
-	pub default_model_key: Option<String>,
+	pub default_model_id: Option<Uuid>,
 }
 
 impl Default for GlobalConfigResponse {
@@ -179,7 +179,7 @@ impl Default for GlobalConfigResponse {
 			default_theme: ThemeCssVars::default(),
 			enable_provider_selector: false,
 			allow_server_stdio_mcp: false,
-			default_model_key: None,
+			default_model_id: None,
 		}
 	}
 }

@@ -541,7 +541,7 @@ CREATE TABLE IF NOT EXISTS teams (
     is_default BOOLEAN NOT NULL DEFAULT false,
     allow_all_models BOOLEAN NOT NULL DEFAULT false,
     budget_id UUID,
-    default_model_key VARCHAR(255),
+    default_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

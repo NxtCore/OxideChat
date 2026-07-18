@@ -53,6 +53,15 @@ const checkAuth = async () => {
 		if (store.bootState !== 'online') {
 			await store.getBaseData();
 		}
+		
+		if (!store.auth.user && !store.auth.isAuthenticated) {
+			if (!getMePromise) {
+				getMePromise = store.getMe().finally(() => {
+					getMePromise = null;
+				});
+			}
+			await getMePromise;
+		}
 
 		if (store.base?.needs_setup) {
 			if (route.path !== '/auth/setup') {
@@ -65,15 +74,6 @@ const checkAuth = async () => {
 		if (route.path === '/auth/setup') {
 			await router.push('/auth/login');
 			return {authenticated: false};
-		}
-
-		if (!store.auth.user && !store.auth.isAuthenticated) {
-			if (!getMePromise) {
-				getMePromise = store.getMe().finally(() => {
-					getMePromise = null;
-				});
-			}
-			await getMePromise;
 		}
 
 		const isAuthPage = route.path.startsWith('/auth');
