@@ -19,8 +19,6 @@ export interface ProviderBillingOverview {
 	status: ProviderBillingStatus;
 	is_enabled: boolean;
 	has_billing_credential: boolean;
-	external_scope_id: string | null;
-	external_scope_name: string | null;
 	upstream: ProviderBillingMetric | null;
 	local: {
 		currency: string;
@@ -34,8 +32,5 @@ export interface ProviderBillingOverview {
 }
 
 export interface UpdateProviderBillingPayload {
-	is_enabled: boolean;
 	credential?: string;
-	external_scope_id: string | null;
-	external_scope_name: string | null;
 }

@@ -15,6 +15,8 @@ use std::{
 };
 use thiserror::Error;
 
+use serde_json::Value;
+
 type EncryptionKey = [u8; 32];
 const NONCE_SIZE: usize = 12;
 const CURRENT_PREFIX: &str = "oxide:v1:";
@@ -22,6 +24,7 @@ const LEGACY_PREFIX: &str = "enc:";
 const ASSOCIATED_DATA: &[u8] = b"oxidechat:credential:v1";
 const DEFAULT_DATA_DIR: &str = ".data";
 const KEY_FILE_NAME: &str = "master.key";
+pub(crate) const SECRET_MASK: &str = "***";
 
 static CIPHER: OnceLock<CipherState> = OnceLock::new();
 
@@ -70,6 +73,10 @@ pub enum EncryptionError {
 	DecryptionFailed,
 	#[error("the decrypted credential is not valid UTF-8")]
 	InvalidPlaintext,
+	#[error("a masked secret has no existing value")]
+	MissingMaskedValue,
+	#[error("secret values must be strings")]
+	InvalidSecretValue,
 }
 
 /// Initialize credential encryption from the environment or a persistent local key.
@@ -100,6 +107,9 @@ fn set_key(key: &EncryptionKey) -> Result<(), EncryptionError> {
 
 #[cfg(test)]
 pub(crate) fn init_for_test(key: EncryptionKey) -> Result<(), EncryptionError> {
+	if CIPHER.get().is_some() {
+		return Ok(());
+	}
 	set_key(&key)
 }
 
@@ -150,6 +160,112 @@ pub fn decrypt_api_key(stored: &str) -> Result<String, EncryptionError> {
 		return decrypt_legacy(value, state);
 	}
 	Ok(stored.to_owned())
+}
+
+pub(crate) fn encrypt_secret_value(value: &str, existing: Option<&str>) -> Result<String, EncryptionError> {
+	if value.starts_with(CURRENT_PREFIX) || value.starts_with(LEGACY_PREFIX) {
+		return Ok(value.to_owned());
+	}
+	if value == SECRET_MASK {
+		let existing = existing.ok_or(EncryptionError::MissingMaskedValue)?;
+		return if existing.starts_with(CURRENT_PREFIX) || existing.starts_with(LEGACY_PREFIX) {
+			Ok(existing.to_owned())
+		} else {
+			encrypt_api_key(existing)
+		};
+	}
+	encrypt_api_key(value)
+}
+
+pub(crate) fn encrypt_object_values(value: &Value, existing: Option<&Value>) -> Result<Value, EncryptionError> {
+	let mut protected = value.clone();
+	let Some(object) = protected.as_object_mut() else {
+		return Ok(protected);
+	};
+	let existing = existing.and_then(Value::as_object);
+	for (key, value) in object {
+		let secret = value.as_str().ok_or(EncryptionError::InvalidSecretValue)?;
+		let previous = existing.and_then(|values| values.get(key)).and_then(Value::as_str);
+		*value = Value::String(encrypt_secret_value(secret, previous)?);
+	}
+	Ok(protected)
+}
+
+pub(crate) fn decrypt_object_values(value: &Value) -> Result<Value, EncryptionError> {
+	let mut revealed = value.clone();
+	let Some(object) = revealed.as_object_mut() else {
+		return Ok(revealed);
+	};
+	for value in object.values_mut() {
+		let secret = value.as_str().ok_or(EncryptionError::InvalidSecretValue)?;
+		*value = Value::String(decrypt_api_key(secret)?);
+	}
+	Ok(revealed)
+}
+
+pub(crate) fn mask_object_values(value: &Value) -> Value {
+	let mut masked = value.clone();
+	if let Some(object) = masked.as_object_mut() {
+		for value in object.values_mut() {
+			*value = Value::String(SECRET_MASK.to_owned());
+		}
+	}
+	masked
+}
+
+pub(crate) fn encrypt_schema_secrets(value: &Value, schema: &Value, existing: Option<&Value>) -> Result<Value, EncryptionError> {
+	transform_schema_secrets(value, schema, existing, SecretTransform::Encrypt)
+}
+
+pub(crate) fn decrypt_schema_secrets(value: &Value, schema: &Value) -> Result<Value, EncryptionError> {
+	transform_schema_secrets(value, schema, None, SecretTransform::Decrypt)
+}
+
+pub(crate) fn mask_schema_secrets(value: &Value, schema: &Value) -> Result<Value, EncryptionError> {
+	transform_schema_secrets(value, schema, None, SecretTransform::Mask)
+}
+
+#[derive(Clone, Copy)]
+enum SecretTransform {
+	Encrypt,
+	Decrypt,
+	Mask,
+}
+
+fn transform_schema_secrets(value: &Value, schema: &Value, existing: Option<&Value>, transform: SecretTransform) -> Result<Value, EncryptionError> {
+	if schema.get("secret").and_then(Value::as_bool) == Some(true) {
+		let secret = value.as_str().ok_or(EncryptionError::InvalidSecretValue)?;
+		let transformed = match transform {
+			SecretTransform::Encrypt => encrypt_secret_value(secret, existing.and_then(Value::as_str))?,
+			SecretTransform::Decrypt => decrypt_api_key(secret)?,
+			SecretTransform::Mask => SECRET_MASK.to_owned(),
+		};
+		return Ok(Value::String(transformed));
+	}
+
+	if let (Some(values), Some(properties)) = (value.as_object(), schema.get("properties").and_then(Value::as_object)) {
+		let mut transformed = values.clone();
+		let existing = existing.and_then(Value::as_object);
+		for (key, property_schema) in properties {
+			if let Some(property_value) = values.get(key) {
+				let previous = existing.and_then(|object| object.get(key));
+				transformed.insert(key.clone(), transform_schema_secrets(property_value, property_schema, previous, transform)?);
+			}
+		}
+		return Ok(Value::Object(transformed));
+	}
+
+	if let (Some(values), Some(item_schema)) = (value.as_array(), schema.get("items")) {
+		let existing = existing.and_then(Value::as_array);
+		let transformed = values
+			.iter()
+			.enumerate()
+			.map(|(index, item)| transform_schema_secrets(item, item_schema, existing.and_then(|items| items.get(index)), transform))
+			.collect::<Result<Vec<Value>, EncryptionError>>()?;
+		return Ok(Value::Array(transformed));
+	}
+
+	Ok(value.clone())
 }
 
 fn decrypt_current(value: &str, state: &CipherState) -> Result<String, EncryptionError> {

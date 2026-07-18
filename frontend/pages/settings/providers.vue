@@ -11,6 +11,73 @@
 			</ShadButton>
 		</div>
 
+		<section v-if="billingProviders.length > 0" class="mb-6 space-y-3">
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<div>
+					<h3 class="text-base font-semibold text-foreground">{{ store.getTranslation('settings.providers.billing.tab') }}</h3>
+					<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.providers.billing.local_tracked') }}</p>
+				</div>
+				<Button variant="outline" size="sm" :disabled="isRefreshingBilling" @click="refreshAllBilling">
+					<Loader2 v-if="isRefreshingBilling" class="mr-2 h-4 w-4 animate-spin" />
+					<RotateCw v-else class="mr-2 h-4 w-4" />
+					{{ store.getTranslation('settings.providers.billing.refresh') }}
+				</Button>
+			</div>
+
+			<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+				<div v-for="item in billingProviders" :key="item.id" class="rounded-lg border border-border bg-card p-4">
+					<div class="flex items-start justify-between gap-3">
+						<div class="flex min-w-0 items-center gap-2.5">
+							<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/60">
+								<div
+									v-if="item.template?.icon && item.template.icon.type === 'svg'"
+									v-html="item.template.icon.icon"
+									class="h-4 w-4 [&>svg]:h-full [&>svg]:w-full"
+									:style="{color: item.template.brandColor}"
+								></div>
+								<img v-else-if="item.template?.icon?.type === 'png'" :src="item.template.icon.icon" :alt="item.name" class="h-4 w-4" />
+								<BrainCircuit v-else class="h-4 w-4 text-primary" />
+							</div>
+							<div class="min-w-0">
+								<p class="truncate text-sm font-medium text-foreground">{{ item.name }}</p>
+								<p class="text-xs text-muted-foreground">{{ store.getTranslation(billingStatusKey(item.billing)) }}</p>
+							</div>
+						</div>
+						<div class="flex shrink-0 items-center gap-1">
+							<span v-if="item.billing.is_stale" class="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+								{{ store.getTranslation('settings.providers.billing.stale') }}
+							</span>
+							<Button
+								v-if="item.billing.is_enabled"
+								variant="ghost"
+								size="icon"
+								class="h-7 w-7"
+								:disabled="billingStore.loading[item.id]"
+								@click="refreshBilling(item.id)"
+							>
+								<Loader2 v-if="billingStore.loading[item.id]" class="h-3.5 w-3.5 animate-spin" />
+								<RotateCw v-else class="h-3.5 w-3.5" />
+								<span class="sr-only">{{ store.getTranslation('settings.providers.billing.refresh') }}</span>
+							</Button>
+						</div>
+					</div>
+
+					<div v-if="item.billing.upstream" class="mt-4 space-y-2">
+						<p class="text-sm font-medium text-foreground">{{ upstreamSummary(item.billing) }}</p>
+						<p v-if="upstreamDetail(item.billing)" class="text-xs text-muted-foreground">{{ upstreamDetail(item.billing) }}</p>
+						<div v-if="item.billing.upstream.limit_amount != null" class="h-1.5 overflow-hidden rounded-full bg-muted">
+							<div class="h-full rounded-full bg-primary transition-all" :style="{width: billingProgress(item.billing) + '%'}"></div>
+						</div>
+					</div>
+					<p v-else class="mt-4 text-sm text-muted-foreground">{{ store.getTranslation(billingStatusKey(item.billing)) }}</p>
+
+					<div class="mt-4 flex items-center justify-between gap-3 border-t border-border pt-3 text-xs text-muted-foreground">
+						<span class="shrink-0">{{ updatedLabel(item.billing.last_synced_at) }}</span>
+					</div>
+				</div>
+			</div>
+		</section>
+
 		<div class="space-y-3">
 			<div
 				v-for="item in displayProviders"
@@ -50,43 +117,6 @@
 							<RotateCw class="h-4 w-4" />
 						</Button>
 						<Switch :modelValue="item.is_enabled || false" :disabled="!item.isConfigured" @update:modelValue="(val: boolean) => toggleProvider(item, val)" />
-					</div>
-				</div>
-				<div v-if="item.isConfigured && item.billing" class="mt-4 border-t border-border pt-3">
-					<div class="flex flex-wrap items-center justify-between gap-2">
-						<div class="flex flex-wrap items-center gap-2">
-							<span class="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-								{{ store.getTranslation(billingStatusKey(item.billing)) }}
-							</span>
-							<span v-if="item.billing.is_stale" class="inline-flex rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
-								{{ store.getTranslation('settings.providers.billing.stale') }}
-							</span>
-						</div>
-						<Button
-							v-if="item.billing.is_enabled"
-							variant="ghost"
-							size="sm"
-							:disabled="billingStore.loading[item.id]"
-							@click="refreshBilling(item.id)"
-						>
-							<Loader2 v-if="billingStore.loading[item.id]" class="mr-2 h-3.5 w-3.5 animate-spin" />
-							<RotateCw v-else class="mr-2 h-3.5 w-3.5" />
-							{{ store.getTranslation('settings.providers.billing.refresh') }}
-						</Button>
-					</div>
-					<div v-if="item.billing.upstream" class="mt-2 space-y-1.5 text-sm">
-						<p class="font-medium text-foreground">{{ upstreamSummary(item.billing) }}</p>
-						<p v-if="upstreamDetail(item.billing)" class="text-muted-foreground">{{ upstreamDetail(item.billing) }}</p>
-						<div v-if="item.billing.upstream.limit_amount != null" class="h-2 overflow-hidden rounded-full bg-muted">
-							<div class="h-full rounded-full bg-primary transition-all" :style="{width: billingProgress(item.billing) + '%'}"></div>
-						</div>
-					</div>
-					<div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-						<span>
-							{{ store.getTranslation('settings.providers.billing.local_tracked') }}:
-							{{ store.getTranslation('settings.providers.billing.local_month', {amount: formatMoney(item.billing.local.spent_amount, item.billing.local.currency)}) }}
-						</span>
-						<span>{{ updatedLabel(item.billing.last_synced_at) }}</span>
 					</div>
 				</div>
 			</div>
@@ -155,26 +185,7 @@
 					<TabsContent v-if="configForm.existingProvider" value="billing">
 						<div class="space-y-4 py-4">
 							<div v-if="supportsUpstreamBilling" class="space-y-4">
-								<div class="flex items-center justify-between gap-4">
-									<Label for="billing-enabled">{{ store.getTranslation('settings.providers.billing.enable') }}</Label>
-									<Switch id="billing-enabled" v-model="billingForm.isEnabled" />
-								</div>
-								<template v-if="selectedProviderKind === 'OPENAI'">
-									<div class="space-y-2">
-										<Label for="billing-key">{{ store.getTranslation('settings.providers.billing.admin_key') }}</Label>
-										<Input id="billing-key" v-model="billingForm.credential" type="password" :placeholder="billingForm.hasCredential ? '••••••••' : ''" />
-										<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.billing.admin_key_hint') }}</p>
-									</div>
-									<div class="space-y-2">
-										<Label for="billing-project">{{ store.getTranslation('settings.providers.billing.project_id') }}</Label>
-										<Input id="billing-project" v-model="billingForm.scopeId" />
-									</div>
-									<div class="space-y-2">
-										<Label for="billing-project-name">{{ store.getTranslation('settings.providers.billing.project_name') }}</Label>
-										<Input id="billing-project-name" v-model="billingForm.scopeName" />
-									</div>
-								</template>
-								<div v-else class="space-y-2">
+								<div class="space-y-2">
 									<Label for="billing-key">{{ store.getTranslation('settings.providers.billing.management_key') }}</Label>
 									<Input id="billing-key" v-model="billingForm.credential" type="password" :placeholder="billingForm.hasCredential ? '••••••••' : ''" />
 									<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.billing.management_key_hint') }}</p>
@@ -304,13 +315,10 @@ let catalogDebounce: ReturnType<typeof setTimeout>;
 
 const showCatalogTab = computed(() => configForm.existingProvider?.kind === 'OPENROUTER');
 const selectedProviderKind = computed(() => configForm.existingProvider?.kind ?? selectedProvider.value?.kind);
-const supportsUpstreamBilling = computed(() => selectedProviderKind.value === 'OPENAI' || selectedProviderKind.value === 'OPENROUTER');
+const supportsUpstreamBilling = computed(() => selectedProviderKind.value === 'OPENROUTER');
 
 const billingForm = reactive({
-	isEnabled: false,
 	credential: '',
-	scopeId: '',
-	scopeName: '',
 	hasCredential: false,
 	hasConnection: false,
 });
@@ -390,6 +398,9 @@ const displayProviders = computed(() => {
 
 	return result;
 });
+
+const billingProviders = computed(() => displayProviders.value.filter(provider => provider.isConfigured && provider.billing));
+const isRefreshingBilling = computed(() => billingProviders.value.some(provider => billingStore.loading[provider.id]));
 
 const configForm = reactive({
 	name: '',
@@ -501,12 +512,9 @@ function openConfigDialog(item: any) {
 async function loadBillingForm(providerId: string) {
 	try {
 		const billing = await billingStore.fetchProviderBilling(providerId);
-		billingForm.isEnabled = billing.is_enabled;
 		billingForm.credential = '';
-		billingForm.scopeId = billing.external_scope_id ?? '';
-		billingForm.scopeName = billing.external_scope_name ?? '';
 		billingForm.hasCredential = billing.has_billing_credential;
-		billingForm.hasConnection = billing.is_enabled || billing.has_billing_credential || billing.external_scope_id !== null;
+		billingForm.hasConnection = billing.has_billing_credential;
 	} catch (error) {
 		console.error('Failed to load billing configuration:', error);
 	}
@@ -540,7 +548,8 @@ function upstreamSummary(billing: ProviderBillingOverview) {
 
 function upstreamDetail(billing: ProviderBillingOverview) {
 	const metric = billing.upstream;
-	if (!metric || metric.limit_amount == null) return '';
+	if (!metric) return '';
+	if (metric.limit_amount == null) return '';
 	if (metric.metric_kind === 'KEY_LIMIT') {
 		return store.getTranslation('settings.providers.billing.key_limit', {amount: formatMoney(metric.limit_amount, metric.currency)});
 	}
@@ -581,6 +590,14 @@ async function refreshBilling(providerId: string) {
 	}
 }
 
+async function refreshAllBilling() {
+	await Promise.all(
+		billingProviders.value
+			.filter(provider => provider.billing.is_enabled)
+			.map(provider => refreshBilling(provider.id)),
+	);
+}
+
 async function saveBilling() {
 	const provider = configForm.existingProvider;
 	if (!provider) return false;
@@ -588,10 +605,7 @@ async function saveBilling() {
 	try {
 		const suppliedCredential = billingForm.credential.length > 0;
 		await billingStore.updateProviderBilling(provider.id, {
-			is_enabled: billingForm.isEnabled,
 			...(billingForm.credential ? {credential: billingForm.credential} : {}),
-			external_scope_id: billingForm.scopeId || null,
-			external_scope_name: billingForm.scopeName || null,
 		});
 		billingForm.credential = '';
 		billingForm.hasCredential = billingForm.hasCredential || suppliedCredential;
@@ -608,7 +622,7 @@ async function saveBilling() {
 
 async function testBillingAccess() {
 	const saved = await saveBilling();
-	if (saved && billingForm.isEnabled && configForm.existingProvider) await refreshBilling(configForm.existingProvider.id);
+	if (saved && configForm.existingProvider) await refreshBilling(configForm.existingProvider.id);
 }
 
 async function removeBilling() {
@@ -616,10 +630,7 @@ async function removeBilling() {
 	try {
 		await billingStore.removeProviderBilling(configForm.existingProvider.id);
 		await billingStore.fetchBillingOverviews();
-		billingForm.isEnabled = false;
 		billingForm.credential = '';
-		billingForm.scopeId = '';
-		billingForm.scopeName = '';
 		billingForm.hasCredential = false;
 		billingForm.hasConnection = false;
 		store.toast(store.getTranslation('settings.providers.billing.removed'), {type: 'success'});

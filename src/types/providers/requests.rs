@@ -4,10 +4,7 @@ use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateProviderBillingRequest {
-	pub is_enabled: bool,
 	pub credential: Option<String>,
-	pub external_scope_id: Option<String>,
-	pub external_scope_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

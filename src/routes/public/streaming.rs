@@ -8,7 +8,7 @@ use crate::types::models::{Model, ModelPricing};
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
 use crate::types::{
 	Budget, Chat, ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, StreamingAssistantMessageCreate,
-	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolExecutionResponse, ToolFunction, UsageEvent, UsageEventRecord, UserToolSettings,
+	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolExecutionResponse, ToolFunction, UsageEvent, UsageEventRecord,
 };
 use crate::types::{CostDetails, JobState};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
@@ -27,7 +27,12 @@ use omniference::{
 	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec},
 };
 use rust_decimal::{Decimal, prelude::FromPrimitive};
-use std::{collections::{HashMap, HashSet}, convert::Infallible, sync::Arc, time::Instant};
+use std::{
+	collections::{HashMap, HashSet},
+	convert::Infallible,
+	sync::Arc,
+	time::Instant,
+};
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
@@ -168,7 +173,11 @@ async fn resolve_tools(db: &sqlx::PgPool, user_id: Uuid, enabled_tool_ids: &[Str
 	let mut system_prompts: Vec<String> = vec![];
 	for tool in tools {
 		if let Some(prompt) = tool.system_prompt.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
-			let label = if tool.display_name.trim().is_empty() { tool.name.as_str() } else { tool.display_name.trim() };
+			let label = if tool.display_name.trim().is_empty() {
+				tool.name.as_str()
+			} else {
+				tool.display_name.trim()
+			};
 			system_prompts.push(format!("Instructions for the \"{label}\" tool:\n{prompt}"));
 		}
 		let funcs = functions_by_tool.get(&tool.id).map(|v| v.as_slice()).unwrap_or(&[]);
@@ -246,12 +255,9 @@ async fn execute_tool_by_name(
 		None
 	};
 
-	let settings = UserToolSettings::find_effective_for_user(db, &tool.id, &user_id)
+	let settings = Tool::effective_settings_for_user(db, &tool.id, Some(&user_id))
 		.await
-		.ok()
-		.flatten()
-		.map(|s| s.settings)
-		.unwrap_or_else(|| serde_json::json!({}));
+		.map_err(|error| format!("Failed to load tool settings: {error}"))?;
 
 	let ctx = ToolContext {
 		user_id: Some(user_id),
@@ -278,7 +284,10 @@ async fn execute_tool_by_name(
 			})
 		}
 		ToolSourceKind::Http => {
-			let base_url = tool.source_config.get("url").and_then(|v| v.as_str()).unwrap_or("");
+			let source_config = tool
+				.revealed_source_config()
+				.map_err(|error| format!("Failed to decrypt HTTP tool credentials: {error}"))?;
+			let base_url = source_config.get("url").and_then(|v| v.as_str()).unwrap_or("");
 			let url = if let Some(entrypoint) = &function_entrypoint {
 				if entrypoint.starts_with("http") {
 					entrypoint.clone()
@@ -289,17 +298,13 @@ async fn execute_tool_by_name(
 				base_url.to_string()
 			};
 
-			let headers: HashMap<String, String> = tool
-				.source_config
-				.get("headers")
-				.and_then(|v| serde_json::from_value(v.clone()).ok())
-				.unwrap_or_default();
+			let headers: HashMap<String, String> = source_config.get("headers").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
 
 			let http_config = crate::utils::tools::http::HttpConfig {
-				method: tool.source_config.get("method").and_then(|v| v.as_str()).unwrap_or("GET").to_string(),
+				method: source_config.get("method").and_then(|v| v.as_str()).unwrap_or("GET").to_string(),
 				url,
 				headers,
-				body_template: tool.source_config.get("body_template").and_then(|v| v.as_str()).map(String::from),
+				body_template: source_config.get("body_template").and_then(|v| v.as_str()).map(String::from),
 			};
 
 			let executor = HttpExecutor::new(full_tool_name.to_string(), http_config).map_err(|e| format!("{:?}", e))?;
@@ -382,7 +387,9 @@ async fn hydrate_image(db: &sqlx::PgPool, image_id: &str, vision: bool, generate
 				"[An image was generated earlier (image_id: {image_id}) from the prompt: \"{}\". It is already displayed to the user. To modify it, call imagegen_edit with image_id \"{image_id}\".]",
 				c.trim()
 			),
-			_ => format!("[An image was generated earlier (image_id: {image_id}) and is already displayed to the user. To modify it, call imagegen_edit with image_id \"{image_id}\".]"),
+			_ => format!(
+				"[An image was generated earlier (image_id: {image_id}) and is already displayed to the user. To modify it, call imagegen_edit with image_id \"{image_id}\".]"
+			),
 		};
 		parts.push(ContentPart::Text(text));
 	} else {
@@ -469,7 +476,11 @@ async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>, vision: bo
 			if parts.is_empty() {
 				parts.push(ContentPart::Text(m.content));
 			}
-			result.push(OmniMessage { role: Role::User, parts, name: None });
+			result.push(OmniMessage {
+				role: Role::User,
+				parts,
+				name: None,
+			});
 			continue;
 		}
 
@@ -493,7 +504,11 @@ async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>, vision: bo
 				}
 				MessagePart::ToolResult { tool_call_id } => {
 					if !buffer.is_empty() {
-						result.push(OmniMessage { role: Role::Assistant, parts: std::mem::take(&mut buffer), name: None });
+						result.push(OmniMessage {
+							role: Role::Assistant,
+							parts: std::mem::take(&mut buffer),
+							name: None,
+						});
 					}
 					unresolved_calls.retain(|c| c != &tool_call_id);
 					result.push(tool_message(execs, &call_names, &tool_call_id));
@@ -502,7 +517,11 @@ async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>, vision: bo
 		}
 
 		if !buffer.is_empty() {
-			result.push(OmniMessage { role: Role::Assistant, parts: buffer, name: None });
+			result.push(OmniMessage {
+				role: Role::Assistant,
+				parts: buffer,
+				name: None,
+			});
 		}
 		// Legacy messages (saved before tool-result markers) and any call whose result marker
 		// is missing: emit their `tool` messages here so no assistant tool_call is left dangling.

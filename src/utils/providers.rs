@@ -21,7 +21,7 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 		.map(decrypt_api_key)
 		.transpose()
 		.map_err(|error| format!("Failed to decrypt provider credential: {error}"))?;
-	let extra_headers = parse_extra_headers(&provider.extra_headers.0);
+	let extra_headers = parse_extra_headers(&provider.extra_headers.0).map_err(|error| format!("Failed to decrypt provider headers: {error}"))?;
 
 	let config = ProviderConfig {
 		name: provider.name.clone(),
@@ -103,7 +103,7 @@ pub async fn sync_gateway_catalog(pool: &PgPool, provider: &Provider) -> Result<
 		.map(decrypt_api_key)
 		.transpose()
 		.map_err(|error| format!("Failed to decrypt provider credential: {error}"))?;
-	let extra_headers = parse_extra_headers(&provider.extra_headers.0);
+	let extra_headers = parse_extra_headers(&provider.extra_headers.0).map_err(|error| format!("Failed to decrypt provider headers: {error}"))?;
 	let base_url = provider.base_url.as_str();
 
 	let public = omniference::catalog::fetch_public_models(base_url, api_key.as_deref(), &extra_headers, None)
@@ -171,7 +171,7 @@ pub async fn sync_endpoint_options(pool: &PgPool, model_id: &Uuid) -> Result<(),
 		.map(decrypt_api_key)
 		.transpose()
 		.map_err(|error| format!("Failed to decrypt provider credential: {error}"))?;
-	let extra_headers = parse_extra_headers(&provider.extra_headers.0);
+	let extra_headers = parse_extra_headers(&provider.extra_headers.0).map_err(|error| format!("Failed to decrypt provider headers: {error}"))?;
 
 	let (author, slug) = target
 		.gateway_model_id

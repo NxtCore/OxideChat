@@ -22,9 +22,9 @@ src/types/<domain>/
 
 Only add more files when the domain has a real boundary that this layout does not cover.
 
-## `mod.rs`
+## `providers_billing`
 
-`mod.rs` should contain the main database row struct and domain-local context structs.
+`providers_billing` should contain the main database row struct and domain-local context structs.
 
 Example shape:
 
@@ -45,7 +45,7 @@ pub struct DomainViewer<'a> {
 impl BaseType for Domain {}
 ```
 
-Keep call-site imports stable by re-exporting public request and response DTOs from `mod.rs`.
+Keep call-site imports stable by re-exporting public request and response DTOs from `providers_billing`.
 
 Do not re-export private SQL row structs.
 
@@ -196,7 +196,7 @@ When porting another type to this pattern:
 
 1. Move public request DTOs into `requests.rs`.
 2. Move public response DTOs into `responses.rs`.
-3. Keep the database row type in `mod.rs`.
+3. Keep the database row type in `providers_billing`.
 4. Add private checked row structs in `rows.rs`.
 5. Move SQL methods into `repository.rs` and `patch.rs`.
 6. Replace dynamic projections with static `query_as!` queries.

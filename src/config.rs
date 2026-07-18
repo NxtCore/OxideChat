@@ -7,6 +7,7 @@
 
 use crate::i18n::Language;
 use crate::types::ThemeCssVars;
+use crate::utils::encryption::{decrypt_api_key, encrypt_secret_value};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
@@ -257,6 +258,13 @@ impl Config {
 	}
 
 	async fn upsert_config(pool: &PgPool, key: &str, value: &str) -> Result<(), sqlx::Error> {
+		let protected;
+		let value = if matches!(key, "oauth_google_client_secret" | "oauth_discord_client_secret") {
+			protected = encrypt_secret_value(value, None).map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+			protected.as_str()
+		} else {
+			value
+		};
 		sqlx::query(
 			r#"
 			INSERT INTO app_config (key, value)
@@ -286,9 +294,15 @@ impl Config {
 					}
 				}
 				"oauth_google_client_id" => values.oauth_google_client_id = Some(row.value),
-				"oauth_google_client_secret" => values.oauth_google_client_secret = Some(row.value),
+				"oauth_google_client_secret" => match decrypt_api_key(&row.value) {
+					Ok(value) => values.oauth_google_client_secret = Some(value),
+					Err(error) => tracing::error!("Failed to decrypt Google OAuth client secret: {error}"),
+				},
 				"oauth_discord_client_id" => values.oauth_discord_client_id = Some(row.value),
-				"oauth_discord_client_secret" => values.oauth_discord_client_secret = Some(row.value),
+				"oauth_discord_client_secret" => match decrypt_api_key(&row.value) {
+					Ok(value) => values.oauth_discord_client_secret = Some(value),
+					Err(error) => tracing::error!("Failed to decrypt Discord OAuth client secret: {error}"),
+				},
 				"enable_provider_selector" => values.enable_provider_selector = row.value == "true",
 				"allow_server_stdio_mcp" => values.allow_server_stdio_mcp = row.value == "true",
 				"default_model_key" => values.default_model_key = Some(row.value),

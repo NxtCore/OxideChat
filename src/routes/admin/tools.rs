@@ -70,14 +70,13 @@ pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) ->
 		.collect();
 
 	if !server_ids.is_empty() {
-		let server_names: HashMap<Uuid, String> =
-			sqlx::query_as::<_, (Uuid, String)>("SELECT id, name FROM mcp_servers WHERE id = ANY($1)")
-				.bind(&server_ids)
-				.fetch_all(&state.db)
-				.await
-				.unwrap_or_default()
-				.into_iter()
-				.collect();
+		let server_names: HashMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>("SELECT id, name FROM mcp_servers WHERE id = ANY($1)")
+			.bind(&server_ids)
+			.fetch_all(&state.db)
+			.await
+			.unwrap_or_default()
+			.into_iter()
+			.collect();
 
 		for r in &mut responses {
 			r.mcp_server_name = r.mcp_server_id.and_then(|id| server_names.get(&id).cloned());
@@ -200,14 +199,9 @@ pub async fn get_tool_settings(State(state): State<Arc<JobState>>, cookies: Cook
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let settings = sqlx::query_as::<_, UserToolSettings>("SELECT * FROM user_tool_settings WHERE tool_id = $1 AND user_id IS NULL")
-		.bind(tool_id)
-		.fetch_optional(&state.db)
-		.await;
-
-	match settings {
-		Ok(Some(s)) => ResponseBuilder::new(ResponseBody::Json(s.settings)).build(),
-		Ok(None) => ResponseBuilder::new(ResponseBody::Json(serde_json::json!({}))).build(),
+	match Tool::system_settings_for_admin(&state.db, &tool_id).await {
+		Ok(settings) => ResponseBuilder::new(ResponseBody::Json(settings)).build(),
+		Err(ToolSettingsError::NotFound) => ErrorBuilder::new(ErrorCode::NotFound).build(),
 		Err(e) => {
 			eprintln!("[TOOLS] Failed to get tool settings: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
@@ -237,6 +231,10 @@ pub async fn set_tool_settings(
 		Err(ToolSettingsError::Invalid) => ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
 		Err(ToolSettingsError::Database(e)) => {
 			eprintln!("[TOOLS] Failed to save tool settings: {e}");
+			ErrorBuilder::new(ErrorCode::InternalError).build()
+		}
+		Err(ToolSettingsError::Encryption(e)) => {
+			eprintln!("[TOOLS] Failed to protect tool settings: {e}");
 			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}
 	}
@@ -350,16 +348,17 @@ pub async fn test_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Pat
 		}
 	};
 
-	let tool_settings = sqlx::query_as::<_, UserToolSettings>("SELECT * FROM user_tool_settings WHERE tool_id = $1 AND user_id IS NULL")
-		.bind(tool_id)
-		.fetch_optional(&state.db)
-		.await
-		.ok()
-		.flatten();
+	let tool_settings = match Tool::effective_settings_for_user(&state.db, &tool_id, None).await {
+		Ok(settings) => settings,
+		Err(error) => {
+			eprintln!("[TOOLS] Failed to load tool settings: {error}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
 
 	let ctx = crate::utils::tools::ToolContext {
 		user_id: None,
-		settings: tool_settings.map(|s| s.settings).unwrap_or_default(),
+		settings: tool_settings,
 		timeout_ms: Some(30000),
 		function_name: req.function_name.clone(),
 		db: Some(std::sync::Arc::new(state.db.clone())),
@@ -407,7 +406,14 @@ pub async fn test_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Pat
 			}
 		}
 		ToolSourceKind::Http => {
-			let config: HttpSourceConfig = match serde_json::from_value(tool.source_config.clone()) {
+			let source_config = match tool.revealed_source_config() {
+				Ok(config) => config,
+				Err(e) => {
+					eprintln!("[TOOLS] Failed to decrypt HTTP tool credentials: {e}");
+					return ErrorBuilder::new(ErrorCode::InternalError).build();
+				}
+			};
+			let config: HttpSourceConfig = match serde_json::from_value(source_config) {
 				Ok(c) => c,
 				Err(e) => {
 					eprintln!("[TOOLS] Invalid HTTP config: {e}");

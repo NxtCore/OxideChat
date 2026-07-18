@@ -223,7 +223,13 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, cookies: Cookies,
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	};
-	let extra_headers = parse_extra_headers(&provider.extra_headers.0);
+	let extra_headers = match parse_extra_headers(&provider.extra_headers.0) {
+		Ok(headers) => headers,
+		Err(error) => {
+			tracing::error!(provider_id=%provider.id, "Failed to decrypt provider headers: {error}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
 
 	let config = ProviderConfig {
 		name: provider.name.clone(),
@@ -263,7 +269,13 @@ pub async fn test_provider_inline(State(state): State<Arc<JobState>>, cookies: C
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 
-	let extra_headers = parse_extra_headers(&req.extra_headers);
+	let extra_headers = match parse_extra_headers(&req.extra_headers) {
+		Ok(headers) => headers,
+		Err(error) => {
+			tracing::error!("Failed to read provider headers: {error}");
+			return ErrorBuilder::new(ErrorCode::InternalError).build();
+		}
+	};
 
 	let config = ProviderConfig {
 		name: "test".to_string(),

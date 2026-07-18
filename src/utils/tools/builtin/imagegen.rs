@@ -228,7 +228,7 @@ impl ToolExecutor for ImageGenExecutor {
 			options,
 		};
 		let engine = crate::ai::get();
-		let response = engine.read().await.image(request).await.map_err(ToolError::ExecutionFailed)?;
+		let response = engine.read().await.image(request).await.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
 		self.record_usage(ctx, &model, &response.usage).await;
 		self.store_response(response, ctx, &caption).await
 	}

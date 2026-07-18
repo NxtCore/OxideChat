@@ -6,7 +6,6 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use thiserror::Error;
 
-pub mod openai;
 pub mod openrouter;
 
 static CLIENT: OnceLock<Client> = OnceLock::new();
@@ -83,15 +82,11 @@ fn response_error(response: Response) -> Result<Response, ProviderBillingError> 
 pub async fn refresh_provider_billing(pool: &PgPool, provider: &Provider) -> Result<ProviderBillingMetric, ProviderBillingError> {
 	let connection = Provider::find_billing_connection_for_admin(pool, &provider.id)
 		.await
-		.map_err(|_| ProviderBillingError::RequestFailed)?
-		.ok_or(ProviderBillingError::MissingConfiguration)?;
-	if !connection.is_enabled {
-		return Err(ProviderBillingError::MissingConfiguration);
-	}
+		.map_err(|_| ProviderBillingError::RequestFailed)?;
 	let result = async {
 		match provider.kind {
 			ProviderKind::Openrouter => {
-				if let Some(stored) = connection.credential.as_deref() {
+				if let Some(stored) = connection.as_ref().and_then(|connection| connection.credential.as_deref()) {
 					let key = decrypt_api_key(stored).map_err(|_| ProviderBillingError::CredentialDecryptionFailed)?;
 					openrouter::fetch_account_metric(client()?, &key).await
 				} else {
@@ -100,20 +95,7 @@ pub async fn refresh_provider_billing(pool: &PgPool, provider: &Provider) -> Res
 					openrouter::fetch_key_metric(client()?, &key).await
 				}
 			}
-			ProviderKind::Openai => {
-				let key = connection
-					.credential
-					.as_deref()
-					.ok_or(ProviderBillingError::MissingConfiguration)
-					.and_then(|stored| decrypt_api_key(stored).map_err(|_| ProviderBillingError::CredentialDecryptionFailed))?;
-				let project_id = connection
-					.external_scope_id
-					.as_deref()
-					.filter(|value| !value.trim().is_empty())
-					.ok_or(ProviderBillingError::MissingConfiguration)?;
-				openai::fetch_metric(client()?, &key, project_id).await
-			}
-			ProviderKind::Anthropic | ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom => Err(ProviderBillingError::Unsupported),
+			ProviderKind::Openai | ProviderKind::Anthropic | ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom => Err(ProviderBillingError::Unsupported),
 		}
 	}
 	.await;

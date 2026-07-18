@@ -54,20 +54,9 @@ pub async fn update_billing(State(state): State<Arc<JobState>>, cookies: Cookies
 	}
 	if matches!(
 		provider.kind,
-		ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom | ProviderKind::Anthropic
-	) && request.is_enabled
-	{
+		ProviderKind::Openai | ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom | ProviderKind::Anthropic
+	) {
 		return ErrorBuilder::new(ErrorCode::BadRequest).details(serde_json::json!({"reason": "unsupported"})).build();
-	}
-	let existing = Provider::find_billing_connection_for_admin(&state.db, &id).await.ok().flatten();
-	if provider.kind == ProviderKind::Openai && request.is_enabled {
-		let has_key = request.credential.is_some() || existing.as_ref().is_some_and(|connection| connection.credential.is_some());
-		let has_project = request.external_scope_id.as_deref().is_some_and(|value| !value.trim().is_empty());
-		if !has_key || !has_project {
-			return ErrorBuilder::new(ErrorCode::ValidationFailed)
-				.details(serde_json::json!({"reason": "openai_billing_configuration_required"}))
-				.build();
-		}
 	}
 	let encrypted = match request.credential.as_deref().map(encrypt_api_key).transpose() {
 		Ok(credential) => credential,
@@ -76,7 +65,7 @@ pub async fn update_billing(State(state): State<Arc<JobState>>, cookies: Cookies
 			return ErrorBuilder::new(ErrorCode::InternalError).build();
 		}
 	};
-	match Provider::upsert_billing_connection_for_admin(&state.db, &id, &request, encrypted.as_deref()).await {
+	match Provider::upsert_billing_connection_for_admin(&state.db, &id, encrypted.as_deref()).await {
 		Ok(Some(_)) => overview_response(&state, &id).await,
 		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
 		Err(error) => {
