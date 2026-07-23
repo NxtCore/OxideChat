@@ -20,6 +20,8 @@ pub enum ToolSettingsError {
 	Invalid,
 	#[error("database error: {0}")]
 	Database(#[from] sqlx::Error),
+	#[error("secret protection error: {0}")]
+	Encryption(#[from] crate::utils::encryption::EncryptionError),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]

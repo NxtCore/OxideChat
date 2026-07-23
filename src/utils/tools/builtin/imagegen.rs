@@ -218,8 +218,9 @@ impl ToolExecutor for ImageGenExecutor {
 			}
 		};
 		let caption = prompt.clone();
+		let provider_config = provider_to_config(&provider).map_err(|error| ToolError::Internal(error.to_string()))?;
 		let request = ImageRequestIR {
-			model: ModelRef { alias: model.display_name.clone(), provider: provider_to_config(&provider), model_id: model.model_id.clone(), input_modalities: Vec::new(), output_modalities: Vec::new() },
+			model: ModelRef { alias: model.display_name.clone(), provider: provider_config, model_id: model.model_id.clone(), input_modalities: Vec::new(), output_modalities: Vec::new() },
 			operation,
 			prompt,
 			request_id: None,
@@ -227,7 +228,7 @@ impl ToolExecutor for ImageGenExecutor {
 			options,
 		};
 		let engine = crate::ai::get();
-		let response = engine.read().await.image(request).await.map_err(ToolError::ExecutionFailed)?;
+		let response = engine.read().await.image(request).await.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
 		self.record_usage(ctx, &model, &response.usage).await;
 		self.store_response(response, ctx, &caption).await
 	}

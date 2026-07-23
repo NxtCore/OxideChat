@@ -134,7 +134,7 @@ impl Team {
 			SET name = COALESCE($2, name),
 				description = CASE WHEN $3 THEN $4 ELSE description END,
 				allow_all_models = COALESCE($5, allow_all_models),
-				default_model_key = CASE WHEN $6 THEN $7 ELSE default_model_key END,
+				default_model_id = CASE WHEN $6 THEN $7 ELSE default_model_id END,
 				updated_at = NOW()
 			WHERE id = $1
 			RETURNING *
@@ -145,8 +145,8 @@ impl Team {
 		.bind(req.description.is_some())
 		.bind(req.description.as_ref().and_then(|v| v.as_deref()).filter(|s| !s.trim().is_empty()))
 		.bind(req.allow_all_models)
-		.bind(req.default_model_key.is_some())
-		.bind(req.default_model_key.as_ref().and_then(|v| v.as_deref()))
+		.bind(req.default_model_id.is_some())
+		.bind(req.default_model_id.as_ref().and_then(|v| *v))
 		.fetch_one(pool)
 		.await
 	}
@@ -163,9 +163,10 @@ impl Team {
 
 		let team_default: Option<String> = sqlx::query_scalar(
 			r#"
-			SELECT t.default_model_key FROM teams t
+			SELECT m.model_id FROM teams t
 			INNER JOIN team_members tm ON tm.team_id = t.id
-			WHERE tm.user_id = $1 AND t.default_model_key IS NOT NULL
+			INNER JOIN models m ON m.id = t.default_model_id
+			WHERE tm.user_id = $1
 			ORDER BY t.is_default ASC LIMIT 1
 			"#,
 		)
@@ -179,7 +180,13 @@ impl Team {
 			return team_default;
 		}
 
-		Config::get().default_model_key()
+		let default_model_id = Config::get().default_model_id()?;
+		sqlx::query_scalar("SELECT model_id FROM models WHERE id = $1")
+			.bind(default_model_id)
+			.fetch_optional(pool)
+			.await
+			.ok()
+			.flatten()
 	}
 
 	pub async fn update_budget(&self, pool: &PgPool, req: &UpdateTeamBudgetRequest) -> Result<Self, sqlx::Error> {
@@ -312,7 +319,7 @@ impl Team {
 			is_default: self.is_default,
 			allow_all_models: self.allow_all_models,
 			budget_id: self.budget_id,
-			default_model_key: self.default_model_key.clone(),
+			default_model_id: self.default_model_id,
 			members: self.members(pool).await?,
 			model_access: self.model_access(pool).await?,
 			created_at: self.created_at,

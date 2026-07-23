@@ -45,7 +45,7 @@ pub struct TeamDetailedResponse {
 	pub is_default: bool,
 	pub allow_all_models: bool,
 	pub budget_id: Option<Uuid>,
-	pub default_model_key: Option<String>,
+	pub default_model_id: Option<Uuid>,
 	pub members: Vec<TeamMemberResponse>,
 	pub model_access: TeamModelAccessResponse,
 	pub created_at: DateTime<Utc>,

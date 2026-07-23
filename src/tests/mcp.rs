@@ -184,16 +184,16 @@ mod tests {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn mcp_server_response_masks_secrets_when_requested(pool: PgPool) {
-		let server = McpServer::create(&pool, None, "sys_secret", "http", &http_config_with_secret("https://sys.example"), true)
-			.await
-			.unwrap();
+	async fn mcp_server_response_masks_secrets_when_requested(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
+		crate::utils::encryption::init_for_test([0x42; 32])?;
+		let server = McpServer::create(&pool, None, "sys_secret", "http", &http_config_with_secret("https://sys.example"), true).await?;
 
 		let masked = McpServerResponse::from_server(server.clone(), false);
 		assert_eq!(masked.connection_config["headers"]["Authorization"], "***");
 
 		let unmasked = McpServerResponse::from_server(server, true);
 		assert_eq!(unmasked.connection_config["headers"]["Authorization"], "Bearer secret");
+		Ok(())
 	}
 
 	#[tokio::test]

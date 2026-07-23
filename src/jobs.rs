@@ -4,7 +4,9 @@
 
 use crate::types::providers::Provider;
 use crate::types::tools::McpServer;
+use crate::utils::provider_billing::refresh_provider_billing;
 use crate::utils::providers::sync_provider_models;
+use futures_util::{StreamExt, stream};
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,6 +14,7 @@ use std::time::Duration;
 /// Minimum interval between session cleanup runs.
 const SESSION_CLEANUP_INTERVAL_SECS: u64 = 3600; // 1 hour
 const PROVIDER_SYNC_INTERVAL_SECS: u64 = 500; // 5 minutes
+const PROVIDER_BILLING_INTERVAL_SECS: u64 = 900; // 15 minutes
 /// How often to reap idle MCP clients and health-check system servers.
 const MCP_MAINTENANCE_INTERVAL_SECS: u64 = 300; // 5 minutes
 /// Close pooled MCP clients that have been idle for longer than this.
@@ -26,11 +29,39 @@ pub async fn start_job_scheduler(state: Arc<super::JobState>) {
 	let handles: Vec<tokio::task::JoinHandle<()>> = vec![
 		tokio::spawn(session_cleanup_job(Arc::clone(&state))),
 		tokio::spawn(provider_sync_job(Arc::clone(&state))),
+		tokio::spawn(provider_billing_job(Arc::clone(&state))),
 		tokio::spawn(mcp_maintenance_job(Arc::clone(&state))),
 	];
 
 	for handle in handles {
 		let _ = handle.await;
+	}
+}
+
+async fn provider_billing_job(state: Arc<super::JobState>) {
+	tracing::info!("[JOBS] Provider billing refresh job started");
+	loop {
+		tokio::time::sleep(Duration::from_secs(PROVIDER_BILLING_INTERVAL_SECS)).await;
+		let providers = match Provider::list_enabled_billing_connections(&state.db).await {
+			Ok(providers) => providers,
+			Err(error) => {
+				tracing::error!("[JOBS] Failed to list provider billing connections: {error}");
+				continue;
+			}
+		};
+		stream::iter(providers)
+			.for_each_concurrent(4, |provider| {
+				let state = &state;
+				async move {
+					match refresh_provider_billing(&state.db, &provider).await {
+						Ok(_) => tracing::info!(provider_id=%provider.id, provider_name=%provider.name, status="AVAILABLE", "[JOBS] Refreshed provider billing"),
+						Err(error) => {
+							tracing::warn!(provider_id=%provider.id, provider_name=%provider.name, category=error.code(), "[JOBS] Provider billing refresh failed")
+						}
+					}
+				}
+			})
+			.await;
 	}
 }
 
@@ -43,7 +74,10 @@ pub async fn sync_provider_models_once(state: &super::JobState) {
 					Ok(summary) => {
 						tracing::info!(
 							"[JOBS] Synced provider '{}': +{}/~{}/-{} models",
-							provider.name, summary.models_added, summary.models_updated, summary.models_removed
+							provider.name,
+							summary.models_added,
+							summary.models_updated,
+							summary.models_removed
 						);
 					}
 					Err(e) => {

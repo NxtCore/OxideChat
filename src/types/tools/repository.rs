@@ -2,11 +2,49 @@ use super::{
 	CreateToolRequest, McpHttpConfig, McpServer, McpServerResponse, McpSourceConfig, McpStdioConfig, Tool, ToolExecution, ToolFunction, ToolSourceKind,
 	UpdateToolRequest, UserToolSettings, WasmBlob,
 };
+use crate::utils::encryption::{decrypt_object_values, decrypt_schema_secrets, encrypt_object_values, encrypt_schema_secrets, mask_schema_secrets};
 use crate::utils::tools::mcp::{McpToolInfo, McpUrlPolicy};
 use crate::utils::tools::{McpClient, McpConnectionPool, ToolError};
+use serde_json::Value;
 use sqlx::Row;
+use sqlx::types::Json;
 use std::sync::Arc;
 use uuid::Uuid;
+
+fn protect_connection_config(config: &Value, existing: Option<&Value>) -> Result<Value, crate::utils::encryption::EncryptionError> {
+	let mut protected = config.clone();
+	for key in ["headers", "env"] {
+		if let Some(values) = config.get(key) {
+			let previous = existing.and_then(|config| config.get(key));
+			protected[key] = encrypt_object_values(values, previous)?;
+		}
+	}
+	Ok(protected)
+}
+
+fn reveal_connection_config(config: &Value) -> Result<Value, crate::utils::encryption::EncryptionError> {
+	let mut revealed = config.clone();
+	for key in ["headers", "env"] {
+		if let Some(values) = config.get(key) {
+			revealed[key] = decrypt_object_values(values)?;
+		}
+	}
+	Ok(revealed)
+}
+
+fn reveal_mcp_server(mut server: McpServer) -> Result<McpServer, sqlx::Error> {
+	server.connection_config = reveal_connection_config(&server.connection_config).map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+	Ok(server)
+}
+
+fn protect_tool_source_config(kind: &ToolSourceKind, config: &Value, existing: Option<&Value>) -> Result<Value, crate::utils::encryption::EncryptionError> {
+	if kind != &ToolSourceKind::Http || config.get("headers").is_none() {
+		return Ok(config.clone());
+	}
+	let mut protected = config.clone();
+	protected["headers"] = encrypt_object_values(config.get("headers").unwrap_or(&Value::Null), existing.and_then(|value| value.get("headers")))?;
+	Ok(protected)
+}
 
 impl Tool {
 	/// Create a system tool and its functions atomically.
@@ -16,6 +54,7 @@ impl Tool {
 	/// Returns an error when the transaction or a database operation fails.
 	pub async fn create_system(pool: &sqlx::PgPool, request: &CreateToolRequest) -> Result<(Self, Vec<ToolFunction>), sqlx::Error> {
 		let mut tx = pool.begin().await?;
+		let source_config = protect_tool_source_config(&request.source_kind, &request.source_config, None).map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
 		let legacy_schema = request
 			.input_schema
 			.clone()
@@ -36,7 +75,7 @@ impl Tool {
 		.bind(&request.description)
 		.bind(&request.icon)
 		.bind(&request.source_kind)
-		.bind(&request.source_config)
+		.bind(&source_config)
 		.bind(&legacy_schema)
 		.bind(&request.settings_schema)
 		.bind(request.is_enabled)
@@ -96,6 +135,20 @@ impl Tool {
 	/// Returns an error when the transaction or a database operation fails.
 	pub async fn update_system(pool: &sqlx::PgPool, tool_id: &Uuid, request: &UpdateToolRequest) -> Result<Option<(Self, Vec<ToolFunction>)>, sqlx::Error> {
 		let mut tx = pool.begin().await?;
+		let existing = sqlx::query_as::<_, (ToolSourceKind, Json<Value>)>("SELECT source_kind, source_config FROM tools WHERE id = $1 AND owner_id IS NULL")
+			.bind(tool_id)
+			.fetch_optional(&mut *tx)
+			.await?;
+		let Some((source_kind, existing_source_config)) = existing else {
+			tx.rollback().await?;
+			return Ok(None);
+		};
+		let source_config = request
+			.source_config
+			.as_ref()
+			.map(|config| protect_tool_source_config(&source_kind, config, Some(&existing_source_config.0)))
+			.transpose()
+			.map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
 		let tool = sqlx::query_as::<_, Tool>(
 			r#"
 			UPDATE tools SET
@@ -118,7 +171,7 @@ impl Tool {
 		.bind(&request.display_name)
 		.bind(&request.description)
 		.bind(&request.icon)
-		.bind(&request.source_config)
+		.bind(&source_config)
 		.bind(&request.input_schema)
 		.bind(&request.settings_schema)
 		.bind(request.is_enabled)
@@ -233,6 +286,13 @@ impl Tool {
 			}
 		}
 
+		let existing = sqlx::query_scalar::<_, Json<Value>>("SELECT settings FROM user_tool_settings WHERE tool_id = $1 AND user_id IS NULL")
+			.bind(tool_id)
+			.fetch_optional(&mut *tx)
+			.await?
+			.map(|settings| settings.0);
+		let protected = encrypt_schema_secrets(settings, &tool.settings_schema, existing.as_ref())?;
+
 		sqlx::query(
 			r#"
 			INSERT INTO user_tool_settings (user_id, tool_id, settings)
@@ -242,11 +302,64 @@ impl Tool {
 			"#,
 		)
 		.bind(tool_id)
-		.bind(settings)
+		.bind(&protected)
 		.execute(&mut *tx)
 		.await?;
 		tx.commit().await?;
 		Ok(())
+	}
+
+	pub async fn system_settings_for_admin(pool: &sqlx::PgPool, tool_id: &Uuid) -> Result<Value, super::ToolSettingsError> {
+		let row = sqlx::query_as::<_, (Json<Value>, Option<Json<Value>>)>(
+			r#"
+			SELECT t.settings_schema, settings.settings
+			FROM tools t
+			LEFT JOIN user_tool_settings settings ON settings.tool_id = t.id AND settings.user_id IS NULL
+			WHERE t.id = $1 AND t.owner_id IS NULL
+			"#,
+		)
+		.bind(tool_id)
+		.fetch_optional(pool)
+		.await?
+		.ok_or(super::ToolSettingsError::NotFound)?;
+		Ok(row
+			.1
+			.map_or_else(|| Ok(serde_json::json!({})), |settings| mask_schema_secrets(&settings.0, &row.0.0))?)
+	}
+
+	pub async fn effective_settings_for_user(pool: &sqlx::PgPool, tool_id: &Uuid, user_id: Option<&Uuid>) -> Result<Value, super::ToolSettingsError> {
+		let row = sqlx::query_as::<_, (Json<Value>, Option<Json<Value>>)>(
+			r#"
+			SELECT t.settings_schema, settings.settings
+			FROM tools t
+			LEFT JOIN LATERAL (
+				SELECT user_tool_settings.settings
+				FROM user_tool_settings
+				WHERE user_tool_settings.tool_id = t.id
+				  AND (user_tool_settings.user_id = $2 OR user_tool_settings.user_id IS NULL)
+				ORDER BY user_tool_settings.user_id NULLS LAST
+				LIMIT 1
+			) settings ON true
+			WHERE t.id = $1
+			"#,
+		)
+		.bind(tool_id)
+		.bind(user_id)
+		.fetch_optional(pool)
+		.await?
+		.ok_or(super::ToolSettingsError::NotFound)?;
+		Ok(row
+			.1
+			.map_or_else(|| Ok(serde_json::json!({})), |settings| decrypt_schema_secrets(&settings.0, &row.0.0))?)
+	}
+
+	pub fn revealed_source_config(&self) -> Result<Value, crate::utils::encryption::EncryptionError> {
+		if self.source_kind != ToolSourceKind::Http || self.source_config.get("headers").is_none() {
+			return Ok(self.source_config.clone());
+		}
+		let mut revealed = self.source_config.clone();
+		revealed["headers"] = decrypt_object_values(self.source_config.get("headers").unwrap_or(&Value::Null))?;
+		Ok(revealed)
 	}
 
 	#[deprecated(note = "Use to_tool_specs with functions instead")]
@@ -647,7 +760,7 @@ impl McpServer {
 	}
 
 	pub async fn list_system(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>(
+		let servers = sqlx::query_as::<_, McpServer>(
 			r#"
 			SELECT id, owner_id, name, transport, connection_config, is_enabled,
 			       last_health_check, health_status, created_at, updated_at
@@ -657,12 +770,13 @@ impl McpServer {
 			"#,
 		)
 		.fetch_all(pool)
-		.await
+		.await?;
+		servers.into_iter().map(reveal_mcp_server).collect()
 	}
 
 	/// List the servers owned by a specific user (excludes global/system servers).
 	pub async fn list_owned(pool: &sqlx::PgPool, owner_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>(
+		let servers = sqlx::query_as::<_, McpServer>(
 			r#"
 			SELECT id, owner_id, name, transport, connection_config, is_enabled,
 			       last_health_check, health_status, created_at, updated_at
@@ -673,7 +787,8 @@ impl McpServer {
 		)
 		.bind(owner_id)
 		.fetch_all(pool)
-		.await
+		.await?;
+		servers.into_iter().map(reveal_mcp_server).collect()
 	}
 
 	/// Fetch a server by id restricted to the given owner scope.
@@ -681,7 +796,7 @@ impl McpServer {
 	/// `owner_id = None` matches system (global) servers; `Some(uuid)` matches
 	/// servers owned by that user.
 	pub async fn find_scoped(pool: &sqlx::PgPool, id: &Uuid, owner_id: Option<&Uuid>) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>(
+		let server = sqlx::query_as::<_, McpServer>(
 			r#"
 			SELECT id, owner_id, name, transport, connection_config, is_enabled,
 			       last_health_check, health_status, created_at, updated_at
@@ -692,12 +807,13 @@ impl McpServer {
 		.bind(id)
 		.bind(owner_id)
 		.fetch_optional(pool)
-		.await
+		.await?;
+		server.map(reveal_mcp_server).transpose()
 	}
 
 	/// Fetch a server usable by a user for execution: their own or a global one.
 	pub async fn find_owned_or_system(pool: &sqlx::PgPool, id: &Uuid, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>(
+		let server = sqlx::query_as::<_, McpServer>(
 			r#"
 			SELECT id, owner_id, name, transport, connection_config, is_enabled,
 			       last_health_check, health_status, created_at, updated_at
@@ -708,7 +824,8 @@ impl McpServer {
 		.bind(id)
 		.bind(user_id)
 		.fetch_optional(pool)
-		.await
+		.await?;
+		server.map(reveal_mcp_server).transpose()
 	}
 
 	pub async fn create(
@@ -719,7 +836,8 @@ impl McpServer {
 		connection_config: &serde_json::Value,
 		is_enabled: bool,
 	) -> Result<Self, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>(
+		let protected = protect_connection_config(connection_config, None).map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+		let server = sqlx::query_as::<_, McpServer>(
 			r#"
 			INSERT INTO mcp_servers (owner_id, name, transport, connection_config, is_enabled)
 			VALUES ($1, $2, $3, $4, $5)
@@ -729,10 +847,11 @@ impl McpServer {
 		.bind(owner_id)
 		.bind(name)
 		.bind(transport)
-		.bind(connection_config)
+		.bind(&protected)
 		.bind(is_enabled)
 		.fetch_one(pool)
-		.await
+		.await?;
+		reveal_mcp_server(server)
 	}
 
 	pub async fn update_scoped(
@@ -744,7 +863,15 @@ impl McpServer {
 		connection_config: Option<&serde_json::Value>,
 		is_enabled: Option<bool>,
 	) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as::<_, McpServer>(
+		let protected = if let Some(config) = connection_config {
+			let Some(existing) = Self::find_scoped(pool, id, owner_id).await? else {
+				return Ok(None);
+			};
+			Some(protect_connection_config(config, Some(&existing.connection_config)).map_err(|error| sqlx::Error::Protocol(error.to_string()))?)
+		} else {
+			None
+		};
+		let server = sqlx::query_as::<_, McpServer>(
 			r#"
 			UPDATE mcp_servers
 			SET name = COALESCE($3, name),
@@ -760,10 +887,11 @@ impl McpServer {
 		.bind(owner_id)
 		.bind(name)
 		.bind(transport)
-		.bind(connection_config)
+		.bind(protected.as_ref())
 		.bind(is_enabled)
 		.fetch_optional(pool)
-		.await
+		.await?;
+		server.map(reveal_mcp_server).transpose()
 	}
 
 	pub async fn delete_scoped(pool: &sqlx::PgPool, id: &Uuid, owner_id: Option<&Uuid>) -> Result<bool, sqlx::Error> {

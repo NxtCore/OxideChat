@@ -28,7 +28,7 @@ export interface TeamMember {
 }
 
 export interface TeamDetailed extends Omit<TeamList, 'member_count'> {
-	default_model_key: string | null;
+	default_model_id: string | null;
 	members: TeamMember[];
 	model_access: {
 		provider_ids: string[];

@@ -122,7 +122,7 @@ pub struct UpdateGlobalConfigRequest {
 	pub enable_provider_selector: Option<bool>,
 	pub allow_server_stdio_mcp: Option<bool>,
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
-	pub default_model_key: Option<Option<String>>,
+	pub default_model_id: Option<Option<Uuid>>,
 }
 
 #[derive(Debug, Deserialize)]

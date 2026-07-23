@@ -3,6 +3,7 @@ use crate::types::Role;
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
 pub struct BaseResponse {
@@ -15,6 +16,6 @@ pub struct BaseResponse {
 	pub enable_provider_selector: bool,
 	/// Whether admins may register server-side stdio MCP servers.
 	pub allow_server_stdio_mcp: bool,
-	/// Instance-wide default model key.
-	pub default_model_key: Option<String>,
+	/// Instance-wide default model ID.
+	pub default_model_id: Option<Uuid>,
 }

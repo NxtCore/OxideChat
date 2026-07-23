@@ -2,6 +2,7 @@ pub mod auth;
 pub mod base;
 pub mod catalog;
 pub mod config;
+pub mod encryption;
 pub mod i18n;
 pub mod images;
 pub mod logging;

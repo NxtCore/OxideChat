@@ -1,3 +1,5 @@
+extern crate core;
+
 mod ai;
 mod config;
 mod i18n;
@@ -17,8 +19,7 @@ use std::sync::Arc;
 async fn main() {
 	dotenv::dotenv().ok();
 
-	let log_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-		.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,omniference=debug"));
+	let log_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,omniference=debug"));
 	tracing_subscriber::fmt().with_env_filter(log_filter).with_target(true).init();
 
 	let db_host = std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string());
@@ -55,18 +56,18 @@ async fn main() {
 		}
 	}
 
+	match utils::encryption::init() {
+		Ok(source) => println!("[ENCRYPTION] Credential encryption enabled using {}", source.as_str()),
+		Err(error) => {
+			eprintln!("[ENCRYPTION] Failed to initialize credential encryption: {error}");
+			std::process::exit(1);
+		}
+	}
 	config::Config::init(&pool).await;
 	println!("[CONFIG] Configuration loaded");
 
 	i18n::I18n::init(&pool).await;
 	println!("[I18N] Translations loaded");
-
-	utils::encryption::init();
-	if utils::encryption::is_enabled() {
-		println!("[ENCRYPTION] API key encryption enabled");
-	} else {
-		println!("[ENCRYPTION] API key encryption disabled (set ENCRYPTION_KEY to enable)");
-	}
 
 	ai::init(&pool).await;
 

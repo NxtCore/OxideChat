@@ -25,15 +25,17 @@ pub async fn init(pool: &PgPool) {
 	let engine = Arc::new(RwLock::new(OmniferenceEngine::new()));
 
 	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
-	if providers.is_empty() {
-		println!("[AI] No providers found in the database.");
-		return;
-	}
 
 	let provider_count = providers.len();
 	let mut engine_write = engine.write().await;
 	for provider in providers {
-		let config = provider_to_config(&provider);
+		let config = match provider_to_config(&provider) {
+			Ok(config) => config,
+			Err(error) => {
+				tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
+				continue;
+			}
+		};
 
 		if let Err(e) = engine_write.register_provider(config).await {
 			eprintln!("[AI] Failed to register provider '{}': {}", provider.name, e);
@@ -59,7 +61,7 @@ pub fn get() -> Arc<RwLock<OmniferenceEngine>> {
 pub async fn catalog() -> Option<Arc<omniference::catalog::Catalog>> {
 	let engine = OF_ENGINE.get()?;
 	let guard = engine.read().await;
-	Some(guard.service().catalog.clone())
+	Some(guard.service().catalog().clone())
 }
 
 /// Pricing overrides are stored in the database and applied at usage-event
@@ -79,7 +81,13 @@ pub async fn reload_providers(pool: &PgPool) {
 	*engine_write = new_engine;
 
 	for provider in providers {
-		let config = provider_to_config(&provider);
+		let config = match provider_to_config(&provider) {
+			Ok(config) => config,
+			Err(error) => {
+				tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
+				continue;
+			}
+		};
 		if let Err(e) = engine_write.register_provider(config).await {
 			eprintln!("[AI] Failed to register provider '{}': {}", provider.name, e);
 		}
@@ -90,11 +98,11 @@ pub async fn reload_providers(pool: &PgPool) {
 }
 
 /// Convert a database provider to omniference config
-pub fn provider_to_config(provider: &Provider) -> ProviderConfig {
-	let api_key = provider.api_key.as_ref().map(|k| decrypt_api_key(k));
-	let extra_headers = parse_extra_headers(&provider.extra_headers.0);
+pub fn provider_to_config(provider: &Provider) -> Result<ProviderConfig, crate::utils::encryption::EncryptionError> {
+	let api_key = provider.api_key.as_deref().map(decrypt_api_key).transpose()?;
+	let extra_headers = parse_extra_headers(&provider.extra_headers.0)?;
 
-	ProviderConfig {
+	Ok(ProviderConfig {
 		name: provider.name.clone(),
 		endpoint: ProviderEndpoint {
 			kind: provider.kind.to_omni_kind(),
@@ -105,13 +113,16 @@ pub fn provider_to_config(provider: &Provider) -> ProviderConfig {
 		},
 		enabled: provider.is_enabled,
 		catalog_provider_slug: None,
-	}
+	})
 }
 
-pub fn parse_extra_headers(value: &serde_json::Value) -> BTreeMap<String, String> {
+pub fn parse_extra_headers(value: &serde_json::Value) -> Result<BTreeMap<String, String>, crate::utils::encryption::EncryptionError> {
 	if let Some(obj) = value.as_object() {
-		obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()
+		obj.iter()
+			.filter_map(|(key, value)| value.as_str().map(|secret| (key, secret)))
+			.map(|(key, secret)| crate::utils::encryption::decrypt_api_key(secret).map(|value| (key.clone(), value)))
+			.collect()
 	} else {
-		BTreeMap::new()
+		Ok(BTreeMap::new())
 	}
 }

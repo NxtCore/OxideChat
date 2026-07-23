@@ -11,6 +11,73 @@
 			</ShadButton>
 		</div>
 
+		<section v-if="billingProviders.length > 0" class="mb-6 space-y-3">
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<div>
+					<h3 class="text-base font-semibold text-foreground">{{ store.getTranslation('settings.providers.billing.tab') }}</h3>
+					<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.providers.billing.local_tracked') }}</p>
+				</div>
+				<Button variant="outline" size="sm" :disabled="isRefreshingBilling" @click="refreshAllBilling">
+					<Loader2 v-if="isRefreshingBilling" class="mr-2 h-4 w-4 animate-spin" />
+					<RotateCw v-else class="mr-2 h-4 w-4" />
+					{{ store.getTranslation('settings.providers.billing.refresh') }}
+				</Button>
+			</div>
+
+			<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+				<div v-for="item in billingProviders" :key="item.id" class="rounded-lg border border-border bg-card p-4">
+					<div class="flex items-start justify-between gap-3">
+						<div class="flex min-w-0 items-center gap-2.5">
+							<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/60">
+								<div
+									v-if="item.template?.icon && item.template.icon.type === 'svg'"
+									v-html="item.template.icon.icon"
+									class="h-4 w-4 [&>svg]:h-full [&>svg]:w-full"
+									:style="{color: item.template.brandColor}"
+								></div>
+								<img v-else-if="item.template?.icon?.type === 'png'" :src="item.template.icon.icon" :alt="item.name" class="h-4 w-4" />
+								<BrainCircuit v-else class="h-4 w-4 text-primary" />
+							</div>
+							<div class="min-w-0">
+								<p class="truncate text-sm font-medium text-foreground">{{ item.name }}</p>
+								<p class="text-xs text-muted-foreground">{{ store.getTranslation(billingStatusKey(item.billing)) }}</p>
+							</div>
+						</div>
+						<div class="flex shrink-0 items-center gap-1">
+							<span v-if="item.billing.is_stale" class="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+								{{ store.getTranslation('settings.providers.billing.stale') }}
+							</span>
+							<Button
+								v-if="item.billing.is_enabled"
+								variant="ghost"
+								size="icon"
+								class="h-7 w-7"
+								:disabled="billingStore.loading[item.id]"
+								@click="refreshBilling(item.id)"
+							>
+								<Loader2 v-if="billingStore.loading[item.id]" class="h-3.5 w-3.5 animate-spin" />
+								<RotateCw v-else class="h-3.5 w-3.5" />
+								<span class="sr-only">{{ store.getTranslation('settings.providers.billing.refresh') }}</span>
+							</Button>
+						</div>
+					</div>
+
+					<div v-if="item.billing.upstream" class="mt-4 space-y-2">
+						<p class="text-sm font-medium text-foreground">{{ upstreamSummary(item.billing) }}</p>
+						<p v-if="upstreamDetail(item.billing)" class="text-xs text-muted-foreground">{{ upstreamDetail(item.billing) }}</p>
+						<div v-if="item.billing.upstream.limit_amount != null" class="h-1.5 overflow-hidden rounded-full bg-muted">
+							<div class="h-full rounded-full bg-primary transition-all" :style="{width: billingProgress(item.billing) + '%'}"></div>
+						</div>
+					</div>
+					<p v-else class="mt-4 text-sm text-muted-foreground">{{ store.getTranslation(billingStatusKey(item.billing)) }}</p>
+
+					<div class="mt-4 flex items-center justify-between gap-3 border-t border-border pt-3 text-xs text-muted-foreground">
+						<span class="shrink-0">{{ updatedLabel(item.billing.last_synced_at) }}</span>
+					</div>
+				</div>
+			</div>
+		</section>
+
 		<div class="space-y-3">
 			<div
 				v-for="item in displayProviders"
@@ -82,9 +149,10 @@
 				</DialogHeader>
 
 				<Tabs v-model="activeProviderTab" default-value="settings" class="w-full">
-					<TabsList v-if="showCatalogTab" class="grid w-full grid-cols-2 mt-2">
+					<TabsList v-if="configForm.existingProvider" class="grid w-full mt-2" :class="showCatalogTab ? 'grid-cols-3' : 'grid-cols-2'">
 						<TabsTrigger value="settings">{{ store.getTranslation('settings.providers.tab_settings') }}</TabsTrigger>
-						<TabsTrigger value="catalog">{{ store.getTranslation('settings.providers.tab_catalog') }}</TabsTrigger>
+						<TabsTrigger value="billing">{{ store.getTranslation('settings.providers.billing.tab') }}</TabsTrigger>
+						<TabsTrigger v-if="showCatalogTab" value="catalog">{{ store.getTranslation('settings.providers.tab_catalog') }}</TabsTrigger>
 					</TabsList>
 
 					<TabsContent value="settings">
@@ -111,6 +179,29 @@
 								<Label for="base-url">{{ store.getTranslation('settings.providers.base_url') }}</Label>
 								<Input id="base-url" v-model="configForm.baseUrl" type="text" :placeholder="selectedProvider?.defaultBaseUrl || 'https://api.example.com'" />
 							</div>
+						</div>
+					</TabsContent>
+
+					<TabsContent v-if="configForm.existingProvider" value="billing">
+						<div class="space-y-4 py-4">
+							<div v-if="supportsUpstreamBilling" class="space-y-4">
+								<div class="space-y-2">
+									<Label for="billing-key">{{ store.getTranslation('settings.providers.billing.management_key') }}</Label>
+									<Input id="billing-key" v-model="billingForm.credential" type="password" :placeholder="billingForm.hasCredential ? '••••••••' : ''" />
+									<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.billing.management_key_hint') }}</p>
+								</div>
+								<div class="flex flex-wrap gap-2">
+									<Button variant="outline" :disabled="billingStore.loading[configForm.existingProvider.id]" @click="testBillingAccess">
+										<RotateCw class="mr-2 h-4 w-4" />{{ store.getTranslation('settings.providers.billing.refresh') }}
+									</Button>
+									<Button v-if="billingForm.hasConnection" variant="destructive" @click="removeBilling">
+										{{ store.getTranslation('settings.providers.billing.remove') }}
+									</Button>
+								</div>
+							</div>
+							<p v-else class="rounded-md bg-muted p-3 text-sm text-muted-foreground">
+								{{ store.getTranslation('settings.providers.billing.local_only') }}
+							</p>
 						</div>
 					</TabsContent>
 
@@ -151,7 +242,7 @@
 				</Tabs>
 
 				<DialogFooter class="gap-2 sm:gap-0">
-					<Button v-if="configForm.existingProvider" variant="destructive" @click="deleteConfig" :disabled="saving" class="mr-auto">
+					<Button v-if="configForm.existingProvider && activeProviderTab === 'settings'" variant="destructive" @click="deleteConfig" :disabled="saving" class="mr-auto">
 						<Trash2 class="h-4 w-4 mr-2" />
 						{{ store.getTranslation('common.delete') }}
 					</Button>
@@ -159,7 +250,7 @@
 						<Button variant="outline" @click="dialogOpen = false">
 							{{ store.getTranslation('common.cancel') }}
 						</Button>
-						<Button @click="saveConfig" :disabled="saving">
+						<Button v-if="activeProviderTab !== 'catalog'" @click="saveActiveTab" :disabled="saving || (activeProviderTab === 'billing' && !supportsUpstreamBilling)">
 							<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
 							{{ store.getTranslation('common.save') }}
 						</Button>
@@ -175,6 +266,8 @@ import {ref, reactive, onMounted, computed, watch} from 'vue';
 import {Sparkles, Cpu, Zap, Server, Plus, Settings2, Loader2, BrainCircuit, Globe, AudioWaveform, Trash2, RotateCw} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
+import {useProviderBillingStore} from '@/stores/providerBillingStore';
+import type {ProviderBillingOverview} from '@/types/providers';
 import {Button} from '@/components/ui/button';
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog';
 import {Input} from '@/components/ui/input';
@@ -205,6 +298,7 @@ interface ConfiguredProvider {
 
 const store = useMainStore();
 const iconsStore = useIconsStore();
+const billingStore = useProviderBillingStore();
 const dialogOpen = ref(false);
 const selectedProvider = ref<ProviderConfig | null>(null);
 const saving = ref(false);
@@ -220,6 +314,14 @@ const catalogSearch = ref('');
 let catalogDebounce: ReturnType<typeof setTimeout>;
 
 const showCatalogTab = computed(() => configForm.existingProvider?.kind === 'OPENROUTER');
+const selectedProviderKind = computed(() => configForm.existingProvider?.kind ?? selectedProvider.value?.kind);
+const supportsUpstreamBilling = computed(() => selectedProviderKind.value === 'OPENROUTER');
+
+const billingForm = reactive({
+	credential: '',
+	hasCredential: false,
+	hasConnection: false,
+});
 
 async function loadCatalog() {
 	if (!configForm.existingProvider) return;
@@ -261,6 +363,7 @@ const displayProviders = computed(() => {
 
 		result.push({
 			...conf,
+			billing: billingStore.overviews[conf.id],
 			isConfigured: true,
 			template: provider_template || {
 				name: conf.name,
@@ -295,6 +398,9 @@ const displayProviders = computed(() => {
 
 	return result;
 });
+
+const billingProviders = computed(() => displayProviders.value.filter(provider => provider.isConfigured && provider.billing));
+const isRefreshingBilling = computed(() => billingProviders.value.some(provider => billingStore.loading[provider.id]));
 
 const configForm = reactive({
 	name: '',
@@ -400,6 +506,142 @@ function openConfigDialog(item: any) {
 	catalogSearch.value = '';
 
 	dialogOpen.value = true;
+	if (item.isConfigured) loadBillingForm(item.id);
+}
+
+async function loadBillingForm(providerId: string) {
+	try {
+		const billing = await billingStore.fetchProviderBilling(providerId);
+		billingForm.credential = '';
+		billingForm.hasCredential = billing.has_billing_credential;
+		billingForm.hasConnection = billing.has_billing_credential;
+	} catch (error) {
+		console.error('Failed to load billing configuration:', error);
+	}
+}
+
+function billingStatusKey(billing: ProviderBillingOverview) {
+	if ((billing.status === 'UPSTREAM_ERROR' || billing.status === 'UNAUTHORIZED') && billing.upstream) return 'settings.providers.billing.failed';
+	if (billing.status === 'AVAILABLE' && billing.upstream) return 'settings.providers.billing.provider_reported';
+	if (billing.status === 'UNSUPPORTED') return 'settings.providers.billing.unsupported';
+	if (billing.status === 'NOT_CONFIGURED' || billing.status === 'UNAUTHORIZED') return 'settings.providers.billing.setup_required';
+	return 'settings.providers.billing.failed';
+}
+
+function decimalValue(value: string | number | null | undefined) {
+	const parsed = Number(value ?? 0);
+	return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoney(value: string | number | null | undefined, currency: string) {
+	return new Intl.NumberFormat(undefined, {style: 'currency', currency: currency || 'USD'}).format(decimalValue(value));
+}
+
+function upstreamSummary(billing: ProviderBillingOverview) {
+	const metric = billing.upstream;
+	if (!metric) return '';
+	if (metric.metric_kind === 'CREDIT_BALANCE') {
+		return store.getTranslation('settings.providers.billing.credits_remaining', {amount: formatMoney(metric.remaining_amount, metric.currency)});
+	}
+	return store.getTranslation('settings.providers.billing.spent_month', {amount: formatMoney(metric.spent_amount, metric.currency)});
+}
+
+function upstreamDetail(billing: ProviderBillingOverview) {
+	const metric = billing.upstream;
+	if (!metric) return '';
+	if (metric.limit_amount == null) return '';
+	if (metric.metric_kind === 'KEY_LIMIT') {
+		return store.getTranslation('settings.providers.billing.key_limit', {amount: formatMoney(metric.limit_amount, metric.currency)});
+	}
+	if (metric.metric_kind === 'SPEND_THRESHOLD' && decimalValue(metric.spent_amount) > decimalValue(metric.limit_amount)) {
+		return store.getTranslation('settings.providers.billing.over_threshold', {
+			amount: formatMoney(decimalValue(metric.spent_amount) - decimalValue(metric.limit_amount), metric.currency),
+		});
+	}
+	if (metric.metric_kind === 'SPEND_THRESHOLD') {
+		return store.getTranslation('settings.providers.billing.remaining_threshold', {
+			amount: formatMoney(metric.remaining_amount, metric.currency),
+			threshold: formatMoney(metric.limit_amount, metric.currency),
+		});
+	}
+	return '';
+}
+
+function billingProgress(billing: ProviderBillingOverview) {
+	const metric = billing.upstream;
+	const limit = decimalValue(metric?.limit_amount);
+	if (!metric || limit <= 0) return 0;
+	return Math.min(100, Math.max(0, (decimalValue(metric.spent_amount) / limit) * 100));
+}
+
+function updatedLabel(value: string | null) {
+	if (!value) return store.getTranslation('settings.providers.billing.never_updated');
+	return store.getTranslation('settings.providers.billing.updated', {time: store.formatDate(value, 'L LT')});
+}
+
+async function refreshBilling(providerId: string) {
+	try {
+		const billing = await billingStore.refreshProviderBilling(providerId);
+		if (billing.status === 'UPSTREAM_ERROR' || billing.status === 'UNAUTHORIZED' || billing.status === 'NOT_CONFIGURED') {
+			store.toast(store.getTranslation('settings.providers.billing.refresh_failed'), {type: 'error'});
+		}
+	} catch (error: any) {
+		store.toast(store.getTranslation('settings.providers.billing.refresh_failed'), {type: 'error', description: error?.message});
+	}
+}
+
+async function refreshAllBilling() {
+	await Promise.all(
+		billingProviders.value
+			.filter(provider => provider.billing.is_enabled)
+			.map(provider => refreshBilling(provider.id)),
+	);
+}
+
+async function saveBilling() {
+	const provider = configForm.existingProvider;
+	if (!provider) return false;
+	saving.value = true;
+	try {
+		const suppliedCredential = billingForm.credential.length > 0;
+		await billingStore.updateProviderBilling(provider.id, {
+			...(billingForm.credential ? {credential: billingForm.credential} : {}),
+		});
+		billingForm.credential = '';
+		billingForm.hasCredential = billingForm.hasCredential || suppliedCredential;
+		billingForm.hasConnection = true;
+		store.toast(store.getTranslation('settings.providers.billing.saved'), {type: 'success'});
+		return true;
+	} catch (error: any) {
+		store.toast(store.getTranslation('settings.providers.save_error'), {type: 'error', description: error?.message});
+		return false;
+	} finally {
+		saving.value = false;
+	}
+}
+
+async function testBillingAccess() {
+	const saved = await saveBilling();
+	if (saved && configForm.existingProvider) await refreshBilling(configForm.existingProvider.id);
+}
+
+async function removeBilling() {
+	if (!configForm.existingProvider) return;
+	try {
+		await billingStore.removeProviderBilling(configForm.existingProvider.id);
+		await billingStore.fetchBillingOverviews();
+		billingForm.credential = '';
+		billingForm.hasCredential = false;
+		billingForm.hasConnection = false;
+		store.toast(store.getTranslation('settings.providers.billing.removed'), {type: 'success'});
+	} catch (error: any) {
+		store.toast(store.getTranslation('settings.providers.save_error'), {type: 'error', description: error?.message});
+	}
+}
+
+function saveActiveTab() {
+	if (activeProviderTab.value === 'billing') return saveBilling();
+	return saveConfig();
 }
 
 function addCustomProvider() {
@@ -517,6 +759,6 @@ async function deleteConfig() {
 }
 
 onMounted(() => {
-	loadProviders();
+	Promise.all([loadProviders(), billingStore.fetchBillingOverviews()]);
 });
 </script>

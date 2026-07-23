@@ -1,4 +1,5 @@
 use super::{Provider, ProviderKind};
+use crate::utils::encryption::encrypt_object_values;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -19,6 +20,10 @@ impl Provider {
 		};
 
 		let api_key = api_key.map_or(existing.api_key.as_deref(), |value| value);
+		let protected_headers = extra_headers
+			.map(|headers| encrypt_object_values(headers, Some(&existing.extra_headers.0)))
+			.transpose()
+			.map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
 
 		sqlx::query_as::<_, Self>(
 			r#"
@@ -40,7 +45,7 @@ impl Provider {
 		.bind(name)
 		.bind(base_url)
 		.bind(api_key)
-		.bind(extra_headers)
+		.bind(protected_headers.as_ref())
 		.bind(is_enabled)
 		.fetch_optional(pool)
 		.await
