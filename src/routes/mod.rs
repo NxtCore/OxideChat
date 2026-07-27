@@ -12,7 +12,14 @@ use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 
 pub fn build_router() -> Router<Arc<JobState>> {
+	let openai_router = Router::new()
+		.route("/models", get(public::openai::list_models))
+		.route("/chat/completions", post(public::openai::chat_completions))
+		.route("/responses", post(public::openai::responses))
+		.method_not_allowed_fallback(public::openai::method_not_allowed)
+		.fallback(public::openai::not_found);
 	Router::new()
+		.nest("/openai/v1", openai_router)
 		.route("/api/v1/health", get(public::base::health))
 		.route("/api/v1/base", get(public::base::get_base))
 		// Admin i18n
