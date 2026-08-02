@@ -11,7 +11,6 @@ categories = ["web-programming"]
 
 [dependencies]
 axum = { version = "0.8" }
-axum07 = { package = "axum", version = "0.7" }
 tokio = { version = "1.48", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -37,7 +36,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "multipart",
 ] }
-tower-http = { version = "0.5", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors"] }
 omniference = { version = "0.3" }
 aes-gcm = "0.10"
 rand = "0.8"

@@ -1,6 +1,7 @@
-use super::{GatewayAuthContext, GatewayAuthError, GatewayCredential, OpenAiModel};
+use super::{GatewayAuthContext, GatewayAuthError, GatewayCredential, GatewayModel};
 use crate::utils::auth::{hash_password, verify_password};
 use chrono::Utc;
+use omniference::types::providers::OpenAIModel;
 use sqlx::PgPool;
 use std::sync::LazyLock;
 use uuid::Uuid;
@@ -9,13 +10,13 @@ static DUMMY_SECRET_HASH: LazyLock<String> = LazyLock::new(|| hash_password("oxi
 
 impl GatewayCredential {
 	pub async fn authenticate(pool: &PgPool, token: &str) -> Result<GatewayAuthContext, GatewayAuthError> {
-		let key_id = parse_key_id(token);
-		let credential = match key_id {
-			Some(id) => Self::find(pool, &id).await.map_err(|_| GatewayAuthError::Unavailable)?,
+		let parsed = parse_token(token);
+		let credential = match parsed.as_ref() {
+			Some(parsed) => Self::find(pool, &parsed.key_id).await.map_err(|_| GatewayAuthError::Unavailable)?,
 			None => None,
 		};
 		let hash = credential.as_ref().map_or(DUMMY_SECRET_HASH.as_str(), |value| value.secret_hash.as_str());
-		let secret = token.rsplit_once('_').map_or("", |(_, value)| value).to_owned();
+		let secret = parsed.map_or_else(String::new, |parsed| parsed.secret.to_owned());
 		let hash = hash.to_owned();
 		let verified = tokio::task::spawn_blocking(move || verify_password(&secret, &hash).unwrap_or(false))
 			.await
@@ -31,11 +32,14 @@ impl GatewayCredential {
 		{
 			return Err(GatewayAuthError::Invalid);
 		}
-		sqlx::query("UPDATE gateway_api_keys SET last_used_at = NOW() WHERE id = $1")
-			.bind(credential.key_id)
-			.execute(pool)
-			.await
-			.map_err(|_| GatewayAuthError::Unavailable)?;
+		if let Err(error) =
+			sqlx::query("UPDATE gateway_api_keys SET last_used_at = NOW() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '1 minute')")
+				.bind(credential.key_id)
+				.execute(pool)
+				.await
+		{
+			tracing::warn!(%error, key_id = %credential.key_id, "failed to update gateway API key usage timestamp");
+		}
 		Ok(GatewayAuthContext {
 			key_id: credential.key_id,
 			project_id: credential.project_id,
@@ -72,15 +76,14 @@ impl GatewayCredential {
 	}
 }
 
-impl OpenAiModel {
-	pub async fn list_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, Self>(
+impl GatewayModel {
+	pub async fn list_for_context(pool: &PgPool, context: &GatewayAuthContext) -> Result<Vec<OpenAIModel>, sqlx::Error> {
+		let models = sqlx::query_as::<_, Self>(
 			r#"
 			SELECT
-				m.model_id AS id,
-				'model'::text AS object,
-				EXTRACT(EPOCH FROM m.created_at)::bigint AS created,
-				p.name AS owned_by
+				p.name AS provider_name,
+				m.model_id,
+				m.created_at
 			FROM models m
 			JOIN providers p ON p.id = m.provider_id
 			WHERE m.is_enabled = TRUE
@@ -94,22 +97,65 @@ impl OpenAiModel {
 				LEFT JOIN team_model_access provider_access
 					ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
 				WHERE tm.user_id = $1
+				  AND ($2::uuid IS NULL OR t.id = $2)
 				  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
 			  )
-			ORDER BY m.model_id
+			ORDER BY p.name, m.model_id
 			"#,
 		)
-		.bind(user_id)
+		.bind(context.user_id)
+		.bind(context.team_id)
 		.fetch_all(pool)
-		.await
+		.await?;
+		Ok(models.into_iter().map(OpenAIModel::from).collect())
+	}
+
+	pub async fn resolve_accessible(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<Option<Uuid>, sqlx::Error> {
+		let (provider_name, model_id) = requested_id.split_once('/').map_or((None, requested_id), |(provider, model)| (Some(provider), model));
+		let matches = sqlx::query_scalar::<_, Uuid>(
+			r#"
+			SELECT m.id
+			FROM models m
+			JOIN providers p ON p.id = m.provider_id
+			WHERE m.model_id = $3
+			  AND ($4::text IS NULL OR LOWER(p.name) = LOWER($4))
+			  AND m.is_enabled = TRUE
+			  AND p.is_enabled = TRUE
+			  AND EXISTS (
+				SELECT 1
+				FROM team_members tm
+				JOIN teams t ON t.id = tm.team_id
+				LEFT JOIN team_model_access model_access
+					ON model_access.team_id = t.id AND model_access.model_id = m.id
+				LEFT JOIN team_model_access provider_access
+					ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
+				WHERE tm.user_id = $1
+				  AND ($2::uuid IS NULL OR t.id = $2)
+				  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
+			  )
+			LIMIT 2
+			"#,
+		)
+		.bind(context.user_id)
+		.bind(context.team_id)
+		.bind(model_id)
+		.bind(provider_name)
+		.fetch_all(pool)
+		.await?;
+		Ok((matches.len() == 1).then(|| matches[0]))
 	}
 }
 
-fn parse_key_id(token: &str) -> Option<Uuid> {
-	let mut parts = token.splitn(3, '_');
-	(parts.next() == Some("oxc"))
-		.then(|| parts.next())
-		.flatten()
-		.and_then(|value| Uuid::parse_str(value).ok())
-		.filter(|_| parts.next().is_some_and(|secret| secret.len() >= 32))
+struct ParsedToken<'a> {
+	key_id: Uuid,
+	secret: &'a str,
+}
+
+fn parse_token(token: &str) -> Option<ParsedToken<'_>> {
+	let remainder = token.strip_prefix("oxc_")?;
+	let (key_id, secret) = remainder.split_once('_')?;
+	(secret.len() >= 32).then_some(ParsedToken {
+		key_id: Uuid::parse_str(key_id).ok()?,
+		secret,
+	})
 }

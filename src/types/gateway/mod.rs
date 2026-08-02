@@ -1,11 +1,12 @@
 mod repository;
-mod responses;
-
-pub use responses::*;
 
 use chrono::{DateTime, Utc};
+use omniference::types::providers::OpenAIModel;
 use sqlx::types::Json;
 use uuid::Uuid;
+
+pub const INFERENCE_READ_SCOPE: &str = "inference:read";
+pub const INFERENCE_WRITE_SCOPE: &str = "inference:write";
 
 #[derive(Debug, sqlx::FromRow)]
 pub struct GatewayCredential {
@@ -36,6 +37,24 @@ impl GatewayAuthContext {
 	#[must_use]
 	pub fn allows(&self, scope: &str) -> bool {
 		self.scopes.iter().any(|candidate| candidate == "*" || candidate == scope)
+	}
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct GatewayModel {
+	pub provider_name: String,
+	pub model_id: String,
+	pub created_at: DateTime<Utc>,
+}
+
+impl From<GatewayModel> for OpenAIModel {
+	fn from(model: GatewayModel) -> Self {
+		Self {
+			id: format!("{}/{}", model.provider_name.to_ascii_lowercase(), model.model_id),
+			object: Some("model".to_string()),
+			created: Some(model.created_at.timestamp().max(0) as u64),
+			owned_by: Some(model.provider_name),
+		}
 	}
 }
 

@@ -69,19 +69,17 @@ async fn main() {
 	i18n::I18n::init(&pool).await;
 	println!("[I18N] Translations loaded");
 
-	ai::init(&pool).await;
-
 	let app_state = Arc::new(JobState {
-		db: pool.clone(),
+		db: pool,
 		mcp_pool: crate::utils::tools::McpConnectionPool::new(),
 		client_tool_pending: crate::types::state::ClientToolPending::new(),
 	});
+	ai::init(&app_state).await;
 
 	tokio::spawn(jobs::start_job_scheduler(app_state.clone()));
 
 	let app = Router::new()
-		.merge(routes::build_router())
-		.with_state(app_state)
+		.merge(routes::build_router(Arc::clone(&app_state)))
 		.layer(DefaultBodyLimit::max(8 * 1024 * 1024));
 
 	let address = format!(
@@ -94,7 +92,7 @@ async fn main() {
 
 	println!("[SERVER] Listening on http://{}", address);
 
-	let pool_for_shutdown = pool.clone();
+	let state_for_shutdown = Arc::clone(&app_state);
 
 	let server = axum::serve(listener, app).with_graceful_shutdown(async move {
 		shutdown_signal().await;
@@ -102,7 +100,7 @@ async fn main() {
 		println!("[SERVER] Shutdown signal received");
 		println!("[DATABASE] Closing pool...");
 
-		pool_for_shutdown.close().await;
+		state_for_shutdown.db.close().await;
 
 		println!("[DATABASE] Pool closed");
 	});

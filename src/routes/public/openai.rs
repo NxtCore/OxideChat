@@ -1,141 +1,95 @@
-use crate::types::models::Model;
-use crate::types::{JobState, OpenAiModel, OpenAiModelsResponse};
-use crate::utils::openai_gateway::{add_gateway_headers, authenticate, error_response, parse_json, run_chat, run_responses};
-use axum::body::Bytes;
-use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use crate::types::models::ModelPricing;
+use crate::types::{Budget, GatewayAuthContext, GatewayModel, JobState};
+use crate::utils::openai_gateway::{error_response, run_chat, run_responses};
+use axum::extract::{Extension, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use omniference::server::SkinAwareJson;
+use omniference::skins::{OpenAIErrorHandler, SkinErrorHandler, SkinRequestMetadata};
+use omniference::types::providers::OpenAIModelsResponse;
 use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
 use std::sync::Arc;
 use uuid::Uuid;
 
 pub async fn not_found() -> Response {
-	add_gateway_headers(
-		error_response(StatusCode::NOT_FOUND, "The requested resource was not found", "not_found_error", "not_found"),
-		None,
-		Uuid::new_v4(),
-	)
+	OpenAIErrorHandler.handle_not_found()
 }
 
 pub async fn method_not_allowed() -> Response {
-	add_gateway_headers(
-		error_response(
-			StatusCode::METHOD_NOT_ALLOWED,
-			"Invalid HTTP method for this endpoint",
-			"invalid_request_error",
-			"method_not_allowed",
-		),
-		None,
-		Uuid::new_v4(),
-	)
+	OpenAIErrorHandler.handle_method_not_allowed()
 }
 
-pub async fn list_models(State(state): State<Arc<JobState>>, headers: HeaderMap) -> impl IntoResponse {
-	let request_id = Uuid::new_v4();
-	let context = match authenticate(&state.db, &headers, "inference:read").await {
-		Ok(context) => context,
-		Err(response) => return add_gateway_headers(response, None, request_id),
-	};
-	let models = match OpenAiModel::list_for_user(&state.db, &context.user_id).await {
+pub async fn list_models(State(state): State<Arc<JobState>>, Extension(context): Extension<GatewayAuthContext>) -> Response {
+	let models = match GatewayModel::list_for_context(&state.db, &context).await {
 		Ok(models) => models,
 		Err(error) => {
 			tracing::error!(%error, "failed to list gateway models");
-			return add_gateway_headers(
-				error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to list models", "server_error", "internal_error"),
-				Some(&context),
-				request_id,
-			);
+			return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to list models", "server_error", "internal_error");
 		}
 	};
-	add_gateway_headers(
-		axum::Json(OpenAiModelsResponse {
-			object: "list".to_string(),
-			data: models,
-		})
-		.into_response(),
-		Some(&context),
-		request_id,
-	)
+	axum::Json(OpenAIModelsResponse {
+		object: Some("list".to_string()),
+		data: models,
+	})
+	.into_response()
 }
 
-pub async fn chat_completions(State(state): State<Arc<JobState>>, headers: HeaderMap, body: Bytes) -> Response {
-	let request_id = Uuid::new_v4();
-	let context = match authenticate(&state.db, &headers, "inference:write").await {
-		Ok(context) => context,
-		Err(response) => return add_gateway_headers(response, None, request_id),
+pub async fn chat_completions(
+	State(state): State<Arc<JobState>>,
+	Extension(context): Extension<GatewayAuthContext>,
+	SkinAwareJson(request): SkinAwareJson<OpenAIChatRequest>,
+) -> Response {
+	let model_id = match resolve_model_access(&state, &context, &request.model).await {
+		Ok(model_id) => model_id,
+		Err(response) => return response,
 	};
-	let request: OpenAIChatRequest = match parse_json(&body) {
-		Ok(request) => request,
-		Err(message) => {
-			return add_gateway_headers(
-				error_response(StatusCode::BAD_REQUEST, message, "invalid_request_error", "invalid_request_body"),
-				Some(&context),
-				request_id,
-			);
-		}
-	};
-	if let Some(response) = validate_model_access(&state, &context.user_id, &request.model).await {
-		return add_gateway_headers(response, Some(&context), request_id);
-	}
-	let response = run_chat(request).await;
-	add_gateway_headers(response, Some(&context), request_id)
+	run_chat(request, request_metadata(&context, model_id)).await
 }
 
-pub async fn responses(State(state): State<Arc<JobState>>, headers: HeaderMap, body: Bytes) -> Response {
-	let request_id = Uuid::new_v4();
-	let context = match authenticate(&state.db, &headers, "inference:write").await {
-		Ok(context) => context,
-		Err(response) => return add_gateway_headers(response, None, request_id),
-	};
-	let request: OpenAIResponsesRequestPayload = match parse_json(&body) {
-		Ok(request) => request,
-		Err(message) => {
-			return add_gateway_headers(
-				error_response(StatusCode::BAD_REQUEST, message, "invalid_request_error", "invalid_request_body"),
-				Some(&context),
-				request_id,
-			);
-		}
-	};
+pub async fn responses(
+	State(state): State<Arc<JobState>>,
+	Extension(context): Extension<GatewayAuthContext>,
+	SkinAwareJson(request): SkinAwareJson<OpenAIResponsesRequestPayload>,
+) -> Response {
 	let Some(model) = request.model.as_deref() else {
-		return add_gateway_headers(
-			error_response(
-				StatusCode::BAD_REQUEST,
-				"Missing required parameter: 'model'.",
-				"invalid_request_error",
-				"missing_required_parameter",
-			),
-			Some(&context),
-			request_id,
+		return error_response(
+			StatusCode::BAD_REQUEST,
+			"Missing required parameter: 'model'.",
+			"invalid_request_error",
+			"missing_required_parameter",
 		);
 	};
-	if let Some(response) = validate_model_access(&state, &context.user_id, model).await {
-		return add_gateway_headers(response, Some(&context), request_id);
-	}
-	let response = run_responses(request).await;
-	add_gateway_headers(response, Some(&context), request_id)
+	let model_id = match resolve_model_access(&state, &context, model).await {
+		Ok(model_id) => model_id,
+		Err(response) => return response,
+	};
+	run_responses(request, request_metadata(&context, model_id)).await
 }
 
-async fn validate_model_access(state: &JobState, user_id: &Uuid, model_id: &str) -> Option<Response> {
-	let model = match Model::find_by_model_id(&state.db, model_id).await {
-		Ok(Some(model)) if model.is_enabled => model,
-		Ok(_) => return Some(model_not_found(model_id)),
-		Err(error) => {
-			tracing::error!(%error, model_id, "failed to resolve gateway model");
-			return Some(error_response(
-				StatusCode::INTERNAL_SERVER_ERROR,
-				"Failed to resolve model",
-				"server_error",
-				"internal_error",
-			));
-		}
-	};
-	match Model::can_user_use_model(&state.db, user_id, &model.id).await {
-		Ok(true) => None,
-		Ok(false) => Some(model_not_found(model_id)),
+async fn resolve_model_access(state: &JobState, context: &GatewayAuthContext, model_id: &str) -> Result<Uuid, Response> {
+	match GatewayModel::resolve_accessible(&state.db, context, model_id).await {
+		Ok(Some(model_id)) => match budget_allows_model(state, &context.user_id, &model_id).await {
+			Ok(true) => Ok(model_id),
+			Ok(false) => Err(error_response(
+				StatusCode::TOO_MANY_REQUESTS,
+				"Budget exceeded for this model",
+				"insufficient_quota",
+				"budget_exceeded",
+			)),
+			Err(error) => {
+				tracing::error!(%error, %model_id, "failed to evaluate gateway budget policy");
+				Err(error_response(
+					StatusCode::INTERNAL_SERVER_ERROR,
+					"Failed to check budget status",
+					"server_error",
+					"internal_error",
+				))
+			}
+		},
+		Ok(None) => Err(OpenAIErrorHandler.handle_model_not_found(model_id)),
 		Err(error) => {
 			tracing::error!(%error, model_id, "failed to evaluate gateway model policy");
-			Some(error_response(
+			Err(error_response(
 				StatusCode::INTERNAL_SERVER_ERROR,
 				"Failed to resolve model",
 				"server_error",
@@ -145,11 +99,22 @@ async fn validate_model_access(state: &JobState, user_id: &Uuid, model_id: &str)
 	}
 }
 
-fn model_not_found(model_id: &str) -> Response {
-	error_response(
-		StatusCode::NOT_FOUND,
-		format!("Model '{model_id}' not found"),
-		"invalid_request_error",
-		"model_not_found",
-	)
+async fn budget_allows_model(state: &JobState, user_id: &Uuid, model_id: &Uuid) -> Result<bool, sqlx::Error> {
+	if ModelPricing::is_free(&state.db, model_id).await? {
+		return Ok(true);
+	}
+	let status = Budget::status_for_user(&state.db, user_id).await?;
+	Ok(!status.blocked_model_ids.contains(model_id))
+}
+
+fn request_metadata(context: &GatewayAuthContext, model_id: Uuid) -> SkinRequestMetadata {
+	let mut metadata = std::collections::BTreeMap::new();
+	metadata.insert("oxide_user_id".to_string(), context.user_id.to_string());
+	metadata.insert("oxide_project_id".to_string(), context.project_id.to_string());
+	metadata.insert("oxide_api_key_id".to_string(), context.key_id.to_string());
+	metadata.insert("oxide_model_id".to_string(), model_id.to_string());
+	if let Some(team_id) = context.team_id {
+		metadata.insert("oxide_team_id".to_string(), team_id.to_string());
+	}
+	SkinRequestMetadata(metadata)
 }

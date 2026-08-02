@@ -1,12 +1,14 @@
 use crate::ai;
-use crate::types::{GatewayAuthContext, OpenAiError, OpenAiErrorResponse};
-use axum::body::Body;
+use crate::types::{GatewayAuthContext, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState};
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use omniference::server::SkinAwareJson;
-use omniference::skins::{OpenAIChatSkin, OpenAIResponsesSkin, SkinContext};
+use omniference::skins::{OpenAIChatSkin, OpenAIResponsesSkin, SkinContext, SkinRequestMetadata, openai_error_response};
 use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
 use sqlx::PgPool;
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub async fn authenticate(pool: &PgPool, headers: &HeaderMap, scope: &str) -> Result<GatewayAuthContext, Response> {
@@ -54,69 +56,74 @@ pub async fn authenticate(pool: &PgPool, headers: &HeaderMap, scope: &str) -> Re
 	Ok(context)
 }
 
-pub async fn run_chat(request: OpenAIChatRequest) -> Response {
+pub async fn run_chat(request: OpenAIChatRequest, metadata: SkinRequestMetadata) -> Response {
 	let engine = ai::get();
 	let engine = engine.read().await;
 	let context = SkinContext::with_service(engine.service().clone());
 	drop(engine);
-	let response = OpenAIChatSkin::handle_chat(axum07::extract::State(context), SkinAwareJson(request)).await;
-	bridge_response(response)
+	OpenAIChatSkin::handle_chat(State(context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await
 }
 
-pub async fn run_responses(request: OpenAIResponsesRequestPayload) -> Response {
+pub async fn run_responses(request: OpenAIResponsesRequestPayload, metadata: SkinRequestMetadata) -> Response {
 	let engine = ai::get();
 	let engine = engine.read().await;
 	let context = SkinContext::with_service(engine.service().clone());
 	drop(engine);
-	let response = OpenAIResponsesSkin::handle_responses(axum07::extract::State(context), SkinAwareJson(request)).await;
-	bridge_response(response)
+	OpenAIResponsesSkin::handle_responses(State(context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await
 }
 
-pub fn parse_json<T: serde::de::DeserializeOwned>(body: &[u8]) -> Result<T, String> {
-	serde_json::from_slice(body).map_err(|error| format!("Failed to parse request body: {error}"))
+pub async fn authenticate_read(State(state): State<Arc<JobState>>, request: Request, next: Next) -> Response {
+	authenticate_request(&state, request, next, INFERENCE_READ_SCOPE).await
+}
+
+pub async fn authenticate_write(State(state): State<Arc<JobState>>, request: Request, next: Next) -> Response {
+	authenticate_request(&state, request, next, INFERENCE_WRITE_SCOPE).await
+}
+
+async fn authenticate_request(state: &JobState, mut request: Request, next: Next, scope: &str) -> Response {
+	let context = match authenticate(&state.db, request.headers(), scope).await {
+		Ok(context) => context,
+		Err(response) => return response,
+	};
+	request.extensions_mut().insert(context.clone());
+	let response = next.run(request).await;
+	add_gateway_context_headers(response, &context)
+}
+
+pub async fn add_request_id(request: Request, next: Next) -> Response {
+	let request_id = Uuid::new_v4();
+	let response = next.run(request).await;
+	add_request_id_header(response, request_id)
 }
 
 #[must_use]
 pub fn error_response(status: StatusCode, message: impl Into<String>, kind: impl Into<String>, code: impl Into<String>) -> Response {
-	(
-		status,
-		axum::Json(OpenAiErrorResponse {
-			error: OpenAiError {
-				message: message.into(),
-				kind: kind.into(),
-				param: None,
-				code: code.into(),
-			},
-		}),
-	)
-		.into_response()
+	(status, axum::Json(openai_error_response(message, kind, code))).into_response()
 }
 
 #[must_use]
-pub fn add_gateway_headers(mut response: Response, context: Option<&GatewayAuthContext>, request_id: Uuid) -> Response {
+fn add_request_id_header(mut response: Response, request_id: Uuid) -> Response {
 	if let Ok(value) = HeaderValue::from_str(&request_id.to_string()) {
 		response.headers_mut().insert("x-request-id", value);
-	}
-	if let Some(context) = context {
-		if let Ok(value) = HeaderValue::from_str(&context.project_id.to_string()) {
-			response.headers_mut().insert("x-oxide-project-id", value);
-		}
-		if let Ok(value) = HeaderValue::from_str(&context.key_id.to_string()) {
-			response.headers_mut().insert("x-oxide-api-key-id", value);
-		}
-		if let Some(team_id) = context.team_id
-			&& let Ok(value) = HeaderValue::from_str(&team_id.to_string())
-		{
-			response.headers_mut().insert("x-oxide-team-id", value);
-		}
-		if let Ok(value) = HeaderValue::from_str(&context.project_name) {
-			response.headers_mut().insert("x-oxide-project-name", value);
-		}
 	}
 	response
 }
 
-pub(crate) fn bridge_response(response: axum07::response::Response) -> Response {
-	let (parts, body) = response.into_parts();
-	Response::from_parts(parts, Body::new(body))
+#[must_use]
+fn add_gateway_context_headers(mut response: Response, context: &GatewayAuthContext) -> Response {
+	if let Ok(value) = HeaderValue::from_str(&context.project_id.to_string()) {
+		response.headers_mut().insert("x-oxide-project-id", value);
+	}
+	if let Ok(value) = HeaderValue::from_str(&context.key_id.to_string()) {
+		response.headers_mut().insert("x-oxide-api-key-id", value);
+	}
+	if let Some(team_id) = context.team_id
+		&& let Ok(value) = HeaderValue::from_str(&team_id.to_string())
+	{
+		response.headers_mut().insert("x-oxide-team-id", value);
+	}
+	if let Ok(value) = HeaderValue::from_str(&context.project_name) {
+		response.headers_mut().insert("x-oxide-project-name", value);
+	}
+	response
 }

@@ -1,29 +1,14 @@
 #[cfg(test)]
 mod tests {
-	use crate::types::{GatewayAuthError, GatewayCredential, OpenAiModel};
+	use crate::types::{GatewayAuthError, GatewayCredential, GatewayModel};
 	use crate::utils::auth::hash_password;
-	use crate::utils::openai_gateway::bridge_response;
-	use axum::body::Bytes;
 	use omniference::skins::{OpenAIChatSkin, OpenAIResponsesSkin, Skin};
 	use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
 	use omniference::types::{ModelRef, ProviderConfig, ProviderEndpoint, ProviderKind};
 	use serde_json::json;
 	use sqlx::PgPool;
 	use std::collections::BTreeMap;
-	use std::convert::Infallible;
-	use std::sync::{
-		Arc,
-		atomic::{AtomicBool, Ordering},
-	};
 	use uuid::Uuid;
-
-	struct DropFlag(Arc<AtomicBool>);
-
-	impl Drop for DropFlag {
-		fn drop(&mut self) {
-			self.0.store(true, Ordering::SeqCst);
-		}
-	}
 
 	async fn create_user(pool: &PgPool) -> Uuid {
 		sqlx::query_scalar("INSERT INTO users (email, username, password_hash) VALUES ('gateway@example.com', 'gateway', 'hash') RETURNING id")
@@ -33,13 +18,18 @@ mod tests {
 	}
 
 	async fn create_key(pool: &PgPool, user_id: Uuid, scopes: serde_json::Value) -> (Uuid, String) {
-		let project_id: Uuid = sqlx::query_scalar("INSERT INTO gateway_projects (owner_id, name) VALUES ($1, 'Gateway') RETURNING id")
+		create_team_key(pool, user_id, None, scopes).await
+	}
+
+	async fn create_team_key(pool: &PgPool, user_id: Uuid, team_id: Option<Uuid>, scopes: serde_json::Value) -> (Uuid, String) {
+		let project_id: Uuid = sqlx::query_scalar("INSERT INTO gateway_projects (owner_id, team_id, name) VALUES ($1, $2, 'Gateway') RETURNING id")
 			.bind(user_id)
+			.bind(team_id)
 			.fetch_one(pool)
 			.await
 			.unwrap();
 		let key_id = Uuid::new_v4();
-		let secret = "abcdefghijklmnopqrstuvwxyz0123456789";
+		let secret = "abcdefghijklmnopqrstuvwxyz_0123456789";
 		let token = format!("oxc_{}_{}", key_id.simple(), secret);
 		sqlx::query(
 			"INSERT INTO gateway_api_keys (id, project_id, name, secret_hash, key_prefix, last_four, scopes)
@@ -152,9 +142,48 @@ mod tests {
 			.execute(&pool)
 			.await
 			.unwrap();
-		let models = OpenAiModel::list_for_user(&pool, &user_id).await.unwrap();
+		let (_, token) = create_key(&pool, user_id, json!(["inference:read"])).await;
+		let context = GatewayCredential::authenticate(&pool, &token).await.unwrap();
+		let models = GatewayModel::list_for_context(&pool, &context).await.unwrap();
 		assert_eq!(models.len(), 1);
-		assert_eq!(models[0].id, "visible");
+		assert_eq!(models[0].id, "gateway provider/visible");
+		assert!(GatewayModel::resolve_accessible(&pool, &context, "gateway provider/visible").await.unwrap().is_some());
+		assert!(GatewayModel::resolve_accessible(&pool, &context, "gateway provider/hidden").await.unwrap().is_none());
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn team_project_only_uses_its_team_policy(pool: PgPool) {
+		let user_id = create_user(&pool).await;
+		let project_team_id: Uuid = sqlx::query_scalar("INSERT INTO teams (name, allow_all_models) VALUES ('Project Team', false) RETURNING id")
+			.fetch_one(&pool)
+			.await
+			.unwrap();
+		let other_team_id: Uuid = sqlx::query_scalar("INSERT INTO teams (name, allow_all_models) VALUES ('Other Team', true) RETURNING id")
+			.fetch_one(&pool)
+			.await
+			.unwrap();
+		for team_id in [project_team_id, other_team_id] {
+			sqlx::query("INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)")
+				.bind(team_id)
+				.bind(user_id)
+				.execute(&pool)
+				.await
+				.unwrap();
+		}
+		let provider_id: Uuid =
+			sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, is_enabled) VALUES ('OPENAI', 'Scoped Provider', 'https://example.com', true) RETURNING id")
+				.fetch_one(&pool)
+				.await
+				.unwrap();
+		sqlx::query("INSERT INTO models (provider_id, model_id, display_name, is_enabled) VALUES ($1, 'scoped', 'Scoped', true)")
+			.bind(provider_id)
+			.execute(&pool)
+			.await
+			.unwrap();
+		let (_, token) = create_team_key(&pool, user_id, Some(project_team_id), json!(["inference:read"])).await;
+		let context = GatewayCredential::authenticate(&pool, &token).await.unwrap();
+		assert!(GatewayModel::list_for_context(&pool, &context).await.unwrap().is_empty());
+		assert!(GatewayModel::resolve_accessible(&pool, &context, "scoped provider/scoped").await.unwrap().is_none());
 	}
 
 	#[test]
@@ -186,19 +215,5 @@ mod tests {
 			assert_eq!(ir.stream, stream);
 			assert_eq!(ir.messages.len(), 1);
 		}
-	}
-
-	#[tokio::test]
-	async fn dropping_bridged_stream_releases_the_upstream_body() {
-		let dropped = Arc::new(AtomicBool::new(false));
-		let guard = DropFlag(dropped.clone());
-		let stream = futures_util::stream::once(async move {
-			let _guard = guard;
-			std::future::pending::<Result<Bytes, Infallible>>().await
-		});
-		let response = axum07::response::Response::new(axum07::body::Body::from_stream(stream));
-		let response = bridge_response(response);
-		drop(response);
-		assert!(dropped.load(Ordering::SeqCst));
 	}
 }

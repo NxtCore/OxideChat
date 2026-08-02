@@ -8,12 +8,14 @@
 
 use omniference::{
 	OmniferenceEngine,
+	middleware::cost::QueuedCostSink,
 	types::{ProviderConfig, ProviderEndpoint},
 };
 use sqlx::PgPool;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 
+use crate::types::JobState;
 use crate::types::providers::Provider;
 use crate::utils::encryption::decrypt_api_key;
 
@@ -21,8 +23,10 @@ use crate::utils::encryption::decrypt_api_key;
 pub static OF_ENGINE: std::sync::OnceLock<Arc<RwLock<OmniferenceEngine>>> = std::sync::OnceLock::new();
 
 /// Initialize the AI engine with providers from the database
-pub async fn init(pool: &PgPool) {
-	let engine = Arc::new(RwLock::new(OmniferenceEngine::new()));
+pub async fn init(state: &Arc<JobState>) {
+	let pool = &state.db;
+	let cost_sink = QueuedCostSink::spawn(Arc::new(crate::utils::omniference_cost::OxideCostSink::new(Arc::clone(state))));
+	let engine = Arc::new(RwLock::new(OmniferenceEngine::with_cost_sink(cost_sink)));
 
 	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
 
@@ -69,13 +73,15 @@ pub async fn catalog() -> Option<Arc<omniference::catalog::Catalog>> {
 pub async fn sync_pricing_overrides(_pool: &PgPool) {}
 
 /// Reload providers from the database
-pub async fn reload_providers(pool: &PgPool) {
+pub async fn reload_providers(state: &Arc<JobState>) {
+	let pool = &state.db;
 	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
 
 	let provider_count = providers.len();
 
 	// Create a fresh engine with new providers
-	let new_engine = OmniferenceEngine::new();
+	let cost_sink = QueuedCostSink::spawn(Arc::new(crate::utils::omniference_cost::OxideCostSink::new(Arc::clone(state))));
+	let new_engine = OmniferenceEngine::with_cost_sink(cost_sink);
 	let engine_arc = get();
 	let mut engine_write = engine_arc.write().await;
 	*engine_write = new_engine;
