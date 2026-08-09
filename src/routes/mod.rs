@@ -12,6 +12,11 @@ use axum::{
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 
+/// Builds the complete API router backed by shared [`Arc<JobState>`] state.
+///
+/// The returned router includes public, administrative, and OpenAI-compatible
+/// gateway routes and owns a shared reference to the supplied application state.
+#[must_use]
 pub fn build_router(state: Arc<JobState>) -> Router {
 	let openai_read_router = Router::new()
 		.route("/models", get(public::openai::list_models))

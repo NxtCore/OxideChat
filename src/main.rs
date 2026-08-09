@@ -92,22 +92,20 @@ async fn main() {
 
 	println!("[SERVER] Listening on http://{}", address);
 
-	let state_for_shutdown = Arc::clone(&app_state);
-
-	let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+	let server = axum::serve(listener, app).with_graceful_shutdown(async {
 		shutdown_signal().await;
-
 		println!("[SERVER] Shutdown signal received");
-		println!("[DATABASE] Closing pool...");
-
-		state_for_shutdown.db.close().await;
-
-		println!("[DATABASE] Pool closed");
 	});
 
 	if let Err(e) = server.await {
 		eprintln!("[SERVER] Error: {}", e);
 	}
+
+	println!("[AI] Draining usage queue...");
+	ai::shutdown().await;
+	println!("[DATABASE] Closing pool...");
+	app_state.db.close().await;
+	println!("[DATABASE] Pool closed");
 }
 
 #[cfg(unix)]
