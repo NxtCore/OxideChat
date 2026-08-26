@@ -62,6 +62,7 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, cookies: C
 		}
 	}
 
+
 	if let Some(default_model_id) = req.default_model_id {
 		if let Err(e) = Config::get().set_default_model_id(&state.db, default_model_id).await {
 			eprintln!("[CONFIG] Failed to update default_model_id: {e}");

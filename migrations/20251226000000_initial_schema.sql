@@ -698,7 +698,7 @@ CREATE INDEX IF NOT EXISTS idx_budget_reset_events_budget ON budget_reset_events
 CREATE INDEX IF NOT EXISTS idx_budget_reset_events_team ON budget_reset_events(team_id, reset_at);
 CREATE INDEX IF NOT EXISTS idx_budget_reset_events_user ON budget_reset_events(user_id, reset_at);
 -- Provider billing
-CREATE TABLE provider_billing_connections (
+CREATE TABLE IF NOT EXISTS provider_billing_connections (
     provider_id UUID PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
     credential TEXT,
     external_scope_id TEXT,
@@ -714,7 +714,7 @@ CREATE TABLE provider_billing_connections (
     )
 );
 
-CREATE TABLE provider_billing_snapshots (
+CREATE TABLE IF NOT EXISTS provider_billing_snapshots (
     provider_id UUID PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
     metric_kind TEXT NOT NULL,
     currency TEXT NOT NULL,
@@ -2541,4 +2541,58 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'workspace.save', 'Save'),
     ('en', 'workspace.set_default', 'Set as default'),
     ('en', 'workspace.update_failed', 'Could not update the workspace.')
+ON CONFLICT (language, key_path) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS gateway_projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    team_id UUID REFERENCES teams(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS gateway_projects_owner_idx ON gateway_projects(owner_id);
+CREATE INDEX IF NOT EXISTS gateway_projects_team_idx ON gateway_projects(team_id) WHERE team_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS gateway_api_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES gateway_projects(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    secret_hash TEXT NOT NULL,
+    key_prefix VARCHAR(48) NOT NULL,
+    last_four VARCHAR(4) NOT NULL,
+    scopes JSONB NOT NULL DEFAULT '["inference:read", "inference:write"]'::jsonb,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    expires_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_api_keys_prefix_idx ON gateway_api_keys(key_prefix);
+CREATE INDEX IF NOT EXISTS gateway_api_keys_project_idx ON gateway_api_keys(project_id);
+
+INSERT INTO i18n_translations (language, key_path, value) VALUES
+    ('en', 'gateway.errors.auth_missing', 'Missing bearer authentication'),
+    ('en', 'gateway.errors.auth_invalid', 'Invalid bearer authentication'),
+    ('en', 'gateway.errors.api_key_incorrect', 'Incorrect API key provided'),
+    ('en', 'gateway.errors.auth_unavailable', 'Authentication service unavailable'),
+    ('en', 'gateway.errors.insufficient_scope', 'API key is not permitted to use this endpoint'),
+    ('en', 'gateway.errors.list_models', 'Failed to list models'),
+    ('en', 'gateway.errors.model_missing', 'Missing required parameter: ''model''.'),
+    ('en', 'gateway.errors.request_conversion', 'Failed to process request'),
+    ('en', 'gateway.errors.budget_exceeded', 'Budget exceeded for this model'),
+    ('en', 'gateway.errors.model_resolve', 'Failed to resolve model'),
+    ('de', 'gateway.errors.auth_missing', 'Bearer-Authentifizierung fehlt'),
+    ('de', 'gateway.errors.auth_invalid', 'Ungültige Bearer-Authentifizierung'),
+    ('de', 'gateway.errors.api_key_incorrect', 'Der angegebene API-Schlüssel ist ungültig'),
+    ('de', 'gateway.errors.auth_unavailable', 'Authentifizierungsdienst ist nicht verfügbar'),
+    ('de', 'gateway.errors.insufficient_scope', 'Der API-Schlüssel ist für diesen Endpunkt nicht berechtigt'),
+    ('de', 'gateway.errors.list_models', 'Modelle konnten nicht geladen werden'),
+    ('de', 'gateway.errors.model_missing', 'Erforderlicher Parameter fehlt: ''model''.'),
+    ('de', 'gateway.errors.request_conversion', 'Anfrage konnte nicht verarbeitet werden'),
+    ('de', 'gateway.errors.budget_exceeded', 'Budget für dieses Modell überschritten'),
+    ('de', 'gateway.errors.model_resolve', 'Modell konnte nicht aufgelöst werden')
 ON CONFLICT (language, key_path) DO NOTHING;

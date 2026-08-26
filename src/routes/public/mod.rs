@@ -6,6 +6,7 @@ pub mod mcp;
 pub mod messages;
 pub mod models;
 pub mod oauth;
+pub mod openai;
 pub mod preferences;
 pub mod providers;
 pub mod streaming;

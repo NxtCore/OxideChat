@@ -2,6 +2,8 @@ pub mod auth;
 pub mod encryption;
 pub mod images;
 pub mod oauth;
+pub mod omniference_cost;
+pub mod openai_gateway;
 pub mod provider_billing;
 pub mod providers;
 pub mod response;

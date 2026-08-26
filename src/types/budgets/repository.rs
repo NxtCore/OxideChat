@@ -376,6 +376,15 @@ impl Budget {
 		.await
 	}
 
+	/// Checks whether paid inference may start within every blocking budget.
+	///
+	/// # Errors
+	/// Returns an error when effective budget status cannot be loaded.
+	pub async fn allows_inference(pool: &PgPool, user_id: &Uuid) -> Result<bool, sqlx::Error> {
+		let status = Self::status_for_user(pool, user_id).await?;
+		Ok(status.budgets.iter().filter(|budget| budget.on_exceed == "block").all(|budget| !budget.exhausted))
+	}
+
 	pub async fn status_for_user(pool: &PgPool, user_id: &Uuid) -> Result<UserBudgetStatus, sqlx::Error> {
 		let effective = Self::budgets_for_user(pool, user_id).await?;
 		let mut window_starts = Vec::with_capacity(effective.len());

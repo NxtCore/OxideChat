@@ -16,6 +16,7 @@
 - Use database transactions for multi-step operations that must be atomic
 - Return `Result<T, E>` instead of unwrapping - never panic in production code
 - Use `async move` blocks only when necessary - prefer borrowing in async functions
+- Do not introduce `Mutex` synchronization; use ownership, channels, atomics, or lock-free primitives instead
 
 ## Architecture
 

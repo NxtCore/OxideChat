@@ -66,4 +66,3 @@ pub async fn get_my_analytics(State(state): State<Arc<JobState>>, cookies: Cooki
 		}
 	}
 }
-

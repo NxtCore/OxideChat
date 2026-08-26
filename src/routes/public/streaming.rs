@@ -43,15 +43,6 @@ fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl
 	Sse::new(futures_util::stream::once(async move { Ok::<_, Infallible>(Event::default().data(data)) })).keep_alive(KeepAlive::default())
 }
 
-async fn acquire_budget_lock(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, sqlx::Error> {
-	let mut tx = pool.begin().await?;
-	sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text, 0))")
-		.bind(user_id)
-		.execute(&mut *tx)
-		.await?;
-	Ok(tx)
-}
-
 /// Interpolate `{{variable}}` placeholders in a system prompt string.
 ///
 /// Supported variables:
@@ -570,30 +561,16 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 		}
 	}
 
-	let mut budget_lock = None;
 	match ModelPricing::is_free(&state.db, &model.id).await {
 		Ok(true) => {}
-		Ok(false) => {
-			let lock = match acquire_budget_lock(&state.db, &user.id).await {
-				Ok(lock) => lock,
-				Err(e) => {
-					eprintln!("[STREAM] Failed to acquire budget lock: {e}");
-					return error_stream("internal_error", "Failed to check budget status").into_response();
-				}
-			};
-			match Budget::status_for_user(&state.db, &user.id).await {
-				Ok(status) if status.blocked_model_ids.contains(&model.id) => {
-					return error_stream("budget_exceeded", "Budget exceeded for this model").into_response();
-				}
-				Ok(_) => {
-					budget_lock = Some(lock);
-				}
-				Err(e) => {
-					eprintln!("[STREAM] Failed to check budget status: {e}");
-					return error_stream("internal_error", "Failed to check budget status").into_response();
-				}
+		Ok(false) => match Budget::allows_inference(&state.db, &user.id).await {
+			Ok(true) => {}
+			Ok(false) => return error_stream("budget_exceeded", "Budget exceeded for this model").into_response(),
+			Err(e) => {
+				eprintln!("[STREAM] Failed to check budget status: {e}");
+				return error_stream("internal_error", "Failed to check budget status").into_response();
 			}
-		}
+		},
 		Err(e) => {
 			eprintln!("[STREAM] Failed to check model pricing: {e}");
 			return error_stream("internal_error", "Failed to check model pricing").into_response();
@@ -807,7 +784,6 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 	let reasoning_effort = req.reasoning_effort.clone();
 	let reasoning_budget_tokens = req.reasoning_budget_tokens;
 	let stream_request_settings = request_settings.clone();
-	let mut budget_lock = budget_lock;
 
 	let sse_stream = async_stream::stream! {
 	eprintln!("[STREAM] Stream generator started");
@@ -1131,13 +1107,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 												cost_total: final_cost_total,
 											}).await;
 											match usage_recorded {
-												Ok(_) => {
-													if let Some(lock) = budget_lock.take() {
-														if let Err(e) = lock.commit().await {
-															eprintln!("[STREAM] Failed to release budget lock for message {}: {e}", msg.id);
-														}
-													}
-												}
+												Ok(_) => {}
 												Err(e) => {
 													eprintln!("[STREAM] Failed to record usage event for message {}: {e}", msg.id);
 													yield Ok::<_, Infallible>(Event::default().data(

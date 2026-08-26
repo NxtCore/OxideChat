@@ -6,13 +6,32 @@ pub mod public;
 use crate::types::JobState;
 use axum::{
 	Router,
+	middleware::{from_fn, from_fn_with_state},
 	routing::{delete, get, patch, post, put},
 };
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 
-pub fn build_router() -> Router<Arc<JobState>> {
+/// Builds the complete API router backed by shared [`Arc<JobState>`] state.
+///
+/// The returned router includes public, administrative, and OpenAI-compatible
+/// gateway routes and owns a shared reference to the supplied application state.
+#[must_use]
+pub fn build_router(state: Arc<JobState>) -> Router {
+	let openai_read_router = Router::new()
+		.route("/models", get(public::openai::list_models))
+		.route_layer(from_fn_with_state(state.clone(), crate::utils::openai_gateway::authenticate_read));
+	let openai_write_router = Router::new()
+		.route("/chat/completions", post(public::openai::chat_completions))
+		.route("/responses", post(public::openai::responses))
+		.route_layer(from_fn_with_state(state.clone(), crate::utils::openai_gateway::authenticate_write));
+	let openai_router = openai_read_router
+		.merge(openai_write_router)
+		.method_not_allowed_fallback(public::openai::method_not_allowed)
+		.fallback(public::openai::not_found)
+		.layer(from_fn(crate::utils::openai_gateway::add_request_id));
 	Router::new()
+		.nest("/openai/v1", openai_router)
 		.route("/api/v1/health", get(public::base::health))
 		.route("/api/v1/base", get(public::base::get_base))
 		// Admin i18n
@@ -159,4 +178,5 @@ pub fn build_router() -> Router<Arc<JobState>> {
 		.route("/api/v1/images/{id}", get(public::images::serve_image))
 		.route("/api/v1/images", post(public::images::upload_image))
 		.layer(CookieManagerLayer::new())
+		.with_state(state)
 }

@@ -1,7 +1,7 @@
 use super::{AnalyticsDayModelRow, AnalyticsRow, UsageEvent, UsageEventRecord};
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -34,6 +34,13 @@ impl UsageEvent {
 	}
 
 	pub async fn record(pool: &PgPool, params: UsageEventRecord<'_>) -> Result<Self, sqlx::Error> {
+		Self::insert(pool, params).await
+	}
+
+	async fn insert<'e, E>(executor: E, params: UsageEventRecord<'_>) -> Result<Self, sqlx::Error>
+	where
+		E: sqlx::Executor<'e, Database = Postgres>,
+	{
 		sqlx::query_as::<_, Self>(
 			r#"
 			INSERT INTO usage_events (
@@ -54,7 +61,7 @@ impl UsageEvent {
 		.bind(params.output_tokens)
 		.bind(params.reasoning_tokens)
 		.bind(params.cost_total)
-		.fetch_one(pool)
+		.fetch_one(executor)
 		.await
 	}
 
