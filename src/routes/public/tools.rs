@@ -1,16 +1,14 @@
-use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext};
 use crate::types::tools::*;
 
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use axum::{extract::State, response::IntoResponse};
+use axum::{extract::{Extension, State}, response::IntoResponse};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
-pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_tools(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

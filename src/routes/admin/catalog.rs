@@ -1,19 +1,17 @@
 //! Admin gateway-catalog routes: the OpenRouter catalog/search view and a runnable model's
 //! provider-options table (endpoints fetched lazily).
 
-use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext};
 use crate::types::catalog::GatewayCatalogModel;
 use crate::types::models::ModelListParams;
 use crate::utils::providers::sync_endpoint_options;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::extract::Query;
 use axum::{
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 const ADMIN_PROVIDERS_VIEW: &str = "admin.providers.view";
@@ -23,8 +21,8 @@ const OPENROUTER_GATEWAY: &str = "openrouter";
 /// GET /api/v1/admin/providers/:id/catalog
 ///
 /// Paginated catalog/search listing for a provider, including `USER_UNAVAILABLE` models.
-pub async fn list_catalog(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Query(params): Query<ModelListParams>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_catalog(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Query(params): Query<ModelListParams>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -46,8 +44,8 @@ pub async fn list_catalog(State(state): State<Arc<JobState>>, cookies: Cookies, 
 ///
 /// Provider options for a runnable model. Endpoints are fetched lazily on first open (when no
 /// options are stored yet and the parent catalog model is available).
-pub async fn list_provider_options(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_provider_options(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -80,8 +78,8 @@ pub async fn list_provider_options(State(state): State<Arc<JobState>>, cookies: 
 /// POST /api/v1/admin/models/:id/provider-options/refresh
 ///
 /// Force a re-fetch of provider endpoints (skips `USER_UNAVAILABLE` models in the syncer).
-pub async fn refresh_provider_options(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn refresh_provider_options(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

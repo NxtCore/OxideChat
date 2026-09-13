@@ -7,6 +7,15 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, oneshot};
 use uuid::Uuid;
 
+/// Per-request context populated by the request middleware.
+///
+/// Additional request-derived values can be added here without changing every
+/// handler's extractor type.
+#[derive(Clone, Debug)]
+pub struct RequestContext {
+	pub user: Option<crate::types::User>,
+}
+
 /// Holds pending client-side tool calls keyed by call ID.
 ///
 /// When the streaming loop needs the user's browser to execute a local MCP

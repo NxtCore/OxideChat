@@ -3,18 +3,17 @@
 //! Server-Sent Events (SSE) endpoint for streaming AI chat completions.
 
 use crate::ai;
-use crate::routes::public::auth::get_current_user;
 use crate::types::models::{Model, ModelPricing};
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
 use crate::types::{
 	Budget, Chat, ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, StreamingAssistantMessageCreate,
 	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolExecutionResponse, ToolFunction, UsageEvent, UsageEventRecord,
 };
-use crate::types::{CostDetails, JobState};
+use crate::types::{CostDetails, JobState, RequestContext};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	response::{
 		IntoResponse,
 		sse::{Event, KeepAlive, Sse},
@@ -33,7 +32,6 @@ use std::{
 	sync::Arc,
 	time::Instant,
 };
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
@@ -523,10 +521,10 @@ async fn get_omni_messages(db: &sqlx::PgPool, messages: Vec<Message>, vision: bo
 	result
 }
 
-pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cookies, Path(chat_id): Path<Uuid>, Json(req): Json<StreamRequest>) -> impl IntoResponse {
+pub async fn stream_completion(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(chat_id): Path<Uuid>, Json(req): Json<StreamRequest>) -> impl IntoResponse {
 	eprintln!("[STREAM] Starting stream completion");
 
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return error_stream("not_authenticated", "Authentication required").into_response();
 	};
 
@@ -1223,13 +1221,13 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, cookies: Cook
 /// that was registered when the `ClientToolCall` SSE event was emitted.
 pub async fn submit_client_tool_result(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path(_chat_id): Path<Uuid>,
 	Json(req): Json<ClientToolResultRequest>,
 ) -> impl IntoResponse {
 	use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 

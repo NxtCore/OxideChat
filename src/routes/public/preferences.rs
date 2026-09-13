@@ -1,14 +1,12 @@
-use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::{PreferencesResponse, Team, UpdatePreferencesRequest, UserPreferences};
+use crate::types::{PreferencesResponse, RequestContext, Team, UpdatePreferencesRequest, UserPreferences};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use axum::{Json, extract::State, response::IntoResponse};
+use axum::{Json, extract::{Extension, State}, response::IntoResponse};
 use std::sync::Arc;
-use tower_cookies::Cookies;
 
 /// GET /api/v1/users/@me/preferences
-pub async fn get_preferences(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_preferences(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -33,8 +31,8 @@ pub async fn get_preferences(State(state): State<Arc<JobState>>, cookies: Cookie
 }
 
 /// PATCH /api/v1/users/@me/preferences
-pub async fn update_preferences(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<UpdatePreferencesRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn update_preferences(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<UpdatePreferencesRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 

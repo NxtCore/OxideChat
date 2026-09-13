@@ -2,19 +2,17 @@
 //!
 //! Public endpoint for listing providers that have at least one enabled model.
 
-use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext};
 use crate::types::models::{Model, ModelViewer};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use axum::{extract::State, response::IntoResponse};
+use axum::{extract::{Extension, State}, response::IntoResponse};
 use std::sync::Arc;
-use tower_cookies::Cookies;
 
 /// GET /api/v1/providers
 ///
 /// List distinct providers that have at least one enabled model.
-pub async fn list_providers(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_providers(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

@@ -1,20 +1,18 @@
-use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::{Chat, CreateWorkspaceRequest, DeleteWorkspaceParams, UpdateWorkspaceRequest, Workspace, WorkspaceDeleteAction, WorkspaceResponse};
+use crate::types::{Chat, CreateWorkspaceRequest, DeleteWorkspaceParams, RequestContext, UpdateWorkspaceRequest, Workspace, WorkspaceDeleteAction, WorkspaceResponse};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, Query, State},
+	extract::{Extension, Path, Query, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 /// GET /api/v1/workspaces
-pub async fn list_workspaces(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn list_workspaces(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -28,8 +26,8 @@ pub async fn list_workspaces(State(state): State<Arc<JobState>>, cookies: Cookie
 }
 
 /// POST /api/v1/workspaces
-pub async fn create_workspace(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateWorkspaceRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn create_workspace(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateWorkspaceRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -50,8 +48,8 @@ pub async fn create_workspace(State(state): State<Arc<JobState>>, cookies: Cooki
 }
 
 /// GET /api/v1/workspaces/:id
-pub async fn get_workspace(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_workspace(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -66,8 +64,8 @@ pub async fn get_workspace(State(state): State<Arc<JobState>>, cookies: Cookies,
 }
 
 /// PATCH /api/v1/workspaces/:id
-pub async fn update_workspace(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateWorkspaceRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn update_workspace(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateWorkspaceRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -97,11 +95,11 @@ pub async fn update_workspace(State(state): State<Arc<JobState>>, cookies: Cooki
 /// DELETE /api/v1/workspaces/:id
 pub async fn delete_workspace(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path(id): Path<Uuid>,
 	Query(params): Query<DeleteWorkspaceParams>,
 ) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 

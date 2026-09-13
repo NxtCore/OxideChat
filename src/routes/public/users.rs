@@ -1,12 +1,10 @@
-use crate::routes::public::auth::get_current_user;
-use crate::types::{AnalyticsQuery, Budget, JobState, UsageEvent};
+use crate::types::{AnalyticsQuery, Budget, JobState, RequestContext, UsageEvent};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
-	extract::{Query, State},
+	extract::{Extension, Query, State},
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 
 /// GET /api/v1/users/@me
 ///
@@ -15,8 +13,8 @@ use tower_cookies::Cookies;
 /// # Errors
 ///
 /// Returns 401 if not authenticated.
-pub async fn get_me(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn get_me(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -30,8 +28,8 @@ pub async fn get_me(State(state): State<Arc<JobState>>, cookies: Cookies) -> imp
 	}
 }
 
-pub async fn get_my_budget(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_my_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -44,8 +42,8 @@ pub async fn get_my_budget(State(state): State<Arc<JobState>>, cookies: Cookies)
 	}
 }
 
-pub async fn get_my_analytics(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<AnalyticsQuery>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_my_analytics(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<AnalyticsQuery>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	let group_by = params.group_by.as_deref().unwrap_or("model");

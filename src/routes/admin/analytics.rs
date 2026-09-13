@@ -1,16 +1,18 @@
-use crate::routes::public::auth::get_current_user;
 use crate::types::consts::ADMIN_ANALYTICS_VIEW;
-use crate::types::{AnalyticsQuery, JobState, UsageEvent};
+use crate::types::{AnalyticsQuery, JobState, RequestContext, UsageEvent};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
-	extract::{Query, State},
+	extract::{Extension, Query, State},
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 
-pub async fn get_analytics(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<AnalyticsQuery>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_analytics(
+	State(state): State<Arc<JobState>>,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
+	Query(params): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_ANALYTICS_VIEW).await {

@@ -1,22 +1,20 @@
 use super::providers::{ADMIN_PROVIDERS_EDIT, ADMIN_PROVIDERS_VIEW};
-use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext, User};
 use crate::types::providers::{Provider, ProviderKind, UpdateProviderBillingRequest};
 use crate::utils::encryption::{encrypt_api_key, is_enabled};
 use crate::utils::provider_billing::refresh_provider_billing;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	http::StatusCode,
 	response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
-pub async fn list_billing(State(state): State<Arc<JobState>>, cookies: Cookies) -> Response {
-	if let Err(response) = authorize(&state, &cookies, ADMIN_PROVIDERS_VIEW).await {
+pub async fn list_billing(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> Response {
+	if let Err(response) = authorize(&state, current_user.as_ref(), ADMIN_PROVIDERS_VIEW).await {
 		return response;
 	}
 	match Provider::list_billing_overviews_for_admin(&state.db).await {
@@ -28,15 +26,15 @@ pub async fn list_billing(State(state): State<Arc<JobState>>, cookies: Cookies) 
 	}
 }
 
-pub async fn get_billing(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> Response {
-	if let Err(response) = authorize(&state, &cookies, ADMIN_PROVIDERS_VIEW).await {
+pub async fn get_billing(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> Response {
+	if let Err(response) = authorize(&state, current_user.as_ref(), ADMIN_PROVIDERS_VIEW).await {
 		return response;
 	}
 	overview_response(&state, &id).await
 }
 
-pub async fn update_billing(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(request): Json<UpdateProviderBillingRequest>) -> Response {
-	if let Err(response) = authorize(&state, &cookies, ADMIN_PROVIDERS_EDIT).await {
+pub async fn update_billing(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(request): Json<UpdateProviderBillingRequest>) -> Response {
+	if let Err(response) = authorize(&state, current_user.as_ref(), ADMIN_PROVIDERS_EDIT).await {
 		return response;
 	}
 	let provider = match Provider::find_for_admin(&state.db, &id).await {
@@ -75,8 +73,8 @@ pub async fn update_billing(State(state): State<Arc<JobState>>, cookies: Cookies
 	}
 }
 
-pub async fn delete_billing(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> Response {
-	if let Err(response) = authorize(&state, &cookies, ADMIN_PROVIDERS_EDIT).await {
+pub async fn delete_billing(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> Response {
+	if let Err(response) = authorize(&state, current_user.as_ref(), ADMIN_PROVIDERS_EDIT).await {
 		return response;
 	}
 	match Provider::delete_billing_connection_for_admin(&state.db, &id).await {
@@ -89,8 +87,8 @@ pub async fn delete_billing(State(state): State<Arc<JobState>>, cookies: Cookies
 	}
 }
 
-pub async fn refresh_billing(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> Response {
-	if let Err(response) = authorize(&state, &cookies, ADMIN_PROVIDERS_EDIT).await {
+pub async fn refresh_billing(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> Response {
+	if let Err(response) = authorize(&state, current_user.as_ref(), ADMIN_PROVIDERS_EDIT).await {
 		return response;
 	}
 	let provider = match Provider::find_for_admin(&state.db, &id).await {
@@ -104,8 +102,8 @@ pub async fn refresh_billing(State(state): State<Arc<JobState>>, cookies: Cookie
 	overview_response(&state, &id).await
 }
 
-async fn authorize(state: &JobState, cookies: &Cookies, permission: &str) -> Result<(), Response> {
-	let Some(user) = get_current_user(&state.db, cookies).await else {
+async fn authorize(state: &JobState, user: Option<&User>, permission: &str) -> Result<(), Response> {
+	let Some(user) = user else {
 		return Err(ErrorBuilder::new(ErrorCode::NotAuthenticated).build());
 	};
 	if !user.has_permission(&state.db, permission).await {

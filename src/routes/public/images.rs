@@ -4,30 +4,26 @@
 //! - GET /api/v1/images/:id - Serve an image by UUID
 //! - POST /api/v1/images - Upload a base64 image (internal use)
 
-use crate::types::JobState;
-use crate::types::{UploadImageRequest, UploadImageResponse};
+use crate::types::{JobState, RequestContext, UploadImageRequest, UploadImageResponse};
 use crate::utils::images::{get_image, image_url, safe_image_mime, store_from_data_uri};
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	http::{HeaderMap, StatusCode, header},
 	response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
-
-use super::auth::get_current_user;
 
 /// Upload a base64 image and return its URL
 ///
 /// POST /api/images
 pub async fn upload_image(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Json(req): Json<UploadImageRequest>,
 ) -> Result<Json<UploadImageResponse>, (StatusCode, String)> {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return Err((StatusCode::UNAUTHORIZED, "Not authenticated".to_string()));
 	};
 

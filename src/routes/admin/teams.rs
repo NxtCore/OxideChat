@@ -1,19 +1,17 @@
-use crate::routes::public::auth::get_current_user;
 use crate::types::consts::{ADMIN_TEAMS_EDIT, ADMIN_TEAMS_VIEW};
-use crate::types::{CreateTeamRequest, JobState, ListTeamsQuery, Team, UpdateTeamBudgetRequest, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest};
+use crate::types::{CreateTeamRequest, JobState, ListTeamsQuery, RequestContext, Team, UpdateTeamBudgetRequest, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, Query, State},
+	extract::{Extension, Path, Query, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
-pub async fn list_teams(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ListTeamsQuery>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn list_teams(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<ListTeamsQuery>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -30,8 +28,8 @@ pub async fn list_teams(State(state): State<Arc<JobState>>, cookies: Cookies, Qu
 	}
 }
 
-pub async fn create_team(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateTeamRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn create_team(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateTeamRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -58,8 +56,8 @@ pub async fn create_team(State(state): State<Arc<JobState>>, cookies: Cookies, J
 	}
 }
 
-pub async fn get_team(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_team(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -85,8 +83,8 @@ pub async fn get_team(State(state): State<Arc<JobState>>, cookies: Cookies, Path
 	}
 }
 
-pub async fn update_team(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateTeamRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn update_team(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateTeamRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -118,8 +116,8 @@ pub async fn update_team(State(state): State<Arc<JobState>>, cookies: Cookies, P
 	}
 }
 
-pub async fn delete_team(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn delete_team(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -148,11 +146,11 @@ pub async fn delete_team(State(state): State<Arc<JobState>>, cookies: Cookies, P
 
 pub async fn set_team_members(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path(id): Path<Uuid>,
 	Json(req): Json<UpdateTeamMembersRequest>,
 ) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -184,8 +182,8 @@ pub async fn set_team_members(
 	}
 }
 
-pub async fn set_team_models(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateTeamModelsRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn set_team_models(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateTeamModelsRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -219,11 +217,11 @@ pub async fn set_team_models(State(state): State<Arc<JobState>>, cookies: Cookie
 
 pub async fn update_team_budget(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path(id): Path<Uuid>,
 	Json(req): Json<UpdateTeamBudgetRequest>,
 ) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 

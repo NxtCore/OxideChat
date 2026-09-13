@@ -1,18 +1,16 @@
-use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
 use crate::types::models::Model;
-use crate::types::{Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, Message, UpdateChatRequest};
+use crate::types::{Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, Message, RequestContext, UpdateChatRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, Query, State},
+	extract::{Extension, Path, Query, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 fn chat_response_with_stats(chat: &Chat, message_count: i64, last_message_at: Option<DateTime<Utc>>) -> ChatResponse {
@@ -37,8 +35,8 @@ async fn build_chat_response(pool: &PgPool, chat: &Chat) -> Result<ChatResponse,
 }
 
 /// GET /api/v1/chats
-pub async fn list_chats(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ChatListParams>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn list_chats(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<ChatListParams>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -74,8 +72,8 @@ pub async fn list_chats(State(state): State<Arc<JobState>>, cookies: Cookies, Qu
 }
 
 /// POST /api/v1/chats
-pub async fn create_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateChatRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn create_chat(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateChatRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -106,8 +104,8 @@ pub async fn create_chat(State(state): State<Arc<JobState>>, cookies: Cookies, J
 }
 
 /// GET /api/v1/chats/:id
-pub async fn get_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_chat(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -190,8 +188,8 @@ pub async fn get_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path
 }
 
 /// PATCH /api/v1/chats/:id
-pub async fn update_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateChatRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn update_chat(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateChatRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -234,8 +232,8 @@ pub async fn update_chat(State(state): State<Arc<JobState>>, cookies: Cookies, P
 }
 
 /// DELETE /api/v1/chats/:id
-pub async fn delete_chat(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn delete_chat(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
