@@ -1,5 +1,4 @@
-use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext};
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
 
@@ -7,18 +6,17 @@ use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuil
 use crate::utils::tools::ToolExecutor;
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
-pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_tools(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -86,8 +84,8 @@ pub async fn list_tools(State(state): State<Arc<JobState>>, cookies: Cookies) ->
 	ResponseBuilder::new(ResponseBody::Json(responses)).build()
 }
 
-pub async fn get_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn get_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -119,8 +117,8 @@ pub async fn get_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path
 	}
 }
 
-pub async fn create_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateToolRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn create_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateToolRequest>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -142,8 +140,8 @@ pub async fn create_tool(State(state): State<Arc<JobState>>, cookies: Cookies, J
 		.build()
 }
 
-pub async fn update_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>, Json(req): Json<UpdateToolRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn update_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>, Json(req): Json<UpdateToolRequest>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -164,8 +162,8 @@ pub async fn update_tool(State(state): State<Arc<JobState>>, cookies: Cookies, P
 	ResponseBuilder::new(ResponseBody::Json(ToolResponse::from_tool_with_functions(tool, functions))).build()
 }
 
-pub async fn delete_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn delete_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -189,8 +187,8 @@ pub async fn delete_tool(State(state): State<Arc<JobState>>, cookies: Cookies, P
 	}
 }
 
-pub async fn get_tool_settings(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn get_tool_settings(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -212,11 +210,11 @@ pub async fn get_tool_settings(State(state): State<Arc<JobState>>, cookies: Cook
 /// PUT /api/v1/admin/tools/:id/settings
 pub async fn set_tool_settings(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path(tool_id): Path<Uuid>,
 	Json(req): Json<SetToolSettingsRequest>,
 ) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -240,10 +238,10 @@ pub async fn set_tool_settings(
 	}
 }
 
-pub async fn upload_wasm(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<UploadWasmRequest>) -> impl IntoResponse {
+pub async fn upload_wasm(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<UploadWasmRequest>) -> impl IntoResponse {
 	use base64::Engine;
 
-	let user = match get_current_user(&state.db, &cookies).await {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -324,8 +322,8 @@ pub async fn upload_wasm(State(state): State<Arc<JobState>>, cookies: Cookies, J
 	}
 }
 
-pub async fn test_tool(State(state): State<Arc<JobState>>, cookies: Cookies, Path(tool_id): Path<Uuid>, Json(req): Json<TestToolRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn test_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>, Json(req): Json<TestToolRequest>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

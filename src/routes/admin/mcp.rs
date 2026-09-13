@@ -6,20 +6,18 @@
 //! because it runs arbitrary commands on the OxideChat host.
 
 use crate::config::Config;
-use crate::routes::public::auth::get_current_user;
 use crate::routes::public::mcp::{normalize_remote_transport, run_discovery, validate_admin_remote_config};
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext};
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 /// Normalize an admin-supplied transport, allowing `stdio` only when enabled.
@@ -41,8 +39,8 @@ fn normalize_admin_transport(transport: &str, connection_config: &serde_json::Va
 }
 
 /// GET /api/v1/admin/mcp-servers
-pub async fn list_servers(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn list_servers(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
@@ -65,8 +63,8 @@ pub async fn list_servers(State(state): State<Arc<JobState>>, cookies: Cookies) 
 }
 
 /// POST /api/v1/admin/mcp-servers
-pub async fn create_server(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateMcpServerRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn create_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateMcpServerRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
@@ -98,8 +96,8 @@ pub async fn create_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 }
 
 /// GET /api/v1/admin/mcp-servers/:id
-pub async fn get_server(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
@@ -120,8 +118,8 @@ pub async fn get_server(State(state): State<Arc<JobState>>, cookies: Cookies, Pa
 }
 
 /// PUT /api/v1/admin/mcp-servers/:id
-pub async fn update_server(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateMcpServerRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn update_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateMcpServerRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
@@ -157,8 +155,8 @@ pub async fn update_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 }
 
 /// DELETE /api/v1/admin/mcp-servers/:id
-pub async fn delete_server(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn delete_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
@@ -179,8 +177,8 @@ pub async fn delete_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 }
 
 /// POST /api/v1/admin/mcp-servers/:id/discover
-pub async fn discover_server(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn discover_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
@@ -200,8 +198,8 @@ pub async fn discover_server(State(state): State<Arc<JobState>>, cookies: Cookie
 }
 
 /// POST /api/v1/admin/mcp-servers/:id/health-check
-pub async fn health_check(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn health_check(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {

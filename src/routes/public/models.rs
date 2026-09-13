@@ -3,19 +3,17 @@
 //! Public endpoint for listing available AI models.
 
 use crate::config::Config;
-use crate::routes::public::auth::get_current_user;
 use crate::types::catalog::{AvailabilityState, GatewayCatalogModel};
 use crate::types::models::{Model, ModelListParams, ModelViewer};
 use crate::types::models_configs::ModelConfig;
-use crate::types::{Budget, JobState};
+use crate::types::{Budget, JobState, RequestContext};
 use crate::utils::providers::sync_endpoint_options;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::Json;
 use axum::extract::{Path, Query};
-use axum::{extract::State, response::IntoResponse};
+use axum::{extract::{Extension, State}, response::IntoResponse};
 use serde::Deserialize;
 use std::{collections::HashSet, sync::Arc};
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -26,8 +24,8 @@ pub struct SetFavoriteRequest {
 /// GET /api/v1/models
 ///
 /// List all available AI models from the database.
-pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ModelListParams>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_models(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<ModelListParams>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -72,8 +70,8 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 /// the instance-wide `enable_provider_selector` setting. Endpoints are fetched lazily on first
 /// open (when nothing is stored yet and the parent catalog model is available), mirroring the
 /// admin endpoint but available to any authenticated user.
-pub async fn get_provider_options(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_provider_options(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -114,8 +112,8 @@ pub async fn get_provider_options(State(state): State<Arc<JobState>>, cookies: C
 /// POST /api/v1/models/:id/favorite
 ///
 /// Toggle or set the favorite status of a model for the current user.
-pub async fn set_model_favorite(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(body): Json<SetFavoriteRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn set_model_favorite(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(body): Json<SetFavoriteRequest>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

@@ -3,8 +3,7 @@
 //! CRUD operations for system-wide AI providers.
 
 use crate::ai::parse_extra_headers;
-use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext};
 use crate::types::models::Model;
 use crate::types::providers::{
 	CreateProviderRequest, Provider, ProviderResponse, SyncProviderResponse, TestProviderRequest, TestProviderResponse, UpdateProviderRequest,
@@ -15,7 +14,7 @@ use crate::utils::providers::sync_provider_models;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
@@ -24,15 +23,14 @@ use omniference::{
 	types::{ProviderConfig, ProviderEndpoint},
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 pub const ADMIN_PROVIDERS_VIEW: &str = "admin.providers.view";
 pub const ADMIN_PROVIDERS_EDIT: &str = "admin.providers.edit";
 
 /// List all system providers
-pub async fn list_providers(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_providers(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -56,8 +54,8 @@ pub async fn list_providers(State(state): State<Arc<JobState>>, cookies: Cookies
 }
 
 /// Get a single provider by ID
-pub async fn get_provider(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn get_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -82,8 +80,8 @@ pub async fn get_provider(State(state): State<Arc<JobState>>, cookies: Cookies, 
 }
 
 /// Create a new system provider
-pub async fn create_provider(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateProviderRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn create_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateProviderRequest>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -123,8 +121,8 @@ pub async fn create_provider(State(state): State<Arc<JobState>>, cookies: Cookie
 }
 
 /// Update an existing provider
-pub async fn update_provider(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateProviderRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn update_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateProviderRequest>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -170,8 +168,8 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, cookies: Cookie
 }
 
 /// Delete a provider
-pub async fn delete_provider(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn delete_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -193,8 +191,8 @@ pub async fn delete_provider(State(state): State<Arc<JobState>>, cookies: Cookie
 }
 
 /// Test a provider connection (can use either an existing provider ID or inline config)
-pub async fn test_provider(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn test_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -259,8 +257,8 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, cookies: Cookies,
 }
 
 /// Test a provider with inline configuration (doesn't require existing provider)
-pub async fn test_provider_inline(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<TestProviderRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn test_provider_inline(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<TestProviderRequest>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -304,8 +302,8 @@ pub async fn test_provider_inline(State(state): State<Arc<JobState>>, cookies: C
 }
 
 /// Sync models from a provider
-pub async fn sync_provider(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn sync_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -341,8 +339,8 @@ pub async fn sync_provider(State(state): State<Arc<JobState>>, cookies: Cookies,
 }
 
 /// List models for a provider
-pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_models(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

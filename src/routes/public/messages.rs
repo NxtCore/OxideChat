@@ -1,5 +1,4 @@
-use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext};
 use crate::types::models::Model;
 use crate::types::{
 	BranchFromMessageRequest, BranchResponse, Chat, ChatMessageResponse, ChatResponse, EditMessageRequest, Message, MessageListParams, ReasoningDetails,
@@ -8,22 +7,21 @@ use crate::types::{
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, Query, State},
+	extract::{Extension, Path, Query, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 /// GET /api/v1/chats/:chat_id/messages
 pub async fn list_messages(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path(chat_id): Path<Uuid>,
 	Query(params): Query<MessageListParams>,
 ) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -90,8 +88,8 @@ pub async fn list_messages(
 }
 
 /// POST /api/v1/chats/:chat_id/messages
-pub async fn send_message(State(state): State<Arc<JobState>>, cookies: Cookies, Path(chat_id): Path<Uuid>, Json(req): Json<SendMessageRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn send_message(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(chat_id): Path<Uuid>, Json(req): Json<SendMessageRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -127,11 +125,11 @@ pub async fn send_message(State(state): State<Arc<JobState>>, cookies: Cookies, 
 /// POST /api/v1/chats/:chat_id/messages/:message_id/edit
 pub async fn edit_message(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
 	Json(req): Json<EditMessageRequest>,
 ) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -179,11 +177,11 @@ pub async fn edit_message(
 /// POST /api/v1/chats/:chat_id/messages/:message_id/switch-fork
 pub async fn switch_fork(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
 	Json(req): Json<SwitchForkRequest>,
 ) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -216,8 +214,8 @@ pub async fn switch_fork(
 }
 
 /// GET /api/v1/chats/:chat_id/messages/:message_id/siblings
-pub async fn get_siblings(State(state): State<Arc<JobState>>, cookies: Cookies, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_siblings(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -260,8 +258,8 @@ pub async fn get_siblings(State(state): State<Arc<JobState>>, cookies: Cookies, 
 }
 
 /// DELETE /api/v1/chats/:chat_id/messages/:message_id/fork
-pub async fn delete_fork(State(state): State<Arc<JobState>>, cookies: Cookies, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn delete_fork(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -287,11 +285,11 @@ pub async fn delete_fork(State(state): State<Arc<JobState>>, cookies: Cookies, P
 /// POST /api/v1/chats/:chat_id/messages/:message_id/branch
 pub async fn branch_from_message(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
 	Json(req): Json<BranchFromMessageRequest>,
 ) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 

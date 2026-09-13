@@ -4,18 +4,16 @@
 
 use crate::i18n::I18n;
 use crate::logging::{AuditLog, EntityType, LogEvent};
-use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::{Translation, TranslationsResponse, UpsertTranslationRequest};
+use crate::types::{RequestContext, Translation, TranslationsResponse, UpsertTranslationRequest};
 
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 
 pub const ADMIN_I18N_VIEW: &str = "admin.i18n.view";
 pub const ADMIN_I18N_EDIT: &str = "admin.i18n.edit";
@@ -23,8 +21,8 @@ pub const ADMIN_I18N_EDIT: &str = "admin.i18n.edit";
 /// GET /api/v1/admin/i18n
 ///
 /// List all translations.
-pub async fn list_translations(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_translations(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -41,8 +39,8 @@ pub async fn list_translations(State(state): State<Arc<JobState>>, cookies: Cook
 /// PUT /api/v1/admin/i18n/translations
 ///
 /// Create or update a translation. Reloads translations after change.
-pub async fn upsert_translation(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<UpsertTranslationRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn upsert_translation(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(payload): Json<UpsertTranslationRequest>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -69,8 +67,8 @@ pub async fn upsert_translation(State(state): State<Arc<JobState>>, cookies: Coo
 /// DELETE /api/v1/admin/i18n/translations/:id
 ///
 /// Delete a translation by ID. Reloads translations after change.
-pub async fn delete_translation(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<sqlx::types::Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn delete_translation(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<sqlx::types::Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

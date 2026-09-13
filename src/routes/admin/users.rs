@@ -3,27 +3,25 @@
 //! CRUD operations for user accounts, role assignment, and password resets.
 
 use crate::logging::{AuditLog, EntityType, LogEvent};
-use crate::routes::public::auth::get_current_user;
 use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
-use crate::types::{AdminResetPasswordRequest, CreateAdminUserRequest, JobState, ListUsersQuery, SetUserRolesRequest, SetUserTeamsRequest, UpdateUserRequest, User};
+use crate::types::{AdminResetPasswordRequest, CreateAdminUserRequest, JobState, ListUsersQuery, RequestContext, SetUserRolesRequest, SetUserTeamsRequest, UpdateUserRequest, User};
 use crate::utils::auth::{hash_password, validate_email, validate_password, validate_username};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, Query, State},
+	extract::{Extension, Path, Query, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 const DEFAULT_PER_PAGE: i64 = 20;
 const MAX_PER_PAGE: i64 = 100;
 
 /// List users with optional pagination, search, and role filter.
-pub async fn list_users(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ListUsersQuery>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_users(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<ListUsersQuery>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(u) => u,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -47,8 +45,8 @@ pub async fn list_users(State(state): State<Arc<JobState>>, cookies: Cookies, Qu
 }
 
 /// Get a single user by ID.
-pub async fn get_user(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn get_user(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(u) => u,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -74,8 +72,8 @@ pub async fn get_user(State(state): State<Arc<JobState>>, cookies: Cookies, Path
 }
 
 /// Create a new user.
-pub async fn create_user(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateAdminUserRequest>) -> impl IntoResponse {
-	let actor = match get_current_user(&state.db, &cookies).await {
+pub async fn create_user(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateAdminUserRequest>) -> impl IntoResponse {
+	let actor = match current_user {
 		Some(u) => u,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -170,8 +168,8 @@ pub async fn create_user(State(state): State<Arc<JobState>>, cookies: Cookies, J
 }
 
 /// Update a user's email or username.
-pub async fn update_user(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateUserRequest>) -> impl IntoResponse {
-	let actor = match get_current_user(&state.db, &cookies).await {
+pub async fn update_user(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateUserRequest>) -> impl IntoResponse {
+	let actor = match current_user {
 		Some(u) => u,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -238,8 +236,8 @@ pub async fn update_user(State(state): State<Arc<JobState>>, cookies: Cookies, P
 }
 
 /// Delete a user. Admins cannot delete their own account.
-pub async fn delete_user(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let actor = match get_current_user(&state.db, &cookies).await {
+pub async fn delete_user(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let actor = match current_user {
 		Some(u) => u,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -274,8 +272,8 @@ pub async fn delete_user(State(state): State<Arc<JobState>>, cookies: Cookies, P
 }
 
 /// Replace the full role set for a user. Admins cannot change their own roles.
-pub async fn set_user_roles(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<SetUserRolesRequest>) -> impl IntoResponse {
-	let actor = match get_current_user(&state.db, &cookies).await {
+pub async fn set_user_roles(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<SetUserRolesRequest>) -> impl IntoResponse {
+	let actor = match current_user {
 		Some(u) => u,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -324,8 +322,8 @@ pub async fn set_user_roles(State(state): State<Arc<JobState>>, cookies: Cookies
 	}
 }
 
-pub async fn set_user_teams(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<SetUserTeamsRequest>) -> impl IntoResponse {
-	let actor = match get_current_user(&state.db, &cookies).await {
+pub async fn set_user_teams(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<SetUserTeamsRequest>) -> impl IntoResponse {
+	let actor = match current_user {
 		Some(u) => u,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -360,8 +358,8 @@ pub async fn set_user_teams(State(state): State<Arc<JobState>>, cookies: Cookies
 }
 
 /// Reset a user's password.
-pub async fn reset_password(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<AdminResetPasswordRequest>) -> impl IntoResponse {
-	let actor = match get_current_user(&state.db, &cookies).await {
+pub async fn reset_password(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<AdminResetPasswordRequest>) -> impl IntoResponse {
+	let actor = match current_user {
 		Some(u) => u,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

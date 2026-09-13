@@ -5,6 +5,7 @@ mod config;
 mod i18n;
 mod jobs;
 mod logging;
+mod middleware;
 mod routes;
 mod tests;
 mod types;

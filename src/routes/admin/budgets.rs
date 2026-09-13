@@ -1,19 +1,17 @@
-use crate::routes::public::auth::get_current_user;
 use crate::types::consts::{ADMIN_BUDGETS_EDIT, ADMIN_BUDGETS_VIEW};
-use crate::types::{Budget, BudgetAssignmentRequest, BudgetResetRequest, CreateBudgetRequest, JobState, ListBudgetsQuery, UpdateBudgetRequest};
+use crate::types::{Budget, BudgetAssignmentRequest, BudgetResetRequest, CreateBudgetRequest, JobState, ListBudgetsQuery, RequestContext, UpdateBudgetRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Path, Query, State},
+	extract::{Extension, Path, Query, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
-pub async fn list_budgets(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ListBudgetsQuery>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn list_budgets(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<ListBudgetsQuery>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
@@ -28,8 +26,8 @@ pub async fn list_budgets(State(state): State<Arc<JobState>>, cookies: Cookies, 
 	}
 }
 
-pub async fn create_budget(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateBudgetRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn create_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateBudgetRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
@@ -55,8 +53,8 @@ pub async fn create_budget(State(state): State<Arc<JobState>>, cookies: Cookies,
 	}
 }
 
-pub async fn update_budget(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateBudgetRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn update_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateBudgetRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
@@ -85,8 +83,8 @@ pub async fn update_budget(State(state): State<Arc<JobState>>, cookies: Cookies,
 	}
 }
 
-pub async fn delete_budget(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn delete_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
@@ -109,8 +107,8 @@ pub async fn delete_budget(State(state): State<Arc<JobState>>, cookies: Cookies,
 	}
 }
 
-pub async fn assign_budget(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<BudgetAssignmentRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn assign_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<BudgetAssignmentRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
@@ -136,8 +134,8 @@ pub async fn assign_budget(State(state): State<Arc<JobState>>, cookies: Cookies,
 	}
 }
 
-pub async fn get_budget_assignments(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_budget_assignments(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
@@ -152,8 +150,8 @@ pub async fn get_budget_assignments(State(state): State<Arc<JobState>>, cookies:
 	}
 }
 
-pub async fn delete_assignment(State(state): State<Arc<JobState>>, cookies: Cookies, Path((budget_id, assignment_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn delete_assignment(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path((budget_id, assignment_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
@@ -169,8 +167,8 @@ pub async fn delete_assignment(State(state): State<Arc<JobState>>, cookies: Cook
 }
 
 
-pub async fn user_overview(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn user_overview(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
@@ -185,8 +183,8 @@ pub async fn user_overview(State(state): State<Arc<JobState>>, cookies: Cookies)
 	}
 }
 
-pub async fn team_overview(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn team_overview(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
@@ -201,8 +199,8 @@ pub async fn team_overview(State(state): State<Arc<JobState>>, cookies: Cookies)
 	}
 }
 
-pub async fn reset_history(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn reset_history(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
@@ -217,8 +215,8 @@ pub async fn reset_history(State(state): State<Arc<JobState>>, cookies: Cookies)
 	}
 }
 
-pub async fn reset_budget(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<BudgetResetRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn reset_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<BudgetResetRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {

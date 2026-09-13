@@ -4,19 +4,17 @@
 //! (Streamable HTTP) MCP servers. Server-side `stdio` transports are rejected
 //! for user-owned servers — those are reserved for admins.
 
-use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext};
 use crate::types::tools::*;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use crate::utils::tools::mcp::{McpToolInfo, McpUrlPolicy, is_remote_mcp_url_syntax_allowed, validate_remote_mcp_url};
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	http::StatusCode,
 	response::IntoResponse,
 };
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 /// Normalize a user-supplied transport string, rejecting anything that is not the
@@ -44,8 +42,8 @@ pub(crate) async fn validate_remote_config(connection_config: &serde_json::Value
 }
 
 /// GET /api/v1/mcp-servers
-pub async fn list_servers(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn list_servers(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -65,8 +63,8 @@ pub async fn list_servers(State(state): State<Arc<JobState>>, cookies: Cookies) 
 }
 
 /// POST /api/v1/mcp-servers
-pub async fn create_server(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<CreateMcpServerRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn create_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateMcpServerRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -94,8 +92,8 @@ pub async fn create_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 }
 
 /// GET /api/v1/mcp-servers/:id
-pub async fn get_server(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn get_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -113,8 +111,8 @@ pub async fn get_server(State(state): State<Arc<JobState>>, cookies: Cookies, Pa
 }
 
 /// PUT /api/v1/mcp-servers/:id
-pub async fn update_server(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<UpdateMcpServerRequest>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn update_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateMcpServerRequest>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -157,8 +155,8 @@ pub async fn update_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 }
 
 /// DELETE /api/v1/mcp-servers/:id
-pub async fn delete_server(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn delete_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -183,11 +181,11 @@ pub async fn delete_server(State(state): State<Arc<JobState>>, cookies: Cookies,
 /// machine (e.g. localhost).
 pub async fn sync_tools_from_client(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path(id): Path<Uuid>,
 	Json(req): Json<SyncMcpToolsRequest>,
 ) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
@@ -237,8 +235,8 @@ pub async fn sync_tools_from_client(
 ///
 /// Connect to the server, list its tools, and (re)generate the user's `Tool`
 /// records for it so they become available in the chat tool selector.
-pub async fn discover_server(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = get_current_user(&state.db, &cookies).await else {
+pub async fn discover_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = current_user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 

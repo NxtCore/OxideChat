@@ -1,5 +1,4 @@
-use crate::routes::public::auth::get_current_user;
-use crate::types::JobState;
+use crate::types::{JobState, RequestContext};
 use crate::types::models::{AdminModelPatchBody, Model, ModelListParams, ModelPricing, ModelPricingOverrideRequest};
 use crate::types::models_configs::{ModelConfig, ModelConfigPatchField};
 use crate::utils::images::{image_url, is_data_uri, store_from_data_uri};
@@ -7,12 +6,11 @@ use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuil
 use axum::extract::Query;
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Extension, Path, State},
 	response::IntoResponse,
 };
 use serde_json::Value;
 use std::sync::Arc;
-use tower_cookies::Cookies;
 use uuid::Uuid;
 
 const ADMIN_MODELS_VIEW: &str = "admin.providers.view";
@@ -57,8 +55,8 @@ fn build_extra_settings(base: Option<&Value>, reasoning_effort: Option<Option<&s
 }
 
 /// GET /api/v1/admin/models
-pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ModelListParams>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_models(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<ModelListParams>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -78,8 +76,8 @@ pub async fn list_models(State(state): State<Arc<JobState>>, cookies: Cookies, Q
 	ResponseBuilder::new(ResponseBody::Json(models)).build()
 }
 
-pub async fn list_image_models(State(state): State<Arc<JobState>>, cookies: Cookies, Query(params): Query<ModelListParams>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_image_models(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<ModelListParams>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -104,8 +102,8 @@ pub async fn list_image_models(State(state): State<Arc<JobState>>, cookies: Cook
 }
 
 /// GET /api/v1/admin/models/:id
-pub async fn get_model(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn get_model(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -126,8 +124,8 @@ pub async fn get_model(State(state): State<Arc<JobState>>, cookies: Cookies, Pat
 	ResponseBuilder::new(ResponseBody::Json(row)).build()
 }
 
-pub async fn list_image_model_providers(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn list_image_model_providers(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -143,8 +141,8 @@ pub async fn list_image_model_providers(State(state): State<Arc<JobState>>, cook
 	}
 }
 
-pub async fn get_model_pricing(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn get_model_pricing(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -163,11 +161,11 @@ pub async fn get_model_pricing(State(state): State<Arc<JobState>>, cookies: Cook
 
 pub async fn put_model_pricing(
 	State(state): State<Arc<JobState>>,
-	cookies: Cookies,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path(id): Path<Uuid>,
 	Json(req): Json<ModelPricingOverrideRequest>,
 ) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -198,8 +196,8 @@ pub async fn put_model_pricing(
 	}
 }
 
-pub async fn delete_model_pricing(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn delete_model_pricing(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};
@@ -224,8 +222,8 @@ pub async fn delete_model_pricing(State(state): State<Arc<JobState>>, cookies: C
 }
 
 /// PATCH /api/v1/admin/models/:id
-pub async fn patch_model(State(state): State<Arc<JobState>>, cookies: Cookies, Path(id): Path<Uuid>, Json(req): Json<AdminModelPatchBody>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn patch_model(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<AdminModelPatchBody>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

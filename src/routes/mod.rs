@@ -177,6 +177,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		// Images CDN (public, no auth)
 		.route("/api/v1/images/{id}", get(public::images::serve_image))
 		.route("/api/v1/images", post(public::images::upload_image))
+		.layer(from_fn_with_state(state.clone(), crate::middleware::load_current_user))
 		.layer(CookieManagerLayer::new())
 		.with_state(state)
 }

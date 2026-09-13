@@ -3,14 +3,12 @@
 //! Admin endpoints for managing instance-wide settings like default theme.
 
 use crate::config::Config;
-use crate::routes::public::auth::get_current_user;
 use crate::types::JobState;
-use crate::types::{GlobalConfigResponse, UpdateGlobalConfigRequest};
+use crate::types::{GlobalConfigResponse, RequestContext, UpdateGlobalConfigRequest};
 
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use axum::{Json, extract::State, response::IntoResponse};
+use axum::{Json, extract::{Extension, State}, response::IntoResponse};
 use std::sync::Arc;
-use tower_cookies::Cookies;
 
 pub const ADMIN_CONFIG_EDIT: &str = "admin.config.edit";
 
@@ -31,8 +29,8 @@ pub async fn get_global_config() -> impl IntoResponse {
 /// PATCH /api/v1/admin/config
 ///
 /// Update global configuration (admin only).
-pub async fn update_global_config(State(state): State<Arc<JobState>>, cookies: Cookies, Json(req): Json<UpdateGlobalConfigRequest>) -> impl IntoResponse {
-	let user = match get_current_user(&state.db, &cookies).await {
+pub async fn update_global_config(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<UpdateGlobalConfigRequest>) -> impl IntoResponse {
+	let user = match current_user {
 		Some(user) => user,
 		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
 	};

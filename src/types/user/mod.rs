@@ -11,7 +11,7 @@ use crate::types::BaseType;
 use sqlx::FromRow;
 use uuid::Uuid;
 
-#[derive(Debug, FromRow)]
+#[derive(Clone, Debug, FromRow)]
 pub struct User {
 	pub id: Uuid,
 	pub email: String,
