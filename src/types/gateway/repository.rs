@@ -1,4 +1,5 @@
 use super::{GatewayAuthContext, GatewayAuthError, GatewayCredential, GatewayInference, GatewayModel, GatewayModelAccessError};
+use super::{GatewayRatePolicy, GatewayRateRule};
 use crate::types::Budget;
 use crate::types::models::ModelPricing;
 use crate::utils::auth::{hash_password, verify_password};
@@ -24,7 +25,10 @@ impl GatewayCredential {
 	pub async fn authenticate(pool: &PgPool, token: &str) -> Result<GatewayAuthContext, GatewayAuthError> {
 		let parsed = parse_token(token);
 		let credential = match parsed.as_ref() {
-			Some(parsed) => Self::find(pool, &parsed.key_id).await.map_err(|_| GatewayAuthError::Unavailable)?,
+			Some(parsed) => Self::find(pool, &parsed.key_id).await.map_err(|error| {
+				tracing::error!(%error, key_id = %parsed.key_id, "gateway credential or policy could not be loaded");
+				GatewayAuthError::Unavailable
+			})?,
 			None => None,
 		};
 		let hash = credential.as_ref().map_or(DUMMY_SECRET_HASH.as_str(), |value| value.secret_hash.as_str());
@@ -53,6 +57,16 @@ impl GatewayCredential {
 		{
 			tracing::warn!(%error, key_id = %credential.key_id, "failed to update gateway API key usage timestamp");
 		}
+		let policy = GatewayRatePolicy {
+			project_rules: credential.project_rules.0,
+			key_rules: credential.key_rules.0,
+			project_concurrency: concurrency_limit(credential.project_concurrency)?,
+			key_concurrency: concurrency_limit(credential.key_concurrency)?,
+		};
+		policy.validate().map_err(|error| {
+			tracing::error!(%error, project_id = %credential.project_id, key_id = %credential.key_id, "invalid gateway rate policy");
+			GatewayAuthError::Unavailable
+		})?;
 		Ok(GatewayAuthContext {
 			key_id: credential.key_id,
 			project_id: credential.project_id,
@@ -60,6 +74,7 @@ impl GatewayCredential {
 			team_id: credential.team_id,
 			project_name: credential.project_name,
 			scopes: credential.scopes.0,
+			policy,
 		})
 	}
 
@@ -78,7 +93,13 @@ impl GatewayCredential {
 				k.is_enabled AS "key_enabled!",
 				p.is_enabled AS "project_enabled!",
 				k.expires_at,
-				k.revoked_at
+				k.revoked_at,
+				p.max_concurrent_requests AS project_concurrency,
+				k.max_concurrent_requests AS key_concurrency,
+				COALESCE((SELECT jsonb_agg(jsonb_build_object('id', r.id, 'route_class', r.route_class, 'metric', r.metric, 'capacity', r.capacity, 'refill_period_seconds', r.refill_period_seconds) ORDER BY r.id)
+				 FROM gateway_rate_limit_rules r WHERE r.project_id = p.id AND r.is_enabled), '[]'::jsonb) AS "project_rules!: Json<Vec<GatewayRateRule>>",
+				COALESCE((SELECT jsonb_agg(jsonb_build_object('id', r.id, 'route_class', r.route_class, 'metric', r.metric, 'capacity', r.capacity, 'refill_period_seconds', r.refill_period_seconds) ORDER BY r.id)
+				 FROM gateway_rate_limit_rules r WHERE r.api_key_id = k.id AND r.is_enabled), '[]'::jsonb) AS "key_rules!: Json<Vec<GatewayRateRule>>"
 			FROM gateway_api_keys k
 			JOIN gateway_projects p ON p.id = k.project_id
 			WHERE k.id = $1
@@ -194,8 +215,39 @@ impl GatewayModel {
 		if !ModelPricing::is_free(pool, &model_id).await? && !Budget::allows_inference(pool, &context.user_id).await? {
 			return Err(GatewayModelAccessError::BudgetExceeded);
 		}
-		Ok(GatewayInference { model_id })
+		if !context.policy.has_token_rules() {
+			return Ok(GatewayInference {
+				model_id,
+				max_output_tokens: None,
+				context_length: None,
+			});
+		}
+		let limits = sqlx::query_as!(
+			super::rows::GatewayModelLimits,
+			"SELECT COALESCE(c.max_output_tokens, m.max_tokens) AS max_tokens,
+			 COALESCE(c.context_length, m.context_length) AS context_length
+			 FROM models m LEFT JOIN model_configs c ON c.model_id = m.id AND c.owner_id IS NULL WHERE m.id = $1",
+			model_id
+		)
+		.fetch_one(pool)
+		.await?;
+		Ok(GatewayInference {
+			model_id,
+			max_output_tokens: limits.max_tokens.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
+			context_length: limits.context_length.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
+		})
 	}
+}
+
+fn concurrency_limit(value: Option<i32>) -> Result<Option<u32>, GatewayAuthError> {
+	value
+		.map(|value| {
+			u32::try_from(value).ok().filter(|value| *value > 0).ok_or_else(|| {
+				tracing::error!("invalid stored gateway concurrency limit");
+				GatewayAuthError::Unavailable
+			})
+		})
+		.transpose()
 }
 
 struct ParsedToken<'a> {

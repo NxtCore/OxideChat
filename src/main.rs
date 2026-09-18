@@ -71,6 +71,7 @@ async fn main() {
 	println!("[I18N] Translations loaded");
 
 	let app_state = Arc::new(JobState {
+		gateway_limiter: crate::types::gateway::limiter::GatewayLimiter::spawn(),
 		db: pool,
 		mcp_pool: crate::utils::tools::McpConnectionPool::new(),
 		client_tool_pending: crate::types::state::ClientToolPending::new(),

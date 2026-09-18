@@ -1,4 +1,10 @@
+mod body;
+pub mod limiter;
+mod policy;
 mod repository;
+mod rows;
+
+pub use policy::*;
 
 use chrono::{DateTime, Utc};
 use omniference::types::providers::OpenAIModel;
@@ -47,6 +53,10 @@ pub struct GatewayCredential {
 	pub project_enabled: bool,
 	pub expires_at: Option<DateTime<Utc>>,
 	pub revoked_at: Option<DateTime<Utc>>,
+	pub project_rules: Json<Vec<GatewayRateRule>>,
+	pub key_rules: Json<Vec<GatewayRateRule>>,
+	pub project_concurrency: Option<i32>,
+	pub key_concurrency: Option<i32>,
 }
 
 /// Authenticated identity and permissions associated with a gateway request.
@@ -58,6 +68,7 @@ pub struct GatewayAuthContext {
 	pub team_id: Option<Uuid>,
 	pub project_name: String,
 	pub scopes: Vec<String>,
+	pub policy: GatewayRatePolicy,
 }
 
 impl GatewayAuthContext {
@@ -72,6 +83,8 @@ impl GatewayAuthContext {
 #[derive(Debug)]
 pub struct GatewayInference {
 	pub model_id: Uuid,
+	pub max_output_tokens: Option<u32>,
+	pub context_length: Option<u32>,
 }
 
 /// Failures produced while authenticating a gateway credential.

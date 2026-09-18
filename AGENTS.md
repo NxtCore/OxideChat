@@ -20,6 +20,11 @@
 
 ## Architecture
 
+- `src/types/gateway/limiter.rs` owns gateway admission through one Tokio actor; bounded admission and unbounded release/reconciliation channels replace shared locking.
+- `src/types/gateway/body.rs` keeps concurrency reservations alive for the lifetime of HTTP bodies.
+- `src/utils/gateway_limits.rs` attaches Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter.
+- Gateway policy and the future Redis contract are documented in `docs/gateway-rate-limits.md`; gateway lifecycle tests live in `src/tests/gateway.rs`.
+
 - `src/main.rs` - Application entry point, sets up Axum server and database pool
 - `src/i18n.rs` - Global i18n translation service (singleton pattern)
 - `src/jobs.rs` - Background job scheduler using tokio tasks

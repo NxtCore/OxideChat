@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod encryption;
+pub mod gateway_limits;
 pub mod images;
 pub mod oauth;
 pub mod omniference_cost;

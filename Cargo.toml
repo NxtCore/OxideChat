@@ -42,6 +42,7 @@ aes-gcm = "0.10"
 rand = "0.8"
 rust_decimal = { version = "1.39.0", features = ["db-postgres", "serde"] }
 futures-util = "0.3.31"
+http-body = "1"
 async-stream = "0.3.6"
 tokio-util = "0.7.17"
 extism = "1"
@@ -82,3 +83,7 @@ multiple_crate_versions = "allow"
 [lints.rust]
 unsafe_code = "warn"
 missing_docs = "allow"
+
+[dev-dependencies]
+tokio = { version = "1.48", features = ["test-util"] }
+tower = { version = "0.5", features = ["util"] }
