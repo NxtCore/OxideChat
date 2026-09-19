@@ -2,14 +2,75 @@
 mod limits {
 	use crate::types::gateway::limiter::{GatewayLimitBackend, GatewayLimiter};
 	use crate::types::*;
-	use axum::body::{Body, Bytes, HttpBody, to_bytes};
-	use axum::response::Response;
+	use ::axum::body::{Body, Bytes, to_bytes};
+	use ::axum::response::Response;
 	use futures_util::StreamExt;
+	use http_body::Body as _;
 	use std::pin::Pin;
 	use std::time::Duration;
 	use uuid::Uuid;
 
 	type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+	#[tokio::test(start_paused = true)]
+	async fn terminal_usage_reconciles_every_finalization_once() -> TestResult {
+		use omniference::catalog::UsageBreakdown;
+		use omniference::middleware::cost::{CostFinalization, CostSink};
+		use std::collections::BTreeMap;
+		use std::sync::Arc;
+
+		let state = Arc::new(JobState {
+			db: sqlx::postgres::PgPoolOptions::new().connect_lazy_with(sqlx::postgres::PgConnectOptions::new()),
+			gateway_limiter: GatewayLimiter::spawn(),
+			mcp_pool: crate::utils::tools::McpConnectionPool::new(),
+			client_tool_pending: crate::types::state::ClientToolPending::new(),
+		});
+		let queue = crate::utils::omniference_cost::OxideCostQueue::spawn(Arc::clone(&state));
+		for finalization in [
+			CostFinalization::ProviderReported,
+			CostFinalization::Done,
+			CostFinalization::Error,
+			CostFinalization::EndOfStream,
+			CostFinalization::Dropped,
+		] {
+			let mut request = request();
+			request.project_id = Uuid::new_v4();
+			request.tokens = 90;
+			request.policy.project_rules.push(rule(10, GatewayLimitDimension::Tokens, 100, 60));
+			let admission = state.gateway_limiter.admit(request.clone()).await?;
+			let metadata = BTreeMap::from([("oxide_reservation_id".to_string(), admission.reservation.id.to_string())]);
+			let usage = UsageBreakdown {
+				input_tokens: 5,
+				output_tokens: 10,
+				reasoning_tokens: 15,
+				..Default::default()
+			};
+			drop(admission);
+			queue.terminal_usage(finalization, &metadata, &usage);
+			queue.terminal_usage(finalization, &metadata, &UsageBreakdown::default());
+			request.tokens = 80;
+			let next = state.gateway_limiter.admit(request).await?;
+			assert_eq!(next.snapshot.tokens.as_ref().map(|snapshot| snapshot.remaining), Some(0));
+		}
+		queue.shutdown().await;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn utility_token_rules_fail_closed_for_projects_and_keys() {
+		for project_rule in [true, false] {
+			let mut request = request();
+			let mut unsupported = rule(10, GatewayLimitDimension::Tokens, 100, 60);
+			unsupported.route_class = GatewayRouteClass::Utility;
+			if project_rule {
+				request.policy.project_rules.push(unsupported);
+			} else {
+				request.policy.key_rules.push(unsupported);
+			}
+			request.route_class = GatewayRouteClass::Utility;
+			assert!(matches!(GatewayLimiter::spawn().admit(request).await, Err(GatewayLimitError::Unavailable)));
+		}
+	}
 
 	fn request() -> GatewayAdmissionRequest {
 		GatewayAdmissionRequest {
@@ -376,6 +437,25 @@ mod tests {
 
 	type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+	#[sqlx::test(migrations = "./migrations")]
+	async fn database_rejects_utility_token_rules(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (key_id, token) = create_key(&pool, user_id, json!(["inference:read"])).await?;
+		let context = GatewayCredential::authenticate(&pool, &token).await?;
+		for (project_id, api_key_id) in [(Some(context.project_id), None), (None, Some(key_id))] {
+			let result = sqlx::query(
+				"INSERT INTO gateway_rate_limit_rules (project_id, api_key_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, $2, 'utility', 'tokens', 100, 60)",
+			)
+			.bind(project_id)
+			.bind(api_key_id)
+			.execute(&pool)
+			.await;
+			let error = result.expect_err("utility token rules must violate the policy constraint");
+			assert_eq!(error.as_database_error().and_then(|error| error.constraint()), Some("gateway_utility_requests_only"));
+		}
+		Ok(())
+	}
+
 	async fn create_user(pool: &PgPool) -> TestResult<Uuid> {
 		Ok(
 			sqlx::query_scalar("INSERT INTO users (email, username, password_hash) VALUES ('gateway@example.com', 'gateway', 'hash') RETURNING id")
@@ -536,8 +616,8 @@ mod tests {
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn enabled_namespace_http_contract_matrix(pool: PgPool) -> TestResult {
-		use axum::body::{Body, to_bytes};
-		use axum::http::Request;
+		use ::axum::body::{Body, to_bytes};
+		use ::axum::http::Request;
 		use tower::ServiceExt;
 		crate::config::Config::init(&pool).await;
 		crate::i18n::I18n::init(&pool).await;

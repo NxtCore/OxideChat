@@ -61,6 +61,7 @@ impl GatewayRatePolicy {
 				|| rule.refill_period_seconds == 0
 				|| rule.refill_period_seconds > i32::MAX as u32
 				|| rule.metric == GatewayLimitDimension::Concurrency
+				|| (rule.route_class == GatewayRouteClass::Utility && rule.metric == GatewayLimitDimension::Tokens)
 		}) || self.project_concurrency == Some(0)
 			|| self.key_concurrency == Some(0)
 		{

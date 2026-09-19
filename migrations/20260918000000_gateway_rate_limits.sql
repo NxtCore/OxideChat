@@ -12,7 +12,8 @@ CREATE TABLE gateway_rate_limit_rules (
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CHECK ((project_id IS NULL) <> (api_key_id IS NULL))
+    CHECK ((project_id IS NULL) <> (api_key_id IS NULL)),
+    CONSTRAINT gateway_utility_requests_only CHECK (route_class <> 'utility' OR metric = 'requests')
 );
 
 CREATE UNIQUE INDEX gateway_project_rate_window ON gateway_rate_limit_rules (project_id, route_class, metric, refill_period_seconds) WHERE project_id IS NOT NULL;

@@ -115,6 +115,7 @@
 - Do not add comments to the code itself
 - When writing axum routes, please use the response "module" to create responses
 - NO SQL statements in route handlers, please add a function to the specific type's module for database operations (check if a smilar function already exists)
+- As omniference is a major part of the application, developers may add a local version of omniference as cargo override in `.cargo/config.toml`
 
 ## Updating This Document
 
