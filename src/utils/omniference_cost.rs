@@ -1,6 +1,5 @@
-use crate::types::gateway::limiter::{GatewayLimitBackend, GatewayLimiter};
 use crate::types::models::{Model, ModelPricing};
-use crate::types::{Budget, JobState, UsageEvent, UsageEventRecord};
+use crate::types::{Budget, GatewayLimitBackend, GatewayLimiter, JobState, RESERVATION_METADATA_KEY, UsageEvent, UsageEventRecord};
 use omniference::catalog::UsageBreakdown;
 use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
 use omniference::stream::CostDetails;
@@ -148,7 +147,7 @@ impl OxideCostQueue {
 
 impl CostSink for OxideCostQueue {
 	fn terminal_usage(&self, _finalization: CostFinalization, metadata: &BTreeMap<String, String>, usage: &UsageBreakdown) {
-		if let Some(id) = metadata.get("oxide_reservation_id").and_then(|value| Uuid::parse_str(value).ok()) {
+		if let Some(id) = metadata.get(RESERVATION_METADATA_KEY).and_then(|value| Uuid::parse_str(value).ok()) {
 			self.limiter
 				.reconcile(id, u64::from(usage.input_tokens) + u64::from(usage.output_tokens.max(usage.reasoning_tokens)));
 		}

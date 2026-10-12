@@ -1,20 +1,19 @@
 use super::limiter::GatewayReservation;
 use axum::body::{Body, Bytes, HttpBody};
-use axum::response::Response;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-struct ReservedBody {
+pub(super) struct ReservedBody {
 	body: Body,
 	reservation: Option<GatewayReservation>,
 }
 
-impl GatewayReservation {
-	#[must_use]
-	/// Holds this reservation until the response body completes, fails, or is dropped.
-	pub fn attach(self, response: Response) -> Response {
-		let (parts, body) = response.into_parts();
-		Response::from_parts(parts, Body::new(ReservedBody { body, reservation: Some(self) }))
+impl ReservedBody {
+	pub(super) fn new(body: Body, reservation: GatewayReservation) -> Self {
+		Self {
+			body,
+			reservation: Some(reservation),
+		}
 	}
 }
 

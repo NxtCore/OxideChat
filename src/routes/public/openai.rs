@@ -1,13 +1,11 @@
-use crate::types::GatewayRouteClass;
-use crate::types::{GatewayAuthContext, GatewayModel, JobState};
+use crate::types::{GatewayAuthContext, GatewayModel, GatewayRoute, JobState};
 use crate::utils::gateway_limits;
-use crate::utils::openai_gateway::{error_response, model_access_error_response, run_chat, run_responses, translation};
+use crate::utils::openai_gateway::{error_response, model_access_error_response, run_chat, run_models, run_responses, translation};
 use axum::extract::{Extension, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use omniference::server::SkinAwareJson;
 use omniference::skins::{OpenAIErrorHandler, SkinErrorHandler};
-use omniference::types::providers::OpenAIModelsResponse;
 use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
 use std::sync::Arc;
 
@@ -23,33 +21,7 @@ pub async fn method_not_allowed() -> Response {
 
 /// Lists enabled models accessible to the authenticated gateway project.
 pub async fn list_models(State(state): State<Arc<JobState>>, Extension(context): Extension<GatewayAuthContext>) -> Response {
-	let admission = match gateway_limits::admit(&state, &context, GatewayRouteClass::Utility, 0, "/models").await {
-		Ok(admission) => admission,
-		Err(response) => return response,
-	};
-	let models = match GatewayModel::list_for_context(&state.db, &context).await {
-		Ok(models) => models,
-		Err(error) => {
-			tracing::error!(%error, "failed to list gateway models");
-			return gateway_limits::finish(
-				admission,
-				error_response(
-					StatusCode::INTERNAL_SERVER_ERROR,
-					translation("gateway.errors.list_models"),
-					"server_error",
-					"internal_error",
-				),
-			);
-		}
-	};
-	gateway_limits::finish(
-		admission,
-		axum::Json(OpenAIModelsResponse {
-			object: Some("list".to_string()),
-			data: models,
-		})
-		.into_response(),
-	)
+	gateway_limits::run_limited(&state, &context, GatewayRoute::MODELS, Ok(0), |_| run_models(&state, &context)).await
 }
 
 /// Runs an authorized OpenAI-compatible chat completion request.
@@ -62,16 +34,8 @@ pub async fn chat_completions(
 		Ok(inference) => inference,
 		Err(error) => return model_access_error_response(error, &request.model),
 	};
-	let tokens = match gateway_limits::chat_tokens(&mut request, &context, &inference) {
-		Ok(tokens) => tokens,
-		Err(response) => return response,
-	};
-	let admission = match gateway_limits::admit(&state, &context, GatewayRouteClass::Inference, tokens, "/chat/completions").await {
-		Ok(admission) => admission,
-		Err(response) => return response,
-	};
-	let response = run_chat(request, &context, inference, admission.reservation.id).await;
-	gateway_limits::finish(admission, response)
+	let tokens = inference.chat_tokens(&context.policy, &mut request);
+	gateway_limits::run_limited(&state, &context, GatewayRoute::CHAT, tokens, |id| run_chat(request, &context, inference, id)).await
 }
 
 /// Runs an authorized OpenAI-compatible responses request.
@@ -92,14 +56,6 @@ pub async fn responses(
 		Ok(inference) => inference,
 		Err(error) => return model_access_error_response(error, model),
 	};
-	let tokens = match gateway_limits::responses_tokens(&mut request, &context, &inference) {
-		Ok(tokens) => tokens,
-		Err(response) => return response,
-	};
-	let admission = match gateway_limits::admit(&state, &context, GatewayRouteClass::Inference, tokens, "/responses").await {
-		Ok(admission) => admission,
-		Err(response) => return response,
-	};
-	let response = run_responses(request, &context, inference, admission.reservation.id).await;
-	gateway_limits::finish(admission, response)
+	let tokens = inference.responses_tokens(&context.policy, &mut request);
+	gateway_limits::run_limited(&state, &context, GatewayRoute::RESPONSES, tokens, |id| run_responses(request, &context, inference, id)).await
 }

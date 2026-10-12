@@ -1,12 +1,14 @@
 mod body;
-pub mod limiter;
+mod estimate;
+mod limiter;
 mod policy;
 mod repository;
-mod rows;
 
+pub use limiter::*;
 pub use policy::*;
 
 use chrono::{DateTime, Utc};
+use std::sync::Arc;
 use omniference::types::providers::OpenAIModel;
 use sqlx::types::Json;
 use uuid::Uuid;
@@ -15,6 +17,20 @@ use uuid::Uuid;
 pub const INFERENCE_READ_SCOPE: &str = "inference:read";
 /// Scope required to run inference through the gateway.
 pub const INFERENCE_WRITE_SCOPE: &str = "inference:write";
+/// Request metadata key carrying the limiter reservation id to usage reporting.
+pub const RESERVATION_METADATA_KEY: &str = "oxide_reservation_id";
+/// Response header naming the authenticated project.
+pub const PROJECT_ID_HEADER: &str = "x-oxide-project-id";
+/// Response header naming the authenticated API key.
+pub const API_KEY_ID_HEADER: &str = "x-oxide-api-key-id";
+/// Response header naming the authenticated project's team.
+pub const TEAM_ID_HEADER: &str = "x-oxide-team-id";
+/// Response header carrying the authenticated project name.
+pub const PROJECT_NAME_HEADER: &str = "x-oxide-project-name";
+/// Response header carrying the concurrency limit.
+pub const CONCURRENT_LIMIT_HEADER: &str = "x-oxide-concurrent-limit";
+/// Response header carrying the remaining concurrency.
+pub const CONCURRENT_REMAINING_HEADER: &str = "x-oxide-concurrent-remaining";
 
 // Response Types
 
@@ -68,7 +84,7 @@ pub struct GatewayAuthContext {
 	pub team_id: Option<Uuid>,
 	pub project_name: String,
 	pub scopes: Vec<String>,
-	pub policy: GatewayRatePolicy,
+	pub policy: Arc<GatewayRatePolicy>,
 }
 
 impl GatewayAuthContext {
@@ -76,6 +92,18 @@ impl GatewayAuthContext {
 	#[must_use]
 	pub fn allows(&self, scope: &str) -> bool {
 		self.scopes.iter().any(|candidate| candidate == "*" || candidate == scope)
+	}
+
+	#[must_use]
+	/// Builds the admission request for one route and token reservation.
+	pub fn admission_request(&self, route: GatewayRoute, tokens: u64) -> GatewayAdmissionRequest {
+		GatewayAdmissionRequest {
+			project_id: self.project_id,
+			key_id: self.key_id,
+			policy: Arc::clone(&self.policy),
+			route_class: route.class,
+			tokens,
+		}
 	}
 }
 

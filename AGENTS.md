@@ -20,16 +20,19 @@
 
 ## Architecture
 
-- `src/types/gateway/limiter.rs` owns gateway admission through one Tokio actor; bounded admission and unbounded release/reconciliation channels replace shared locking.
-- `src/types/gateway/body.rs` keeps concurrency reservations alive for the lifetime of HTTP bodies.
-- `src/utils/gateway_limits.rs` attaches Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter.
-- Gateway policy and the future Redis contract are documented in `docs/gateway-rate-limits.md`; gateway lifecycle tests live in `src/tests/gateway.rs`.
-
 - `src/main.rs` - Application entry point, sets up Axum server and database pool
 - `src/i18n.rs` - Global i18n translation service (singleton pattern)
 - `src/jobs.rs` - Background job scheduler using tokio tasks
 - `src/types/` - Shared request/response DTOs and domain types
 - `src/tests/` - Unit tests organized by module (e.g., `i18n.rs`, `base.rs`)
+- `src/types/gateway/` - Gateway rate limiting and credentials, re-exported through `crate::types::*`
+    - `limiter.rs` - Admission owned by one Tokio actor; bounded admission and unbounded release/reconciliation channels replace shared locking
+    - `policy.rs` - Rate rules, validated policies (`GatewayRatePolicy::from_stored`), and `GatewayLimitError`
+    - `estimate.rs` - Token estimation for inference requests
+    - `body.rs` - Keeps concurrency reservations alive for the lifetime of HTTP response bodies
+    - `repository.rs` - Database access for credentials, policies, and model access
+    - `mod.rs` - Shared gateway types and constants
+- `src/utils/gateway_limits.rs` - HTTP glue only: admission for a route and Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter
 - `src/routes/` - HTTP route handlers (handlers only, no type definitions)
 - `migrations/` - SQLx database migrations
 - `JobState` struct contains shared application state (database pool)
@@ -115,7 +118,10 @@
 - Do not add comments to the code itself
 - When writing axum routes, please use the response "module" to create responses
 - NO SQL statements in route handlers, please add a function to the specific type's module for database operations (check if a smilar function already exists)
-- As omniference is a major part of the application, developers may add a local version of omniference as cargo override in `.cargo/config.toml`
+
+## Local Development
+
+- Omniference is a major part of the application; developers may point Cargo at a local checkout with a patch override in `.cargo/config.toml`
 
 ## Updating This Document
 

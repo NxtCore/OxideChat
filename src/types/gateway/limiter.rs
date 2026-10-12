@@ -1,10 +1,43 @@
-use super::*;
-use std::collections::HashMap;
+use super::body::ReservedBody;
+use super::{
+	GatewayAdmissionRequest, GatewayLimitDimension, GatewayLimitError, GatewayLimitSnapshot, GatewayMetricSnapshot, GatewayRateRule, GatewayRouteClass,
+	GatewayRuleMetric,
+};
+use axum::body::Body;
+use axum::response::Response;
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+#[cfg(test)]
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
+use uuid::Uuid;
 
 const SCALE: i128 = 1_000_000_000;
+const ADMISSION_QUEUE: usize = 256;
+const CONCURRENCY_RETRY: Duration = Duration::from_secs(1);
+
+// Response Types
+
+#[derive(Debug)]
+/// An accepted reservation and protocol-neutral post-admission capacities.
+pub struct GatewayAdmission {
+	pub reservation: GatewayReservation,
+	pub snapshot: GatewayLimitSnapshot,
+}
+
+// Internal Types
+
+#[cfg(test)]
+#[derive(Debug, Eq, PartialEq)]
+/// Sizes of the limiter's internal tables.
+pub struct GatewayStateCounts {
+	pub buckets: usize,
+	pub concurrency: usize,
+	pub reservations: usize,
+}
 
 #[derive(Clone, Debug)]
 /// Channel handle for the process-local admission owner.
@@ -20,17 +53,19 @@ pub struct GatewayReservation {
 	control: mpsc::UnboundedSender<Control>,
 }
 
+impl GatewayReservation {
+	#[must_use]
+	/// Holds this reservation until the response body completes, fails, or is dropped.
+	pub fn attach(self, response: Response) -> Response {
+		let (parts, body) = response.into_parts();
+		Response::from_parts(parts, Body::new(ReservedBody::new(body, self)))
+	}
+}
+
 impl Drop for GatewayReservation {
 	fn drop(&mut self) {
 		let _ = self.control.send(Control::Release(self.id));
 	}
-}
-
-#[derive(Debug)]
-/// An accepted reservation and protocol-neutral post-admission capacities.
-pub struct GatewayAdmission {
-	pub reservation: GatewayReservation,
-	pub snapshot: GatewayLimitSnapshot,
 }
 
 #[async_trait::async_trait]
@@ -39,7 +74,7 @@ pub trait GatewayLimitBackend: Send + Sync {
 	/// Reserves all applicable rules together.
 	///
 	/// # Errors
-	/// Returns a rejection or unavailable error without committing partial charges.
+	/// Returns a rejection or an enforcement error without committing partial charges.
 	async fn admit(&self, request: GatewayAdmissionRequest) -> Result<GatewayAdmission, GatewayLimitError>;
 	/// Applies the first final usage report for a reservation without blocking.
 	fn reconcile(&self, reservation: Uuid, actual_tokens: u64);
@@ -49,7 +84,7 @@ impl GatewayLimiter {
 	#[must_use]
 	/// Starts the single-owner worker on the current Tokio runtime.
 	pub fn spawn() -> Self {
-		let (admissions, receiver) = mpsc::channel(256);
+		let (admissions, receiver) = mpsc::channel(ADMISSION_QUEUE);
 		let (control, controls) = mpsc::unbounded_channel();
 		tokio::spawn(Owner::default().run(receiver, controls));
 		Self { admissions, control }
@@ -63,17 +98,51 @@ impl GatewayLimiter {
 	}
 
 	#[cfg(test)]
-	pub async fn state_counts(&self) -> Result<(usize, usize, usize), GatewayLimitError> {
+	pub fn saturated() -> Self {
+		let (admissions, receiver) = mpsc::channel(1);
+		let (control, _) = mpsc::unbounded_channel();
+		let (reply, _) = oneshot::channel();
+		let request = GatewayAdmissionRequest {
+			project_id: Uuid::nil(),
+			key_id: Uuid::nil(),
+			policy: Arc::default(),
+			route_class: GatewayRouteClass::Inference,
+			tokens: 0,
+		};
+		let reservation = GatewayReservation {
+			id: Uuid::nil(),
+			control: control.clone(),
+		};
+		let _ = admissions.try_send(Admission { request, reservation, reply });
+		tokio::spawn(async move {
+			let _receiver = receiver;
+			std::future::pending::<()>().await;
+		});
+		Self { admissions, control }
+	}
+
+	#[cfg(test)]
+	pub async fn state_counts(&self) -> Result<GatewayStateCounts, GatewayLimitError> {
 		let (reply, response) = oneshot::channel();
 		self.control.send(Control::Inspect(reply)).map_err(|_| GatewayLimitError::Unavailable)?;
 		response.await.map_err(|_| GatewayLimitError::Unavailable)
+	}
+
+	fn bypass(error: TrySendError<Admission>, limited: bool) -> Result<GatewayAdmission, GatewayLimitError> {
+		match (error, limited) {
+			(TrySendError::Full(_), true) => Err(GatewayLimitError::Overloaded),
+			(TrySendError::Closed(_), true) => Err(GatewayLimitError::Unavailable),
+			(TrySendError::Full(message) | TrySendError::Closed(message), false) => Ok(GatewayAdmission {
+				reservation: message.reservation,
+				snapshot: GatewayLimitSnapshot::default(),
+			}),
+		}
 	}
 }
 
 #[async_trait::async_trait]
 impl GatewayLimitBackend for GatewayLimiter {
 	async fn admit(&self, request: GatewayAdmissionRequest) -> Result<GatewayAdmission, GatewayLimitError> {
-		request.policy.validate()?;
 		let limited = request.policy.applies(request.route_class);
 		let reservation = GatewayReservation {
 			id: Uuid::new_v4(),
@@ -82,14 +151,7 @@ impl GatewayLimitBackend for GatewayLimiter {
 		let (reply, response) = oneshot::channel();
 		let message = Admission { request, reservation, reply };
 		if let Err(error) = self.admissions.try_send(message) {
-			return if limited {
-				Err(GatewayLimitError::Unavailable)
-			} else {
-				Ok(GatewayAdmission {
-					reservation: error.into_inner().reservation,
-					snapshot: GatewayLimitSnapshot::default(),
-				})
-			};
+			return Self::bypass(error, limited);
 		}
 		response.await.map_err(|_| GatewayLimitError::Unavailable)?
 	}
@@ -112,7 +174,7 @@ enum Control {
 	Release(Uuid),
 	Reconcile(Uuid, u64),
 	#[cfg(test)]
-	Inspect(oneshot::Sender<(usize, usize, usize)>),
+	Inspect(oneshot::Sender<GatewayStateCounts>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -122,6 +184,19 @@ enum Subject {
 }
 
 type BucketKey = (Subject, Uuid);
+
+#[derive(Default)]
+struct Failure {
+	dimension: Option<GatewayLimitDimension>,
+	retry_after: Duration,
+}
+
+impl Failure {
+	fn add(&mut self, dimension: GatewayLimitDimension, retry_after: Duration) {
+		self.dimension.get_or_insert(dimension);
+		self.retry_after = self.retry_after.max(retry_after);
+	}
+}
 
 struct Bucket {
 	capacity: i128,
@@ -133,20 +208,29 @@ struct Bucket {
 
 impl Bucket {
 	fn new(rule: &GatewayRateRule, now: Instant) -> Self {
+		let capacity = i128::from(rule.capacity);
 		Self {
-			capacity: i128::from(rule.capacity),
+			capacity,
 			period: i128::from(rule.refill_period_seconds),
-			credit: i128::from(rule.capacity) * SCALE,
+			credit: capacity * SCALE,
 			updated: now,
 			remainder: 0,
 		}
 	}
 
+	fn full(&self) -> i128 {
+		self.capacity * SCALE
+	}
+
+	fn is_full(&self) -> bool {
+		self.credit >= self.full()
+	}
+
 	fn refill(&mut self, now: Instant) {
-		let elapsed = now.duration_since(self.updated).as_nanos().min(i128::MAX as u128) as i128;
+		let elapsed = i128::try_from(now.duration_since(self.updated).as_nanos()).unwrap_or(i128::MAX);
 		let refill = elapsed.saturating_mul(self.capacity).saturating_add(self.remainder);
-		self.credit = self.credit.saturating_add(refill / self.period).min(self.capacity * SCALE);
-		self.remainder = if self.credit == self.capacity * SCALE { 0 } else { refill % self.period };
+		self.credit = self.credit.saturating_add(refill / self.period).min(self.full());
+		self.remainder = if self.is_full() { 0 } else { refill % self.period };
 		self.updated = now;
 	}
 
@@ -157,25 +241,40 @@ impl Bucket {
 		}
 		self.capacity = i128::from(rule.capacity);
 		self.period = i128::from(rule.refill_period_seconds);
-		self.credit = self.credit.min(self.capacity * SCALE);
+		self.credit = self.credit.min(self.full());
 	}
 
 	fn wait(&self, credit: i128) -> Duration {
 		let numerator = credit.max(0).saturating_mul(self.period).saturating_sub(self.remainder).max(0);
 		let nanos = numerator / self.capacity + i128::from(numerator % self.capacity != 0);
-		if nanos / SCALE > i128::from(u64::MAX) {
-			Duration::MAX
-		} else {
-			Duration::new((nanos / SCALE) as u64, (nanos % SCALE) as u32)
+		match (u64::try_from(nanos / SCALE), u32::try_from(nanos % SCALE)) {
+			(Ok(seconds), Ok(subsec)) => Duration::new(seconds, subsec),
+			_ => Duration::MAX,
+		}
+	}
+
+	fn retry_after(&self, cost: i128) -> Duration {
+		if cost > self.full() { Duration::MAX } else { self.wait(cost - self.credit) }
+	}
+
+	fn fill_cmp(&self, other: &Self) -> Ordering {
+		let credits = (u128::try_from(self.credit.max(0)).unwrap_or(0), u128::try_from(other.credit.max(0)).unwrap_or(0));
+		let capacities = (u128::try_from(self.capacity).unwrap_or(0), u128::try_from(other.capacity).unwrap_or(0));
+		match (credits.0.checked_mul(capacities.1), credits.1.checked_mul(capacities.0)) {
+			(Some(left), Some(right)) => left.cmp(&right),
+			_ => {
+				let scale = u128::try_from(SCALE).unwrap_or(1);
+				(credits.0 / scale * capacities.1).cmp(&(credits.1 / scale * capacities.0))
+			}
 		}
 	}
 
 	fn snapshot(&self, rule_id: Uuid) -> GatewayMetricSnapshot {
 		GatewayMetricSnapshot {
 			rule_id,
-			capacity: self.capacity as u64,
-			remaining: (self.credit.max(0) / SCALE) as u64,
-			reset_after: self.wait(self.capacity * SCALE - self.credit),
+			capacity: u64::try_from(self.capacity).unwrap_or(u64::MAX),
+			remaining: u64::try_from(self.credit.max(0) / SCALE).unwrap_or(u64::MAX),
+			reset_after: self.wait(self.full() - self.credit),
 		}
 	}
 }
@@ -201,17 +300,23 @@ impl Owner {
 			tokio::select! {
 				Some(control) = controls.recv() => self.control(control),
 				message = admissions.recv() => match message {
-					Some(message) => {
-						if message.reply.is_closed() { continue; }
-						while let Ok(control) = controls.try_recv() { self.control(control); }
-						let result = self.admit(&message.request, message.reservation);
-						let _ = message.reply.send(result);
-					},
+					Some(message) => self.serve(message, &mut controls),
 					None => break,
 				},
 				_ = eviction.tick() => self.evict(),
 			}
 		}
+	}
+
+	fn serve(&mut self, message: Admission, controls: &mut mpsc::UnboundedReceiver<Control>) {
+		if message.reply.is_closed() {
+			return;
+		}
+		while let Ok(control) = controls.try_recv() {
+			self.control(control);
+		}
+		let result = self.admit(&message.request, message.reservation);
+		let _ = message.reply.send(result);
 	}
 
 	fn rules(request: &GatewayAdmissionRequest) -> impl Iterator<Item = (BucketKey, &GatewayRateRule)> {
@@ -224,63 +329,39 @@ impl Owner {
 			.filter(|(_, rule)| rule.matches(request.route_class))
 	}
 
+	fn caps(request: &GatewayAdmissionRequest) -> [(Subject, Option<u32>); 2] {
+		[
+			(Subject::Project(request.project_id), request.policy.project_concurrency),
+			(Subject::Key(request.key_id), request.policy.key_concurrency),
+		]
+	}
+
+	fn active(&self, subject: &Subject) -> u32 {
+		self.concurrency.get(subject).copied().unwrap_or(0)
+	}
+
+	fn cost(rule: &GatewayRateRule, tokens: u64) -> i128 {
+		i128::from(if rule.metric == GatewayRuleMetric::Requests { 1 } else { tokens }) * SCALE
+	}
+
 	fn admit(&mut self, request: &GatewayAdmissionRequest, reservation: GatewayReservation) -> Result<GatewayAdmission, GatewayLimitError> {
-		let now = Instant::now();
-		let mut failure = None;
-		let mut retry_after = Duration::ZERO;
-		for (key, rule) in Self::rules(request) {
-			let bucket = self.buckets.entry(key).or_insert_with(|| Bucket::new(rule, now));
-			bucket.configure(rule, now);
-			let cost = Self::cost(rule, request.tokens);
-			if bucket.credit < cost {
-				failure.get_or_insert(rule.metric);
-				retry_after = retry_after.max(if cost > bucket.capacity * SCALE {
-					Duration::MAX
-				} else {
-					bucket.wait(cost - bucket.credit)
-				});
-			}
-		}
-		let subjects = [Subject::Project(request.project_id), Subject::Key(request.key_id)];
-		let caps = [request.policy.project_concurrency, request.policy.key_concurrency];
-		if request.route_class == GatewayRouteClass::Inference {
-			for (subject, cap) in subjects.iter().zip(caps) {
-				if cap.is_some_and(|cap| self.concurrency.get(subject).copied().unwrap_or(0) >= cap) {
-					failure.get_or_insert(GatewayLimitDimension::Concurrency);
-					retry_after = retry_after.max(Duration::from_secs(1));
-				}
-			}
-		}
-		if let Some(dimension) = failure {
+		let mut failure = Failure::default();
+		self.check_rules(request, &mut failure);
+		self.check_concurrency(request, &mut failure);
+		if let Some(dimension) = failure.dimension {
 			return Err(GatewayLimitError::Rejected {
 				dimension,
-				snapshot: self.snapshot(request),
-				retry_after,
+				snapshot: Box::new(self.snapshot(request)),
+				retry_after: failure.retry_after,
 			});
 		}
-		let mut token_buckets = Vec::with_capacity(request.policy.project_rules.len() + request.policy.key_rules.len());
-		for (key, rule) in Self::rules(request) {
-			if let Some(bucket) = self.buckets.get_mut(&key) {
-				bucket.credit -= Self::cost(rule, request.tokens);
-			}
-			if rule.metric == GatewayLimitDimension::Tokens {
-				token_buckets.push(key);
-			}
-		}
-		let subjects = if request.route_class == GatewayRouteClass::Inference {
-			for subject in subjects {
-				let count = self.concurrency.entry(subject).or_default();
-				*count = count.saturating_add(1);
-			}
-			Some(subjects)
-		} else {
-			None
-		};
+		let buckets = self.charge(request);
+		let subjects = self.acquire(request);
 		self.reservations.insert(
 			reservation.id,
 			Record {
 				subjects,
-				buckets: token_buckets,
+				buckets,
 				estimated: request.tokens,
 				reconciled: false,
 			},
@@ -291,91 +372,133 @@ impl Owner {
 		})
 	}
 
-	fn cost(rule: &GatewayRateRule, tokens: u64) -> i128 {
-		i128::from(if rule.metric == GatewayLimitDimension::Requests { 1 } else { tokens }) * SCALE
+	fn check_rules(&mut self, request: &GatewayAdmissionRequest, failure: &mut Failure) {
+		let now = Instant::now();
+		for (key, rule) in Self::rules(request) {
+			let bucket = self.buckets.entry(key).or_insert_with(|| Bucket::new(rule, now));
+			bucket.configure(rule, now);
+			let cost = Self::cost(rule, request.tokens);
+			if bucket.credit < cost {
+				failure.add(rule.metric.into(), bucket.retry_after(cost));
+			}
+		}
+	}
+
+	fn check_concurrency(&self, request: &GatewayAdmissionRequest, failure: &mut Failure) {
+		if request.route_class != GatewayRouteClass::Inference {
+			return;
+		}
+		for (subject, cap) in Self::caps(request) {
+			if cap.is_some_and(|cap| self.active(&subject) >= cap) {
+				failure.add(GatewayLimitDimension::Concurrency, CONCURRENCY_RETRY);
+			}
+		}
+	}
+
+	fn charge(&mut self, request: &GatewayAdmissionRequest) -> Vec<BucketKey> {
+		let mut token_buckets = Vec::with_capacity(request.policy.project_rules.len() + request.policy.key_rules.len());
+		for (key, rule) in Self::rules(request) {
+			if let Some(bucket) = self.buckets.get_mut(&key) {
+				bucket.credit -= Self::cost(rule, request.tokens);
+			}
+			if rule.metric == GatewayRuleMetric::Tokens {
+				token_buckets.push(key);
+			}
+		}
+		token_buckets
+	}
+
+	fn acquire(&mut self, request: &GatewayAdmissionRequest) -> Option<[Subject; 2]> {
+		if request.route_class != GatewayRouteClass::Inference {
+			return None;
+		}
+		let subjects = Self::caps(request).map(|(subject, _)| subject);
+		for subject in subjects {
+			let count = self.concurrency.entry(subject).or_default();
+			*count = count.saturating_add(1);
+		}
+		Some(subjects)
 	}
 
 	fn snapshot(&self, request: &GatewayAdmissionRequest) -> GatewayLimitSnapshot {
-		let mut snapshot = GatewayLimitSnapshot::default();
-		let mut selected_requests: Option<(Uuid, &Bucket)> = None;
-		let mut selected_tokens: Option<(Uuid, &Bucket)> = None;
-		for (key, rule) in Self::rules(request) {
-			let Some(bucket) = self.buckets.get(&key) else {
+		GatewayLimitSnapshot {
+			requests: self.binding(request, GatewayRuleMetric::Requests),
+			tokens: self.binding(request, GatewayRuleMetric::Tokens),
+			concurrency: self.concurrency_snapshot(request),
+		}
+	}
+
+	fn binding(&self, request: &GatewayAdmissionRequest, metric: GatewayRuleMetric) -> Option<GatewayMetricSnapshot> {
+		Self::rules(request)
+			.filter(|(_, rule)| rule.metric == metric)
+			.filter_map(|(key, rule)| self.buckets.get(&key).map(|bucket| (rule.id, bucket)))
+			.min_by(|(left_id, left), (right_id, right)| left.fill_cmp(right).then(left_id.cmp(right_id)))
+			.map(|(id, bucket)| bucket.snapshot(id))
+	}
+
+	fn concurrency_snapshot(&self, request: &GatewayAdmissionRequest) -> Option<(u32, u32)> {
+		if request.route_class != GatewayRouteClass::Inference {
+			return None;
+		}
+		let mut selected: Option<(u32, u32)> = None;
+		for (subject, cap) in Self::caps(request) {
+			let Some(cap) = cap else {
 				continue;
 			};
-			let target = if rule.metric == GatewayLimitDimension::Requests {
-				&mut selected_requests
-			} else {
-				&mut selected_tokens
-			};
-			if target.is_none_or(|(id, current)| {
-				let ordering = ratio_cmp(
-					(bucket.credit.max(0) as u128, bucket.capacity as u128),
-					(current.credit.max(0) as u128, current.capacity as u128),
-				);
-				ordering.is_lt() || (ordering.is_eq() && rule.id < id)
-			}) {
-				*target = Some((rule.id, bucket));
+			let remaining = cap.saturating_sub(self.active(&subject));
+			if selected.is_none_or(|(limit, left)| u64::from(remaining) * u64::from(limit) < u64::from(left) * u64::from(cap)) {
+				selected = Some((cap, remaining));
 			}
 		}
-		snapshot.requests = selected_requests.map(|(id, bucket)| bucket.snapshot(id));
-		snapshot.tokens = selected_tokens.map(|(id, bucket)| bucket.snapshot(id));
-		if request.route_class == GatewayRouteClass::Inference {
-			for (subject, cap) in [
-				(Subject::Project(request.project_id), request.policy.project_concurrency),
-				(Subject::Key(request.key_id), request.policy.key_concurrency),
-			] {
-				if let Some(cap) = cap {
-					let remaining = cap.saturating_sub(self.concurrency.get(&subject).copied().unwrap_or(0));
-					if snapshot
-						.concurrency
-						.is_none_or(|(limit, left)| u64::from(remaining) * u64::from(limit) < u64::from(left) * u64::from(cap))
-					{
-						snapshot.concurrency = Some((cap, remaining));
-					}
-				}
-			}
-		}
-		snapshot
+		selected
 	}
 
 	fn control(&mut self, command: Control) {
-		let id = match command {
-			Control::Release(id) | Control::Reconcile(id, _) => id,
+		match command {
+			Control::Release(id) => self.release(id),
+			Control::Reconcile(id, actual) => self.reconcile(id, actual),
 			#[cfg(test)]
 			Control::Inspect(reply) => {
-				let _ = reply.send((self.buckets.len(), self.concurrency.len(), self.reservations.len()));
-				return;
+				let _ = reply.send(GatewayStateCounts {
+						buckets: self.buckets.len(),
+						concurrency: self.concurrency.len(),
+						reservations: self.reservations.len(),
+					});
 			}
-		};
-		let Some(record) = self.reservations.get_mut(&id) else {
-			return;
-		};
-		match command {
-			Control::Release(_) => {
-				if let Some(subjects) = record.subjects.take() {
-					for subject in subjects {
-						if let Some(count) = self.concurrency.get_mut(&subject) {
-							*count = count.saturating_sub(1);
-						}
-					}
-				}
-			}
-			Control::Reconcile(_, actual) if !record.reconciled => {
-				let adjustment = (i128::from(record.estimated) - i128::from(actual)) * SCALE;
-				for key in &record.buckets {
-					if let Some(bucket) = self.buckets.get_mut(key) {
-						bucket.refill(Instant::now());
-						bucket.credit = bucket.credit.saturating_add(adjustment).min(bucket.capacity * SCALE);
-					}
-				}
-				record.reconciled = true;
-			}
-			Control::Reconcile(_, _) => {}
-			#[cfg(test)]
-			Control::Inspect(_) => {}
 		}
-		if record.subjects.is_none() && (record.reconciled || record.buckets.is_empty()) {
+	}
+
+	fn release(&mut self, id: Uuid) {
+		if let Some(subjects) = self.reservations.get_mut(&id).and_then(|record| record.subjects.take()) {
+			for subject in subjects {
+				if let Some(count) = self.concurrency.get_mut(&subject) {
+					*count = count.saturating_sub(1);
+				}
+			}
+		}
+		self.settle(id);
+	}
+
+	fn reconcile(&mut self, id: Uuid, actual: u64) {
+		if let Some(record) = self.reservations.get_mut(&id).filter(|record| !record.reconciled) {
+			let adjustment = (i128::from(record.estimated) - i128::from(actual)) * SCALE;
+			for key in &record.buckets {
+				if let Some(bucket) = self.buckets.get_mut(key) {
+					bucket.refill(Instant::now());
+					bucket.credit = bucket.credit.saturating_add(adjustment).min(bucket.full());
+				}
+			}
+			record.reconciled = true;
+		}
+		self.settle(id);
+	}
+
+	fn settle(&mut self, id: Uuid) {
+		let finished = self
+			.reservations
+			.get(&id)
+			.is_some_and(|record| record.subjects.is_none() && (record.reconciled || record.buckets.is_empty()));
+		if finished {
 			self.reservations.remove(&id);
 		}
 	}
@@ -388,30 +511,11 @@ impl Owner {
 				|| record
 					.buckets
 					.iter()
-					.any(|key| self.buckets.get(key).is_some_and(|bucket| bucket.credit < bucket.capacity * SCALE))
+					.any(|key| self.buckets.get(key).is_some_and(|bucket| !bucket.is_full()))
 		});
-		let retained: std::collections::HashSet<BucketKey> = self.reservations.values().flat_map(|record| record.buckets.iter().copied()).collect();
+		let retained: HashSet<BucketKey> = self.reservations.values().flat_map(|record| record.buckets.iter().copied()).collect();
 		self.buckets
-			.retain(|key, bucket| bucket.credit < bucket.capacity * SCALE || retained.contains(key) || self.concurrency.get(&key.0).is_some_and(|count| *count > 0));
+			.retain(|key, bucket| !bucket.is_full() || retained.contains(key) || self.concurrency.get(&key.0).is_some_and(|count| *count > 0));
 		self.concurrency.retain(|_, count| *count != 0);
-	}
-}
-
-fn ratio_cmp(mut left: (u128, u128), mut right: (u128, u128)) -> std::cmp::Ordering {
-	let mut reverse = false;
-	loop {
-		let order = (left.0 / left.1).cmp(&(right.0 / right.1));
-		let remainders = (left.0 % left.1, right.0 % right.1);
-		let order = if order.is_eq() && (remainders.0 == 0 || remainders.1 == 0) {
-			remainders.0.cmp(&remainders.1)
-		} else {
-			order
-		};
-		if !order.is_eq() || remainders.0 == 0 || remainders.1 == 0 {
-			return if reverse { order.reverse() } else { order };
-		}
-		left = (left.1, remainders.0);
-		right = (right.1, remainders.1);
-		reverse = !reverse;
 	}
 }

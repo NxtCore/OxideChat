@@ -1,88 +1,27 @@
 #[cfg(test)]
-mod limits {
-	use crate::types::gateway::limiter::{GatewayLimitBackend, GatewayLimiter};
+mod support {
 	use crate::types::*;
-	use ::axum::body::{Body, Bytes, to_bytes};
-	use ::axum::response::Response;
-	use futures_util::StreamExt;
-	use http_body::Body as _;
-	use std::pin::Pin;
-	use std::time::Duration;
+	use crate::utils::auth::hash_password;
+	use omniference::types::{ModelRef, ProviderConfig, ProviderEndpoint, ProviderKind};
+	use sqlx::PgPool;
+	use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+	use std::collections::BTreeMap;
+	use std::sync::Arc;
 	use uuid::Uuid;
 
-	type TestResult = Result<(), Box<dyn std::error::Error>>;
+	pub type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-	#[tokio::test(start_paused = true)]
-	async fn terminal_usage_reconciles_every_finalization_once() -> TestResult {
-		use omniference::catalog::UsageBreakdown;
-		use omniference::middleware::cost::{CostFinalization, CostSink};
-		use std::collections::BTreeMap;
-		use std::sync::Arc;
-
-		let state = Arc::new(JobState {
-			db: sqlx::postgres::PgPoolOptions::new().connect_lazy_with(sqlx::postgres::PgConnectOptions::new()),
-			gateway_limiter: GatewayLimiter::spawn(),
-			mcp_pool: crate::utils::tools::McpConnectionPool::new(),
-			client_tool_pending: crate::types::state::ClientToolPending::new(),
-		});
-		let queue = crate::utils::omniference_cost::OxideCostQueue::spawn(Arc::clone(&state));
-		for finalization in [
-			CostFinalization::ProviderReported,
-			CostFinalization::Done,
-			CostFinalization::Error,
-			CostFinalization::EndOfStream,
-			CostFinalization::Dropped,
-		] {
-			let mut request = request();
-			request.project_id = Uuid::new_v4();
-			request.tokens = 90;
-			request.policy.project_rules.push(rule(10, GatewayLimitDimension::Tokens, 100, 60));
-			let admission = state.gateway_limiter.admit(request.clone()).await?;
-			let metadata = BTreeMap::from([("oxide_reservation_id".to_string(), admission.reservation.id.to_string())]);
-			let usage = UsageBreakdown {
-				input_tokens: 5,
-				output_tokens: 10,
-				reasoning_tokens: 15,
-				..Default::default()
-			};
-			drop(admission);
-			queue.terminal_usage(finalization, &metadata, &usage);
-			queue.terminal_usage(finalization, &metadata, &UsageBreakdown::default());
-			request.tokens = 80;
-			let next = state.gateway_limiter.admit(request).await?;
-			assert_eq!(next.snapshot.tokens.as_ref().map(|snapshot| snapshot.remaining), Some(0));
-		}
-		queue.shutdown().await;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn utility_token_rules_fail_closed_for_projects_and_keys() {
-		for project_rule in [true, false] {
-			let mut request = request();
-			let mut unsupported = rule(10, GatewayLimitDimension::Tokens, 100, 60);
-			unsupported.route_class = GatewayRouteClass::Utility;
-			if project_rule {
-				request.policy.project_rules.push(unsupported);
-			} else {
-				request.policy.key_rules.push(unsupported);
-			}
-			request.route_class = GatewayRouteClass::Utility;
-			assert!(matches!(GatewayLimiter::spawn().admit(request).await, Err(GatewayLimitError::Unavailable)));
-		}
-	}
-
-	fn request() -> GatewayAdmissionRequest {
+	pub fn request() -> GatewayAdmissionRequest {
 		GatewayAdmissionRequest {
 			project_id: Uuid::from_u128(1),
 			key_id: Uuid::from_u128(2),
-			policy: GatewayRatePolicy::default(),
+			policy: Arc::new(GatewayRatePolicy::default()),
 			route_class: GatewayRouteClass::Inference,
 			tokens: 0,
 		}
 	}
 
-	fn rule(id: u128, metric: GatewayLimitDimension, capacity: u64, seconds: u32) -> GatewayRateRule {
+	pub fn rule(id: u128, metric: GatewayRuleMetric, capacity: u64, seconds: u32) -> GatewayRateRule {
 		GatewayRateRule {
 			id: Uuid::from_u128(id),
 			route_class: GatewayRouteClass::Inference,
@@ -92,371 +31,34 @@ mod limits {
 		}
 	}
 
-	#[tokio::test(start_paused = true)]
-	async fn project_and_key_request_rules_are_atomic() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.policy.project_rules.push(rule(10, GatewayLimitDimension::Requests, 2, 60));
-		request.policy.key_rules.push(rule(11, GatewayLimitDimension::Requests, 1, 60));
-		drop(limiter.admit(request.clone()).await?);
-		assert!(matches!(
-			limiter.admit(request.clone()).await,
-			Err(GatewayLimitError::Rejected {
-				dimension: GatewayLimitDimension::Requests,
-				..
-			})
-		));
-		request.key_id = Uuid::from_u128(3);
-		drop(limiter.admit(request.clone()).await?);
-		request.key_id = Uuid::from_u128(4);
-		assert!(matches!(
-			limiter.admit(request).await,
-			Err(GatewayLimitError::Rejected {
-				dimension: GatewayLimitDimension::Requests,
-				..
-			})
-		));
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn project_wins_over_permissive_key() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.policy.project_rules.push(rule(10, GatewayLimitDimension::Requests, 1, 60));
-		request.policy.key_rules.push(rule(11, GatewayLimitDimension::Requests, 100, 60));
-		drop(limiter.admit(request.clone()).await?);
-		assert!(limiter.admit(request).await.is_err());
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn overlapping_request_windows_and_maximum_retry() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.policy.project_rules = vec![rule(10, GatewayLimitDimension::Requests, 1, 10), rule(11, GatewayLimitDimension::Requests, 2, 60)];
-		drop(limiter.admit(request.clone()).await?);
-		assert!(limiter.admit(request.clone()).await.is_err());
-		tokio::time::advance(Duration::from_secs(10)).await;
-		drop(limiter.admit(request.clone()).await?);
-		let Err(GatewayLimitError::Rejected { retry_after, .. }) = limiter.admit(request.clone()).await else {
-			return Err("expected rejection".into());
-		};
-		assert_eq!(retry_after, Duration::from_secs(20));
-		tokio::time::advance(retry_after).await;
-		drop(limiter.admit(request).await?);
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn overlapping_million_token_windows() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.tokens = 1_000_000;
-		request.policy.project_rules = vec![
-			rule(10, GatewayLimitDimension::Tokens, 1_000_000, 120),
-			rule(11, GatewayLimitDimension::Tokens, 2_000_000, 300),
-		];
-		drop(limiter.admit(request.clone()).await?);
-		assert!(limiter.admit(request.clone()).await.is_err());
-		tokio::time::advance(Duration::from_secs(120)).await;
-		drop(limiter.admit(request.clone()).await?);
-		tokio::time::advance(Duration::from_secs(120)).await;
-		drop(limiter.admit(request.clone()).await?);
-		tokio::time::advance(Duration::from_secs(120)).await;
-		drop(limiter.admit(request.clone()).await?);
-		tokio::time::advance(Duration::from_secs(120)).await;
-		drop(limiter.admit(request.clone()).await?);
-		tokio::time::advance(Duration::from_secs(120)).await;
-		drop(limiter.admit(request.clone()).await?);
-		tokio::time::advance(Duration::from_secs(120)).await;
-		assert!(limiter.admit(request).await.is_err());
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn reconciliation_refunds_every_rule_once_and_charges_excess() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.tokens = 80;
-		request.policy.project_rules = vec![rule(10, GatewayLimitDimension::Tokens, 100, 60), rule(11, GatewayLimitDimension::Tokens, 200, 300)];
-		request.policy.key_rules = vec![rule(12, GatewayLimitDimension::Tokens, 100, 60)];
-		let first = limiter.admit(request.clone()).await?;
-		limiter.reconcile(first.reservation.id, 20);
-		limiter.reconcile(first.reservation.id, 0);
-		drop(first);
-		let second = limiter.admit(request.clone()).await?;
-		assert_eq!(second.snapshot.tokens.as_ref().map(|snapshot| snapshot.remaining), Some(0));
-		limiter.reconcile(second.reservation.id, 120);
-		drop(second);
-		request.tokens = 1;
-		assert!(limiter.admit(request.clone()).await.is_err());
-		tokio::time::advance(Duration::from_secs(25)).await;
-		drop(limiter.admit(request).await?);
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn project_and_key_concurrency_are_composed() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.policy.project_concurrency = Some(2);
-		request.policy.key_concurrency = Some(1);
-		let first = limiter.admit(request.clone()).await?;
-		assert!(matches!(
-			limiter.admit(request.clone()).await,
-			Err(GatewayLimitError::Rejected {
-				dimension: GatewayLimitDimension::Concurrency,
-				..
-			})
-		));
-		request.key_id = Uuid::from_u128(3);
-		let second = limiter.admit(request.clone()).await?;
-		request.key_id = Uuid::from_u128(4);
-		assert!(limiter.admit(request.clone()).await.is_err());
-		drop(first);
-		drop(limiter.admit(request).await?);
-		drop(second);
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn nonstreaming_and_body_error_release() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.policy.project_concurrency = Some(1);
-		let reservation = limiter.admit(request.clone()).await?.reservation;
-		let response = reservation.attach(Response::new(Body::from("complete")));
-		assert!(limiter.admit(request.clone()).await.is_err());
-		assert_eq!(to_bytes(response.into_body(), 100).await?.as_ref(), b"complete");
-		let reservation = limiter.admit(request.clone()).await?.reservation;
-		let stream = futures_util::stream::iter([Err::<Bytes, _>(std::io::Error::other("provider failure"))]);
-		let mut body = reservation.attach(Response::new(Body::from_stream(stream))).into_body();
-		let frame = futures_util::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await;
-		assert!(matches!(frame, Some(Err(_))));
-		drop(limiter.admit(request).await?);
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn streaming_holds_reservation_until_eof() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.policy.project_concurrency = Some(1);
-		let reservation = limiter.admit(request.clone()).await?.reservation;
-		let stream = futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"a")), Ok(Bytes::from_static(b"b"))]);
-		let mut body = reservation.attach(Response::new(Body::from_stream(stream))).into_body();
-		assert!(futures_util::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await.is_some());
-		assert!(limiter.admit(request.clone()).await.is_err());
-		to_bytes(body, 100).await?;
-		drop(limiter.admit(request).await?);
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn unpolled_stream_drop_and_serving_task_cancellation_release() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.policy.project_concurrency = Some(1);
-		let reservation = limiter.admit(request.clone()).await?.reservation;
-		let stream = futures_util::stream::pending::<Result<Bytes, std::io::Error>>();
-		let response = reservation.attach(Response::new(Body::from_stream(stream)));
-		assert!(limiter.admit(request.clone()).await.is_err());
-		drop(response);
-		let reservation = limiter.admit(request.clone()).await?.reservation;
-		let response = reservation.attach(Response::new(Body::from_stream(futures_util::stream::pending::<Result<Bytes, std::io::Error>>())));
-		let (ready, started) = tokio::sync::oneshot::channel();
-		let task = tokio::spawn(async move {
-			let _ = ready.send(());
-			let _ = to_bytes(response.into_body(), 100).await;
-		});
-		started.await?;
-		assert!(limiter.admit(request.clone()).await.is_err());
-		task.abort();
-		assert!(task.await.is_err());
-		drop(limiter.admit(request).await?);
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn utility_is_independent_and_never_reserves_tokens_or_concurrency() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.policy.project_concurrency = Some(1);
-		request.policy.project_rules = vec![rule(10, GatewayLimitDimension::Requests, 1, 60), rule(11, GatewayLimitDimension::Tokens, 1, 60)];
-		let inference = limiter.admit(request.clone()).await?;
-		request.route_class = GatewayRouteClass::Utility;
-		request.tokens = u64::MAX;
-		let utility = limiter.admit(request.clone()).await?;
-		assert!(utility.snapshot.requests.is_none() && utility.snapshot.tokens.is_none() && utility.snapshot.concurrency.is_none());
-		let mut utility_rule = rule(12, GatewayLimitDimension::Requests, 1, 60);
-		utility_rule.route_class = GatewayRouteClass::Utility;
-		request.policy.project_rules.push(utility_rule);
-		drop(limiter.admit(request.clone()).await?);
-		assert!(limiter.admit(request).await.is_err());
-		drop(inference);
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn no_limits_and_inactive_state_eviction() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		let first = limiter.admit(request.clone()).await?;
-		let second = limiter.admit(request.clone()).await?;
-		assert!(first.snapshot.requests.is_none() && second.snapshot.concurrency.is_none());
-		drop((first, second));
-		request.tokens = 100;
-		request.policy.project_rules.push(rule(10, GatewayLimitDimension::Tokens, 100, 60));
-		drop(limiter.admit(request).await?);
-		assert_eq!(limiter.state_counts().await?.0, 1);
-		tokio::time::advance(Duration::from_secs(121)).await;
-		tokio::task::yield_now().await;
-		assert_eq!(limiter.state_counts().await?, (0, 0, 0));
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn edits_clamp_without_refilling_unrelated_buckets() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.policy.project_rules = vec![rule(10, GatewayLimitDimension::Requests, 2, 60), rule(11, GatewayLimitDimension::Requests, 10, 300)];
-		drop(limiter.admit(request.clone()).await?);
-		request.policy.project_rules[0].capacity = 100;
-		drop(limiter.admit(request.clone()).await?);
-		assert!(limiter.admit(request.clone()).await.is_err());
-		request.policy.project_rules.remove(0);
-		let admission = limiter.admit(request).await?;
-		assert_eq!(admission.snapshot.requests.map(|value| value.remaining), Some(7));
-		Ok(())
-	}
-
-	#[test]
-	fn malformed_signed_policy_fails_closed() {
-		let value = serde_json::json!({"id": Uuid::nil(), "route_class": "inference", "metric": "tokens", "capacity": -1, "refill_period_seconds": 60});
-		assert!(serde_json::from_value::<GatewayRateRule>(value).is_err());
-	}
-
-	#[test]
-	fn token_estimation_uses_output_and_external_input_bounds() -> TestResult {
-		let inference = GatewayInference {
-			model_id: Uuid::nil(),
-			max_output_tokens: Some(100),
-			context_length: Some(1000),
-		};
-		let text = serde_json::json!({"messages": [{"role": "user", "content": "hello"}]});
-		let default = crate::utils::gateway_limits::estimate_tokens(&text, &inference, None, 1)?;
-		let explicit = crate::utils::gateway_limits::estimate_tokens(&text, &inference, Some(200), 1)?;
-		assert_eq!(explicit, default + 100);
-		assert_eq!(crate::utils::gateway_limits::estimate_tokens(&text, &inference, None, 2)?, default * 2);
-		let external = serde_json::json!({"previous_response_id": "opaque-history"});
-		assert_eq!(crate::utils::gateway_limits::estimate_tokens(&external, &inference, None, 1)?, 1100);
-		let unknown = GatewayInference {
-			model_id: Uuid::nil(),
-			max_output_tokens: None,
-			context_length: None,
-		};
-		assert!(crate::utils::gateway_limits::estimate_tokens(&text, &unknown, None, 1).is_err());
-		assert!(crate::utils::gateway_limits::estimate_tokens(&external, &unknown, Some(100), 1).is_err());
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn active_streams_survive_eviction_and_partial_body_drop_releases() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.tokens = 10;
-		request.policy.project_concurrency = Some(1);
-		request.policy.project_rules.push(rule(10, GatewayLimitDimension::Tokens, 100, 60));
-		let admission = limiter.admit(request.clone()).await?;
-		let stream = futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"partial"))]).chain(futures_util::stream::pending());
-		let mut body = admission.reservation.attach(Response::new(Body::from_stream(stream))).into_body();
-		assert!(futures_util::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await.is_some());
-		tokio::time::advance(Duration::from_secs(121)).await;
-		assert!(limiter.admit(request.clone()).await.is_err());
-		assert_eq!(limiter.state_counts().await?.2, 1);
-		drop(body);
-		drop(limiter.admit(request).await?);
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn unavailable_actor_fails_closed_only_for_configured_limits() -> TestResult {
-		let limiter = GatewayLimiter::unavailable();
-		let mut request = request();
-		drop(limiter.admit(request.clone()).await?);
-		request.policy.project_concurrency = Some(1);
-		assert!(matches!(limiter.admit(request).await, Err(GatewayLimitError::Unavailable)));
-		Ok(())
-	}
-
-	#[tokio::test(start_paused = true)]
-	async fn binding_ties_are_stable_and_all_success_headers_are_attached() -> TestResult {
-		let limiter = GatewayLimiter::spawn();
-		let mut request = request();
-		request.tokens = 10;
-		request.policy.project_concurrency = Some(2);
-		request.policy.project_rules = vec![
-			rule(11, GatewayLimitDimension::Requests, 2, 60),
-			rule(10, GatewayLimitDimension::Requests, 2, 120),
-			rule(12, GatewayLimitDimension::Tokens, 100, 60),
-		];
-		let admission = limiter.admit(request).await?;
-		assert_eq!(admission.snapshot.requests.as_ref().map(|value| value.rule_id), Some(Uuid::from_u128(10)));
-		let response = crate::utils::gateway_limits::finish(admission, Response::new(Body::from("ok")));
-		for header in [
-			"x-ratelimit-limit-requests",
-			"x-ratelimit-remaining-requests",
-			"x-ratelimit-reset-requests",
-			"x-ratelimit-limit-tokens",
-			"x-ratelimit-remaining-tokens",
-			"x-ratelimit-reset-tokens",
-			"x-oxide-concurrent-limit",
-			"x-oxide-concurrent-remaining",
-		] {
-			assert!(response.headers().contains_key(header));
+	pub fn utility_token_rule() -> GatewayRateRule {
+		GatewayRateRule {
+			route_class: GatewayRouteClass::Utility,
+			..rule(10, GatewayRuleMetric::Tokens, 100, 60)
 		}
-		assert_eq!(response.headers()["x-ratelimit-remaining-tokens"], "90");
-		assert_eq!(response.headers()["x-oxide-concurrent-remaining"], "1");
-		assert!(!response.headers().contains_key("retry-after"));
-		Ok(())
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use crate::types::*;
-	use crate::utils::auth::hash_password;
-	use omniference::skins::{OpenAIChatSkin, OpenAIResponsesSkin, Skin};
-	use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
-	use omniference::types::{ModelRef, ProviderConfig, ProviderEndpoint, ProviderKind};
-	use serde_json::json;
-	use sqlx::PgPool;
-	use std::collections::BTreeMap;
-	use uuid::Uuid;
-
-	type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
-
-	#[sqlx::test(migrations = "./migrations")]
-	async fn database_rejects_utility_token_rules(pool: PgPool) -> TestResult {
-		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, json!(["inference:read"])).await?;
-		let context = GatewayCredential::authenticate(&pool, &token).await?;
-		for (project_id, api_key_id) in [(Some(context.project_id), None), (None, Some(key_id))] {
-			let result = sqlx::query(
-				"INSERT INTO gateway_rate_limit_rules (project_id, api_key_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, $2, 'utility', 'tokens', 100, 60)",
-			)
-			.bind(project_id)
-			.bind(api_key_id)
-			.execute(&pool)
-			.await;
-			let error = result.expect_err("utility token rules must violate the policy constraint");
-			assert_eq!(error.as_database_error().and_then(|error| error.constraint()), Some("gateway_utility_requests_only"));
-		}
-		Ok(())
 	}
 
-	async fn create_user(pool: &PgPool) -> TestResult<Uuid> {
+	pub fn assert_rejected(result: Result<GatewayAdmission, GatewayLimitError>, expected: GatewayLimitDimension) {
+		assert!(
+			matches!(result, Err(GatewayLimitError::Rejected { dimension, .. }) if dimension == expected),
+			"expected a {expected:?} rejection"
+		);
+	}
+
+	pub fn job_state(db: PgPool) -> Arc<JobState> {
+		Arc::new(JobState {
+			db,
+			gateway_limiter: GatewayLimiter::spawn(),
+			mcp_pool: crate::utils::tools::McpConnectionPool::new(),
+			client_tool_pending: crate::types::state::ClientToolPending::new(),
+		})
+	}
+
+	pub fn detached_job_state() -> Arc<JobState> {
+		job_state(PgPoolOptions::new().connect_lazy_with(PgConnectOptions::new()))
+	}
+
+	pub async fn create_user(pool: &PgPool) -> TestResult<Uuid> {
 		Ok(
 			sqlx::query_scalar("INSERT INTO users (email, username, password_hash) VALUES ('gateway@example.com', 'gateway', 'hash') RETURNING id")
 				.fetch_one(pool)
@@ -464,11 +66,7 @@ mod tests {
 		)
 	}
 
-	async fn create_key(pool: &PgPool, user_id: Uuid, scopes: serde_json::Value) -> TestResult<(Uuid, String)> {
-		create_team_key(pool, user_id, None, scopes).await
-	}
-
-	async fn create_team_key(pool: &PgPool, user_id: Uuid, team_id: Option<Uuid>, scopes: serde_json::Value) -> TestResult<(Uuid, String)> {
+	pub async fn create_key(pool: &PgPool, user_id: Uuid, team_id: Option<Uuid>, scopes: serde_json::Value) -> TestResult<(Uuid, String)> {
 		let project_id: Uuid = sqlx::query_scalar("INSERT INTO gateway_projects (owner_id, team_id, name) VALUES ($1, $2, 'Gateway') RETURNING id")
 			.bind(user_id)
 			.bind(team_id)
@@ -492,7 +90,7 @@ mod tests {
 		Ok((key_id, token))
 	}
 
-	async fn create_team(pool: &PgPool, user_id: Uuid, name: &str, allow_all_models: bool) -> TestResult<Uuid> {
+	pub async fn create_team(pool: &PgPool, user_id: Uuid, name: &str, allow_all_models: bool) -> TestResult<Uuid> {
 		let team_id: Uuid = sqlx::query_scalar("INSERT INTO teams (name, allow_all_models) VALUES ($1, $2) RETURNING id")
 			.bind(name)
 			.bind(allow_all_models)
@@ -506,7 +104,7 @@ mod tests {
 		Ok(team_id)
 	}
 
-	async fn create_provider_model(pool: &PgPool, provider_name: &str, model_name: &str) -> TestResult<(Uuid, Uuid)> {
+	pub async fn create_provider_model(pool: &PgPool, provider_name: &str, model_name: &str) -> TestResult<(Uuid, Uuid)> {
 		let provider_id: Uuid =
 			sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, is_enabled) VALUES ('OPENAI', $1, 'https://example.com', true) RETURNING id")
 				.bind(provider_name)
@@ -520,7 +118,7 @@ mod tests {
 		Ok((provider_id, model_id))
 	}
 
-	fn model_ref() -> ModelRef {
+	pub fn model_ref() -> ModelRef {
 		ModelRef {
 			alias: "provider/test-model".to_string(),
 			provider: ProviderConfig {
@@ -540,27 +138,408 @@ mod tests {
 			output_modalities: Vec::new(),
 		}
 	}
+}
+
+#[cfg(test)]
+mod limiter {
+	use super::support::*;
+	use crate::types::*;
+	use crate::utils::omniference_cost::OxideCostQueue;
+	use ::axum::body::{Body, Bytes, to_bytes};
+	use ::axum::response::Response;
+	use futures_util::StreamExt;
+	use http_body::Body as _;
+	use omniference::catalog::UsageBreakdown;
+	use omniference::middleware::cost::{CostFinalization, CostSink};
+	use std::collections::BTreeMap;
+	use std::pin::Pin;
+	use std::sync::Arc;
+	use std::time::Duration;
+	use uuid::Uuid;
+
+	#[tokio::test(start_paused = true)]
+	async fn terminal_usage_reconciles_every_finalization_once() -> TestResult {
+		let state = detached_job_state();
+		let queue = OxideCostQueue::spawn(Arc::clone(&state));
+		for finalization in [
+			CostFinalization::ProviderReported,
+			CostFinalization::Done,
+			CostFinalization::Error,
+			CostFinalization::EndOfStream,
+			CostFinalization::Dropped,
+		] {
+			let mut request = request();
+			request.project_id = Uuid::new_v4();
+			request.tokens = 90;
+			Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Tokens, 100, 60));
+			let admission = state.gateway_limiter.admit(request.clone()).await?;
+			let metadata = BTreeMap::from([("oxide_reservation_id".to_string(), admission.reservation.id.to_string())]);
+			let usage = UsageBreakdown {
+				input_tokens: 5,
+				output_tokens: 10,
+				reasoning_tokens: 15,
+				..Default::default()
+			};
+			drop(admission);
+			queue.terminal_usage(finalization, &metadata, &usage);
+			queue.terminal_usage(finalization, &metadata, &UsageBreakdown::default());
+			request.tokens = 80;
+			let next = state.gateway_limiter.admit(request).await?;
+			assert_eq!(next.snapshot.tokens.as_ref().map(|snapshot| snapshot.remaining), Some(0));
+		}
+		queue.shutdown().await;
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn project_and_key_request_rules_are_atomic() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Requests, 2, 60));
+		Arc::make_mut(&mut request.policy).key_rules.push(rule(11, GatewayRuleMetric::Requests, 1, 60));
+		drop(limiter.admit(request.clone()).await?);
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Requests);
+		request.key_id = Uuid::from_u128(3);
+		drop(limiter.admit(request.clone()).await?);
+		request.key_id = Uuid::from_u128(4);
+		assert_rejected(limiter.admit(request).await, GatewayLimitDimension::Requests);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn project_wins_over_permissive_key() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Requests, 1, 60));
+		Arc::make_mut(&mut request.policy).key_rules.push(rule(11, GatewayRuleMetric::Requests, 100, 60));
+		drop(limiter.admit(request.clone()).await?);
+		assert_rejected(limiter.admit(request).await, GatewayLimitDimension::Requests);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn overlapping_request_windows_and_maximum_retry() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		Arc::make_mut(&mut request.policy).project_rules = vec![rule(10, GatewayRuleMetric::Requests, 1, 10), rule(11, GatewayRuleMetric::Requests, 2, 60)];
+		drop(limiter.admit(request.clone()).await?);
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Requests);
+		tokio::time::advance(Duration::from_secs(10)).await;
+		drop(limiter.admit(request.clone()).await?);
+		let Err(GatewayLimitError::Rejected { retry_after, .. }) = limiter.admit(request.clone()).await else {
+			return Err("expected rejection".into());
+		};
+		assert_eq!(retry_after, Duration::from_secs(20));
+		tokio::time::advance(retry_after).await;
+		drop(limiter.admit(request).await?);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn overlapping_million_token_windows() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		request.tokens = 1_000_000;
+		Arc::make_mut(&mut request.policy).project_rules = vec![
+			rule(10, GatewayRuleMetric::Tokens, 1_000_000, 120),
+			rule(11, GatewayRuleMetric::Tokens, 2_000_000, 300),
+		];
+		drop(limiter.admit(request.clone()).await?);
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Tokens);
+		tokio::time::advance(Duration::from_secs(120)).await;
+		drop(limiter.admit(request.clone()).await?);
+		tokio::time::advance(Duration::from_secs(120)).await;
+		drop(limiter.admit(request.clone()).await?);
+		tokio::time::advance(Duration::from_secs(120)).await;
+		drop(limiter.admit(request.clone()).await?);
+		tokio::time::advance(Duration::from_secs(120)).await;
+		drop(limiter.admit(request.clone()).await?);
+		tokio::time::advance(Duration::from_secs(120)).await;
+		drop(limiter.admit(request.clone()).await?);
+		tokio::time::advance(Duration::from_secs(120)).await;
+		assert_rejected(limiter.admit(request).await, GatewayLimitDimension::Tokens);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn reconciliation_refunds_every_rule_once_and_charges_excess() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		request.tokens = 80;
+		Arc::make_mut(&mut request.policy).project_rules = vec![rule(10, GatewayRuleMetric::Tokens, 100, 60), rule(11, GatewayRuleMetric::Tokens, 200, 300)];
+		Arc::make_mut(&mut request.policy).key_rules = vec![rule(12, GatewayRuleMetric::Tokens, 100, 60)];
+		let first = limiter.admit(request.clone()).await?;
+		limiter.reconcile(first.reservation.id, 20);
+		limiter.reconcile(first.reservation.id, 0);
+		drop(first);
+		let second = limiter.admit(request.clone()).await?;
+		assert_eq!(second.snapshot.tokens.as_ref().map(|snapshot| snapshot.remaining), Some(0));
+		limiter.reconcile(second.reservation.id, 120);
+		drop(second);
+		request.tokens = 1;
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Tokens);
+		tokio::time::advance(Duration::from_secs(25)).await;
+		drop(limiter.admit(request).await?);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn project_and_key_concurrency_are_composed() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		Arc::make_mut(&mut request.policy).project_concurrency = Some(2);
+		Arc::make_mut(&mut request.policy).key_concurrency = Some(1);
+		let first = limiter.admit(request.clone()).await?;
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Concurrency);
+		request.key_id = Uuid::from_u128(3);
+		let second = limiter.admit(request.clone()).await?;
+		request.key_id = Uuid::from_u128(4);
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Concurrency);
+		drop(first);
+		drop(limiter.admit(request).await?);
+		drop(second);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn nonstreaming_and_body_error_release() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		let reservation = limiter.admit(request.clone()).await?.reservation;
+		let response = reservation.attach(Response::new(Body::from("complete")));
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Concurrency);
+		assert_eq!(to_bytes(response.into_body(), 100).await?.as_ref(), b"complete");
+		let reservation = limiter.admit(request.clone()).await?.reservation;
+		let stream = futures_util::stream::iter([Err::<Bytes, _>(std::io::Error::other("provider failure"))]);
+		let mut body = reservation.attach(Response::new(Body::from_stream(stream))).into_body();
+		let frame = futures_util::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await;
+		assert!(matches!(frame, Some(Err(_))));
+		drop(limiter.admit(request).await?);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn streaming_holds_reservation_until_eof() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		let reservation = limiter.admit(request.clone()).await?.reservation;
+		let stream = futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"a")), Ok(Bytes::from_static(b"b"))]);
+		let mut body = reservation.attach(Response::new(Body::from_stream(stream))).into_body();
+		assert!(futures_util::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await.is_some());
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Concurrency);
+		to_bytes(body, 100).await?;
+		drop(limiter.admit(request).await?);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn unpolled_stream_drop_and_serving_task_cancellation_release() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		let reservation = limiter.admit(request.clone()).await?.reservation;
+		let stream = futures_util::stream::pending::<Result<Bytes, std::io::Error>>();
+		let response = reservation.attach(Response::new(Body::from_stream(stream)));
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Concurrency);
+		drop(response);
+		let reservation = limiter.admit(request.clone()).await?.reservation;
+		let response = reservation.attach(Response::new(Body::from_stream(futures_util::stream::pending::<Result<Bytes, std::io::Error>>())));
+		let (ready, started) = tokio::sync::oneshot::channel();
+		let task = tokio::spawn(async move {
+			let _ = ready.send(());
+			let _ = to_bytes(response.into_body(), 100).await;
+		});
+		started.await?;
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Concurrency);
+		task.abort();
+		assert!(task.await.is_err());
+		drop(limiter.admit(request).await?);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn utility_is_independent_and_never_reserves_tokens_or_concurrency() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		Arc::make_mut(&mut request.policy).project_rules = vec![rule(10, GatewayRuleMetric::Requests, 1, 60), rule(11, GatewayRuleMetric::Tokens, 1, 60)];
+		let inference = limiter.admit(request.clone()).await?;
+		request.route_class = GatewayRouteClass::Utility;
+		request.tokens = u64::MAX;
+		let utility = limiter.admit(request.clone()).await?;
+		assert!(utility.snapshot.requests.is_none() && utility.snapshot.tokens.is_none() && utility.snapshot.concurrency.is_none());
+		let mut utility_rule = rule(12, GatewayRuleMetric::Requests, 1, 60);
+		utility_rule.route_class = GatewayRouteClass::Utility;
+		Arc::make_mut(&mut request.policy).project_rules.push(utility_rule);
+		drop(limiter.admit(request.clone()).await?);
+		assert_rejected(limiter.admit(request).await, GatewayLimitDimension::Requests);
+		drop(inference);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn no_limits_and_inactive_state_eviction() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		let first = limiter.admit(request.clone()).await?;
+		let second = limiter.admit(request.clone()).await?;
+		assert!(first.snapshot.requests.is_none() && second.snapshot.concurrency.is_none());
+		drop((first, second));
+		request.tokens = 100;
+		Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Tokens, 100, 60));
+		drop(limiter.admit(request).await?);
+		assert_eq!(limiter.state_counts().await?.buckets, 1);
+		tokio::time::advance(Duration::from_secs(121)).await;
+		tokio::task::yield_now().await;
+		assert_eq!(
+			limiter.state_counts().await?,
+			GatewayStateCounts {
+				buckets: 0,
+				concurrency: 0,
+				reservations: 0
+			}
+		);
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn edits_clamp_without_refilling_unrelated_buckets() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		Arc::make_mut(&mut request.policy).project_rules = vec![rule(10, GatewayRuleMetric::Requests, 2, 60), rule(11, GatewayRuleMetric::Requests, 10, 300)];
+		drop(limiter.admit(request.clone()).await?);
+		Arc::make_mut(&mut request.policy).project_rules[0].capacity = 100;
+		drop(limiter.admit(request.clone()).await?);
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Requests);
+		Arc::make_mut(&mut request.policy).project_rules.remove(0);
+		let admission = limiter.admit(request).await?;
+		assert_eq!(admission.snapshot.requests.map(|value| value.remaining), Some(7));
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn active_streams_survive_eviction_and_partial_body_drop_releases() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		request.tokens = 10;
+		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Tokens, 100, 60));
+		let admission = limiter.admit(request.clone()).await?;
+		let stream = futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"partial"))]).chain(futures_util::stream::pending());
+		let mut body = admission.reservation.attach(Response::new(Body::from_stream(stream))).into_body();
+		assert!(futures_util::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await.is_some());
+		tokio::time::advance(Duration::from_secs(121)).await;
+		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Concurrency);
+		assert_eq!(limiter.state_counts().await?.reservations, 1);
+		drop(body);
+		drop(limiter.admit(request).await?);
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn unavailable_actor_fails_closed_only_for_configured_limits() -> TestResult {
+		let limiter = GatewayLimiter::unavailable();
+		let mut request = request();
+		drop(limiter.admit(request.clone()).await?);
+		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		assert!(matches!(limiter.admit(request).await, Err(GatewayLimitError::Unavailable)));
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn full_admission_queue_overloads_only_limited_routes() -> TestResult {
+		let limiter = GatewayLimiter::saturated();
+		let mut request = request();
+		drop(limiter.admit(request.clone()).await?);
+		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		assert!(matches!(limiter.admit(request).await, Err(GatewayLimitError::Overloaded)));
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod policy {
+	use super::support::*;
+	use crate::types::*;
+	use serde_json::json;
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	#[test]
+	fn malformed_signed_policy_fails_closed() {
+		let value = json!({"id": Uuid::nil(), "route_class": "inference", "metric": "tokens", "capacity": -1, "refill_period_seconds": 60});
+		assert!(serde_json::from_value::<GatewayRateRule>(value).is_err());
+	}
+
+	#[test]
+	fn utility_token_rules_fail_closed_for_projects_and_keys() -> TestResult {
+		let project = GatewayRatePolicy::from_stored(vec![utility_token_rule()], Vec::new(), None, None);
+		let key = GatewayRatePolicy::from_stored(Vec::new(), vec![utility_token_rule()], None, None);
+		assert!(matches!(project, Err(GatewayLimitError::Misconfigured)));
+		assert!(matches!(key, Err(GatewayLimitError::Misconfigured)));
+		Ok(())
+	}
+
+	#[test]
+	fn invalid_stored_concurrency_is_misconfigured() -> TestResult {
+		for (project, key) in [(Some(-1), None), (None, Some(-1)), (Some(0), None), (None, Some(0))] {
+			let policy = GatewayRatePolicy::from_stored(Vec::new(), Vec::new(), project, key);
+			assert!(matches!(policy, Err(GatewayLimitError::Misconfigured)));
+		}
+		Ok(())
+	}
+
+	#[test]
+	fn valid_stored_policy_is_loaded() -> TestResult {
+		let rules = vec![rule(10, GatewayRuleMetric::Tokens, 100, 60)];
+		let policy = GatewayRatePolicy::from_stored(rules, Vec::new(), Some(3), None)?;
+		assert_eq!(policy.project_concurrency, Some(3));
+		assert_eq!(policy.key_concurrency, None);
+		assert!(policy.has_token_rules());
+		Ok(())
+	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn bearer_key_authenticates_and_updates_last_used(pool: PgPool) -> TestResult {
+	async fn database_rejects_utility_token_rules(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, json!(["inference:read", "inference:write"])).await?;
+		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
-		assert_eq!(context.key_id, key_id);
-		assert_eq!(context.user_id, user_id);
-		assert!(context.allows("inference:write"));
-		let last_used: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar("SELECT last_used_at FROM gateway_api_keys WHERE id = $1")
-			.bind(key_id)
-			.fetch_one(&pool)
-			.await?;
-		assert!(last_used.is_some());
+		for (project_id, api_key_id) in [(Some(context.project_id), None), (None, Some(key_id))] {
+			let result = sqlx::query(
+				"INSERT INTO gateway_rate_limit_rules (project_id, api_key_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, $2, 'utility', 'tokens', 100, 60)",
+			)
+			.bind(project_id)
+			.bind(api_key_id)
+			.execute(&pool)
+			.await;
+			let error = result.expect_err("utility token rules must violate the policy constraint");
+			assert_eq!(error.as_database_error().and_then(|error| error.constraint()), Some("gateway_utility_requests_only"));
+		}
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn database_rejects_duplicate_rule_windows(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let context = GatewayCredential::authenticate(&pool, &token).await?;
+		let insert = "INSERT INTO gateway_rate_limit_rules (project_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'inference', 'tokens', 7, 120)";
+		sqlx::query(insert).bind(context.project_id).execute(&pool).await?;
+		let result = sqlx::query(insert).bind(context.project_id).execute(&pool).await;
+		let error = result.expect_err("a duplicate window must violate the unique index");
+		assert_eq!(
+			error.as_database_error().and_then(|error| error.constraint()),
+			Some("idx_gateway_rate_limit_rules_project_window")
+		);
 		Ok(())
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn project_and_key_policies_load_together_and_disabled_rules_are_ignored(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, json!(["inference:read"])).await?;
+		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
 		let initial = GatewayCredential::authenticate(&pool, &token).await?;
 		assert!(!initial.policy.applies(GatewayRouteClass::Inference));
 		sqlx::query("UPDATE gateway_projects SET max_concurrent_requests = 3 WHERE id = $1")
@@ -581,22 +560,68 @@ mod tests {
 		assert_eq!(context.policy.project_rules.len(), 2);
 		assert_eq!(context.policy.key_rules.len(), 1);
 		assert_eq!(context.policy.key_rules[0].route_class, GatewayRouteClass::Utility);
-		assert!(
-			sqlx::query(
-				"INSERT INTO gateway_rate_limit_rules (project_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'inference', 'tokens', 7, 120)"
-			)
-			.bind(initial.project_id)
-			.execute(&pool)
-			.await
-			.is_err()
-		);
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod estimate {
+	use super::support::*;
+	use crate::types::*;
+	use uuid::Uuid;
+
+	#[test]
+	fn token_estimation_uses_output_and_external_input_bounds() -> TestResult {
+		let inference = GatewayInference {
+			model_id: Uuid::nil(),
+			max_output_tokens: Some(100),
+			context_length: Some(1000),
+		};
+		let text = serde_json::to_vec(&serde_json::json!({"messages": [{"role": "user", "content": "hello"}]}))?;
+		let external = serde_json::to_vec(&serde_json::json!({"previous_response_id": "opaque-history"}))?;
+		let default = inference.estimate_tokens(&text, None, 1)?;
+		let explicit = inference.estimate_tokens(&text, Some(200), 1)?;
+		assert_eq!(explicit, default + 100);
+		assert_eq!(inference.estimate_tokens(&text, None, 2)?, default * 2);
+		assert_eq!(inference.estimate_tokens(&external, None, 1)?, 1100);
+		let unknown = GatewayInference {
+			model_id: Uuid::nil(),
+			max_output_tokens: None,
+			context_length: None,
+		};
+		assert!(unknown.estimate_tokens(&text, None, 1).is_err());
+		assert!(unknown.estimate_tokens(&external, Some(100), 1).is_err());
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod authentication {
+	use super::support::*;
+	use crate::types::*;
+	use serde_json::json;
+	use sqlx::PgPool;
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn bearer_key_authenticates_and_updates_last_used(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read", "inference:write"])).await?;
+		let context = GatewayCredential::authenticate(&pool, &token).await?;
+		assert_eq!(context.key_id, key_id);
+		assert_eq!(context.user_id, user_id);
+		assert!(context.allows("inference:write"));
+		let last_used: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar("SELECT last_used_at FROM gateway_api_keys WHERE id = $1")
+			.bind(key_id)
+			.fetch_one(&pool)
+			.await?;
+		assert!(last_used.is_some());
 		Ok(())
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn disabled_projects_and_keys_fail_authentication(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, json!(["inference:read"])).await?;
+		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
 		sqlx::query("UPDATE gateway_api_keys SET is_enabled = false WHERE id = $1")
 			.bind(key_id)
 			.execute(&pool)
@@ -615,70 +640,9 @@ mod tests {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn enabled_namespace_http_contract_matrix(pool: PgPool) -> TestResult {
-		use ::axum::body::{Body, to_bytes};
-		use ::axum::http::Request;
-		use tower::ServiceExt;
-		crate::config::Config::init(&pool).await;
-		crate::i18n::I18n::init(&pool).await;
-		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, json!(["inference:read"])).await?;
-		sqlx::query("INSERT INTO gateway_rate_limit_rules (api_key_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'utility', 'requests', 1, 60)")
-			.bind(key_id)
-			.execute(&pool)
-			.await?;
-		let state = std::sync::Arc::new(JobState {
-			db: pool,
-			gateway_limiter: crate::types::gateway::limiter::GatewayLimiter::spawn(),
-			mcp_pool: crate::utils::tools::McpConnectionPool::new(),
-			client_tool_pending: crate::types::state::ClientToolPending::new(),
-		});
-		let router = crate::routes::build_router(std::sync::Arc::clone(&state));
-		for (method, path, authenticated, expected) in [
-			("GET", "/openai/v1/models", false, 401),
-			("POST", "/openai/v1/chat/completions", true, 403),
-			("GET", "/openai/v1/absent", true, 404),
-			("GET", "/openai/v1/models", true, 200),
-			("GET", "/openai/v1/models", true, 429),
-			("GET", "/openai/v1/models", true, 500),
-		] {
-			if expected == 500 {
-				state.db.close().await;
-			}
-			let mut request = Request::builder().method(method).uri(path);
-			if authenticated {
-				request = request.header("authorization", format!("Bearer {token}"));
-			}
-			let response = router.clone().oneshot(request.body(Body::empty())?).await?;
-			assert_eq!(response.status().as_u16(), expected);
-			assert!(response.headers().contains_key("x-request-id"));
-			assert!(!response.headers().contains_key("request-id"));
-			if expected == 200 || expected == 429 {
-				for header in ["x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests"] {
-					assert!(response.headers().contains_key(header));
-				}
-				assert!(!response.headers().contains_key("x-ratelimit-limit-tokens"));
-				assert!(!response.headers().contains_key("x-oxide-concurrent-limit"));
-			}
-			if expected == 429 {
-				assert!(response.headers().contains_key("retry-after"));
-			}
-			let value: serde_json::Value = serde_json::from_slice(&to_bytes(response.into_body(), 10000).await?)?;
-			if expected >= 400 {
-				assert!(value["error"]["message"].is_string());
-			}
-			if expected == 429 {
-				assert_eq!(value["error"]["type"], "rate_limit_error");
-				assert_eq!(value["error"]["code"], "requests_limit_exceeded");
-			}
-		}
-		Ok(())
-	}
-
-	#[sqlx::test(migrations = "./migrations")]
 	async fn invalid_revoked_and_expired_keys_are_rejected(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, json!(["inference:write"])).await?;
+		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:write"])).await?;
 		assert!(matches!(
 			GatewayCredential::authenticate(&pool, "oxc_00000000000000000000000000000000_abcdefghijklmnopqrstuvwxyz012345").await,
 			Err(GatewayAuthError::Invalid)
@@ -695,6 +659,14 @@ mod tests {
 		assert!(matches!(GatewayCredential::authenticate(&pool, &token).await, Err(GatewayAuthError::Invalid)));
 		Ok(())
 	}
+}
+
+#[cfg(test)]
+mod models {
+	use super::support::*;
+	use crate::types::*;
+	use serde_json::json;
+	use sqlx::PgPool;
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn model_listing_respects_team_policy(pool: PgPool) -> TestResult {
@@ -710,7 +682,7 @@ mod tests {
 			.bind(visible_id)
 			.execute(&pool)
 			.await?;
-		let (_, token) = create_key(&pool, user_id, json!(["inference:read"])).await?;
+		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		let models = GatewayModel::list_for_context(&pool, &context).await?;
 		assert_eq!(models.len(), 1);
@@ -733,7 +705,7 @@ mod tests {
 				.execute(&pool)
 				.await?;
 		}
-		let (_, token) = create_key(&pool, user_id, json!(["inference:read"])).await?;
+		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		let models = GatewayModel::list_for_context(&pool, &context).await?;
 		assert_eq!(models.len(), 1);
@@ -746,7 +718,7 @@ mod tests {
 		let user_id = create_user(&pool).await?;
 		create_team(&pool, user_id, "Postpaid Team", true).await?;
 		let (_, model_id) = create_provider_model(&pool, "Postpaid Provider", "paid").await?;
-		let (_, token) = create_key(&pool, user_id, json!(["inference:write"])).await?;
+		let (_, token) = create_key(&pool, user_id, None, json!(["inference:write"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		let first = GatewayModel::authorize_inference(&pool, &context, "postpaid provider/paid").await?;
 		let second = GatewayModel::authorize_inference(&pool, &context, "postpaid provider/paid").await?;
@@ -761,12 +733,165 @@ mod tests {
 		let project_team_id = create_team(&pool, user_id, "Project Team", false).await?;
 		create_team(&pool, user_id, "Other Team", true).await?;
 		create_provider_model(&pool, "Scoped Provider", "scoped").await?;
-		let (_, token) = create_team_key(&pool, user_id, Some(project_team_id), json!(["inference:read"])).await?;
+		let (_, token) = create_key(&pool, user_id, Some(project_team_id), json!(["inference:read"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		assert!(GatewayModel::list_for_context(&pool, &context).await?.is_empty());
 		assert!(GatewayModel::resolve_accessible(&pool, &context, "scoped provider/scoped").await?.is_none());
 		Ok(())
 	}
+}
+
+#[cfg(test)]
+mod http {
+	use super::support::*;
+	use crate::types::*;
+	use ::axum::Router;
+	use ::axum::body::{Body, to_bytes};
+	use ::axum::http::Request;
+	use ::axum::response::Response;
+	use serde_json::{Value, json};
+	use sqlx::PgPool;
+	use std::sync::Arc;
+	use tower::ServiceExt;
+
+	const MODELS_PATH: &str = "/openai/v1/models";
+
+	async fn router(pool: PgPool) -> TestResult<(Router, Arc<JobState>)> {
+		crate::config::Config::init(&pool).await;
+		crate::i18n::I18n::init(&pool).await;
+		let state = job_state(pool);
+		Ok((crate::routes::build_router(Arc::clone(&state)), state))
+	}
+
+	async fn send(router: &Router, method: &str, path: &str, token: Option<&str>) -> TestResult<Response> {
+		let mut request = Request::builder().method(method).uri(path);
+		if let Some(token) = token {
+			request = request.header("authorization", format!("Bearer {token}"));
+		}
+		Ok(router.clone().oneshot(request.body(Body::empty())?).await?)
+	}
+
+	async fn json_body(response: Response) -> TestResult<Value> {
+		Ok(serde_json::from_slice(&to_bytes(response.into_body(), 10000).await?)?)
+	}
+
+	async fn assert_error(response: Response, status: u16) -> TestResult<Value> {
+		assert_eq!(response.status().as_u16(), status);
+		assert!(response.headers().contains_key("x-request-id"));
+		assert!(!response.headers().contains_key("request-id"));
+		let value = json_body(response).await?;
+		assert!(value["error"]["message"].is_string());
+		Ok(value)
+	}
+
+	fn assert_request_limit_headers(response: &Response) {
+		for header in ["x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests"] {
+			assert!(response.headers().contains_key(header));
+		}
+		assert!(!response.headers().contains_key("x-ratelimit-limit-tokens"));
+		assert!(!response.headers().contains_key("x-oxide-concurrent-limit"));
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn missing_credentials_return_unauthorized(pool: PgPool) -> TestResult {
+		let (router, _) = router(pool).await?;
+		let response = send(&router, "GET", MODELS_PATH, None).await?;
+		assert_error(response, 401).await?;
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn missing_scope_returns_forbidden(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (router, _) = router(pool).await?;
+		let response = send(&router, "POST", "/openai/v1/chat/completions", Some(&token)).await?;
+		assert_error(response, 403).await?;
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn unknown_route_returns_not_found(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (router, _) = router(pool).await?;
+		let response = send(&router, "GET", "/openai/v1/absent", Some(&token)).await?;
+		assert_error(response, 404).await?;
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn utility_request_limit_reports_headers_then_rejects(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		sqlx::query("INSERT INTO gateway_rate_limit_rules (api_key_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'utility', 'requests', 1, 60)")
+			.bind(key_id)
+			.execute(&pool)
+			.await?;
+		let (router, _) = router(pool).await?;
+		let allowed = send(&router, "GET", MODELS_PATH, Some(&token)).await?;
+		assert_eq!(allowed.status().as_u16(), 200);
+		assert!(allowed.headers().contains_key("x-request-id"));
+		assert_request_limit_headers(&allowed);
+		let limited = send(&router, "GET", MODELS_PATH, Some(&token)).await?;
+		assert_request_limit_headers(&limited);
+		assert!(limited.headers().contains_key("retry-after"));
+		let value = assert_error(limited, 429).await?;
+		assert_eq!(value["error"]["type"], "rate_limit_error");
+		assert_eq!(value["error"]["code"], "requests_limit_exceeded");
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn unavailable_database_returns_server_error(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (router, state) = router(pool).await?;
+		state.db.close().await;
+		let response = send(&router, "GET", MODELS_PATH, Some(&token)).await?;
+		assert_error(response, 500).await?;
+		Ok(())
+	}
+
+	#[tokio::test(start_paused = true)]
+	async fn all_success_headers_are_attached_for_the_binding_rules() -> TestResult {
+		let limiter = GatewayLimiter::spawn();
+		let mut request = request();
+		request.tokens = 10;
+		Arc::make_mut(&mut request.policy).project_concurrency = Some(2);
+		Arc::make_mut(&mut request.policy).project_rules = vec![
+			rule(11, GatewayRuleMetric::Requests, 2, 60),
+			rule(10, GatewayRuleMetric::Requests, 2, 120),
+			rule(12, GatewayRuleMetric::Tokens, 100, 60),
+		];
+		let admission = limiter.admit(request).await?;
+		assert_eq!(admission.snapshot.requests.as_ref().map(|value| value.rule_id), Some(uuid::Uuid::from_u128(10)));
+		let response = crate::utils::gateway_limits::finish(admission, Response::new(Body::from("ok")));
+		for header in [
+			"x-ratelimit-limit-requests",
+			"x-ratelimit-remaining-requests",
+			"x-ratelimit-reset-requests",
+			"x-ratelimit-limit-tokens",
+			"x-ratelimit-remaining-tokens",
+			"x-ratelimit-reset-tokens",
+			"x-oxide-concurrent-limit",
+			"x-oxide-concurrent-remaining",
+		] {
+			assert!(response.headers().contains_key(header));
+		}
+		assert_eq!(response.headers()["x-ratelimit-remaining-tokens"], "90");
+		assert_eq!(response.headers()["x-oxide-concurrent-remaining"], "1");
+		assert!(!response.headers().contains_key("retry-after"));
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod skins {
+	use super::support::*;
+	use omniference::skins::{OpenAIChatSkin, OpenAIResponsesSkin, Skin};
+	use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
+	use serde_json::json;
 
 	#[test]
 	fn chat_skin_converts_streaming_and_non_streaming_requests() -> TestResult {

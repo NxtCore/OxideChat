@@ -1,48 +1,58 @@
-use crate::types::gateway::limiter::{GatewayAdmission, GatewayLimitBackend};
 use crate::types::{
-	GatewayAdmissionRequest, GatewayAuthContext, GatewayInference, GatewayLimitDimension, GatewayLimitError, GatewayLimitSnapshot, GatewayMetricSnapshot,
-	GatewayRouteClass, JobState,
+	CONCURRENT_LIMIT_HEADER, CONCURRENT_REMAINING_HEADER, GatewayAdmission, GatewayAuthContext, GatewayLimitBackend, GatewayLimitDimension, GatewayLimitError,
+	GatewayLimitSnapshot, GatewayMetricSnapshot, GatewayRoute, JobState,
 };
 use crate::utils::openai_gateway::{error_response, translation};
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
 use omniference::skins::{RateLimitHeaders, RateLimitMetric, openai_rate_limit_headers};
+use std::future::Future;
 use std::time::Duration;
+use uuid::Uuid;
 
-/// Admits an authenticated request and renders local OpenAI errors.
+/// Admits a request, runs it with its reservation id, and ties the reservation to the response body.
 ///
-/// # Errors
-/// Returns a translated rejection response when admission fails.
-pub async fn admit(state: &JobState, context: &GatewayAuthContext, class: GatewayRouteClass, tokens: u64, route: &str) -> Result<GatewayAdmission, Response> {
-	state
-		.gateway_limiter
-		.admit(GatewayAdmissionRequest {
-			project_id: context.project_id,
-			key_id: context.key_id,
-			policy: context.policy.clone(),
-			route_class: class,
-			tokens,
-		})
-		.await
-		.map_err(|error| {
-			let dimension = match &error {
-				GatewayLimitError::Rejected { dimension, .. } => Some(dimension),
-				GatewayLimitError::Unavailable => None,
-			};
-			tracing::warn!(project_id = %context.project_id, key_id = %context.key_id, route, ?dimension, "gateway admission rejected");
+/// A failed token estimate or admission is rendered here as a translated `OpenAI` error.
+pub async fn run_limited<F, Fut>(state: &JobState, context: &GatewayAuthContext, route: GatewayRoute, tokens: Result<u64, GatewayLimitError>, run: F) -> Response
+where
+	F: FnOnce(Uuid) -> Fut,
+	Fut: Future<Output = Response>,
+{
+	let admitted = match tokens {
+		Ok(tokens) => state.gateway_limiter.admit(context.admission_request(route, tokens)).await,
+		Err(error) => Err(error),
+	};
+	match admitted {
+		Ok(admission) => {
+			let response = run(admission.reservation.id).await;
+			finish(admission, response)
+		}
+		Err(error) => {
+			log_failure(&error, context, route);
 			limit_error_response(error)
-		})
+		}
+	}
+}
+
+fn log_failure(error: &GatewayLimitError, context: &GatewayAuthContext, route: GatewayRoute) {
+	let (project_id, key_id, path) = (context.project_id, context.key_id, route.path);
+	match error {
+		GatewayLimitError::Rejected { dimension, .. } => tracing::warn!(%project_id, %key_id, path, ?dimension, "gateway admission rejected"),
+		GatewayLimitError::Overloaded => tracing::warn!(%project_id, %key_id, path, "gateway admission queue is full"),
+		GatewayLimitError::Unavailable | GatewayLimitError::Misconfigured => tracing::error!(%project_id, %key_id, path, %error, "gateway admission failed"),
+	}
 }
 
 #[must_use]
-/// Maps neutral admission failures to the enabled OpenAI namespace.
+/// Maps neutral admission failures to the enabled `OpenAI` namespace.
 pub fn limit_error_response(error: GatewayLimitError) -> Response {
 	match error {
-		GatewayLimitError::Unavailable => error_response(
-			StatusCode::SERVICE_UNAVAILABLE,
-			translation("gateway.errors.limiter_unavailable"),
-			"server_error",
-			"gateway_limiter_unavailable",
+		GatewayLimitError::Unavailable => server_error(StatusCode::SERVICE_UNAVAILABLE, "gateway.errors.limiter_unavailable", "gateway_limiter_unavailable"),
+		GatewayLimitError::Overloaded => server_error(StatusCode::SERVICE_UNAVAILABLE, "gateway.errors.limiter_overloaded", "gateway_limiter_overloaded"),
+		GatewayLimitError::Misconfigured => server_error(
+			StatusCode::INTERNAL_SERVER_ERROR,
+			"gateway.errors.limiter_misconfigured",
+			"gateway_limiter_misconfigured",
 		),
 		GatewayLimitError::Rejected {
 			dimension,
@@ -63,6 +73,10 @@ pub fn limit_error_response(error: GatewayLimitError) -> Response {
 	}
 }
 
+fn server_error(status: StatusCode, key: &str, code: &str) -> Response {
+	error_response(status, translation(key), "server_error", code)
+}
+
 #[must_use]
 /// Attaches protocol-rendered rate headers and host concurrency headers.
 pub fn attach_headers(mut response: Response, snapshot: &GatewayLimitSnapshot, retry_after: Option<Duration>) -> Response {
@@ -77,7 +91,7 @@ pub fn attach_headers(mut response: Response, snapshot: &GatewayLimitSnapshot, r
 		}
 	}
 	if let Some((limit, remaining)) = snapshot.concurrency {
-		for (name, value) in [("x-oxide-concurrent-limit", limit), ("x-oxide-concurrent-remaining", remaining)] {
+		for (name, value) in [(CONCURRENT_LIMIT_HEADER, limit), (CONCURRENT_REMAINING_HEADER, remaining)] {
 			if let Ok(value) = HeaderValue::try_from(value.to_string()) {
 				response.headers_mut().insert(name, value);
 			}
@@ -99,83 +113,4 @@ fn metric(snapshot: &GatewayMetricSnapshot) -> RateLimitMetric {
 pub fn finish(admission: GatewayAdmission, response: Response) -> Response {
 	let response = attach_headers(response, &admission.snapshot, None);
 	admission.reservation.attach(response)
-}
-
-/// Estimates text conservatively and reserves configured bounds for external input.
-///
-/// # Errors
-/// Returns unavailable if required output or external-input bounds are absent.
-pub fn estimate_tokens(request: &serde_json::Value, inference: &GatewayInference, output_max: Option<u64>, choices: u64) -> Result<u64, GatewayLimitError> {
-	let output = output_max
-		.or(inference.max_output_tokens.map(u64::from))
-		.filter(|value| *value > 0)
-		.ok_or(GatewayLimitError::Unavailable)?;
-	let bytes = serde_json::to_vec(request).map_err(|_| GatewayLimitError::Unavailable)?.len() as u64;
-	let input = if has_external_input(request) {
-		inference.context_length.map(u64::from).ok_or(GatewayLimitError::Unavailable)?
-	} else {
-		bytes.saturating_mul(2).saturating_add(1024)
-	};
-	Ok(input.saturating_add(output).saturating_mul(choices.max(1)))
-}
-
-fn has_external_input(value: &serde_json::Value) -> bool {
-	match value {
-		serde_json::Value::Object(fields) => fields.iter().any(|(key, value)| {
-			(matches!(
-				key.as_str(),
-				"image_url" | "input_audio" | "file_id" | "file_url" | "video_url" | "previous_response_id" | "conversation" | "prompt"
-			) && !value.is_null())
-				|| has_external_input(value)
-		}),
-		serde_json::Value::Array(values) => values.iter().any(has_external_input),
-		_ => false,
-	}
-}
-
-/// Resolves and applies the Chat Completions token reservation maximum.
-///
-/// # Errors
-/// Returns a translated error if a conservative reservation cannot be computed.
-pub fn chat_tokens(
-	request: &mut omniference::types::providers::openai::OpenAIChatRequest,
-	context: &GatewayAuthContext,
-	inference: &GatewayInference,
-) -> Result<u64, Response> {
-	if !context.policy.has_token_rules() {
-		return Ok(0);
-	}
-	let output_max = request.max_completion_tokens.or(request.max_tokens).or(inference.max_output_tokens);
-	if request.max_completion_tokens.is_none() && request.max_tokens.is_none() {
-		request.max_completion_tokens = output_max;
-	}
-	serde_json::to_value(&*request)
-		.map_err(|_| GatewayLimitError::Unavailable)
-		.and_then(|value| estimate_tokens(&value, inference, output_max.map(u64::from), u64::from(request.n.unwrap_or(1))))
-		.map_err(limit_error_response)
-}
-
-/// Resolves and applies the Responses token reservation maximum.
-///
-/// # Errors
-/// Returns a translated error if a conservative reservation cannot be computed.
-pub fn responses_tokens(
-	request: &mut omniference::types::providers::openai::OpenAIResponsesRequestPayload,
-	context: &GatewayAuthContext,
-	inference: &GatewayInference,
-) -> Result<u64, Response> {
-	if !context.policy.has_token_rules() {
-		return Ok(0);
-	}
-	if request.max_output_tokens.is_none() {
-		request.max_output_tokens = inference.max_output_tokens.map(i64::from);
-	}
-	let output_max = request.max_output_tokens.and_then(|value| u64::try_from(value).ok()).filter(|value| *value > 0);
-	if output_max.is_none() {
-		return Err(limit_error_response(GatewayLimitError::Unavailable));
-	}
-	serde_json::to_value(&*request)
-		.map_err(|_| GatewayLimitError::Unavailable)
-		.and_then(|value| estimate_tokens(&value, inference, output_max, 1))
-		.map_err(limit_error_response)
 }
