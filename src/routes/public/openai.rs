@@ -35,7 +35,7 @@ pub async fn chat_completions(
 		Err(error) => return model_access_error_response(error, &request.model),
 	};
 	let tokens = inference.chat_tokens(&context.policy, &mut request);
-	gateway_limits::run_limited(&state, &context, GatewayRoute::CHAT, tokens, |id| run_chat(request, &context, inference, id)).await
+	gateway_limits::run_limited(&state, &context, GatewayRoute::CHAT, tokens, |id| run_chat(request, &context, inference, id, GatewayRoute::CHAT.usage_type)).await
 }
 
 /// Runs an authorized OpenAI-compatible responses request.
@@ -57,5 +57,5 @@ pub async fn responses(
 		Err(error) => return model_access_error_response(error, model),
 	};
 	let tokens = inference.responses_tokens(&context.policy, &mut request);
-	gateway_limits::run_limited(&state, &context, GatewayRoute::RESPONSES, tokens, |id| run_responses(request, &context, inference, id)).await
+	gateway_limits::run_limited(&state, &context, GatewayRoute::RESPONSES, tokens, |id| run_responses(request, &context, inference, id, GatewayRoute::RESPONSES.usage_type)).await
 }

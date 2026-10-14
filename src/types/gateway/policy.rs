@@ -70,20 +70,24 @@ pub enum GatewayRouteClass {
 pub struct GatewayRoute {
 	pub class: GatewayRouteClass,
 	pub path: &'static str,
+	pub usage_type: &'static str,
 }
 
 impl GatewayRoute {
 	pub const MODELS: Self = Self {
 		class: GatewayRouteClass::Utility,
 		path: "/models",
+		usage_type: "gateway.models",
 	};
 	pub const CHAT: Self = Self {
 		class: GatewayRouteClass::Inference,
 		path: "/chat/completions",
+		usage_type: "gateway.chat",
 	};
 	pub const RESPONSES: Self = Self {
 		class: GatewayRouteClass::Inference,
 		path: "/responses",
+		usage_type: "gateway.responses",
 	};
 }
 
