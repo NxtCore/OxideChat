@@ -82,13 +82,13 @@ impl I18n {
 	/// Initialize the global i18n instance.
 	///
 	/// Call this once at startup after database connection is established.
-	/// Panics if called more than once.
+	/// Later calls are ignored; the first initialization wins.
 	pub async fn init(pool: &PgPool) {
 		let translations = Self::load_from_db(pool).await;
 		let instance = Self {
 			translations: ArcSwap::new(Arc::new(translations)),
 		};
-		I18N.set(instance).expect("I18n already initialized");
+		let _ = I18N.set(instance);
 	}
 
 	/// Get the global i18n instance.
