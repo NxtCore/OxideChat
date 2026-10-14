@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-	use crate::types::{Chat, Workspace};
+	use crate::types::{Chat, Workspace, WorkspaceDeleteAction};
 	use sqlx::PgPool;
 	use uuid::Uuid;
 
@@ -34,13 +34,13 @@ mod tests {
 		let to = Workspace::create(&pool, &user, "To", None, None, false).await.unwrap();
 		let chat = Chat::create(&pool, &user, Some(&from.id), Some("c")).await.unwrap();
 
-		let moved = Chat::move_all_to_workspace(&pool, &user, &from.id, &to.id).await.unwrap();
-		assert_eq!(moved, 1);
+		let deleted = Workspace::delete_with_chat_disposition(&pool, &from.id, &user, WorkspaceDeleteAction::Move, Some(&to.id))
+			.await
+			.unwrap();
+		assert!(deleted);
 
 		let reloaded = Chat::find_by_id_and_user(&pool, &chat.id, &user).await.unwrap().unwrap();
 		assert_eq!(reloaded.workspace_id, Some(to.id));
-
-		assert!(Workspace::delete(&pool, &from.id, &user).await.unwrap());
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
@@ -49,8 +49,10 @@ mod tests {
 		let ws = Workspace::create(&pool, &user, "Ws", None, None, false).await.unwrap();
 		let chat = Chat::create(&pool, &user, Some(&ws.id), Some("c")).await.unwrap();
 
-		let archived = Chat::archive_all_in_workspace(&pool, &user, &ws.id).await.unwrap();
-		assert_eq!(archived, 1);
+		let deleted = Workspace::delete_with_chat_disposition(&pool, &ws.id, &user, WorkspaceDeleteAction::Archive, None)
+			.await
+			.unwrap();
+		assert!(deleted);
 
 		let reloaded = Chat::find_by_id_and_user(&pool, &chat.id, &user).await.unwrap().unwrap();
 		assert!(reloaded.is_archived);
@@ -85,8 +87,10 @@ mod tests {
 		let chat = Chat::create(&pool, &user, Some(&ws.id), Some("c")).await.unwrap();
 		insert_message(&pool, &chat.id).await;
 
-		let deleted = Chat::delete_all_in_workspace(&pool, &user, &ws.id).await.unwrap();
-		assert_eq!(deleted, 1);
+		let deleted = Workspace::delete_with_chat_disposition(&pool, &ws.id, &user, WorkspaceDeleteAction::Delete, None)
+			.await
+			.unwrap();
+		assert!(deleted);
 
 		assert!(Chat::find_by_id_and_user(&pool, &chat.id, &user).await.unwrap().is_none());
 		let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE chat_id = $1")
