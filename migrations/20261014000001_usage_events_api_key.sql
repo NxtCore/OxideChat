@@ -4,5 +4,5 @@ CREATE INDEX IF NOT EXISTS idx_usage_events_api_key_created ON usage_events(api_
 
 INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.analytics.unknown_api_key', 'Unknown key'),
-    ('de', 'settings.analytics.unknown_api_key', 'Unbekannter Schlüssel');
+    ('de', 'settings.analytics.unknown_api_key', 'Unbekannter Schlüssel')
 ON CONFLICT (language, key_path) DO NOTHING;

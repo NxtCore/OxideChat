@@ -91,6 +91,7 @@ impl UsageEvent {
 			FROM usage_events ue
 			LEFT JOIN gateway_api_keys k ON k.id = ue.api_key_id
 			WHERE ue.created_at >= $1 AND ue.created_at <= $2
+			  AND ue.api_key_id IS NOT NULL
 			  AND ($3::uuid IS NULL OR ue.user_id = $3)
 			  AND ($4::uuid IS NULL OR ue.team_id = $4)
 			  AND ($5::uuid IS NULL OR ue.api_key_id = $5)
