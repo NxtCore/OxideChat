@@ -107,10 +107,10 @@ fn set_key(key: &EncryptionKey) -> Result<(), EncryptionError> {
 
 #[cfg(test)]
 pub(crate) fn init_for_test(key: EncryptionKey) -> Result<(), EncryptionError> {
-	if CIPHER.get().is_some() {
-		return Ok(());
+	match set_key(&key) {
+		Err(EncryptionError::AlreadyInitialized) => Ok(()),
+		result => result,
 	}
-	set_key(&key)
 }
 
 /// Check whether encryption was initialized successfully.
