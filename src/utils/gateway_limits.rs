@@ -39,11 +39,11 @@ where
 }
 
 fn log_failure(error: &GatewayLimitError, context: &GatewayAuthContext, route: GatewayRoute) {
-	let (project_id, key_id, path) = (context.project_id, context.key_id, route.path);
+	let (team_id, key_id, path) = (context.team_id, context.key_id, route.path);
 	match error {
-		GatewayLimitError::Rejected { dimension, .. } => tracing::warn!(%project_id, %key_id, path, ?dimension, "gateway admission rejected"),
-		GatewayLimitError::Overloaded => tracing::warn!(%project_id, %key_id, path, "gateway admission queue is full"),
-		GatewayLimitError::Unavailable | GatewayLimitError::Misconfigured => tracing::error!(%project_id, %key_id, path, %error, "gateway admission failed"),
+		GatewayLimitError::Rejected { dimension, .. } => tracing::warn!(%team_id, %key_id, path, ?dimension, "gateway admission rejected"),
+		GatewayLimitError::Overloaded => tracing::warn!(%team_id, %key_id, path, "gateway admission queue is full"),
+		GatewayLimitError::Unavailable | GatewayLimitError::Misconfigured => tracing::error!(%team_id, %key_id, path, %error, "gateway admission failed"),
 	}
 }
 

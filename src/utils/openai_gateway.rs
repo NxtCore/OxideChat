@@ -1,8 +1,8 @@
 use crate::ai;
 use crate::i18n::I18n;
 use crate::types::{
-	API_KEY_ID_HEADER, GatewayAuthContext, GatewayInference, GatewayModel, GatewayModelAccessError, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState, PROJECT_ID_HEADER,
-	PROJECT_NAME_HEADER, RESERVATION_METADATA_KEY, TEAM_ID_HEADER,
+	API_KEY_ID_HEADER, GatewayAuthContext, GatewayInference, GatewayModel, GatewayModelAccessError, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState,
+	RESERVATION_METADATA_KEY, TEAM_ID_HEADER,
 };
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -63,7 +63,7 @@ pub async fn authenticate(pool: &PgPool, headers: &HeaderMap, scope: &str) -> Re
 	Ok(context)
 }
 
-/// Lists the models visible to an authorized gateway project.
+/// Lists the models visible to an authorized gateway API key.
 pub async fn run_models(state: &JobState, context: &GatewayAuthContext) -> Response {
 	match GatewayModel::list_for_context(&state.db, context).await {
 		Ok(models) => axum::Json(OpenAIModelsResponse {
@@ -192,12 +192,9 @@ fn request_metadata(context: &GatewayAuthContext, inference: &GatewayInference, 
 	let mut metadata = BTreeMap::new();
 	metadata.insert(RESERVATION_METADATA_KEY.to_string(), reservation_id.to_string());
 	metadata.insert("oxide_user_id".to_string(), context.user_id.to_string());
-	metadata.insert("oxide_project_id".to_string(), context.project_id.to_string());
 	metadata.insert("oxide_api_key_id".to_string(), context.key_id.to_string());
 	metadata.insert("oxide_model_id".to_string(), inference.model_id.to_string());
-	if let Some(team_id) = context.team_id {
-		metadata.insert("oxide_team_id".to_string(), team_id.to_string());
-	}
+	metadata.insert("oxide_team_id".to_string(), context.team_id.to_string());
 	SkinRequestMetadata(metadata)
 }
 
@@ -212,20 +209,12 @@ fn add_request_id_header(mut response: Response, request_id: Uuid) -> Response {
 
 #[must_use]
 fn gateway_context_headers(context: &GatewayAuthContext) -> HeaderMap {
-	let mut headers = HeaderMap::with_capacity(4);
-	if let Ok(value) = HeaderValue::from_str(&context.project_id.to_string()) {
-		headers.insert(PROJECT_ID_HEADER, value);
-	}
+	let mut headers = HeaderMap::with_capacity(2);
 	if let Ok(value) = HeaderValue::from_str(&context.key_id.to_string()) {
 		headers.insert(API_KEY_ID_HEADER, value);
 	}
-	if let Some(team_id) = context.team_id
-		&& let Ok(value) = HeaderValue::from_str(&team_id.to_string())
-	{
+	if let Ok(value) = HeaderValue::from_str(&context.team_id.to_string()) {
 		headers.insert(TEAM_ID_HEADER, value);
-	}
-	if let Ok(value) = HeaderValue::from_str(&context.project_name) {
-		headers.insert(PROJECT_NAME_HEADER, value);
 	}
 	headers
 }
