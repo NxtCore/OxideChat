@@ -1,5 +1,5 @@
 use crate::types::models::{Model, ModelPricing};
-use crate::types::{Budget, JobState, UsageEvent, UsageEventRecord};
+use crate::types::{Budget, GatewayLimitBackend, GatewayLimiter, JobState, RESERVATION_METADATA_KEY, UsageEvent, UsageEventRecord};
 use omniference::catalog::UsageBreakdown;
 use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
 use omniference::stream::CostDetails;
@@ -63,6 +63,7 @@ impl OxideCostSink {
 
 /// Managed asynchronous cost queue with retry and shutdown handling.
 pub struct OxideCostQueue {
+	limiter: GatewayLimiter,
 	sender: mpsc::UnboundedSender<CostQueueMessage>,
 	shutdown_started: AtomicBool,
 	shutdown_complete: AtomicBool,
@@ -73,6 +74,7 @@ impl OxideCostQueue {
 	/// Starts a cost queue that writes through the supplied application state.
 	#[must_use]
 	pub fn spawn(state: Arc<JobState>) -> Arc<Self> {
+		let limiter = state.gateway_limiter.clone();
 		let (sender, mut receiver) = mpsc::unbounded_channel();
 		let sink = OxideCostSink::new(state);
 		tokio::spawn(async move {
@@ -103,6 +105,7 @@ impl OxideCostQueue {
 			}
 		});
 		Arc::new(Self {
+			limiter,
 			sender,
 			shutdown_started: AtomicBool::new(false),
 			shutdown_complete: AtomicBool::new(false),
@@ -143,6 +146,13 @@ impl OxideCostQueue {
 }
 
 impl CostSink for OxideCostQueue {
+	fn terminal_usage(&self, _finalization: CostFinalization, metadata: &BTreeMap<String, String>, usage: &UsageBreakdown) {
+		if let Some(id) = metadata.get(RESERVATION_METADATA_KEY).and_then(|value| Uuid::parse_str(value).ok()) {
+			self.limiter
+				.reconcile(id, u64::from(usage.input_tokens) + u64::from(usage.output_tokens.max(usage.reasoning_tokens)));
+		}
+	}
+
 	fn record(&self, provider: &str, model: &str, cost: &CostDetails, finalization: CostFinalization) {
 		self.record_with_context(provider, model, cost, finalization, &BTreeMap::new(), &UsageBreakdown::default());
 	}

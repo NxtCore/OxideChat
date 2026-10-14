@@ -1,12 +1,31 @@
 use super::{GatewayAuthContext, GatewayAuthError, GatewayCredential, GatewayInference, GatewayModel, GatewayModelAccessError};
+use super::{GatewayRatePolicy, GatewayRateRule};
 use crate::types::Budget;
 use crate::types::models::ModelPricing;
 use crate::utils::auth::{hash_password, verify_password};
 use chrono::Utc;
 use omniference::types::providers::OpenAIModel;
 use sqlx::{PgPool, types::Json};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use uuid::Uuid;
+
+// Internal Types
+
+struct ResolvedModel {
+	id: Uuid,
+	max_tokens: Option<i32>,
+	context_length: Option<i32>,
+}
+
+impl From<ResolvedModel> for GatewayInference {
+	fn from(model: ResolvedModel) -> Self {
+		Self {
+			model_id: model.id,
+			max_output_tokens: model.max_tokens.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
+			context_length: model.context_length.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
+		}
+	}
+}
 
 static DUMMY_SECRET_HASH: LazyLock<String> = LazyLock::new(|| hash_password("oxide-gateway-invalid-secret").unwrap_or_default());
 
@@ -24,7 +43,10 @@ impl GatewayCredential {
 	pub async fn authenticate(pool: &PgPool, token: &str) -> Result<GatewayAuthContext, GatewayAuthError> {
 		let parsed = parse_token(token);
 		let credential = match parsed.as_ref() {
-			Some(parsed) => Self::find(pool, &parsed.key_id).await.map_err(|_| GatewayAuthError::Unavailable)?,
+			Some(parsed) => Self::find(pool, &parsed.key_id).await.map_err(|error| {
+				tracing::error!(%error, key_id = %parsed.key_id, "gateway credential or policy could not be loaded");
+				GatewayAuthError::Unavailable
+			})?,
 			None => None,
 		};
 		let hash = credential.as_ref().map_or(DUMMY_SECRET_HASH.as_str(), |value| value.secret_hash.as_str());
@@ -53,6 +75,16 @@ impl GatewayCredential {
 		{
 			tracing::warn!(%error, key_id = %credential.key_id, "failed to update gateway API key usage timestamp");
 		}
+		let policy = GatewayRatePolicy::from_stored(
+			credential.project_rules.0,
+			credential.key_rules.0,
+			credential.project_concurrency,
+			credential.key_concurrency,
+		)
+		.map_err(|error| {
+			tracing::error!(%error, project_id = %credential.project_id, key_id = %credential.key_id, "invalid gateway rate policy");
+			GatewayAuthError::Unavailable
+		})?;
 		Ok(GatewayAuthContext {
 			key_id: credential.key_id,
 			project_id: credential.project_id,
@@ -60,6 +92,7 @@ impl GatewayCredential {
 			team_id: credential.team_id,
 			project_name: credential.project_name,
 			scopes: credential.scopes.0,
+			policy: Arc::new(policy),
 		})
 	}
 
@@ -78,9 +111,23 @@ impl GatewayCredential {
 				k.is_enabled AS "key_enabled!",
 				p.is_enabled AS "project_enabled!",
 				k.expires_at,
-				k.revoked_at
+				k.revoked_at,
+				p.max_concurrent_requests AS project_concurrency,
+				k.max_concurrent_requests AS key_concurrency,
+				rules.project_rules AS "project_rules!: Json<Vec<GatewayRateRule>>",
+				rules.key_rules AS "key_rules!: Json<Vec<GatewayRateRule>>"
 			FROM gateway_api_keys k
 			JOIN gateway_projects p ON p.id = k.project_id
+			CROSS JOIN LATERAL (
+				SELECT
+					COALESCE(jsonb_agg(r.rule ORDER BY r.id) FILTER (WHERE r.project_id = p.id), '[]'::jsonb) AS project_rules,
+					COALESCE(jsonb_agg(r.rule ORDER BY r.id) FILTER (WHERE r.api_key_id = k.id), '[]'::jsonb) AS key_rules
+				FROM (
+					SELECT id, project_id, api_key_id, jsonb_build_object('id', id, 'route_class', route_class, 'metric', metric, 'capacity', capacity, 'refill_period_seconds', refill_period_seconds) AS rule
+					FROM gateway_rate_limit_rules
+					WHERE is_enabled AND (project_id = p.id OR api_key_id = k.id)
+				) r
+			) rules
 			WHERE k.id = $1
 			"#,
 			key_id
@@ -143,12 +190,21 @@ impl GatewayModel {
 	///
 	/// Returns an error when model-access storage cannot be queried.
 	pub async fn resolve_accessible(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<Option<Uuid>, sqlx::Error> {
+		Ok(Self::resolve_model(pool, context, requested_id).await?.map(|model| model.id))
+	}
+
+	async fn resolve_model(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<Option<ResolvedModel>, sqlx::Error> {
 		let (provider_name, model_id) = requested_id.split_once('/').map_or((None, requested_id), |(provider, model)| (Some(provider), model));
-		let matches = sqlx::query_scalar!(
+		let mut matches = sqlx::query_as!(
+			ResolvedModel,
 			r#"
-			SELECT DISTINCT m.id
+			SELECT DISTINCT
+				m.id,
+				COALESCE(c.max_output_tokens, m.max_tokens) AS max_tokens,
+				COALESCE(c.context_length, m.context_length) AS context_length
 			FROM models m
 			JOIN providers p ON p.id = m.provider_id
+			LEFT JOIN model_configs c ON c.model_id = m.id AND c.owner_id IS NULL
 			WHERE m.model_id = $3
 			  AND ($4::text IS NULL OR LOWER(p.name) = LOWER($4))
 			  AND m.is_enabled = TRUE
@@ -174,7 +230,7 @@ impl GatewayModel {
 		)
 		.fetch_all(pool)
 		.await?;
-		Ok((matches.len() == 1).then(|| matches[0]))
+		Ok(if matches.len() == 1 { matches.pop() } else { None })
 	}
 
 	/// Resolves model access and checks budget admission.
@@ -188,13 +244,11 @@ impl GatewayModel {
 	/// ambiguous models, [`GatewayModelAccessError::BudgetExceeded`] for blocked
 	/// budgets, and a database error when policy evaluation fails.
 	pub async fn authorize_inference(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<GatewayInference, GatewayModelAccessError> {
-		let model_id = Self::resolve_accessible(pool, context, requested_id)
-			.await?
-			.ok_or(GatewayModelAccessError::NotFound)?;
-		if !ModelPricing::is_free(pool, &model_id).await? && !Budget::allows_inference(pool, &context.user_id).await? {
+		let model = Self::resolve_model(pool, context, requested_id).await?.ok_or(GatewayModelAccessError::NotFound)?;
+		if !ModelPricing::is_free(pool, &model.id).await? && !Budget::allows_inference(pool, &context.user_id).await? {
 			return Err(GatewayModelAccessError::BudgetExceeded);
 		}
-		Ok(GatewayInference { model_id })
+		Ok(model.into())
 	}
 }
 

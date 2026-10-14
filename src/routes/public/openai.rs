@@ -1,11 +1,11 @@
-use crate::types::{GatewayAuthContext, GatewayModel, JobState};
-use crate::utils::openai_gateway::{error_response, model_access_error_response, run_chat, run_responses, translation};
+use crate::types::{GatewayAuthContext, GatewayModel, GatewayRoute, JobState};
+use crate::utils::gateway_limits;
+use crate::utils::openai_gateway::{error_response, model_access_error_response, run_chat, run_models, run_responses, translation};
 use axum::extract::{Extension, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use omniference::server::SkinAwareJson;
 use omniference::skins::{OpenAIErrorHandler, SkinErrorHandler};
-use omniference::types::providers::OpenAIModelsResponse;
 use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
 use std::sync::Arc;
 
@@ -21,43 +21,28 @@ pub async fn method_not_allowed() -> Response {
 
 /// Lists enabled models accessible to the authenticated gateway project.
 pub async fn list_models(State(state): State<Arc<JobState>>, Extension(context): Extension<GatewayAuthContext>) -> Response {
-	let models = match GatewayModel::list_for_context(&state.db, &context).await {
-		Ok(models) => models,
-		Err(error) => {
-			tracing::error!(%error, "failed to list gateway models");
-			return error_response(
-				StatusCode::INTERNAL_SERVER_ERROR,
-				translation("gateway.errors.list_models"),
-				"server_error",
-				"internal_error",
-			);
-		}
-	};
-	axum::Json(OpenAIModelsResponse {
-		object: Some("list".to_string()),
-		data: models,
-	})
-	.into_response()
+	gateway_limits::run_limited(&state, &context, GatewayRoute::MODELS, Ok(0), |_| run_models(&state, &context)).await
 }
 
 /// Runs an authorized OpenAI-compatible chat completion request.
 pub async fn chat_completions(
 	State(state): State<Arc<JobState>>,
 	Extension(context): Extension<GatewayAuthContext>,
-	SkinAwareJson(request): SkinAwareJson<OpenAIChatRequest>,
+	SkinAwareJson(mut request): SkinAwareJson<OpenAIChatRequest>,
 ) -> Response {
 	let inference = match GatewayModel::authorize_inference(&state.db, &context, &request.model).await {
 		Ok(inference) => inference,
 		Err(error) => return model_access_error_response(error, &request.model),
 	};
-	run_chat(request, &context, inference).await
+	let tokens = inference.chat_tokens(&context.policy, &mut request);
+	gateway_limits::run_limited(&state, &context, GatewayRoute::CHAT, tokens, |id| run_chat(request, &context, inference, id)).await
 }
 
 /// Runs an authorized OpenAI-compatible responses request.
 pub async fn responses(
 	State(state): State<Arc<JobState>>,
 	Extension(context): Extension<GatewayAuthContext>,
-	SkinAwareJson(request): SkinAwareJson<OpenAIResponsesRequestPayload>,
+	SkinAwareJson(mut request): SkinAwareJson<OpenAIResponsesRequestPayload>,
 ) -> Response {
 	let Some(model) = request.model.as_deref() else {
 		return error_response(
@@ -71,5 +56,6 @@ pub async fn responses(
 		Ok(inference) => inference,
 		Err(error) => return model_access_error_response(error, model),
 	};
-	run_responses(request, &context, inference).await
+	let tokens = inference.responses_tokens(&context.policy, &mut request);
+	gateway_limits::run_limited(&state, &context, GatewayRoute::RESPONSES, tokens, |id| run_responses(request, &context, inference, id)).await
 }

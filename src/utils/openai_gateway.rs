@@ -1,12 +1,16 @@
 use crate::ai;
 use crate::i18n::I18n;
-use crate::types::{GatewayAuthContext, GatewayInference, GatewayModelAccessError, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState};
+use crate::types::{
+	API_KEY_ID_HEADER, GatewayAuthContext, GatewayInference, GatewayModel, GatewayModelAccessError, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState, PROJECT_ID_HEADER,
+	PROJECT_NAME_HEADER, RESERVATION_METADATA_KEY, TEAM_ID_HEADER,
+};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use omniference::server::SkinAwareJson;
 use omniference::skins::{OpenAIChatSkin, OpenAIErrorHandler, OpenAIResponsesSkin, SkinContext, SkinErrorHandler, SkinRequestMetadata, openai_error_response};
+use omniference::types::providers::OpenAIModelsResponse;
 use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
 use sqlx::PgPool;
 use std::collections::BTreeMap;
@@ -59,9 +63,29 @@ pub async fn authenticate(pool: &PgPool, headers: &HeaderMap, scope: &str) -> Re
 	Ok(context)
 }
 
-/// Runs an authorized OpenAI chat request.
-pub async fn run_chat(request: OpenAIChatRequest, context: &GatewayAuthContext, inference: GatewayInference) -> Response {
-	let metadata = request_metadata(context, &inference);
+/// Lists the models visible to an authorized gateway project.
+pub async fn run_models(state: &JobState, context: &GatewayAuthContext) -> Response {
+	match GatewayModel::list_for_context(&state.db, context).await {
+		Ok(models) => axum::Json(OpenAIModelsResponse {
+			object: Some("list".to_string()),
+			data: models,
+		})
+		.into_response(),
+		Err(error) => {
+			tracing::error!(%error, "failed to list gateway models");
+			error_response(
+				StatusCode::INTERNAL_SERVER_ERROR,
+				translation("gateway.errors.list_models"),
+				"server_error",
+				"internal_error",
+			)
+		}
+	}
+}
+
+/// Runs an authorized `OpenAI` chat request.
+pub async fn run_chat(request: OpenAIChatRequest, context: &GatewayAuthContext, inference: GatewayInference, reservation_id: Uuid) -> Response {
+	let metadata = request_metadata(context, &inference, reservation_id);
 	let engine = ai::get();
 	let engine = engine.read().await;
 	let skin_context = SkinContext::with_service(engine.service().clone());
@@ -69,9 +93,9 @@ pub async fn run_chat(request: OpenAIChatRequest, context: &GatewayAuthContext, 
 	OpenAIChatSkin::handle_chat(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await
 }
 
-/// Runs an authorized OpenAI responses request.
-pub async fn run_responses(request: OpenAIResponsesRequestPayload, context: &GatewayAuthContext, inference: GatewayInference) -> Response {
-	let metadata = request_metadata(context, &inference);
+/// Runs an authorized `OpenAI` responses request.
+pub async fn run_responses(request: OpenAIResponsesRequestPayload, context: &GatewayAuthContext, inference: GatewayInference, reservation_id: Uuid) -> Response {
+	let metadata = request_metadata(context, &inference, reservation_id);
 	let raw_request = match serde_json::to_value(request) {
 		Ok(raw_request) => raw_request,
 		Err(error) => {
@@ -106,9 +130,11 @@ async fn authenticate_request(state: &JobState, mut request: Request, next: Next
 		Ok(context) => context,
 		Err(response) => return response,
 	};
-	request.extensions_mut().insert(context.clone());
-	let response = next.run(request).await;
-	add_gateway_context_headers(response, &context)
+	let headers = gateway_context_headers(&context);
+	request.extensions_mut().insert(context);
+	let mut response = next.run(request).await;
+	response.headers_mut().extend(headers);
+	response
 }
 
 /// Axum middleware assigning a unique request identifier response header.
@@ -162,8 +188,9 @@ fn invalid_bearer_response() -> Response {
 	)
 }
 
-fn request_metadata(context: &GatewayAuthContext, inference: &GatewayInference) -> SkinRequestMetadata {
+fn request_metadata(context: &GatewayAuthContext, inference: &GatewayInference, reservation_id: Uuid) -> SkinRequestMetadata {
 	let mut metadata = BTreeMap::new();
+	metadata.insert(RESERVATION_METADATA_KEY.to_string(), reservation_id.to_string());
 	metadata.insert("oxide_user_id".to_string(), context.user_id.to_string());
 	metadata.insert("oxide_project_id".to_string(), context.project_id.to_string());
 	metadata.insert("oxide_api_key_id".to_string(), context.key_id.to_string());
@@ -176,27 +203,29 @@ fn request_metadata(context: &GatewayAuthContext, inference: &GatewayInference) 
 
 #[must_use]
 fn add_request_id_header(mut response: Response, request_id: Uuid) -> Response {
-	if let Ok(value) = HeaderValue::from_str(&request_id.to_string()) {
-		response.headers_mut().insert("x-request-id", value);
+	let (name, value) = omniference::skins::openai_request_id_header(&request_id.to_string());
+	if let Ok(value) = HeaderValue::from_str(&value) {
+		response.headers_mut().insert(name, value);
 	}
 	response
 }
 
 #[must_use]
-fn add_gateway_context_headers(mut response: Response, context: &GatewayAuthContext) -> Response {
+fn gateway_context_headers(context: &GatewayAuthContext) -> HeaderMap {
+	let mut headers = HeaderMap::with_capacity(4);
 	if let Ok(value) = HeaderValue::from_str(&context.project_id.to_string()) {
-		response.headers_mut().insert("x-oxide-project-id", value);
+		headers.insert(PROJECT_ID_HEADER, value);
 	}
 	if let Ok(value) = HeaderValue::from_str(&context.key_id.to_string()) {
-		response.headers_mut().insert("x-oxide-api-key-id", value);
+		headers.insert(API_KEY_ID_HEADER, value);
 	}
 	if let Some(team_id) = context.team_id
 		&& let Ok(value) = HeaderValue::from_str(&team_id.to_string())
 	{
-		response.headers_mut().insert("x-oxide-team-id", value);
+		headers.insert(TEAM_ID_HEADER, value);
 	}
 	if let Ok(value) = HeaderValue::from_str(&context.project_name) {
-		response.headers_mut().insert("x-oxide-project-name", value);
+		headers.insert(PROJECT_NAME_HEADER, value);
 	}
-	response
+	headers
 }
