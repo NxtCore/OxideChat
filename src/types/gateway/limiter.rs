@@ -316,7 +316,9 @@ impl Owner {
 			self.control(control);
 		}
 		let result = self.admit(&message.request, message.reservation);
-		let _ = message.reply.send(result);
+		if let Err(Ok(admission)) = message.reply.send(result) {
+			self.reconcile(admission.reservation.id, 0);
+		}
 	}
 
 	fn rules(request: &GatewayAdmissionRequest) -> impl Iterator<Item = (BucketKey, &GatewayRateRule)> {

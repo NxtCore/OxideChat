@@ -13,6 +13,7 @@ use uuid::Uuid;
 /// Admits a request, runs it with its reservation id, and ties the reservation to the response body.
 ///
 /// A failed token estimate or admission is rendered here as a translated `OpenAI` error.
+/// A non-success response refunds its token reservation because providers report no usage for it.
 pub async fn run_limited<F, Fut>(state: &JobState, context: &GatewayAuthContext, route: GatewayRoute, tokens: Result<u64, GatewayLimitError>, run: F) -> Response
 where
 	F: FnOnce(Uuid) -> Fut,
@@ -25,6 +26,9 @@ where
 	match admitted {
 		Ok(admission) => {
 			let response = run(admission.reservation.id).await;
+			if !response.status().is_success() {
+				state.gateway_limiter.reconcile(admission.reservation.id, 0);
+			}
 			finish(admission, response)
 		}
 		Err(error) => {
