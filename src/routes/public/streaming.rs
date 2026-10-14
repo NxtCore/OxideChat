@@ -1096,6 +1096,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, Extension(Req
 											let usage_recorded = UsageEvent::record(&db, UsageEventRecord {
 												user_id: &user.id,
 												team_id: Budget::primary_team_id(&db, &user.id).await.ok().flatten(),
+												api_key_id: None,
 												model_id: &model.id,
 												provider_id: &model.provider_id,
 												request_type: "chat",

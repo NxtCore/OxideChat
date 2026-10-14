@@ -19,21 +19,20 @@ pub async fn get_analytics(
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
 	let group_by = params.group_by.as_deref().unwrap_or("model");
-	if group_by == "day_model" {
-		return match UsageEvent::day_model_analytics(&state.db, params.from, params.to, params.user_id.as_ref()).await {
-			Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
-			Err(e) => {
-				eprintln!("[ANALYTICS] Failed to load day_model analytics: {e}");
-				ErrorBuilder::new(ErrorCode::DatabaseError).build()
-			}
-		};
-	}
-	let analytics = match params.user_id.as_ref() {
-		Some(user_id) => UsageEvent::analytics_for_user(&state.db, user_id, params.from, params.to, group_by).await,
-		None => UsageEvent::analytics(&state.db, params.from, params.to, group_by).await,
+	let filter = params.filter();
+	let result = match group_by {
+		"day_model" => UsageEvent::day_model_analytics(&state.db, params.from, params.to, filter)
+			.await
+			.map(|rows| ResponseBuilder::new(ResponseBody::Json(rows)).build()),
+		"api_key" => UsageEvent::api_key_analytics(&state.db, params.from, params.to, filter)
+			.await
+			.map(|rows| ResponseBuilder::new(ResponseBody::Json(rows)).build()),
+		_ => UsageEvent::analytics(&state.db, params.from, params.to, group_by, filter)
+			.await
+			.map(|rows| ResponseBuilder::new(ResponseBody::Json(rows)).build()),
 	};
-	match analytics {
-		Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
+	match result {
+		Ok(response) => response,
 		Err(e) => {
 			eprintln!("[ANALYTICS] Failed to load analytics: {e}");
 			ErrorBuilder::new(ErrorCode::DatabaseError).build()

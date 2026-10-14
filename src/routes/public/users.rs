@@ -1,4 +1,4 @@
-use crate::types::{AnalyticsQuery, Budget, JobState, RequestContext, UsageEvent};
+use crate::types::{AnalyticsQuery, Budget, JobState, RequestContext, UsageEvent, UsageFilter};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	extract::{Extension, Query, State},
@@ -47,8 +47,12 @@ pub async fn get_my_analytics(State(state): State<Arc<JobState>>, Extension(Requ
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	let group_by = params.group_by.as_deref().unwrap_or("model");
+	let filter = UsageFilter {
+		user_id: Some(user.id),
+		..UsageFilter::default()
+	};
 	if group_by == "day_model" {
-		return match UsageEvent::day_model_analytics(&state.db, params.from, params.to, Some(&user.id)).await {
+		return match UsageEvent::day_model_analytics(&state.db, params.from, params.to, filter).await {
 			Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
 			Err(e) => {
 				eprintln!("[ANALYTICS] Failed to load user day_model analytics: {e}");
@@ -56,7 +60,7 @@ pub async fn get_my_analytics(State(state): State<Arc<JobState>>, Extension(Requ
 			}
 		};
 	}
-	match UsageEvent::analytics_for_user(&state.db, &user.id, params.from, params.to, group_by).await {
+	match UsageEvent::analytics(&state.db, params.from, params.to, group_by, filter).await {
 		Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
 		Err(e) => {
 			eprintln!("[ANALYTICS] Failed to load user analytics: {e}");

@@ -2,6 +2,7 @@ import {defineStore} from 'pinia';
 import type {
 	AnalyticsDayModelRow,
 	AnalyticsRow,
+	ApiKeyAnalyticsRow,
 	Budget,
 	BudgetAssignmentInfo,
 	BudgetPayload,
@@ -21,6 +22,7 @@ export const useBudgetStore = defineStore('budget', {
 			byModel: [] as AnalyticsRow[],
 			byUser: [] as AnalyticsRow[],
 			byTeam: [] as AnalyticsRow[],
+			byApiKey: [] as ApiKeyAnalyticsRow[],
 			byDay: [] as AnalyticsRow[],
 			byDayModel: [] as AnalyticsDayModelRow[],
 		},
@@ -122,16 +124,18 @@ export const useBudgetStore = defineStore('budget', {
 		},
 		async fetchAllAnalytics(params: {from?: string; to?: string} = {}) {
 			const {$customFetch} = useNuxtApp();
-			const [byModel, byUser, byTeam, byDay, byDayModel] = await Promise.all([
+			const [byModel, byUser, byTeam, byApiKey, byDay, byDayModel] = await Promise.all([
 				$customFetch<AnalyticsRow[]>('/api/v1/admin/analytics', {params: {...params, group_by: 'model'}}),
 				$customFetch<AnalyticsRow[]>('/api/v1/admin/analytics', {params: {...params, group_by: 'user'}}),
 				$customFetch<AnalyticsRow[]>('/api/v1/admin/analytics', {params: {...params, group_by: 'team'}}),
+				$customFetch<ApiKeyAnalyticsRow[]>('/api/v1/admin/analytics', {params: {...params, group_by: 'api_key'}}),
 				$customFetch<AnalyticsRow[]>('/api/v1/admin/analytics', {params: {...params, group_by: 'day'}}),
 				$customFetch<AnalyticsDayModelRow[]>('/api/v1/admin/analytics', {params: {...params, group_by: 'day_model'}}),
 			]);
 			this.analytics.byModel = byModel ?? [];
 			this.analytics.byUser = byUser ?? [];
 			this.analytics.byTeam = byTeam ?? [];
+			this.analytics.byApiKey = byApiKey ?? [];
 			this.analytics.byDay = byDay ?? [];
 			this.analytics.byDayModel = byDayModel ?? [];
 		},
