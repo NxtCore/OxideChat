@@ -48,6 +48,7 @@ impl OxideCostSink {
 		let usage = UsageEventRecord {
 			user_id: &user_id,
 			team_id,
+			api_key_id: metadata_uuid(record, "oxide_api_key_id"),
 			model_id: &model.id,
 			provider_id: &model.provider_id,
 			request_type: "gateway",

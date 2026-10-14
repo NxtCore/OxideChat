@@ -119,16 +119,37 @@
 
 				<!-- Top API Keys + Top Users -->
 				<div v-if="isAdmin" class="mb-6 grid gap-4 xl:grid-cols-2">
-					<!-- Top API Keys (placeholder) -->
+					<!-- Top API Keys -->
 					<div class="rounded-lg border border-border bg-card">
-						<div class="flex items-center justify-between border-b border-border px-4 py-3">
+						<div class="border-b border-border px-4 py-3">
 							<h3 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.top_api_keys') }}</h3>
-							<span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{{ store.getTranslation('settings.analytics.coming_soon') }}</span>
 						</div>
-						<div class="flex flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
-							<KeyRound class="h-8 w-8 opacity-30" />
-							<p class="text-sm">{{ store.getTranslation('settings.analytics.api_keys_soon') }}</p>
+						<div v-if="byApiKey.length">
+							<div class="grid grid-cols-[1.5rem_1fr_5rem_5rem_5rem] items-center gap-2 border-b border-border/50 px-4 py-2 text-xs font-medium text-muted-foreground">
+								<span>#</span>
+								<span></span>
+								<span class="text-right">{{ store.getTranslation('settings.analytics.requests') }}</span>
+								<span class="text-right">{{ store.getTranslation('settings.analytics.total_tokens_short') }}</span>
+								<span class="text-right">{{ store.getTranslation('settings.analytics.cost') }}</span>
+							</div>
+							<div
+								v-for="(row, i) in byApiKey.slice(0, 8)"
+								:key="row.id ?? 'unknown'"
+								class="grid grid-cols-[1.5rem_1fr_5rem_5rem_5rem] items-center gap-2 border-b border-border/50 px-4 py-2.5 text-sm last:border-0"
+							>
+								<span class="text-xs text-muted-foreground">{{ i + 1 }}</span>
+								<div class="flex min-w-0 items-center gap-2">
+									<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+										<KeyRound class="h-3 w-3" />
+									</div>
+									<span class="truncate font-medium">{{ apiKeyLabel(row) }}</span>
+								</div>
+								<span class="text-right text-xs text-muted-foreground">{{ formatNumber(row.request_count) }}</span>
+								<span class="text-right text-xs text-muted-foreground">{{ formatTokens(tokenTotal(row)) }}</span>
+								<span class="text-right font-medium text-foreground">{{ formatMoney(Number(row.cost_total)) }}</span>
+							</div>
 						</div>
+						<p v-else class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
 					</div>
 
 					<!-- Top Users -->
@@ -274,12 +295,16 @@
 							<div class="rounded-lg border border-border bg-card p-4">
 								<div class="mb-4 flex items-center justify-between gap-3">
 									<h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{ store.getTranslation('settings.analytics.spend_over_time') }}</h4>
-									<span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{{ store.getTranslation('settings.analytics.coming_soon') }}</span>
+									<span class="text-xs font-medium text-muted-foreground tabular-nums">{{ formatMoney(apiKeyTotalCost) }}</span>
 								</div>
-								<div class="flex h-[280px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/80 text-muted-foreground">
-									<KeyRound class="h-7 w-7 opacity-40" />
-									<p class="px-6 text-center text-sm">{{ store.getTranslation('settings.analytics.api_keys_soon') }}</p>
-								</div>
+								<SettingsHorizontalAnalyticsChart
+									v-if="apiKeyBarData.length"
+									:rows="apiKeyBarData"
+									:value-label="store.getTranslation('settings.analytics.cost')"
+									color="var(--primary)"
+									:format-value="formatMoney"
+								/>
+								<p v-else class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
 							</div>
 							<div class="rounded-lg border border-border bg-card p-4">
 								<div class="mb-4 flex items-center justify-between gap-3">
@@ -497,7 +522,7 @@ import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import {useMainStore} from '@/stores';
 import {useBudgetStore} from '@/stores/budgetStore';
 import {useIconsStore} from '@/stores/icons';
-import type {AnalyticsDayModelRow, AnalyticsRow} from '~/types/budgets';
+import type {AnalyticsDayModelRow, AnalyticsRow, ApiKeyAnalyticsRow} from '~/types/budgets';
 
 const props = defineProps<{
 	isAdmin: boolean;
@@ -609,8 +634,14 @@ const byDayModel = computed(() => {
 });
 const byUser = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byUser : []);
 const byTeam = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byTeam : []);
+const byApiKey = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byApiKey : []);
 
-function tokenTotal(row: AnalyticsRow) {
+function apiKeyLabel(row: ApiKeyAnalyticsRow) {
+	if (!row.id) return tx('settings.analytics.unknown_api_key', 'Unknown key');
+	return `${row.name ?? ''} •••• ${row.last_four ?? ''}`;
+}
+
+function tokenTotal(row: Pick<AnalyticsRow, 'input_tokens' | 'output_tokens' | 'reasoning_tokens'>) {
 	return row.input_tokens + row.output_tokens + row.reasoning_tokens;
 }
 
@@ -723,6 +754,12 @@ const userBarData = computed(() =>
 );
 
 const userTotalCost = computed(() => byUser.value.reduce((sum, row) => sum + Number(row.cost_total), 0));
+
+const apiKeyBarData = computed(() =>
+	byApiKey.value.slice(0, 8).map(row => ({label: apiKeyLabel(row), value: Number(row.cost_total)})),
+);
+
+const apiKeyTotalCost = computed(() => byApiKey.value.reduce((sum, row) => sum + Number(row.cost_total), 0));
 
 const trendingModels = computed(() => {
 	const days = [...new Set(byDayModel.value.map(row => row.day))].sort();

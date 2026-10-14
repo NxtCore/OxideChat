@@ -53,6 +53,17 @@ export interface AnalyticsDayModelRow {
 	request_count: number;
 }
 
+export interface ApiKeyAnalyticsRow {
+	id: string | null;
+	name: string | null;
+	last_four: string | null;
+	input_tokens: number;
+	output_tokens: number;
+	reasoning_tokens: number;
+	cost_total: string;
+	request_count: number;
+}
+
 export interface BudgetAssignmentInfo {
 	id: string;
 	budget_id: string;
