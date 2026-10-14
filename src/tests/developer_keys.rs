@@ -346,6 +346,22 @@ mod rotation {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn rotating_a_disabled_key_gives_a_disabled_replacement(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, user_id, false).await?;
+		let (old, _) = create_key(&pool, user_id, team_id).await?;
+		let disable = UpdateGatewayKeyRequest {
+			is_enabled: Some(false),
+			..Default::default()
+		};
+		GatewayApiKey::update(&pool, &user_id, &old.id, &disable).await?;
+		let (new, previous, token) = GatewayApiKey::rotate(&pool, &user_id, &old.id, None).await?;
+		assert!(!new.is_enabled && !previous.is_enabled);
+		assert!(matches!(GatewayCredential::authenticate(&pool, &token).await, Err(GatewayAuthError::Invalid)));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn zero_overlap_retires_the_old_key_immediately(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
 		let team_id = create_team(&pool, user_id, false).await?;

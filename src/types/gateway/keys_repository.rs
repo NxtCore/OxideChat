@@ -38,6 +38,7 @@ struct NewKey<'a> {
 	scopes: &'a [String],
 	expires_at: Option<DateTime<Utc>>,
 	max_concurrent_requests: Option<i32>,
+	is_enabled: bool,
 }
 
 impl IssuedSecret {
@@ -186,8 +187,8 @@ impl GatewayApiKey {
 
 	async fn insert(tx: &mut Transaction<'_, Postgres>, new: &NewKey<'_>, issued: &IssuedSecret) -> Result<Self, sqlx::Error> {
 		sqlx::query_as::<_, Self>(concat!(
-			"INSERT INTO gateway_api_keys (id, user_id, created_by, team_id, name, secret_hash, key_prefix, last_four, scopes, expires_at, max_concurrent_requests) ",
-			"VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ",
+			"INSERT INTO gateway_api_keys (id, user_id, created_by, team_id, name, secret_hash, key_prefix, last_four, scopes, expires_at, max_concurrent_requests, is_enabled) ",
+			"VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING ",
 			key_columns!()
 		))
 		.bind(issued.id)
@@ -200,6 +201,7 @@ impl GatewayApiKey {
 		.bind(Json(new.scopes))
 		.bind(new.expires_at)
 		.bind(new.max_concurrent_requests)
+		.bind(new.is_enabled)
 		.fetch_one(&mut **tx)
 		.await
 	}
@@ -227,6 +229,7 @@ impl GatewayApiKey {
 			scopes: &scopes,
 			expires_at: request.expires_at,
 			max_concurrent_requests: request.max_concurrent_requests,
+			is_enabled: true,
 		};
 		let key = Self::insert(&mut tx, &new, &issued).await?;
 		let metadata = json!({ "after": key_snapshot(&key), "key_prefix": key.key_prefix });
@@ -319,6 +322,7 @@ impl GatewayApiKey {
 			scopes: &old.scopes.0,
 			expires_at: old.expires_at,
 			max_concurrent_requests: old.max_concurrent_requests,
+			is_enabled: old.is_enabled,
 		};
 		let replacement = Self::insert(&mut tx, &new, &issued).await?;
 		sqlx::query(
