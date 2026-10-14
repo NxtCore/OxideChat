@@ -27,10 +27,10 @@
 - `src/tests/` - Unit tests organized by module (e.g., `i18n.rs`, `base.rs`)
 - `src/types/gateway/` - Gateway rate limiting and credentials, re-exported through `crate::types::*`
     - `limiter.rs` - Admission owned by one Tokio actor; bounded admission and unbounded release/reconciliation channels replace shared locking
-    - `policy.rs` - Rate rules, validated policies (`GatewayRatePolicy::from_stored`), and `GatewayLimitError`
+    - `policy.rs` - Team and key rate rules, validated policies (`GatewayRatePolicy::from_stored`), and `GatewayLimitError`
     - `estimate.rs` - Token estimation for inference requests
     - `body.rs` - Keeps concurrency reservations alive for the lifetime of HTTP response bodies
-    - `repository.rs` - Database access for credentials, policies, and model access
+    - `repository.rs` - Database access for credentials, policies, and model access; a key belongs to a user and is pinned to one of their teams (no projects), and authentication requires the user to still be a member of that team
     - `mod.rs` - Shared gateway types and constants
 - `src/utils/gateway_limits.rs` - HTTP glue only: admission for a route and Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter
 - `src/routes/` - HTTP route handlers (handlers only, no type definitions)

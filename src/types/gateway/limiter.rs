@@ -103,7 +103,7 @@ impl GatewayLimiter {
 		let (control, _) = mpsc::unbounded_channel();
 		let (reply, _) = oneshot::channel();
 		let request = GatewayAdmissionRequest {
-			project_id: Uuid::nil(),
+			team_id: Uuid::nil(),
 			key_id: Uuid::nil(),
 			policy: Arc::default(),
 			route_class: GatewayRouteClass::Inference,
@@ -179,7 +179,7 @@ enum Control {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum Subject {
-	Project(Uuid),
+	Team(Uuid),
 	Key(Uuid),
 }
 
@@ -322,16 +322,16 @@ impl Owner {
 	fn rules(request: &GatewayAdmissionRequest) -> impl Iterator<Item = (BucketKey, &GatewayRateRule)> {
 		request
 			.policy
-			.project_rules
+			.team_rules
 			.iter()
-			.map(|rule| ((Subject::Project(request.project_id), rule.id), rule))
+			.map(|rule| ((Subject::Team(request.team_id), rule.id), rule))
 			.chain(request.policy.key_rules.iter().map(|rule| ((Subject::Key(request.key_id), rule.id), rule)))
 			.filter(|(_, rule)| rule.matches(request.route_class))
 	}
 
 	fn caps(request: &GatewayAdmissionRequest) -> [(Subject, Option<u32>); 2] {
 		[
-			(Subject::Project(request.project_id), request.policy.project_concurrency),
+			(Subject::Team(request.team_id), request.policy.team_concurrency),
 			(Subject::Key(request.key_id), request.policy.key_concurrency),
 		]
 	}
@@ -396,7 +396,7 @@ impl Owner {
 	}
 
 	fn charge(&mut self, request: &GatewayAdmissionRequest) -> Vec<BucketKey> {
-		let mut token_buckets = Vec::with_capacity(request.policy.project_rules.len() + request.policy.key_rules.len());
+		let mut token_buckets = Vec::with_capacity(request.policy.team_rules.len() + request.policy.key_rules.len());
 		for (key, rule) in Self::rules(request) {
 			if let Some(bucket) = self.buckets.get_mut(&key) {
 				bucket.credit -= Self::cost(rule, request.tokens);

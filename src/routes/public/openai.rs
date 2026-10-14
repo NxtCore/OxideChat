@@ -19,7 +19,7 @@ pub async fn method_not_allowed() -> Response {
 	OpenAIErrorHandler.handle_method_not_allowed()
 }
 
-/// Lists enabled models accessible to the authenticated gateway project.
+/// Lists enabled models accessible to the authenticated gateway API key.
 pub async fn list_models(State(state): State<Arc<JobState>>, Extension(context): Extension<GatewayAuthContext>) -> Response {
 	gateway_limits::run_limited(&state, &context, GatewayRoute::MODELS, Ok(0), |_| run_models(&state, &context)).await
 }

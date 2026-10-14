@@ -13,7 +13,7 @@ mod support {
 
 	pub fn request() -> GatewayAdmissionRequest {
 		GatewayAdmissionRequest {
-			project_id: Uuid::from_u128(1),
+			team_id: Uuid::from_u128(1),
 			key_id: Uuid::from_u128(2),
 			policy: Arc::new(GatewayRatePolicy::default()),
 			route_class: GatewayRouteClass::Inference,
@@ -66,21 +66,26 @@ mod support {
 		)
 	}
 
-	pub async fn create_key(pool: &PgPool, user_id: Uuid, team_id: Option<Uuid>, scopes: serde_json::Value) -> TestResult<(Uuid, String)> {
-		let project_id: Uuid = sqlx::query_scalar("INSERT INTO gateway_projects (owner_id, team_id, name) VALUES ($1, $2, 'Gateway') RETURNING id")
-			.bind(user_id)
-			.bind(team_id)
-			.fetch_one(pool)
-			.await?;
+	pub async fn create_key(pool: &PgPool, user_id: Uuid, team_id: Uuid, scopes: serde_json::Value) -> TestResult<(Uuid, String)> {
+		insert_key(pool, Some(user_id), team_id, scopes).await
+	}
+
+	pub async fn create_key_in_new_team(pool: &PgPool, user_id: Uuid, scopes: serde_json::Value) -> TestResult<(Uuid, String)> {
+		let team_id = create_team(pool, user_id, &format!("Key Team {}", Uuid::new_v4()), false).await?;
+		create_key(pool, user_id, team_id, scopes).await
+	}
+
+	pub async fn insert_key(pool: &PgPool, user_id: Option<Uuid>, team_id: Uuid, scopes: serde_json::Value) -> TestResult<(Uuid, String)> {
 		let key_id = Uuid::new_v4();
 		let secret = "abcdefghijklmnopqrstuvwxyz_0123456789";
 		let token = format!("oxc_{}_{}", key_id.simple(), secret);
 		sqlx::query(
-			"INSERT INTO gateway_api_keys (id, project_id, name, secret_hash, key_prefix, last_four, scopes)
-			 VALUES ($1, $2, 'Test', $3, $4, $5, $6)",
+			"INSERT INTO gateway_api_keys (id, user_id, team_id, name, secret_hash, key_prefix, last_four, scopes)
+			 VALUES ($1, $2, $3, 'Test', $4, $5, $6, $7)",
 		)
 		.bind(key_id)
-		.bind(project_id)
+		.bind(user_id)
+		.bind(team_id)
 		.bind(hash_password(secret).map_err(|error| std::io::Error::other(error.to_string()))?)
 		.bind(format!("oxc_{}", key_id.simple()))
 		.bind(&secret[secret.len() - 4..])
@@ -169,9 +174,9 @@ mod limiter {
 			CostFinalization::Dropped,
 		] {
 			let mut request = request();
-			request.project_id = Uuid::new_v4();
+			request.team_id = Uuid::new_v4();
 			request.tokens = 90;
-			Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Tokens, 100, 60));
+			Arc::make_mut(&mut request.policy).team_rules.push(rule(10, GatewayRuleMetric::Tokens, 100, 60));
 			let admission = state.gateway_limiter.admit(request.clone()).await?;
 			let metadata = BTreeMap::from([("oxide_reservation_id".to_string(), admission.reservation.id.to_string())]);
 			let usage = UsageBreakdown {
@@ -192,10 +197,10 @@ mod limiter {
 	}
 
 	#[tokio::test(start_paused = true)]
-	async fn project_and_key_request_rules_are_atomic() -> TestResult {
+	async fn team_and_key_request_rules_are_atomic() -> TestResult {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
-		Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Requests, 2, 60));
+		Arc::make_mut(&mut request.policy).team_rules.push(rule(10, GatewayRuleMetric::Requests, 2, 60));
 		Arc::make_mut(&mut request.policy).key_rules.push(rule(11, GatewayRuleMetric::Requests, 1, 60));
 		drop(limiter.admit(request.clone()).await?);
 		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Requests);
@@ -207,10 +212,10 @@ mod limiter {
 	}
 
 	#[tokio::test(start_paused = true)]
-	async fn project_wins_over_permissive_key() -> TestResult {
+	async fn team_wins_over_permissive_key() -> TestResult {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
-		Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Requests, 1, 60));
+		Arc::make_mut(&mut request.policy).team_rules.push(rule(10, GatewayRuleMetric::Requests, 1, 60));
 		Arc::make_mut(&mut request.policy).key_rules.push(rule(11, GatewayRuleMetric::Requests, 100, 60));
 		drop(limiter.admit(request.clone()).await?);
 		assert_rejected(limiter.admit(request).await, GatewayLimitDimension::Requests);
@@ -221,7 +226,7 @@ mod limiter {
 	async fn overlapping_request_windows_and_maximum_retry() -> TestResult {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
-		Arc::make_mut(&mut request.policy).project_rules = vec![rule(10, GatewayRuleMetric::Requests, 1, 10), rule(11, GatewayRuleMetric::Requests, 2, 60)];
+		Arc::make_mut(&mut request.policy).team_rules = vec![rule(10, GatewayRuleMetric::Requests, 1, 10), rule(11, GatewayRuleMetric::Requests, 2, 60)];
 		drop(limiter.admit(request.clone()).await?);
 		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Requests);
 		tokio::time::advance(Duration::from_secs(10)).await;
@@ -240,7 +245,7 @@ mod limiter {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
 		request.tokens = 1_000_000;
-		Arc::make_mut(&mut request.policy).project_rules = vec![
+		Arc::make_mut(&mut request.policy).team_rules = vec![
 			rule(10, GatewayRuleMetric::Tokens, 1_000_000, 120),
 			rule(11, GatewayRuleMetric::Tokens, 2_000_000, 300),
 		];
@@ -266,7 +271,7 @@ mod limiter {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
 		request.tokens = 80;
-		Arc::make_mut(&mut request.policy).project_rules = vec![rule(10, GatewayRuleMetric::Tokens, 100, 60), rule(11, GatewayRuleMetric::Tokens, 200, 300)];
+		Arc::make_mut(&mut request.policy).team_rules = vec![rule(10, GatewayRuleMetric::Tokens, 100, 60), rule(11, GatewayRuleMetric::Tokens, 200, 300)];
 		Arc::make_mut(&mut request.policy).key_rules = vec![rule(12, GatewayRuleMetric::Tokens, 100, 60)];
 		let first = limiter.admit(request.clone()).await?;
 		limiter.reconcile(first.reservation.id, 20);
@@ -284,10 +289,10 @@ mod limiter {
 	}
 
 	#[tokio::test(start_paused = true)]
-	async fn project_and_key_concurrency_are_composed() -> TestResult {
+	async fn team_and_key_concurrency_are_composed() -> TestResult {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
-		Arc::make_mut(&mut request.policy).project_concurrency = Some(2);
+		Arc::make_mut(&mut request.policy).team_concurrency = Some(2);
 		Arc::make_mut(&mut request.policy).key_concurrency = Some(1);
 		let first = limiter.admit(request.clone()).await?;
 		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Concurrency);
@@ -305,7 +310,7 @@ mod limiter {
 	async fn nonstreaming_and_body_error_release() -> TestResult {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
-		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		Arc::make_mut(&mut request.policy).team_concurrency = Some(1);
 		let reservation = limiter.admit(request.clone()).await?.reservation;
 		let response = reservation.attach(Response::new(Body::from("complete")));
 		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Concurrency);
@@ -323,7 +328,7 @@ mod limiter {
 	async fn streaming_holds_reservation_until_eof() -> TestResult {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
-		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		Arc::make_mut(&mut request.policy).team_concurrency = Some(1);
 		let reservation = limiter.admit(request.clone()).await?.reservation;
 		let stream = futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"a")), Ok(Bytes::from_static(b"b"))]);
 		let mut body = reservation.attach(Response::new(Body::from_stream(stream))).into_body();
@@ -338,7 +343,7 @@ mod limiter {
 	async fn unpolled_stream_drop_and_serving_task_cancellation_release() -> TestResult {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
-		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		Arc::make_mut(&mut request.policy).team_concurrency = Some(1);
 		let reservation = limiter.admit(request.clone()).await?.reservation;
 		let stream = futures_util::stream::pending::<Result<Bytes, std::io::Error>>();
 		let response = reservation.attach(Response::new(Body::from_stream(stream)));
@@ -363,8 +368,8 @@ mod limiter {
 	async fn utility_is_independent_and_never_reserves_tokens_or_concurrency() -> TestResult {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
-		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
-		Arc::make_mut(&mut request.policy).project_rules = vec![rule(10, GatewayRuleMetric::Requests, 1, 60), rule(11, GatewayRuleMetric::Tokens, 1, 60)];
+		Arc::make_mut(&mut request.policy).team_concurrency = Some(1);
+		Arc::make_mut(&mut request.policy).team_rules = vec![rule(10, GatewayRuleMetric::Requests, 1, 60), rule(11, GatewayRuleMetric::Tokens, 1, 60)];
 		let inference = limiter.admit(request.clone()).await?;
 		request.route_class = GatewayRouteClass::Utility;
 		request.tokens = u64::MAX;
@@ -372,7 +377,7 @@ mod limiter {
 		assert!(utility.snapshot.requests.is_none() && utility.snapshot.tokens.is_none() && utility.snapshot.concurrency.is_none());
 		let mut utility_rule = rule(12, GatewayRuleMetric::Requests, 1, 60);
 		utility_rule.route_class = GatewayRouteClass::Utility;
-		Arc::make_mut(&mut request.policy).project_rules.push(utility_rule);
+		Arc::make_mut(&mut request.policy).team_rules.push(utility_rule);
 		drop(limiter.admit(request.clone()).await?);
 		assert_rejected(limiter.admit(request).await, GatewayLimitDimension::Requests);
 		drop(inference);
@@ -388,7 +393,7 @@ mod limiter {
 		assert!(first.snapshot.requests.is_none() && second.snapshot.concurrency.is_none());
 		drop((first, second));
 		request.tokens = 100;
-		Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Tokens, 100, 60));
+		Arc::make_mut(&mut request.policy).team_rules.push(rule(10, GatewayRuleMetric::Tokens, 100, 60));
 		drop(limiter.admit(request).await?);
 		assert_eq!(limiter.state_counts().await?.buckets, 1);
 		tokio::time::advance(Duration::from_secs(121)).await;
@@ -408,12 +413,12 @@ mod limiter {
 	async fn edits_clamp_without_refilling_unrelated_buckets() -> TestResult {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
-		Arc::make_mut(&mut request.policy).project_rules = vec![rule(10, GatewayRuleMetric::Requests, 2, 60), rule(11, GatewayRuleMetric::Requests, 10, 300)];
+		Arc::make_mut(&mut request.policy).team_rules = vec![rule(10, GatewayRuleMetric::Requests, 2, 60), rule(11, GatewayRuleMetric::Requests, 10, 300)];
 		drop(limiter.admit(request.clone()).await?);
-		Arc::make_mut(&mut request.policy).project_rules[0].capacity = 100;
+		Arc::make_mut(&mut request.policy).team_rules[0].capacity = 100;
 		drop(limiter.admit(request.clone()).await?);
 		assert_rejected(limiter.admit(request.clone()).await, GatewayLimitDimension::Requests);
-		Arc::make_mut(&mut request.policy).project_rules.remove(0);
+		Arc::make_mut(&mut request.policy).team_rules.remove(0);
 		let admission = limiter.admit(request).await?;
 		assert_eq!(admission.snapshot.requests.map(|value| value.remaining), Some(7));
 		Ok(())
@@ -424,8 +429,8 @@ mod limiter {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
 		request.tokens = 10;
-		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
-		Arc::make_mut(&mut request.policy).project_rules.push(rule(10, GatewayRuleMetric::Tokens, 100, 60));
+		Arc::make_mut(&mut request.policy).team_concurrency = Some(1);
+		Arc::make_mut(&mut request.policy).team_rules.push(rule(10, GatewayRuleMetric::Tokens, 100, 60));
 		let admission = limiter.admit(request.clone()).await?;
 		let stream = futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"partial"))]).chain(futures_util::stream::pending());
 		let mut body = admission.reservation.attach(Response::new(Body::from_stream(stream))).into_body();
@@ -443,7 +448,7 @@ mod limiter {
 		let limiter = GatewayLimiter::unavailable();
 		let mut request = request();
 		drop(limiter.admit(request.clone()).await?);
-		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		Arc::make_mut(&mut request.policy).team_concurrency = Some(1);
 		assert!(matches!(limiter.admit(request).await, Err(GatewayLimitError::Unavailable)));
 		Ok(())
 	}
@@ -453,7 +458,7 @@ mod limiter {
 		let limiter = GatewayLimiter::saturated();
 		let mut request = request();
 		drop(limiter.admit(request.clone()).await?);
-		Arc::make_mut(&mut request.policy).project_concurrency = Some(1);
+		Arc::make_mut(&mut request.policy).team_concurrency = Some(1);
 		assert!(matches!(limiter.admit(request).await, Err(GatewayLimitError::Overloaded)));
 		Ok(())
 	}
@@ -474,18 +479,18 @@ mod policy {
 	}
 
 	#[test]
-	fn utility_token_rules_fail_closed_for_projects_and_keys() -> TestResult {
-		let project = GatewayRatePolicy::from_stored(vec![utility_token_rule()], Vec::new(), None, None);
+	fn utility_token_rules_fail_closed_for_teams_and_keys() -> TestResult {
+		let team = GatewayRatePolicy::from_stored(vec![utility_token_rule()], Vec::new(), None, None);
 		let key = GatewayRatePolicy::from_stored(Vec::new(), vec![utility_token_rule()], None, None);
-		assert!(matches!(project, Err(GatewayLimitError::Misconfigured)));
+		assert!(matches!(team, Err(GatewayLimitError::Misconfigured)));
 		assert!(matches!(key, Err(GatewayLimitError::Misconfigured)));
 		Ok(())
 	}
 
 	#[test]
 	fn invalid_stored_concurrency_is_misconfigured() -> TestResult {
-		for (project, key) in [(Some(-1), None), (None, Some(-1)), (Some(0), None), (None, Some(0))] {
-			let policy = GatewayRatePolicy::from_stored(Vec::new(), Vec::new(), project, key);
+		for (team, key) in [(Some(-1), None), (None, Some(-1)), (Some(0), None), (None, Some(0))] {
+			let policy = GatewayRatePolicy::from_stored(Vec::new(), Vec::new(), team, key);
 			assert!(matches!(policy, Err(GatewayLimitError::Misconfigured)));
 		}
 		Ok(())
@@ -495,7 +500,7 @@ mod policy {
 	fn valid_stored_policy_is_loaded() -> TestResult {
 		let rules = vec![rule(10, GatewayRuleMetric::Tokens, 100, 60)];
 		let policy = GatewayRatePolicy::from_stored(rules, Vec::new(), Some(3), None)?;
-		assert_eq!(policy.project_concurrency, Some(3));
+		assert_eq!(policy.team_concurrency, Some(3));
 		assert_eq!(policy.key_concurrency, None);
 		assert!(policy.has_token_rules());
 		Ok(())
@@ -504,13 +509,13 @@ mod policy {
 	#[sqlx::test(migrations = "./migrations")]
 	async fn database_rejects_utility_token_rules(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (key_id, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
-		for (project_id, api_key_id) in [(Some(context.project_id), None), (None, Some(key_id))] {
+		for (team_id, api_key_id) in [(Some(context.team_id), None), (None, Some(key_id))] {
 			let result = sqlx::query(
-				"INSERT INTO gateway_rate_limit_rules (project_id, api_key_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, $2, 'utility', 'tokens', 100, 60)",
+				"INSERT INTO gateway_rate_limit_rules (team_id, api_key_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, $2, 'utility', 'tokens', 100, 60)",
 			)
-			.bind(project_id)
+			.bind(team_id)
 			.bind(api_key_id)
 			.execute(&pool)
 			.await;
@@ -523,41 +528,41 @@ mod policy {
 	#[sqlx::test(migrations = "./migrations")]
 	async fn database_rejects_duplicate_rule_windows(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (_, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
-		let insert = "INSERT INTO gateway_rate_limit_rules (project_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'inference', 'tokens', 7, 120)";
-		sqlx::query(insert).bind(context.project_id).execute(&pool).await?;
-		let result = sqlx::query(insert).bind(context.project_id).execute(&pool).await;
+		let insert = "INSERT INTO gateway_rate_limit_rules (team_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'inference', 'tokens', 7, 120)";
+		sqlx::query(insert).bind(context.team_id).execute(&pool).await?;
+		let result = sqlx::query(insert).bind(context.team_id).execute(&pool).await;
 		let error = result.expect_err("a duplicate window must violate the unique index");
 		assert_eq!(
 			error.as_database_error().and_then(|error| error.constraint()),
-			Some("idx_gateway_rate_limit_rules_project_window")
+			Some("idx_gateway_rate_limit_rules_team_window")
 		);
 		Ok(())
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn project_and_key_policies_load_together_and_disabled_rules_are_ignored(pool: PgPool) -> TestResult {
+	async fn team_and_key_policies_load_together_and_disabled_rules_are_ignored(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (key_id, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
 		let initial = GatewayCredential::authenticate(&pool, &token).await?;
 		assert!(!initial.policy.applies(GatewayRouteClass::Inference));
-		sqlx::query("UPDATE gateway_projects SET max_concurrent_requests = 3 WHERE id = $1")
-			.bind(initial.project_id)
+		sqlx::query("UPDATE teams SET gateway_max_concurrent_requests = 3 WHERE id = $1")
+			.bind(initial.team_id)
 			.execute(&pool)
 			.await?;
 		sqlx::query("UPDATE gateway_api_keys SET max_concurrent_requests = 2 WHERE id = $1")
 			.bind(key_id)
 			.execute(&pool)
 			.await?;
-		sqlx::query("INSERT INTO gateway_rate_limit_rules (project_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'inference', 'tokens', 1000000, 120), ($1, 'inference', 'tokens', 2000000, 300)")
-			.bind(initial.project_id).execute(&pool).await?;
+		sqlx::query("INSERT INTO gateway_rate_limit_rules (team_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'inference', 'tokens', 1000000, 120), ($1, 'inference', 'tokens', 2000000, 300)")
+			.bind(initial.team_id).execute(&pool).await?;
 		sqlx::query("INSERT INTO gateway_rate_limit_rules (api_key_id, route_class, metric, capacity, refill_period_seconds, is_enabled) VALUES ($1, 'utility', 'requests', 10, 60, true), ($1, 'inference', 'requests', 1, 60, false)")
 			.bind(key_id).execute(&pool).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
-		assert_eq!(context.policy.project_concurrency, Some(3));
+		assert_eq!(context.policy.team_concurrency, Some(3));
 		assert_eq!(context.policy.key_concurrency, Some(2));
-		assert_eq!(context.policy.project_rules.len(), 2);
+		assert_eq!(context.policy.team_rules.len(), 2);
 		assert_eq!(context.policy.key_rules.len(), 1);
 		assert_eq!(context.policy.key_rules[0].route_class, GatewayRouteClass::Utility);
 		Ok(())
@@ -605,7 +610,7 @@ mod authentication {
 	#[sqlx::test(migrations = "./migrations")]
 	async fn bearer_key_authenticates_and_updates_last_used(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read", "inference:write"])).await?;
+		let (key_id, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read", "inference:write"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		assert_eq!(context.key_id, key_id);
 		assert_eq!(context.user_id, user_id);
@@ -619,19 +624,10 @@ mod authentication {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn disabled_projects_and_keys_fail_authentication(pool: PgPool) -> TestResult {
+	async fn disabled_keys_fail_authentication(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (key_id, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
 		sqlx::query("UPDATE gateway_api_keys SET is_enabled = false WHERE id = $1")
-			.bind(key_id)
-			.execute(&pool)
-			.await?;
-		assert!(matches!(GatewayCredential::authenticate(&pool, &token).await, Err(GatewayAuthError::Invalid)));
-		sqlx::query("UPDATE gateway_api_keys SET is_enabled = true WHERE id = $1")
-			.bind(key_id)
-			.execute(&pool)
-			.await?;
-		sqlx::query("UPDATE gateway_projects SET is_enabled = false WHERE id = (SELECT project_id FROM gateway_api_keys WHERE id = $1)")
 			.bind(key_id)
 			.execute(&pool)
 			.await?;
@@ -640,9 +636,57 @@ mod authentication {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn key_whose_user_left_the_team_is_rejected(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, user_id, "Leaving Team", false).await?;
+		let (_, token) = create_key(&pool, user_id, team_id, json!(["inference:read"])).await?;
+		assert!(GatewayCredential::authenticate(&pool, &token).await.is_ok());
+		sqlx::query("DELETE FROM team_members WHERE team_id = $1 AND user_id = $2")
+			.bind(team_id)
+			.bind(user_id)
+			.execute(&pool)
+			.await?;
+		assert!(matches!(GatewayCredential::authenticate(&pool, &token).await, Err(GatewayAuthError::Invalid)));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn key_without_user_is_rejected(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, user_id, "Service Team", false).await?;
+		let (_, token) = insert_key(&pool, None, team_id, json!(["inference:read"])).await?;
+		assert!(matches!(GatewayCredential::authenticate(&pool, &token).await, Err(GatewayAuthError::Invalid)));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn team_rules_are_shared_by_keys_of_the_same_team_only(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, user_id, "Limited Team", false).await?;
+		let other_team_id = create_team(&pool, user_id, "Unlimited Team", false).await?;
+		let (_, first_token) = create_key(&pool, user_id, team_id, json!(["inference:read"])).await?;
+		let (_, second_token) = create_key(&pool, user_id, team_id, json!(["inference:read"])).await?;
+		let (_, other_token) = create_key(&pool, user_id, other_team_id, json!(["inference:read"])).await?;
+		sqlx::query("INSERT INTO gateway_rate_limit_rules (team_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'inference', 'requests', 5, 60)")
+			.bind(team_id)
+			.execute(&pool)
+			.await?;
+		let first = GatewayCredential::authenticate(&pool, &first_token).await?;
+		let second = GatewayCredential::authenticate(&pool, &second_token).await?;
+		let other = GatewayCredential::authenticate(&pool, &other_token).await?;
+		assert_eq!(first.team_id, second.team_id);
+		assert_eq!(first.policy.team_rules.len(), 1);
+		assert_eq!(second.policy.team_rules.len(), 1);
+		assert_eq!(first.policy.team_rules[0].id, second.policy.team_rules[0].id);
+		assert_ne!(first.team_id, other.team_id);
+		assert!(other.policy.team_rules.is_empty());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn invalid_revoked_and_expired_keys_are_rejected(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:write"])).await?;
+		let (key_id, token) = create_key_in_new_team(&pool, user_id, json!(["inference:write"])).await?;
 		assert!(matches!(
 			GatewayCredential::authenticate(&pool, "oxc_00000000000000000000000000000000_abcdefghijklmnopqrstuvwxyz012345").await,
 			Err(GatewayAuthError::Invalid)
@@ -682,7 +726,7 @@ mod models {
 			.bind(visible_id)
 			.execute(&pool)
 			.await?;
-		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (_, token) = create_key(&pool, user_id, team_id, json!(["inference:read"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		let models = GatewayModel::list_for_context(&pool, &context).await?;
 		assert_eq!(models.len(), 1);
@@ -693,32 +737,37 @@ mod models {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn duplicate_team_grants_return_one_model(pool: PgPool) -> TestResult {
+	async fn key_only_sees_models_of_its_pinned_team(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
 		let first_team = create_team(&pool, user_id, "First Gateway Team", false).await?;
 		let second_team = create_team(&pool, user_id, "Second Gateway Team", false).await?;
-		let (_, model_id) = create_provider_model(&pool, "Shared Provider", "shared").await?;
-		for team_id in [first_team, second_team] {
+		let (provider_id, shared_id) = create_provider_model(&pool, "Shared Provider", "shared").await?;
+		let other_id: uuid::Uuid = sqlx::query_scalar("INSERT INTO models (provider_id, model_id, display_name, is_enabled) VALUES ($1, 'other', 'Other', true) RETURNING id")
+			.bind(provider_id)
+			.fetch_one(&pool)
+			.await?;
+		for (team_id, model_id) in [(first_team, shared_id), (second_team, shared_id), (second_team, other_id)] {
 			sqlx::query("INSERT INTO team_model_access (team_id, model_id) VALUES ($1, $2)")
 				.bind(team_id)
 				.bind(model_id)
 				.execute(&pool)
 				.await?;
 		}
-		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (_, token) = create_key(&pool, user_id, first_team, json!(["inference:read"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		let models = GatewayModel::list_for_context(&pool, &context).await?;
 		assert_eq!(models.len(), 1);
-		assert_eq!(GatewayModel::resolve_accessible(&pool, &context, "shared provider/shared").await?, Some(model_id));
+		assert_eq!(GatewayModel::resolve_accessible(&pool, &context, "shared provider/shared").await?, Some(shared_id));
+		assert!(GatewayModel::resolve_accessible(&pool, &context, "shared provider/other").await?.is_none());
 		Ok(())
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn paid_inference_allows_concurrent_admission(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		create_team(&pool, user_id, "Postpaid Team", true).await?;
+		let team_id = create_team(&pool, user_id, "Postpaid Team", true).await?;
 		let (_, model_id) = create_provider_model(&pool, "Postpaid Provider", "paid").await?;
-		let (_, token) = create_key(&pool, user_id, None, json!(["inference:write"])).await?;
+		let (_, token) = create_key(&pool, user_id, team_id, json!(["inference:write"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		let first = GatewayModel::authorize_inference(&pool, &context, "postpaid provider/paid").await?;
 		let second = GatewayModel::authorize_inference(&pool, &context, "postpaid provider/paid").await?;
@@ -728,12 +777,12 @@ mod models {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn team_project_only_uses_its_team_policy(pool: PgPool) -> TestResult {
+	async fn key_only_uses_its_pinned_team_policy(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let project_team_id = create_team(&pool, user_id, "Project Team", false).await?;
+		let pinned_team_id = create_team(&pool, user_id, "Pinned Team", false).await?;
 		create_team(&pool, user_id, "Other Team", true).await?;
 		create_provider_model(&pool, "Scoped Provider", "scoped").await?;
-		let (_, token) = create_key(&pool, user_id, Some(project_team_id), json!(["inference:read"])).await?;
+		let (_, token) = create_key(&pool, user_id, pinned_team_id, json!(["inference:read"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		assert!(GatewayModel::list_for_context(&pool, &context).await?.is_empty());
 		assert!(GatewayModel::resolve_accessible(&pool, &context, "scoped provider/scoped").await?.is_none());
@@ -803,7 +852,7 @@ mod http {
 	#[sqlx::test(migrations = "./migrations")]
 	async fn missing_scope_returns_forbidden(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (_, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
 		let (router, _) = router(pool).await?;
 		let response = send(&router, "POST", "/openai/v1/chat/completions", Some(&token)).await?;
 		assert_error(response, 403).await?;
@@ -813,7 +862,7 @@ mod http {
 	#[sqlx::test(migrations = "./migrations")]
 	async fn unknown_route_returns_not_found(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (_, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
 		let (router, _) = router(pool).await?;
 		let response = send(&router, "GET", "/openai/v1/absent", Some(&token)).await?;
 		assert_error(response, 404).await?;
@@ -823,7 +872,7 @@ mod http {
 	#[sqlx::test(migrations = "./migrations")]
 	async fn utility_request_limit_reports_headers_then_rejects(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (key_id, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (key_id, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
 		sqlx::query("INSERT INTO gateway_rate_limit_rules (api_key_id, route_class, metric, capacity, refill_period_seconds) VALUES ($1, 'utility', 'requests', 1, 60)")
 			.bind(key_id)
 			.execute(&pool)
@@ -845,7 +894,7 @@ mod http {
 	#[sqlx::test(migrations = "./migrations")]
 	async fn unavailable_database_returns_server_error(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
-		let (_, token) = create_key(&pool, user_id, None, json!(["inference:read"])).await?;
+		let (_, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
 		let (router, state) = router(pool).await?;
 		state.db.close().await;
 		let response = send(&router, "GET", MODELS_PATH, Some(&token)).await?;
@@ -858,8 +907,8 @@ mod http {
 		let limiter = GatewayLimiter::spawn();
 		let mut request = request();
 		request.tokens = 10;
-		Arc::make_mut(&mut request.policy).project_concurrency = Some(2);
-		Arc::make_mut(&mut request.policy).project_rules = vec![
+		Arc::make_mut(&mut request.policy).team_concurrency = Some(2);
+		Arc::make_mut(&mut request.policy).team_rules = vec![
 			rule(11, GatewayRuleMetric::Requests, 2, 60),
 			rule(10, GatewayRuleMetric::Requests, 2, 120),
 			rule(12, GatewayRuleMetric::Tokens, 100, 60),

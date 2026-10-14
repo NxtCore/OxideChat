@@ -8,7 +8,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 /// Policy and usage sent to an admission backend.
 pub struct GatewayAdmissionRequest {
-	pub project_id: Uuid,
+	pub team_id: Uuid,
 	pub key_id: Uuid,
 	pub policy: Arc<GatewayRatePolicy>,
 	pub route_class: GatewayRouteClass,
@@ -126,11 +126,11 @@ pub struct GatewayRateRule {
 }
 
 #[derive(Clone, Debug, Default)]
-/// Independently enforced project and key limits.
+/// Independently enforced team and key limits.
 pub struct GatewayRatePolicy {
-	pub project_rules: Vec<GatewayRateRule>,
+	pub team_rules: Vec<GatewayRateRule>,
 	pub key_rules: Vec<GatewayRateRule>,
-	pub project_concurrency: Option<u32>,
+	pub team_concurrency: Option<u32>,
 	pub key_concurrency: Option<u32>,
 }
 
@@ -140,15 +140,15 @@ impl GatewayRatePolicy {
 	/// # Errors
 	/// Returns [`GatewayLimitError::Misconfigured`] for a malformed rule or cap.
 	pub fn from_stored(
-		project_rules: Vec<GatewayRateRule>,
+		team_rules: Vec<GatewayRateRule>,
 		key_rules: Vec<GatewayRateRule>,
-		project_concurrency: Option<i32>,
+		team_concurrency: Option<i32>,
 		key_concurrency: Option<i32>,
 	) -> Result<Self, GatewayLimitError> {
 		let policy = Self {
-			project_rules,
+			team_rules,
 			key_rules,
-			project_concurrency: concurrency_cap(project_concurrency)?,
+			team_concurrency: concurrency_cap(team_concurrency)?,
 			key_concurrency: concurrency_cap(key_concurrency)?,
 		};
 		policy.validate()?;
@@ -160,8 +160,8 @@ impl GatewayRatePolicy {
 	/// # Errors
 	/// Returns [`GatewayLimitError::Misconfigured`] for a malformed rule or cap.
 	pub fn validate(&self) -> Result<(), GatewayLimitError> {
-		let invalid_rule = self.project_rules.iter().chain(&self.key_rules).any(|rule| !rule.is_valid());
-		if invalid_rule || self.project_concurrency == Some(0) || self.key_concurrency == Some(0) {
+		let invalid_rule = self.team_rules.iter().chain(&self.key_rules).any(|rule| !rule.is_valid());
+		if invalid_rule || self.team_concurrency == Some(0) || self.key_concurrency == Some(0) {
 			return Err(GatewayLimitError::Misconfigured);
 		}
 		Ok(())
@@ -170,7 +170,7 @@ impl GatewayRatePolicy {
 	#[must_use]
 	/// Reports whether inference needs a token estimate.
 	pub fn has_token_rules(&self) -> bool {
-		self.project_rules
+		self.team_rules
 			.iter()
 			.chain(&self.key_rules)
 			.any(|rule| rule.matches(GatewayRouteClass::Inference) && rule.metric == GatewayRuleMetric::Tokens)
@@ -179,8 +179,8 @@ impl GatewayRatePolicy {
 	#[must_use]
 	/// Reports whether a stopped backend must fail this route closed.
 	pub fn applies(&self, class: GatewayRouteClass) -> bool {
-		self.project_rules.iter().chain(&self.key_rules).any(|rule| rule.matches(class))
-			|| (class == GatewayRouteClass::Inference && (self.project_concurrency.is_some() || self.key_concurrency.is_some()))
+		self.team_rules.iter().chain(&self.key_rules).any(|rule| rule.matches(class))
+			|| (class == GatewayRouteClass::Inference && (self.team_concurrency.is_some() || self.key_concurrency.is_some()))
 	}
 }
 

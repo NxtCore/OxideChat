@@ -30,7 +30,7 @@ impl From<ResolvedModel> for GatewayInference {
 static DUMMY_SECRET_HASH: LazyLock<String> = LazyLock::new(|| hash_password("oxide-gateway-invalid-secret").unwrap_or_default());
 
 impl GatewayCredential {
-	/// Authenticates a gateway token and returns its enabled project context.
+	/// Authenticates a gateway token and returns its enabled team-pinned context.
 	///
 	/// Invalid tokens and disabled, revoked, or expired keys return
 	/// [`GatewayAuthError::Invalid`]. Database and verification-task failures
@@ -60,7 +60,6 @@ impl GatewayCredential {
 		};
 		if !verified
 			|| !credential.key_enabled
-			|| !credential.project_enabled
 			|| credential.revoked_at.is_some()
 			|| credential.expires_at.is_some_and(|expires_at| expires_at <= Utc::now())
 		{
@@ -76,21 +75,19 @@ impl GatewayCredential {
 			tracing::warn!(%error, key_id = %credential.key_id, "failed to update gateway API key usage timestamp");
 		}
 		let policy = GatewayRatePolicy::from_stored(
-			credential.project_rules.0,
+			credential.team_rules.0,
 			credential.key_rules.0,
-			credential.project_concurrency,
+			credential.team_concurrency,
 			credential.key_concurrency,
 		)
 		.map_err(|error| {
-			tracing::error!(%error, project_id = %credential.project_id, key_id = %credential.key_id, "invalid gateway rate policy");
+			tracing::error!(%error, team_id = %credential.team_id, key_id = %credential.key_id, "invalid gateway rate policy");
 			GatewayAuthError::Unavailable
 		})?;
 		Ok(GatewayAuthContext {
 			key_id: credential.key_id,
-			project_id: credential.project_id,
 			user_id: credential.user_id,
 			team_id: credential.team_id,
-			project_name: credential.project_name,
 			scopes: credential.scopes.0,
 			policy: Arc::new(policy),
 		})
@@ -102,30 +99,28 @@ impl GatewayCredential {
 			r#"
 			SELECT
 				k.id AS "key_id!",
-				k.project_id,
-				p.owner_id AS "user_id!",
-				p.team_id,
-				p.name AS "project_name!",
+				k.user_id AS "user_id!",
+				k.team_id,
 				k.secret_hash,
 				k.scopes AS "scopes!: Json<Vec<String>>",
 				k.is_enabled AS "key_enabled!",
-				p.is_enabled AS "project_enabled!",
 				k.expires_at,
 				k.revoked_at,
-				p.max_concurrent_requests AS project_concurrency,
+				t.gateway_max_concurrent_requests AS team_concurrency,
 				k.max_concurrent_requests AS key_concurrency,
-				rules.project_rules AS "project_rules!: Json<Vec<GatewayRateRule>>",
+				rules.team_rules AS "team_rules!: Json<Vec<GatewayRateRule>>",
 				rules.key_rules AS "key_rules!: Json<Vec<GatewayRateRule>>"
 			FROM gateway_api_keys k
-			JOIN gateway_projects p ON p.id = k.project_id
+			JOIN teams t ON t.id = k.team_id
+			JOIN team_members tm ON tm.team_id = k.team_id AND tm.user_id = k.user_id
 			CROSS JOIN LATERAL (
 				SELECT
-					COALESCE(jsonb_agg(r.rule ORDER BY r.id) FILTER (WHERE r.project_id = p.id), '[]'::jsonb) AS project_rules,
+					COALESCE(jsonb_agg(r.rule ORDER BY r.id) FILTER (WHERE r.team_id = t.id), '[]'::jsonb) AS team_rules,
 					COALESCE(jsonb_agg(r.rule ORDER BY r.id) FILTER (WHERE r.api_key_id = k.id), '[]'::jsonb) AS key_rules
 				FROM (
-					SELECT id, project_id, api_key_id, jsonb_build_object('id', id, 'route_class', route_class, 'metric', metric, 'capacity', capacity, 'refill_period_seconds', refill_period_seconds) AS rule
+					SELECT id, team_id, api_key_id, jsonb_build_object('id', id, 'route_class', route_class, 'metric', metric, 'capacity', capacity, 'refill_period_seconds', refill_period_seconds) AS rule
 					FROM gateway_rate_limit_rules
-					WHERE is_enabled AND (project_id = p.id OR api_key_id = k.id)
+					WHERE is_enabled AND (team_id = t.id OR api_key_id = k.id)
 				) r
 			) rules
 			WHERE k.id = $1
@@ -138,10 +133,9 @@ impl GatewayCredential {
 }
 
 impl GatewayModel {
-	/// Lists enabled models accessible through the authenticated user's eligible teams.
+	/// Lists enabled models accessible through the key's pinned team.
 	///
-	/// A team-bound project is filtered to that team. Models granted through
-	/// multiple teams are returned only once.
+	/// Only the key's pinned team is considered.
 	///
 	/// # Errors
 	///
@@ -167,7 +161,7 @@ impl GatewayModel {
 				LEFT JOIN team_model_access provider_access
 					ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
 				WHERE tm.user_id = $1
-				  AND ($2::uuid IS NULL OR t.id = $2)
+				  AND t.id = $2
 				  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
 			  )
 			ORDER BY p.name, m.model_id
@@ -218,7 +212,7 @@ impl GatewayModel {
 				LEFT JOIN team_model_access provider_access
 					ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
 				WHERE tm.user_id = $1
-				  AND ($2::uuid IS NULL OR t.id = $2)
+				  AND t.id = $2
 				  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
 			  )
 			LIMIT 2
