@@ -112,14 +112,13 @@ impl Config {
 	///
 	/// Call this once at startup after database connection is established.
 	///
-	/// # Panics
-	/// Panics if called more than once.
+	/// Later calls are ignored; the first initialization wins.
 	pub async fn init(pool: &PgPool) {
 		let values = Self::load_from_db(pool).await;
 		let instance = Self {
 			values: ArcSwap::new(Arc::new(values)),
 		};
-		CONFIG.set(instance).expect("Config already initialized");
+		let _ = CONFIG.set(instance);
 	}
 
 	/// Reload configuration from the database.
