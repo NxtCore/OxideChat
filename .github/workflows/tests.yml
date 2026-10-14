@@ -1,0 +1,55 @@
+name: Tests
+
+on:
+    push:
+        branches: [master]
+    pull_request:
+        branches: [master]
+
+concurrency:
+    group: tests-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    test:
+        name: Clippy and Tests
+        runs-on: ubuntu-24.04
+        services:
+            postgres:
+                image: postgres:17
+                env:
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: postgres
+                    POSTGRES_DB: oxidechat
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd "pg_isready -U postgres -d oxidechat"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+        env:
+            DATABASE_URL: postgres://postgres:postgres@localhost:5432/oxidechat
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: clippy
+
+            - name: Cache cargo
+              uses: Swatinem/rust-cache@v2
+
+            - name: Install SQLx CLI
+              run: cargo install sqlx-cli --no-default-features --features postgres --locked
+
+            - name: Run migrations
+              run: sqlx migrate run
+
+            - name: Clippy
+              run: cargo clippy --all-targets
+
+            - name: Test
+              run: cargo test

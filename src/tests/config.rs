@@ -20,8 +20,8 @@ mod tests {
 
 	#[test]
 	fn test_oauth_provider_as_str() {
-		assert_eq!(OAuthProvider::Google.as_str(), "google");
-		assert_eq!(OAuthProvider::Discord.as_str(), "discord");
+		assert_eq!(OAuthProvider::Google.as_str(), "GOOGLE");
+		assert_eq!(OAuthProvider::Discord.as_str(), "DISCORD");
 	}
 
 	#[test]
