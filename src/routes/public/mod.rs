@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod base;
 pub mod chats;
+pub mod developer;
 pub mod images;
 pub mod mcp;
 pub mod messages;

@@ -206,6 +206,12 @@ pub enum ErrorCode {
 	InvalidProvider,
 	ProviderNotConfigured,
 	DefaultWorkspaceDelete,
+	ApiKeyNameInvalid,
+	ApiKeyScopesInvalid,
+	ApiKeyExpiryInvalid,
+	ApiKeyConcurrencyInvalid,
+	ApiKeyOverlapInvalid,
+	ApiKeyRuleInvalid,
 
 	// 401 Unauthorized
 	Unauthorized,
@@ -223,12 +229,14 @@ pub enum ErrorCode {
 	Forbidden,
 	InsufficientPermissions,
 	AccountDisabled,
+	ApiKeyTeamForbidden,
 
 	// 404 Not Found
 	NotFound,
 	UserNotFound,
 	ResourceNotFound,
 	TranslationNotFound,
+	ApiKeyNotFound,
 
 	// 409 Conflict
 	Conflict,
@@ -237,6 +245,8 @@ pub enum ErrorCode {
 	EmailOrUsernameTaken,
 	AlreadyExists,
 	OAuthEmailConflict,
+	ApiKeyRevoked,
+	ApiKeyRuleDuplicate,
 
 	// 422 Unprocessable Entity
 	UnprocessableEntity,
@@ -273,7 +283,14 @@ impl ErrorCode {
 			| Self::MalformedRequest
 			| Self::InvalidProvider
 			| Self::ProviderNotConfigured
-			| Self::DefaultWorkspaceDelete => StatusCode::BAD_REQUEST,
+			| Self::DefaultWorkspaceDelete
+			| Self::ApiKeyNameInvalid
+			| Self::ApiKeyScopesInvalid
+			| Self::ApiKeyExpiryInvalid
+			| Self::ApiKeyConcurrencyInvalid
+			| Self::ApiKeyOverlapInvalid
+			| Self::ApiKeyRuleInvalid
+			=> StatusCode::BAD_REQUEST,
 
 			Self::Unauthorized
 			| Self::NotAuthenticated
@@ -285,9 +302,9 @@ impl ErrorCode {
 			| Self::OAuthStateMismatch
 			| Self::OAuthTokenError
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
-			Self::Forbidden | Self::InsufficientPermissions | Self::AccountDisabled => StatusCode::FORBIDDEN,
-			Self::NotFound | Self::UserNotFound | Self::ResourceNotFound | Self::TranslationNotFound => StatusCode::NOT_FOUND,
-			Self::Conflict | Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::OAuthEmailConflict => StatusCode::CONFLICT,
+			Self::Forbidden | Self::InsufficientPermissions | Self::AccountDisabled | Self::ApiKeyTeamForbidden => StatusCode::FORBIDDEN,
+			Self::NotFound | Self::UserNotFound | Self::ResourceNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
+			Self::Conflict | Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::OAuthEmailConflict | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate => StatusCode::CONFLICT,
 			Self::UnprocessableEntity => StatusCode::UNPROCESSABLE_ENTITY,
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
@@ -317,6 +334,12 @@ impl ErrorCode {
 			Self::InvalidProvider => "auth.errors.oauth_provider_invalid",
 			Self::ProviderNotConfigured => "auth.errors.oauth_provider_disabled",
 			Self::DefaultWorkspaceDelete => "workspace.cannot_delete_default",
+			Self::ApiKeyNameInvalid => "developer.errors.name_invalid",
+			Self::ApiKeyScopesInvalid => "developer.errors.scopes_invalid",
+			Self::ApiKeyExpiryInvalid => "developer.errors.expiry_invalid",
+			Self::ApiKeyConcurrencyInvalid => "developer.errors.concurrency_invalid",
+			Self::ApiKeyOverlapInvalid => "developer.errors.overlap_invalid",
+			Self::ApiKeyRuleInvalid => "developer.errors.rule_invalid",
 
 			Self::Unauthorized => "auth.errors.unauthorized",
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
@@ -332,11 +355,13 @@ impl ErrorCode {
 			Self::Forbidden => "errors.forbidden",
 			Self::InsufficientPermissions => "errors.insufficient_permissions",
 			Self::AccountDisabled => "auth.errors.account_disabled",
+			Self::ApiKeyTeamForbidden => "developer.errors.team_forbidden",
 
 			Self::NotFound => "errors.not_found",
 			Self::UserNotFound => "auth.errors.user_not_found",
 			Self::ResourceNotFound => "errors.resource_not_found",
 			Self::TranslationNotFound => "i18n.errors.translation_not_found",
+			Self::ApiKeyNotFound => "developer.errors.key_not_found",
 
 			Self::Conflict => "errors.conflict",
 			Self::EmailTaken => "auth.errors.email_taken",
@@ -344,6 +369,8 @@ impl ErrorCode {
 			Self::EmailOrUsernameTaken => "auth.errors.email_or_username_taken",
 			Self::AlreadyExists => "errors.already_exists",
 			Self::OAuthEmailConflict => "auth.errors.oauth_email_conflict",
+			Self::ApiKeyRevoked => "developer.errors.key_revoked",
+			Self::ApiKeyRuleDuplicate => "developer.errors.rule_duplicate",
 
 			Self::UnprocessableEntity => "errors.unprocessable_entity",
 
@@ -376,6 +403,12 @@ impl ErrorCode {
 			Self::InvalidProvider => "invalid_provider",
 			Self::ProviderNotConfigured => "provider_not_configured",
 			Self::DefaultWorkspaceDelete => "default_workspace_delete",
+			Self::ApiKeyNameInvalid => "api_key_name_invalid",
+			Self::ApiKeyScopesInvalid => "api_key_scopes_invalid",
+			Self::ApiKeyExpiryInvalid => "api_key_expiry_invalid",
+			Self::ApiKeyConcurrencyInvalid => "api_key_concurrency_invalid",
+			Self::ApiKeyOverlapInvalid => "api_key_overlap_invalid",
+			Self::ApiKeyRuleInvalid => "api_key_rule_invalid",
 
 			Self::Unauthorized => "unauthorized",
 			Self::NotAuthenticated => "not_authenticated",
@@ -391,11 +424,13 @@ impl ErrorCode {
 			Self::Forbidden => "forbidden",
 			Self::InsufficientPermissions => "insufficient_permissions",
 			Self::AccountDisabled => "account_disabled",
+			Self::ApiKeyTeamForbidden => "api_key_team_forbidden",
 
 			Self::NotFound => "not_found",
 			Self::UserNotFound => "user_not_found",
 			Self::ResourceNotFound => "resource_not_found",
 			Self::TranslationNotFound => "translation_not_found",
+			Self::ApiKeyNotFound => "api_key_not_found",
 
 			Self::Conflict => "conflict",
 			Self::EmailTaken => "email_taken",
@@ -403,6 +438,8 @@ impl ErrorCode {
 			Self::EmailOrUsernameTaken => "email_or_username_taken",
 			Self::AlreadyExists => "already_exists",
 			Self::OAuthEmailConflict => "oauth_email_conflict",
+			Self::ApiKeyRevoked => "api_key_revoked",
+			Self::ApiKeyRuleDuplicate => "api_key_rule_duplicate",
 
 			Self::UnprocessableEntity => "unprocessable_entity",
 

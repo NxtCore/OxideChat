@@ -31,6 +31,7 @@
     - `estimate.rs` - Token estimation for inference requests
     - `body.rs` - Keeps concurrency reservations alive for the lifetime of HTTP response bodies
     - `repository.rs` - Database access for credentials, policies, and model access; a key belongs to a user and is pinned to one of their teams (no projects), and authentication requires the user to still be a member of that team
+    - `keys.rs` / `keys_repository.rs` - API key management DTOs, errors, and SQL (create, update, revoke, rotate, key-scoped limit rules, team picker); audit events are written to `audit_logs` in the same transaction
     - `mod.rs` - Shared gateway types and constants
 - `src/utils/gateway_limits.rs` - HTTP glue only: admission for a route and Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter
 - `src/routes/` - HTTP route handlers (handlers only, no type definitions)
