@@ -84,8 +84,8 @@ pub async fn run_models(state: &JobState, context: &GatewayAuthContext) -> Respo
 }
 
 /// Runs an authorized `OpenAI` chat request.
-pub async fn run_chat(request: OpenAIChatRequest, context: &GatewayAuthContext, inference: GatewayInference, reservation_id: Uuid) -> Response {
-	let metadata = request_metadata(context, &inference, reservation_id);
+pub async fn run_chat(request: OpenAIChatRequest, context: &GatewayAuthContext, inference: GatewayInference, reservation_id: Uuid, usage_type: &'static str) -> Response {
+	let metadata = request_metadata(context, &inference, reservation_id, usage_type);
 	let engine = ai::get();
 	let engine = engine.read().await;
 	let skin_context = SkinContext::with_service(engine.service().clone());
@@ -94,8 +94,8 @@ pub async fn run_chat(request: OpenAIChatRequest, context: &GatewayAuthContext, 
 }
 
 /// Runs an authorized `OpenAI` responses request.
-pub async fn run_responses(request: OpenAIResponsesRequestPayload, context: &GatewayAuthContext, inference: GatewayInference, reservation_id: Uuid) -> Response {
-	let metadata = request_metadata(context, &inference, reservation_id);
+pub async fn run_responses(request: OpenAIResponsesRequestPayload, context: &GatewayAuthContext, inference: GatewayInference, reservation_id: Uuid, usage_type: &'static str) -> Response {
+	let metadata = request_metadata(context, &inference, reservation_id, usage_type);
 	let raw_request = match serde_json::to_value(request) {
 		Ok(raw_request) => raw_request,
 		Err(error) => {
@@ -188,13 +188,14 @@ fn invalid_bearer_response() -> Response {
 	)
 }
 
-fn request_metadata(context: &GatewayAuthContext, inference: &GatewayInference, reservation_id: Uuid) -> SkinRequestMetadata {
+fn request_metadata(context: &GatewayAuthContext, inference: &GatewayInference, reservation_id: Uuid, usage_type: &str) -> SkinRequestMetadata {
 	let mut metadata = BTreeMap::new();
 	metadata.insert(RESERVATION_METADATA_KEY.to_string(), reservation_id.to_string());
 	metadata.insert("oxide_user_id".to_string(), context.user_id.to_string());
 	metadata.insert("oxide_api_key_id".to_string(), context.key_id.to_string());
 	metadata.insert("oxide_model_id".to_string(), inference.model_id.to_string());
 	metadata.insert("oxide_team_id".to_string(), context.team_id.to_string());
+	metadata.insert("oxide_request_type".to_string(), usage_type.to_string());
 	SkinRequestMetadata(metadata)
 }
 

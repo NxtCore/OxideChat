@@ -51,7 +51,7 @@ impl OxideCostSink {
 			api_key_id: metadata_uuid(record, "oxide_api_key_id"),
 			model_id: &model.id,
 			provider_id: &model.provider_id,
-			request_type: "gateway",
+			request_type: record.metadata.get("oxide_request_type").map_or("gateway", String::as_str),
 			input_tokens,
 			output_tokens,
 			reasoning_tokens,
