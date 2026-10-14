@@ -2,6 +2,7 @@ pub mod auth;
 pub mod base;
 pub mod catalog;
 pub mod config;
+pub mod developer_keys;
 pub mod encryption;
 pub mod gateway;
 pub mod i18n;

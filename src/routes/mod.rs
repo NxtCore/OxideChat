@@ -174,6 +174,16 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.route("/api/v1/mcp-servers/{id}", delete(public::mcp::delete_server))
 		.route("/api/v1/mcp-servers/{id}/discover", post(public::mcp::discover_server))
 		.route("/api/v1/mcp-servers/{id}/sync-tools", post(public::mcp::sync_tools_from_client))
+		// Developer Gateway Keys
+		.route("/api/v1/developer/teams", get(public::developer::list_teams))
+		.route("/api/v1/developer/keys", get(public::developer::list_keys).post(public::developer::create_key))
+		.route("/api/v1/developer/keys/{id}", patch(public::developer::update_key))
+		.route("/api/v1/developer/keys/{id}/revoke", post(public::developer::revoke_key))
+		.route("/api/v1/developer/keys/{id}/rotate", post(public::developer::rotate_key))
+		.route(
+			"/api/v1/developer/keys/{id}/limits",
+			get(public::developer::get_limits).put(public::developer::set_limits).delete(public::developer::clear_limits),
+		)
 		// Images CDN (public, no auth)
 		.route("/api/v1/images/{id}", get(public::images::serve_image))
 		.route("/api/v1/images", post(public::images::upload_image))
