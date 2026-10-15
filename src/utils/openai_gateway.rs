@@ -91,6 +91,7 @@ pub async fn run_chat(request: OpenAIChatRequest, context: &GatewayAuthContext, 
 	let skin_context = SkinContext::with_service(engine.service().clone());
 	drop(engine);
 	let response = OpenAIChatSkin::handle_chat(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await;
+	log_upstream_failure(&response, context, usage_type);
 	inference.finish(response)
 }
 
@@ -114,7 +115,15 @@ pub async fn run_responses(request: OpenAIResponsesRequestPayload, context: &Gat
 	let skin_context = SkinContext::with_service(engine.service().clone());
 	drop(engine);
 	let response = OpenAIResponsesSkin::handle_responses(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(raw_request)).await;
+	log_upstream_failure(&response, context, usage_type);
 	inference.finish(response)
+}
+
+fn log_upstream_failure(response: &Response, context: &GatewayAuthContext, usage_type: &str) {
+	let status = response.status();
+	if status.is_server_error() {
+		tracing::error!(status = status.as_u16(), key_id = %context.key_id, team_id = %context.team_id, usage_type, "gateway inference request failed upstream");
+	}
 }
 
 /// Axum middleware requiring gateway model-read permission.

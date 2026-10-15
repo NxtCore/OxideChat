@@ -2,7 +2,7 @@ use super::keys::{GatewayKeyRuleRow, GatewayTeamModelRow};
 use super::{
 	CreateGatewayKeyRequest, DEFAULT_ROTATION_OVERLAP_SECONDS, GatewayApiKey, GatewayKeyBudgetResponse, GatewayKeyError, GatewayKeyRuleRequest, GatewayKeyRuleResponse, GatewayRatePolicy,
 	GatewayRouteClass, GatewayRuleMetric, GatewayTeamResponse, KEY_SCOPES, MAX_KEY_NAME_LENGTH, MAX_ROTATION_OVERLAP_SECONDS, SetGatewayKeyBudgetRequest,
-	UpdateGatewayKeyRequest,
+	UpdateGatewayKeyRequest, public_model_id,
 };
 use crate::types::{Budget, BudgetSubject, Team};
 use crate::utils::auth::hash_password;
@@ -536,7 +536,7 @@ impl GatewayTeamResponse {
 		.await?;
 		let mut models: HashMap<Uuid, Vec<String>> = HashMap::with_capacity(teams.len());
 		for row in rows {
-			models.entry(row.team_id).or_default().push(format!("{}/{}", row.provider_name.to_ascii_lowercase(), row.model_id));
+			models.entry(row.team_id).or_default().push(public_model_id(&row.provider_name, &row.model_id));
 		}
 		Ok(teams
 			.into_iter()

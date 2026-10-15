@@ -178,9 +178,9 @@ impl GatewayModel {
 
 	/// Resolves one enabled provider/model identifier accessible to the context.
 	///
-	/// Provider-qualified identifiers match provider names case-insensitively.
-	/// An unqualified identifier resolves only when exactly one distinct model is
-	/// accessible; otherwise this returns `None`.
+	/// The stored model id and the legacy `provider/stored-id` form both resolve,
+	/// matched case-insensitively. An id matching more than one accessible model
+	/// resolves to `None`.
 	///
 	/// # Errors
 	///
@@ -190,7 +190,6 @@ impl GatewayModel {
 	}
 
 	async fn resolve_model(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<Option<ResolvedModel>, sqlx::Error> {
-		let (provider_name, model_id) = requested_id.split_once('/').map_or((None, requested_id), |(provider, model)| (Some(provider), model));
 		let mut matches = sqlx::query_as!(
 			ResolvedModel,
 			r#"
@@ -202,8 +201,7 @@ impl GatewayModel {
 			FROM models m
 			JOIN providers p ON p.id = m.provider_id
 			LEFT JOIN model_configs c ON c.model_id = m.id AND c.owner_id IS NULL
-			WHERE m.model_id = $3
-			  AND ($4::text IS NULL OR LOWER(p.name) = LOWER($4))
+			WHERE (m.model_id = $3 OR LOWER(p.name || '/' || m.model_id) = LOWER($3))
 			  AND m.is_enabled = TRUE
 			  AND p.is_enabled = TRUE
 			  AND EXISTS (
@@ -222,8 +220,7 @@ impl GatewayModel {
 			"#,
 			context.user_id,
 			context.team_id,
-			model_id,
-			provider_name
+			requested_id
 		)
 		.fetch_all(pool)
 		.await?;

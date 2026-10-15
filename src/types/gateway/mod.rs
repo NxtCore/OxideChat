@@ -50,10 +50,23 @@ pub struct GatewayModel {
 	pub created_at: DateTime<Utc>,
 }
 
+/// Public gateway id of a stored model.
+///
+/// Discovered models already carry their provider prefix, so the stored id is
+/// returned unchanged; ids without the prefix get it added.
+#[must_use]
+pub fn public_model_id(provider_name: &str, model_id: &str) -> String {
+	let provider = provider_name.to_ascii_lowercase();
+	match model_id.split_once('/') {
+		Some((prefix, _)) if prefix.eq_ignore_ascii_case(&provider) => model_id.to_string(),
+		_ => format!("{provider}/{model_id}"),
+	}
+}
+
 impl From<GatewayModel> for OpenAIModel {
 	fn from(model: GatewayModel) -> Self {
 		Self {
-			id: format!("{}/{}", model.provider_name.to_ascii_lowercase(), model.model_id),
+			id: public_model_id(&model.provider_name, &model.model_id),
 			object: Some("model".to_string()),
 			created: Some(model.created_at.timestamp().max(0) as u64),
 			owned_by: Some(model.provider_name),

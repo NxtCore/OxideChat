@@ -742,6 +742,34 @@ mod models {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn provider_prefixed_stored_ids_are_listed_once_and_resolve_in_both_forms(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, user_id, "Prefixed Team", true).await?;
+		let (_, model_id) = create_provider_model(&pool, "OpenAI", "openai/gpt-4.1-nano").await?;
+		let (_, token) = create_key(&pool, user_id, team_id, json!(["inference:read"])).await?;
+		let context = GatewayCredential::authenticate(&pool, &token).await?;
+		let models = GatewayModel::list_for_context(&pool, &context).await?;
+		assert_eq!(models.len(), 1);
+		assert_eq!(models[0].id, "openai/gpt-4.1-nano");
+		for requested in ["openai/gpt-4.1-nano", "OpenAI/openai/gpt-4.1-nano", "openai/openai/gpt-4.1-nano"] {
+			assert_eq!(GatewayModel::resolve_accessible(&pool, &context, requested).await?, Some(model_id), "{requested}");
+		}
+		let inference = GatewayModel::resolve_inference(&pool, &context, "openai/openai/gpt-4.1-nano").await?;
+		assert_eq!(inference.engine_model_id, "openai/gpt-4.1-nano");
+		assert!(GatewayModel::resolve_accessible(&pool, &context, "gpt-4.1-nano").await?.is_none());
+		let teams = GatewayTeamResponse::list_for_user(&pool, &user_id).await?;
+		assert_eq!(teams[0].models, vec!["openai/gpt-4.1-nano".to_string()]);
+		Ok(())
+	}
+
+	#[test]
+	fn public_model_ids_add_the_provider_only_when_missing() {
+		assert_eq!(public_model_id("OpenAI", "openai/gpt-4.1-nano"), "openai/gpt-4.1-nano");
+		assert_eq!(public_model_id("Gateway Provider", "visible"), "gateway provider/visible");
+		assert_eq!(public_model_id("OpenRouter", "openai/gpt-4o"), "openrouter/openai/gpt-4o");
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn key_only_sees_models_of_its_pinned_team(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
 		let first_team = create_team(&pool, user_id, "First Gateway Team", false).await?;
