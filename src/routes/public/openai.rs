@@ -30,11 +30,16 @@ pub async fn chat_completions(
 	Extension(context): Extension<GatewayAuthContext>,
 	SkinAwareJson(mut request): SkinAwareJson<OpenAIChatRequest>,
 ) -> Response {
-	let inference = match GatewayModel::authorize_inference(&state.db, &context, &request.model).await {
+	let inference = match GatewayModel::resolve_inference(&state.db, &context, &request.model).await {
 		Ok(inference) => inference,
 		Err(error) => return model_access_error_response(error, &request.model),
 	};
-	let tokens = inference.chat_tokens(&context.policy, &mut request);
+	let estimate = inference.chat_estimate(&context.policy, &mut request);
+	let inference = match GatewayModel::authorize_inference(&state.db, &state.budget_ledger, &context, inference, estimate.tokens()).await {
+		Ok(inference) => inference,
+		Err(error) => return model_access_error_response(error, &request.model),
+	};
+	let tokens = estimate.limiter_tokens();
 	gateway_limits::run_limited(&state, &context, GatewayRoute::CHAT, tokens, |id| run_chat(request, &context, inference, id, GatewayRoute::CHAT.usage_type)).await
 }
 
@@ -52,10 +57,16 @@ pub async fn responses(
 			"missing_required_parameter",
 		);
 	};
-	let inference = match GatewayModel::authorize_inference(&state.db, &context, model).await {
+	let inference = match GatewayModel::resolve_inference(&state.db, &context, model).await {
 		Ok(inference) => inference,
 		Err(error) => return model_access_error_response(error, model),
 	};
-	let tokens = inference.responses_tokens(&context.policy, &mut request);
+	let model = model.to_owned();
+	let estimate = inference.responses_estimate(&context.policy, &mut request);
+	let inference = match GatewayModel::authorize_inference(&state.db, &state.budget_ledger, &context, inference, estimate.tokens()).await {
+		Ok(inference) => inference,
+		Err(error) => return model_access_error_response(error, &model),
+	};
+	let tokens = estimate.limiter_tokens();
 	gateway_limits::run_limited(&state, &context, GatewayRoute::RESPONSES, tokens, |id| run_responses(request, &context, inference, id, GatewayRoute::RESPONSES.usage_type)).await
 }

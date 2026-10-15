@@ -1,4 +1,5 @@
 use super::{GatewayInference, GatewayLimitError, GatewayRatePolicy};
+use crate::types::TokenEstimate;
 use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
 use serde_json::Value;
 
@@ -13,12 +14,46 @@ const EXTERNAL_INPUT_KEYS: [&str; 8] = [
 	"prompt",
 ];
 
+/// Token bounds of one request and whether the limiter must reserve them.
+pub struct GatewayEstimate {
+	result: Result<TokenEstimate, GatewayLimitError>,
+	limited: bool,
+}
+
+impl GatewayEstimate {
+	#[must_use]
+	/// Bounds used to price the request; an unbounded request is priced at zero.
+	pub fn tokens(&self) -> TokenEstimate {
+		self.result.as_ref().copied().unwrap_or_default()
+	}
+
+	/// Tokens for the limiter, which only reserves them when token rules apply.
+	///
+	/// # Errors
+	/// Returns the estimation failure when token rules apply and no bound could be computed.
+	pub fn limiter_tokens(self) -> Result<u64, GatewayLimitError> {
+		match self.result {
+			Ok(tokens) if self.limited => Ok(tokens.total()),
+			Err(error) if self.limited => Err(error),
+			_ => Ok(0),
+		}
+	}
+}
+
 impl GatewayInference {
 	/// Estimates text conservatively and reserves the model context for external input.
 	///
 	/// # Errors
 	/// Returns [`GatewayLimitError::Misconfigured`] if a required output or context bound is absent.
 	pub fn estimate_tokens(&self, body: &[u8], output_max: Option<u64>, choices: u64) -> Result<u64, GatewayLimitError> {
+		Ok(self.estimate_split(body, output_max, choices)?.total())
+	}
+
+	/// Estimates input and output tokens separately so each can be priced.
+	///
+	/// # Errors
+	/// Returns [`GatewayLimitError::Misconfigured`] if a required output or context bound is absent.
+	pub fn estimate_split(&self, body: &[u8], output_max: Option<u64>, choices: u64) -> Result<TokenEstimate, GatewayLimitError> {
 		let output = output_max
 			.or(self.max_output_tokens.map(u64::from))
 			.filter(|value| *value > 0)
@@ -28,39 +63,37 @@ impl GatewayInference {
 		} else {
 			u64::try_from(body.len()).unwrap_or(u64::MAX).saturating_mul(2).saturating_add(1024)
 		};
-		Ok(input.saturating_add(output).saturating_mul(choices.max(1)))
+		let choices = choices.max(1);
+		Ok(TokenEstimate {
+			input: input.saturating_mul(choices),
+			output: output.saturating_mul(choices),
+		})
 	}
 
-	/// Applies the output maximum to a Chat Completions request and returns its token reservation.
-	///
-	/// # Errors
-	/// Returns a limit error if a conservative reservation cannot be computed.
-	pub fn chat_tokens(&self, policy: &GatewayRatePolicy, request: &mut OpenAIChatRequest) -> Result<u64, GatewayLimitError> {
-		if !policy.has_token_rules() {
-			return Ok(0);
-		}
+	/// Bounds a Chat Completions request; the output maximum is applied only when token rules reserve it.
+	pub fn chat_estimate(&self, policy: &GatewayRatePolicy, request: &mut OpenAIChatRequest) -> GatewayEstimate {
+		let limited = policy.has_token_rules();
 		let output_max = request.max_completion_tokens.or(request.max_tokens).or(self.max_output_tokens);
-		if request.max_completion_tokens.is_none() && request.max_tokens.is_none() {
+		if limited && request.max_completion_tokens.is_none() && request.max_tokens.is_none() {
 			request.max_completion_tokens = output_max;
 		}
-		let body = serde_json::to_vec(&*request).map_err(|_| GatewayLimitError::Unavailable)?;
-		self.estimate_tokens(&body, output_max.map(u64::from), u64::from(request.n.unwrap_or(1)))
+		let result = serde_json::to_vec(&*request)
+			.map_err(|_| GatewayLimitError::Unavailable)
+			.and_then(|body| self.estimate_split(&body, output_max.map(u64::from), u64::from(request.n.unwrap_or(1))));
+		GatewayEstimate { result, limited }
 	}
 
-	/// Applies the output maximum to a Responses request and returns its token reservation.
-	///
-	/// # Errors
-	/// Returns a limit error if a conservative reservation cannot be computed.
-	pub fn responses_tokens(&self, policy: &GatewayRatePolicy, request: &mut OpenAIResponsesRequestPayload) -> Result<u64, GatewayLimitError> {
-		if !policy.has_token_rules() {
-			return Ok(0);
-		}
-		if request.max_output_tokens.is_none() {
+	/// Bounds a Responses request; the output maximum is applied only when token rules reserve it.
+	pub fn responses_estimate(&self, policy: &GatewayRatePolicy, request: &mut OpenAIResponsesRequestPayload) -> GatewayEstimate {
+		let limited = policy.has_token_rules();
+		if limited && request.max_output_tokens.is_none() {
 			request.max_output_tokens = self.max_output_tokens.map(i64::from);
 		}
 		let output_max = request.max_output_tokens.and_then(|value| u64::try_from(value).ok());
-		let body = serde_json::to_vec(&*request).map_err(|_| GatewayLimitError::Unavailable)?;
-		self.estimate_tokens(&body, output_max, 1)
+		let result = serde_json::to_vec(&*request)
+			.map_err(|_| GatewayLimitError::Unavailable)
+			.and_then(|body| self.estimate_split(&body, output_max, 1));
+		GatewayEstimate { result, limited }
 	}
 }
 

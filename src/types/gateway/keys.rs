@@ -1,5 +1,7 @@
 use super::{GatewayRateRule, GatewayRouteClass, GatewayRuleMetric, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE};
 use chrono::{DateTime, Utc};
+use crate::types::EffectiveBudgetResponse;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::{FromRow, types::Json};
 use uuid::Uuid;
@@ -62,6 +64,14 @@ pub struct SetGatewayKeyLimitsRequest {
 	pub rules: Vec<GatewayKeyRuleRequest>,
 }
 
+#[derive(Debug, Deserialize)]
+/// Body replacing the key's spending budget.
+pub struct SetGatewayKeyBudgetRequest {
+	pub amount: Decimal,
+	pub interval: String,
+	pub on_exceed: String,
+}
+
 // Response Types
 
 #[derive(Debug, Serialize)]
@@ -104,6 +114,34 @@ pub struct GatewayKeyRuleResponse {
 	pub metric: String,
 	pub capacity: i64,
 	pub refill_period_seconds: i32,
+}
+
+#[derive(Debug, Serialize)]
+/// A key's spending budget with its current spend.
+pub struct GatewayKeyBudgetResponse {
+	pub amount: Decimal,
+	pub interval: String,
+	pub on_exceed: String,
+	pub spent: Decimal,
+	pub remaining: Decimal,
+	pub window_start: DateTime<Utc>,
+	pub resets_at: Option<DateTime<Utc>>,
+	pub exhausted: bool,
+}
+
+impl From<EffectiveBudgetResponse> for GatewayKeyBudgetResponse {
+	fn from(budget: EffectiveBudgetResponse) -> Self {
+		Self {
+			amount: budget.amount,
+			interval: budget.budget.interval,
+			on_exceed: budget.on_exceed,
+			spent: budget.spent,
+			remaining: budget.remaining,
+			window_start: budget.window_start,
+			resets_at: budget.resets_at,
+			exhausted: budget.exhausted,
+		}
+	}
 }
 
 #[derive(Debug, Serialize)]
@@ -228,6 +266,9 @@ pub enum GatewayKeyError {
 	/// Two rules share a route class, metric and window.
 	#[error("gateway_key_rule_duplicate")]
 	DuplicateRule,
+	/// The budget amount, interval or action is unsupported.
+	#[error("gateway_key_budget_invalid")]
+	InvalidBudget,
 	/// The secret could not be generated or hashed.
 	#[error("gateway_key_secret_failed")]
 	Secret,

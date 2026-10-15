@@ -6,10 +6,10 @@ use crate::ai;
 use crate::types::models::{Model, ModelPricing};
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
 use crate::types::{
-	Budget, Chat, ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, StreamingAssistantMessageCreate,
+	Budget, BudgetError, BudgetSubject, Chat, ChatMessageResponse, ClientToolResultRequest, Message, MessagePart, RequestSettings, StreamData, StreamRequest, StreamingAssistantMessageCreate,
 	StreamingUserMessageCreate, Tool, ToolExecution, ToolExecutionInternal, ToolExecutionResponse, ToolFunction, UsageEvent, UsageEventRecord,
 };
-use crate::types::{CostDetails, JobState, RequestContext};
+use crate::types::{CostDetails, JobState, RequestContext, TokenEstimate};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use axum::{
 	Json,
@@ -33,6 +33,8 @@ use std::{
 	time::Instant,
 };
 use uuid::Uuid;
+
+const DEFAULT_OUTPUT_ESTIMATE: u64 = 4096;
 
 fn error_stream(code: impl Into<String>, message: impl Into<String>) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
 	let code = code.into();
@@ -559,21 +561,18 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, Extension(Req
 		}
 	}
 
-	match ModelPricing::is_free(&state.db, &model.id).await {
-		Ok(true) => {}
-		Ok(false) => match Budget::allows_inference(&state.db, &user.id).await {
-			Ok(true) => {}
-			Ok(false) => return error_stream("budget_exceeded", "Budget exceeded for this model").into_response(),
-			Err(e) => {
-				eprintln!("[STREAM] Failed to check budget status: {e}");
-				return error_stream("internal_error", "Failed to check budget status").into_response();
-			}
-		},
+	let estimate = TokenEstimate {
+		input: (req.content.len() as u64).saturating_mul(2).saturating_add(1024),
+		output: model.max_tokens.and_then(|tokens| u64::try_from(tokens).ok()).filter(|tokens| *tokens > 0).unwrap_or(DEFAULT_OUTPUT_ESTIMATE),
+	};
+	let budget = match state.budget_ledger.reserve_for_model(&state.db, BudgetSubject::user(user.id), &model.id, estimate).await {
+		Ok(admission) => admission,
+		Err(BudgetError::Exceeded) => return error_stream("budget_exceeded", "Budget exceeded for this model").into_response(),
 		Err(e) => {
-			eprintln!("[STREAM] Failed to check model pricing: {e}");
-			return error_stream("internal_error", "Failed to check model pricing").into_response();
+			eprintln!("[STREAM] Failed to check budget status: {e}");
+			return error_stream("internal_error", "Failed to check budget status").into_response();
 		}
-	}
+	};
 
 	let user_model_config = ModelConfig::find_for_user_by_stable_key(&state.db, ModelConfigViewer { user_id: &user.id }, &req.model_key)
 		.await
@@ -776,6 +775,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, Extension(Req
 	let ir_for_stream = ir.clone();
 
 	let db = state.db.clone();
+	let budget_ledger = state.budget_ledger.clone();
 	let mcp_pool = state.mcp_pool.clone();
 	let client_tool_pending = state.client_tool_pending.clone();
 	let start_time = Instant::now();
@@ -1093,6 +1093,9 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, Extension(Req
 
 									match message {
 										Ok(msg) => {
+											if let Some(reservation) = &budget.reservation {
+												budget_ledger.reconcile(reservation.id, final_cost_total);
+											}
 											let usage_recorded = UsageEvent::record(&db, UsageEventRecord {
 												user_id: &user.id,
 												team_id: Budget::primary_team_id(&db, &user.id).await.ok().flatten(),
@@ -1106,7 +1109,11 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, Extension(Req
 												cost_total: final_cost_total,
 											}).await;
 											match usage_recorded {
-												Ok(_) => {}
+												Ok(_) => {
+													if let Some(reservation) = &budget.reservation {
+														budget_ledger.settle(reservation.id);
+													}
+												}
 												Err(e) => {
 													eprintln!("[STREAM] Failed to record usage event for message {}: {e}", msg.id);
 													yield Ok::<_, Infallible>(Event::default().data(

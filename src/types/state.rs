@@ -1,6 +1,6 @@
 //! Shared application state.
 
-use crate::types::GatewayLimiter;
+use crate::types::{BudgetLedger, GatewayLimiter};
 use crate::utils::tools::McpConnectionPool;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -65,6 +65,7 @@ impl ClientToolPending {
 #[derive(Clone, Debug)]
 pub struct JobState {
 	pub gateway_limiter: GatewayLimiter,
+	pub budget_ledger: BudgetLedger,
 	pub db: PgPool,
 	/// Process-lifetime cache of initialized MCP clients keyed by `mcp_server_id`.
 	pub mcp_pool: McpConnectionPool,

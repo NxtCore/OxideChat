@@ -1,5 +1,5 @@
 use crate::types::models::{Model, ModelPricing};
-use crate::types::{Budget, GatewayLimitBackend, GatewayLimiter, JobState, RESERVATION_METADATA_KEY, UsageEvent, UsageEventRecord};
+use crate::types::{BUDGET_RESERVATION_METADATA_KEY, Budget, BudgetLedger, GatewayLimitBackend, GatewayLimiter, JobState, RESERVATION_METADATA_KEY, UsageEvent, UsageEventRecord};
 use omniference::catalog::UsageBreakdown;
 use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
 use omniference::stream::CostDetails;
@@ -26,6 +26,15 @@ impl OxideCostSink {
 	}
 
 	async fn persist(&self, record: &CostRecord) -> Result<(), sqlx::Error> {
+		let budget_id = metadata_uuid(record, BUDGET_RESERVATION_METADATA_KEY);
+		self.store(record, budget_id).await?;
+		if let Some(id) = budget_id {
+			self.state.budget_ledger.settle(id);
+		}
+		Ok(())
+	}
+
+	async fn store(&self, record: &CostRecord, budget_id: Option<Uuid>) -> Result<(), sqlx::Error> {
 		let Some(user_id) = metadata_uuid(record, "oxide_user_id") else {
 			return Ok(());
 		};
@@ -45,6 +54,9 @@ impl OxideCostSink {
 			Some(team_id) => Some(team_id),
 			None => Budget::primary_team_id(&self.state.db, &user_id).await?,
 		};
+		if let Some(id) = budget_id {
+			self.state.budget_ledger.reconcile(id, cost_total);
+		}
 		let usage = UsageEventRecord {
 			user_id: &user_id,
 			team_id,
@@ -65,6 +77,7 @@ impl OxideCostSink {
 /// Managed asynchronous cost queue with retry and shutdown handling.
 pub struct OxideCostQueue {
 	limiter: GatewayLimiter,
+	ledger: BudgetLedger,
 	sender: mpsc::UnboundedSender<CostQueueMessage>,
 	shutdown_started: AtomicBool,
 	shutdown_complete: AtomicBool,
@@ -76,6 +89,7 @@ impl OxideCostQueue {
 	#[must_use]
 	pub fn spawn(state: Arc<JobState>) -> Arc<Self> {
 		let limiter = state.gateway_limiter.clone();
+		let ledger = state.budget_ledger.clone();
 		let (sender, mut receiver) = mpsc::unbounded_channel();
 		let sink = OxideCostSink::new(state);
 		tokio::spawn(async move {
@@ -107,6 +121,7 @@ impl OxideCostQueue {
 		});
 		Arc::new(Self {
 			limiter,
+			ledger,
 			sender,
 			shutdown_started: AtomicBool::new(false),
 			shutdown_complete: AtomicBool::new(false),
@@ -148,6 +163,9 @@ impl OxideCostQueue {
 
 impl CostSink for OxideCostQueue {
 	fn terminal_usage(&self, _finalization: CostFinalization, metadata: &BTreeMap<String, String>, usage: &UsageBreakdown) {
+		if let Some(id) = metadata.get(BUDGET_RESERVATION_METADATA_KEY).and_then(|value| Uuid::parse_str(value).ok()) {
+			self.ledger.finalize(id);
+		}
 		if let Some(id) = metadata.get(RESERVATION_METADATA_KEY).and_then(|value| Uuid::parse_str(value).ok()) {
 			self.limiter
 				.reconcile(id, u64::from(usage.input_tokens) + u64::from(usage.output_tokens.max(usage.reasoning_tokens)));

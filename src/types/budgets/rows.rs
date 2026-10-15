@@ -18,5 +18,6 @@ pub(super) struct EffectiveBudgetRow {
 	pub assignment_id: Uuid,
 	pub team_id: Option<Uuid>,
 	pub user_id: Option<Uuid>,
+	pub api_key_id: Option<Uuid>,
 	pub assigned_at: DateTime<Utc>,
 }

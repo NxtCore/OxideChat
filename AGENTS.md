@@ -25,13 +25,16 @@
 - `src/jobs.rs` - Background job scheduler using tokio tasks
 - `src/types/` - Shared request/response DTOs and domain types
 - `src/tests/` - Unit tests organized by module (e.g., `i18n.rs`, `base.rs`)
+- `src/types/budgets/` - Budget definitions, assignments (user, team, API key) and spend evaluation
+    - `ledger.rs` - `BudgetLedger`: one Tokio actor reserves estimated cost at admission, reconciles once to actual cost, and refunds on drop; web chat and the gateway both reserve through `BudgetLedger::reserve_for_model`, never through their own checks
+    - `repository.rs` - `Budget::evaluate`/`status_for`/`checks` load effective budgets for a `BudgetSubject` (optional user, optional key)
 - `src/types/gateway/` - Gateway rate limiting and credentials, re-exported through `crate::types::*`
     - `limiter.rs` - Admission owned by one Tokio actor; bounded admission and unbounded release/reconciliation channels replace shared locking
     - `policy.rs` - Team and key rate rules, validated policies (`GatewayRatePolicy::from_stored`), and `GatewayLimitError`
     - `estimate.rs` - Token estimation for inference requests
     - `body.rs` - Keeps concurrency reservations alive for the lifetime of HTTP response bodies
     - `repository.rs` - Database access for credentials, policies, and model access; a key belongs to a user and is pinned to one of their teams (no projects), and authentication requires the user to still be a member of that team
-    - `keys.rs` / `keys_repository.rs` - API key management DTOs, errors, and SQL (create, update, revoke, rotate, key-scoped limit rules, team picker); audit events are written to `audit_logs` in the same transaction
+    - `keys.rs` / `keys_repository.rs` - API key management DTOs, errors, and SQL (create, update, revoke, rotate, key-scoped limit rules, per-key budget, team picker); audit events are written to `audit_logs` in the same transaction
     - `mod.rs` - Shared gateway types and constants
 - `src/utils/gateway_limits.rs` - HTTP glue only: admission for a route and Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter
 - `src/routes/` - HTTP route handlers (handlers only, no type definitions)

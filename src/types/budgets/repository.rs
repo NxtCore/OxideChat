@@ -1,7 +1,7 @@
 use super::rows::EffectiveBudgetRow;
 use super::{
 	Budget, BudgetAssignmentInfo, BudgetAssignmentRequest, BudgetResetEventResponse, BudgetResetRequest, BudgetResponse, BudgetTeamSummaryResponse, CreateBudgetRequest,
-	EffectiveBudget, EffectiveBudgetResponse, TeamBudgetAssignmentOverviewResponse, TeamBudgetOverviewResponse, UpdateBudgetRequest, UserBudgetOverviewResponse,
+	BudgetAction, BudgetCheck, BudgetScope, BudgetSubject, EffectiveBudget, EffectiveBudgetResponse, TeamBudgetAssignmentOverviewResponse, TeamBudgetOverviewResponse, UpdateBudgetRequest, UserBudgetOverviewResponse,
 	UserBudgetStatus,
 };
 use crate::types::BaseType;
@@ -120,6 +120,7 @@ impl Budget {
 			assignment_id: row.assignment_id,
 			team_id: row.team_id,
 			user_id: row.user_id,
+			api_key_id: row.api_key_id,
 			assigned_at: row.assigned_at,
 		}
 	}
@@ -133,6 +134,7 @@ impl Budget {
 			       reset_strategy::text AS reset_strategy, on_exceed::text AS on_exceed, is_enabled, created_at, updated_at
 			FROM budgets
 			WHERE ($1::text IS NULL OR name ILIKE $1 ESCAPE '\')
+			  AND NOT EXISTS (SELECT 1 FROM budget_assignments ba WHERE ba.budget_id = budgets.id AND ba.api_key_id IS NOT NULL)
 			ORDER BY name ASC
 			LIMIT $2 OFFSET $3
 			"#,
@@ -335,26 +337,28 @@ impl Budget {
 		.await
 	}
 
-	pub async fn budgets_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<EffectiveBudget>, sqlx::Error> {
+	pub async fn budgets_for(pool: &PgPool, subject: BudgetSubject) -> Result<Vec<EffectiveBudget>, sqlx::Error> {
 		let rows = sqlx::query_as::<_, EffectiveBudgetRow>(
 			r#"
 			SELECT b.id, b.name, b.description, b.amount, b.kind::text AS kind, b.interval::text AS interval,
 			       b.reset_strategy::text AS reset_strategy, b.on_exceed::text AS on_exceed, b.is_enabled, b.created_at, b.updated_at,
-			       ba.id AS assignment_id, ba.team_id, ba.user_id, ba.assigned_at
+			       ba.id AS assignment_id, ba.team_id, ba.user_id, ba.api_key_id, ba.assigned_at
 			FROM budget_assignments ba
 			JOIN budgets b ON b.id = ba.budget_id
 			WHERE b.is_enabled = true
 			  AND (
-			      ba.user_id = $1
-			      OR EXISTS (
+			      ($1::uuid IS NOT NULL AND ba.user_id = $1)
+			      OR ($1::uuid IS NOT NULL AND EXISTS (
 			          SELECT 1 FROM team_members tm
 			          WHERE tm.team_id = ba.team_id AND tm.user_id = $1
-			      )
+			      ))
+			      OR ($2::uuid IS NOT NULL AND ba.api_key_id = $2)
 			  )
 			ORDER BY b.name ASC
 			"#,
 		)
-		.bind(user_id)
+		.bind(subject.user_id)
+		.bind(subject.api_key_id)
 		.fetch_all(pool)
 		.await?;
 		Ok(rows.into_iter().map(Self::budget_from_row).collect())
@@ -376,20 +380,15 @@ impl Budget {
 		.await
 	}
 
-	/// Checks whether paid inference may start within every blocking budget.
+	/// Evaluates every budget effective for the subject against its stored spend.
 	///
 	/// # Errors
-	/// Returns an error when effective budget status cannot be loaded.
-	pub async fn allows_inference(pool: &PgPool, user_id: &Uuid) -> Result<bool, sqlx::Error> {
-		let status = Self::status_for_user(pool, user_id).await?;
-		Ok(status.budgets.iter().filter(|budget| budget.on_exceed == "block").all(|budget| !budget.exhausted))
-	}
-
-	pub async fn status_for_user(pool: &PgPool, user_id: &Uuid) -> Result<UserBudgetStatus, sqlx::Error> {
-		let effective = Self::budgets_for_user(pool, user_id).await?;
+	/// Returns an error when budgets or usage cannot be loaded.
+	pub async fn evaluate(pool: &PgPool, subject: BudgetSubject) -> Result<Vec<EffectiveBudgetResponse>, sqlx::Error> {
+		let effective = Self::budgets_for(pool, subject).await?;
 		let mut window_starts = Vec::with_capacity(effective.len());
 		let mut resets_at = Vec::with_capacity(effective.len());
-		let reset_by_assignment = Self::latest_resets_for_user(pool, user_id, &effective).await?;
+		let reset_by_assignment = Self::latest_resets_for_user(pool, subject.user_id.as_ref(), &effective).await?;
 		for budget in &effective {
 			let (window_start, resets) = Self::window(budget);
 			let window_start = reset_by_assignment
@@ -400,32 +399,36 @@ impl Budget {
 			window_starts.push(window_start);
 			resets_at.push(resets);
 		}
-		let spent_by_assignment = Self::spent_by_assignment(pool, user_id, &effective, &window_starts).await?;
+		let spent_by_assignment = Self::spent_by_assignment(pool, subject.user_id.as_ref(), &effective, &window_starts).await?;
 		let mut budgets = Vec::with_capacity(effective.len());
-		let mut should_block = false;
-		let mut should_warn = false;
 		for (index, budget) in effective.into_iter().enumerate() {
-			let window_start = window_starts[index];
-			let resets_at = resets_at[index];
 			let spent = spent_by_assignment.get(&budget.assignment_id).copied().unwrap_or(Decimal::ZERO);
-			let remaining = (budget.budget.amount - spent).max(Decimal::ZERO);
-			let exhausted = spent >= budget.budget.amount;
-			should_block |= exhausted && budget.budget.on_exceed == "block";
-			should_warn |= exhausted && budget.budget.on_exceed == "warn";
 			budgets.push(EffectiveBudgetResponse {
 				amount: budget.budget.amount,
 				spent,
-				remaining,
-				window_start,
-				resets_at,
+				remaining: (budget.budget.amount - spent).max(Decimal::ZERO),
+				window_start: window_starts[index],
+				resets_at: resets_at[index],
 				on_exceed: budget.budget.on_exceed.clone(),
-				exhausted,
+				exhausted: spent >= budget.budget.amount,
 				assignment_id: budget.assignment_id,
 				team_id: budget.team_id,
 				user_id: budget.user_id,
+				api_key_id: budget.api_key_id,
 				budget: BudgetResponse::from(budget.budget),
 			});
 		}
+		Ok(budgets)
+	}
+
+	/// Summarizes the subject's budgets with the overall decision and the models it blocks.
+	///
+	/// # Errors
+	/// Returns an error when effective budget status cannot be loaded.
+	pub async fn status_for(pool: &PgPool, subject: BudgetSubject) -> Result<UserBudgetStatus, sqlx::Error> {
+		let budgets = Self::evaluate(pool, subject).await?;
+		let should_block = budgets.iter().any(|budget| budget.exhausted && budget.on_exceed == "block");
+		let should_warn = budgets.iter().any(|budget| budget.exhausted && budget.on_exceed == "warn");
 		let blocked_model_ids = if should_block { ModelPricing::priced_model_ids(pool).await? } else { Vec::new() };
 		let decision = if should_block {
 			"block"
@@ -441,7 +444,30 @@ impl Budget {
 		})
 	}
 
-	async fn latest_resets_for_user(pool: &PgPool, user_id: &Uuid, budgets: &[EffectiveBudget]) -> Result<HashMap<Uuid, DateTime<Utc>>, sqlx::Error> {
+	/// Loads the subject's budgets in the shape the reservation ledger admits against.
+	///
+	/// # Errors
+	/// Returns an error when effective budget status cannot be loaded.
+	pub async fn checks(pool: &PgPool, subject: BudgetSubject) -> Result<Vec<BudgetCheck>, sqlx::Error> {
+		let budgets = Self::evaluate(pool, subject).await?;
+		Ok(budgets
+			.into_iter()
+			.map(|budget| {
+				let shared = budget.api_key_id.is_some() || (budget.team_id.is_some() && budget.budget.kind == "pooled");
+				BudgetCheck {
+					scope: BudgetScope {
+						assignment_id: budget.assignment_id,
+						user_id: if shared { None } else { subject.user_id },
+					},
+					amount: budget.amount,
+					spent: budget.spent,
+					action: BudgetAction::from_stored(&budget.on_exceed),
+				}
+			})
+			.collect())
+	}
+
+	async fn latest_resets_for_user(pool: &PgPool, user_id: Option<&Uuid>, budgets: &[EffectiveBudget]) -> Result<HashMap<Uuid, DateTime<Utc>>, sqlx::Error> {
 		if budgets.is_empty() {
 			return Ok(HashMap::new());
 		}
@@ -480,7 +506,7 @@ impl Budget {
 
 	async fn spent_by_assignment(
 		pool: &PgPool,
-		user_id: &Uuid,
+		user_id: Option<&Uuid>,
 		budgets: &[EffectiveBudget],
 		window_starts: &[DateTime<Utc>],
 	) -> Result<HashMap<Uuid, Decimal>, sqlx::Error> {
@@ -490,23 +516,26 @@ impl Budget {
 		let mut assignment_ids = Vec::with_capacity(budgets.len());
 		let mut team_ids = Vec::with_capacity(budgets.len());
 		let mut is_pooled_team = Vec::with_capacity(budgets.len());
+		let mut api_key_ids = Vec::with_capacity(budgets.len());
 		for budget in budgets {
 			assignment_ids.push(budget.assignment_id);
 			team_ids.push(budget.team_id.unwrap_or_else(Uuid::nil));
+			api_key_ids.push(budget.api_key_id);
 			is_pooled_team.push(budget.budget.kind == "pooled" && budget.team_id.is_some());
 		}
 		let rows = sqlx::query_as::<_, BudgetSpentRow>(
 			r#"
 			SELECT budget_windows.assignment_id, COALESCE(SUM(ue.cost_total), 0)::numeric AS spent
-			FROM UNNEST($1::uuid[], $2::uuid[], $3::bool[], $4::timestamptz[]) AS budget_windows(assignment_id, team_id, is_pooled_team, window_start)
+			FROM UNNEST($1::uuid[], $2::uuid[], $3::bool[], $4::timestamptz[], $6::uuid[]) AS budget_windows(assignment_id, team_id, is_pooled_team, window_start, api_key_id)
 			LEFT JOIN usage_events ue
 			  ON ue.created_at >= budget_windows.window_start
 			 AND (
-			     (budget_windows.is_pooled_team AND EXISTS (
+			     (budget_windows.api_key_id IS NOT NULL AND ue.api_key_id = budget_windows.api_key_id)
+			     OR (budget_windows.api_key_id IS NULL AND budget_windows.is_pooled_team AND EXISTS (
 			         SELECT 1 FROM team_members tm
 			         WHERE tm.team_id = budget_windows.team_id AND tm.user_id = ue.user_id
 			     ))
-			     OR (NOT budget_windows.is_pooled_team AND ue.user_id = $5)
+			     OR (budget_windows.api_key_id IS NULL AND NOT budget_windows.is_pooled_team AND ue.user_id = $5)
 			 )
 			GROUP BY budget_windows.assignment_id
 			"#,
@@ -516,6 +545,7 @@ impl Budget {
 		.bind(&is_pooled_team)
 		.bind(window_starts)
 		.bind(user_id)
+		.bind(&api_key_ids)
 		.fetch_all(pool)
 		.await?;
 		Ok(rows.into_iter().map(|row| (row.assignment_id, row.spent)).collect())
@@ -592,7 +622,7 @@ impl Budget {
 			r#"
 			SELECT b.id, b.name, b.description, b.amount, b.kind::text AS kind, b.interval::text AS interval,
 			       b.reset_strategy::text AS reset_strategy, b.on_exceed::text AS on_exceed, b.is_enabled, b.created_at, b.updated_at,
-			       ba.id AS assignment_id, ba.team_id, ba.user_id, ba.assigned_at
+			       ba.id AS assignment_id, ba.team_id, ba.user_id, ba.api_key_id, ba.assigned_at
 			FROM budget_assignments ba
 			JOIN budgets b ON b.id = ba.budget_id
 			WHERE b.id = $1
@@ -628,7 +658,7 @@ impl Budget {
 			let teams = all_teams.remove(&user.id).unwrap_or_default();
 			let mut window_starts = Vec::with_capacity(effective.len());
 			let mut resets_at_vec = Vec::with_capacity(effective.len());
-			let reset_by_assignment = Self::latest_resets_for_user(pool, &user.id, &effective).await?;
+			let reset_by_assignment = Self::latest_resets_for_user(pool, Some(&user.id), &effective).await?;
 			for budget in &effective {
 				let (window_start, resets) = Self::window(budget);
 				let window_start = reset_by_assignment
@@ -639,7 +669,7 @@ impl Budget {
 				window_starts.push(window_start);
 				resets_at_vec.push(resets);
 			}
-			let spent_by_assignment = Self::spent_by_assignment(pool, &user.id, &effective, &window_starts).await?;
+			let spent_by_assignment = Self::spent_by_assignment(pool, Some(&user.id), &effective, &window_starts).await?;
 			let mut budget_responses = Vec::with_capacity(effective.len());
 			let mut should_block = false;
 			let mut should_warn = false;
@@ -662,6 +692,7 @@ impl Budget {
 					assignment_id: budget.assignment_id,
 					team_id: budget.team_id,
 					user_id: budget.user_id,
+					api_key_id: budget.api_key_id,
 					budget: BudgetResponse::from(budget.budget),
 				});
 			}
@@ -725,6 +756,7 @@ impl Budget {
 				assignment_id: row.assignment_id,
 				team_id: row.team_id,
 				user_id: row.user_id,
+				api_key_id: None,
 				assigned_at: row.assigned_at,
 			};
 			map.entry(row.target_user_id).or_default().push(budget);
@@ -807,6 +839,7 @@ impl Budget {
 				assignment_id: row.assignment_id,
 				team_id: Some(row.team_id),
 				user_id: None,
+				api_key_id: None,
 				assigned_at: row.assigned_at,
 			})
 			.collect();
