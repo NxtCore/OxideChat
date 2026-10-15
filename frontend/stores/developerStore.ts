@@ -1,5 +1,5 @@
 import {defineStore} from 'pinia';
-import type {CreateKeyPayload, DeveloperKey, DeveloperKeyRotation, DeveloperKeyRule, DeveloperKeyWithToken, DeveloperTeam} from '~/types/developer';
+import type {CreateKeyPayload, DeveloperKey, DeveloperKeyBudget, DeveloperKeyRotation, DeveloperKeyRule, DeveloperKeyWithToken, DeveloperTeam, SetKeyBudgetPayload} from '~/types/developer';
 
 export const useDeveloperStore = defineStore('developer', {
 	state: () => ({
@@ -77,6 +77,18 @@ export const useDeveloperStore = defineStore('developer', {
 				rules: rules.map(({route_class, metric, capacity, refill_period_seconds}) => ({route_class, metric, capacity, refill_period_seconds})),
 			};
 			return (await $customFetch<DeveloperKeyRule[]>(`/api/v1/developer/keys/${id}/limits`, {method: 'PUT', body})) ?? [];
+		},
+		async getBudget(id: string): Promise<DeveloperKeyBudget | null> {
+			const {$customFetch} = useNuxtApp();
+			return (await $customFetch<DeveloperKeyBudget | null>(`/api/v1/developer/keys/${id}/budget`)) ?? null;
+		},
+		async setBudget(id: string, payload: SetKeyBudgetPayload): Promise<DeveloperKeyBudget | null> {
+			const {$customFetch} = useNuxtApp();
+			return (await $customFetch<DeveloperKeyBudget | null>(`/api/v1/developer/keys/${id}/budget`, {method: 'PUT', body: payload})) ?? null;
+		},
+		async clearBudget(id: string) {
+			const {$customFetch} = useNuxtApp();
+			await $customFetch(`/api/v1/developer/keys/${id}/budget`, {method: 'DELETE'});
 		},
 	},
 });

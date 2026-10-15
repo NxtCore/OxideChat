@@ -39,7 +39,7 @@
 				:class="keyStatus(apiKey) === 'revoked' ? 'opacity-70' : ''"
 				:data-testid="`key-${apiKey.name}`"
 			>
-				<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+				<div class="flex flex-col gap-3">
 					<div class="min-w-0 space-y-1">
 						<div class="flex flex-wrap items-center gap-2">
 							<span class="truncate font-semibold text-foreground">{{ apiKey.name }}</span>
@@ -62,7 +62,7 @@
 						</p>
 					</div>
 
-					<div v-if="!apiKey.revoked_at" class="flex shrink-0 flex-wrap items-center gap-2">
+					<div v-if="!apiKey.revoked_at" class="flex flex-wrap items-center gap-2">
 						<div class="flex items-center gap-2 pr-2">
 							<ShadSwitch
 								:model-value="apiKey.is_enabled"
@@ -76,6 +76,9 @@
 						</ShadButton>
 						<ShadButton variant="outline" size="sm" @click="limitsTarget = apiKey">
 							<Gauge class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.limits') }}
+						</ShadButton>
+						<ShadButton variant="outline" size="sm" @click="budgetTarget = apiKey">
+							<Wallet class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.budget') }}
 						</ShadButton>
 						<ShadButton variant="outline" size="sm" @click="rotateTarget = apiKey">
 							<RefreshCw class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rotate') }}
@@ -91,6 +94,7 @@
 		<DeveloperCreateKeyDialog v-model:open="createOpen" @created="onCreated" />
 		<DeveloperRotateKeyDialog :open="!!rotateTarget" :api-key="rotateTarget" @update:open="rotateTarget = null" @rotated="onRotated" />
 		<DeveloperKeyLimitsDialog :open="!!limitsTarget" :api-key="limitsTarget" @update:open="limitsTarget = null" />
+		<DeveloperKeyBudgetDialog :open="!!budgetTarget" :api-key="budgetTarget" @update:open="budgetTarget = null" />
 		<DeveloperKeyRevealDialog
 			v-model:open="revealOpen"
 			:token="revealToken"
@@ -130,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import {AlertTriangle, Ban, Gauge, KeyRound, Pencil, Plus, RefreshCw} from 'lucide-vue-next';
+import {AlertTriangle, Ban, Gauge, KeyRound, Pencil, Plus, RefreshCw, Wallet} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useDeveloperStore} from '@/stores/developerStore';
 import type {DeveloperKey, DeveloperKeyRotation, DeveloperKeyWithToken} from '~/types/developer';
@@ -143,6 +147,7 @@ const renameTarget = ref<DeveloperKey | null>(null);
 const renameValue = ref('');
 const rotateTarget = ref<DeveloperKey | null>(null);
 const limitsTarget = ref<DeveloperKey | null>(null);
+const budgetTarget = ref<DeveloperKey | null>(null);
 const revokeTarget = ref<DeveloperKey | null>(null);
 const revealOpen = ref(false);
 const revealToken = ref('');

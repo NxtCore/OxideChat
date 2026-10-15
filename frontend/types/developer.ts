@@ -48,3 +48,23 @@ export interface CreateKeyPayload {
 export type KeyStatus = 'active' | 'disabled' | 'expired' | 'revoked';
 
 export const KEY_SCOPES = ['inference:read', 'inference:write'] as const;
+
+export type BudgetInterval = 'daily' | 'weekly' | 'monthly' | 'total';
+export type BudgetOnExceed = 'block' | 'warn';
+
+export interface DeveloperKeyBudget {
+	amount: string;
+	interval: BudgetInterval;
+	on_exceed: BudgetOnExceed;
+	spent: string;
+	remaining: string;
+	window_start: string;
+	resets_at: string | null;
+	exhausted: boolean;
+}
+
+export interface SetKeyBudgetPayload {
+	amount: number;
+	interval: BudgetInterval;
+	on_exceed: BudgetOnExceed;
+}
