@@ -91,6 +91,10 @@
 						<Settings class="mr-2 h-4 w-4" />
 						<span>{{ store.getTranslation('settings.title') }}</span>
 					</ShadDropdownMenuItem>
+					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="router.push('/developer')">
+						<Code2 class="mr-2 h-4 w-4" />
+						<span>{{ store.getTranslation('developer.title') }}</span>
+					</ShadDropdownMenuItem>
 					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="handleLogout">
 						<LogOut class="mr-2 h-4 w-4" />
 						<span>{{ store.getTranslation('sidebar.logout') }}</span>
@@ -104,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import {ChevronUp, LogOut, Settings, Settings2, Layers} from 'lucide-vue-next';
+import {ChevronUp, Code2, LogOut, Settings, Settings2, Layers} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useChatStore} from '@/stores/chatStore';
 import {useBudgetStore} from '@/stores/budgetStore';
