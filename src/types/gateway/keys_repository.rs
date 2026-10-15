@@ -1,12 +1,14 @@
 use super::keys::{GatewayKeyRuleRow, GatewayTeamModelRow};
 use super::{
-	CreateGatewayKeyRequest, DEFAULT_ROTATION_OVERLAP_SECONDS, GatewayApiKey, GatewayKeyError, GatewayKeyRuleRequest, GatewayKeyRuleResponse, GatewayRatePolicy,
-	GatewayRouteClass, GatewayRuleMetric, GatewayTeamResponse, KEY_SCOPES, MAX_KEY_NAME_LENGTH, MAX_ROTATION_OVERLAP_SECONDS, UpdateGatewayKeyRequest,
+	CreateGatewayKeyRequest, DEFAULT_ROTATION_OVERLAP_SECONDS, GatewayApiKey, GatewayKeyBudgetResponse, GatewayKeyError, GatewayKeyRuleRequest, GatewayKeyRuleResponse, GatewayRatePolicy,
+	GatewayRouteClass, GatewayRuleMetric, GatewayTeamResponse, KEY_SCOPES, MAX_KEY_NAME_LENGTH, MAX_ROTATION_OVERLAP_SECONDS, SetGatewayKeyBudgetRequest,
+	UpdateGatewayKeyRequest, public_model_id,
 };
-use crate::types::Team;
+use crate::types::{Budget, BudgetSubject, Team};
 use crate::utils::auth::hash_password;
 use chrono::{DateTime, Duration, Utc};
 use rand::{Rng, distributions::Alphanumeric, rngs::OsRng};
+use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sqlx::{PgConnection, PgPool, Postgres, Transaction, types::Json};
 use std::collections::{HashMap, HashSet};
@@ -14,6 +16,9 @@ use uuid::Uuid;
 
 const SECRET_LENGTH: usize = 48;
 const AUDIT_TARGET: &str = "gateway_api_key";
+const BUDGET_INTERVALS: [&str; 4] = ["daily", "weekly", "monthly", "total"];
+const BUDGET_ACTIONS: [&str; 2] = ["block", "warn"];
+const MAX_BUDGET_UNITS: i64 = 999_999_999_999;
 
 macro_rules! key_columns {
 	() => {
@@ -98,6 +103,14 @@ fn validate_concurrency(value: Option<i32>) -> Result<(), GatewayKeyError> {
 		Some(value) if value <= 0 => Err(GatewayKeyError::InvalidConcurrency),
 		_ => Ok(()),
 	}
+}
+
+fn validate_budget(request: &SetGatewayKeyBudgetRequest) -> Result<(), GatewayKeyError> {
+	let valid = request.amount > Decimal::ZERO
+		&& request.amount <= Decimal::new(MAX_BUDGET_UNITS, 4)
+		&& BUDGET_INTERVALS.contains(&request.interval.as_str())
+		&& BUDGET_ACTIONS.contains(&request.on_exceed.as_str());
+	if valid { Ok(()) } else { Err(GatewayKeyError::InvalidBudget) }
 }
 
 fn route_class_str(class: GatewayRouteClass) -> &'static str {
@@ -333,6 +346,13 @@ impl GatewayApiKey {
 		.bind(replacement.id)
 		.execute(&mut *tx)
 		.await?;
+		sqlx::query(
+			"INSERT INTO budget_assignments (budget_id, api_key_id) SELECT budget_id, $2 FROM budget_assignments WHERE api_key_id = $1",
+		)
+		.bind(key_id)
+		.bind(replacement.id)
+		.execute(&mut *tx)
+		.await?;
 		let overlap_end = Utc::now() + Duration::seconds(overlap);
 		let previous = sqlx::query_as::<_, Self>(concat!(
 			"UPDATE gateway_api_keys SET expires_at = LEAST(COALESCE(expires_at, $2), $2) WHERE id = $1 RETURNING ",
@@ -418,6 +438,77 @@ impl GatewayApiKey {
 	}
 }
 
+impl GatewayApiKey {
+	/// Returns the spending budget of a key owned by the user, if one is set.
+	///
+	/// # Errors
+	///
+	/// Returns [`GatewayKeyError::NotFound`] or a storage error.
+	pub async fn budget(pool: &PgPool, user_id: &Uuid, key_id: &Uuid) -> Result<Option<GatewayKeyBudgetResponse>, GatewayKeyError> {
+		Self::find_owned(pool, user_id, key_id).await?;
+		let budgets = Budget::evaluate(pool, BudgetSubject::key(*key_id)).await?;
+		Ok(budgets.into_iter().next().map(GatewayKeyBudgetResponse::from))
+	}
+
+	/// Sets or replaces the spending budget of an active key.
+	///
+	/// # Errors
+	///
+	/// Returns [`GatewayKeyError::InvalidBudget`] for an unsupported budget, the usual lookup errors, or a storage error.
+	pub async fn replace_budget(pool: &PgPool, user_id: &Uuid, key_id: &Uuid, request: &SetGatewayKeyBudgetRequest) -> Result<GatewayKeyBudgetResponse, GatewayKeyError> {
+		validate_budget(request)?;
+		let mut tx = pool.begin().await?;
+		Self::lock_active(&mut tx, user_id, key_id).await?;
+		let updated = sqlx::query(
+			"UPDATE budgets SET amount = $2, interval = $3::budget_interval, on_exceed = $4::budget_on_exceed, updated_at = NOW()
+			 WHERE id = (SELECT budget_id FROM budget_assignments WHERE api_key_id = $1)",
+		)
+		.bind(key_id)
+		.bind(request.amount)
+		.bind(&request.interval)
+		.bind(&request.on_exceed)
+		.execute(&mut *tx)
+		.await?;
+		if updated.rows_affected() == 0 {
+			sqlx::query(
+				"WITH created AS (
+					INSERT INTO budgets (name, amount, kind, interval, reset_strategy, on_exceed)
+					VALUES ($2, $3, 'pooled', $4::budget_interval, 'calendar', $5::budget_on_exceed)
+					RETURNING id
+				)
+				INSERT INTO budget_assignments (budget_id, api_key_id) SELECT id, $1 FROM created",
+			)
+			.bind(key_id)
+			.bind(format!("key:{key_id}"))
+			.bind(request.amount)
+			.bind(&request.interval)
+			.bind(&request.on_exceed)
+			.execute(&mut *tx)
+			.await?;
+		}
+		let metadata = json!({ "amount": request.amount, "interval": request.interval, "on_exceed": request.on_exceed });
+		write_audit(&mut tx, "gateway_api_key_budget_updated", user_id, key_id, metadata).await?;
+		tx.commit().await?;
+		Self::budget(pool, user_id, key_id).await?.ok_or(GatewayKeyError::NotFound)
+	}
+
+	/// Removes the spending budget of an active key.
+	///
+	/// # Errors
+	///
+	/// Returns the usual lookup errors or a storage error.
+	pub async fn clear_budget(pool: &PgPool, user_id: &Uuid, key_id: &Uuid) -> Result<(), GatewayKeyError> {
+		let mut tx = pool.begin().await?;
+		Self::lock_active(&mut tx, user_id, key_id).await?;
+		let removed = sqlx::query("DELETE FROM budget_assignments WHERE budget_id IN (SELECT budget_id FROM budget_assignments WHERE api_key_id = $1)").bind(key_id).execute(&mut *tx).await?;
+		if removed.rows_affected() > 0 {
+			write_audit(&mut tx, "gateway_api_key_budget_cleared", user_id, key_id, json!({})).await?;
+		}
+		tx.commit().await?;
+		Ok(())
+	}
+}
+
 impl GatewayTeamResponse {
 	/// Lists the user's teams with the models each one grants through the gateway.
 	///
@@ -445,7 +536,7 @@ impl GatewayTeamResponse {
 		.await?;
 		let mut models: HashMap<Uuid, Vec<String>> = HashMap::with_capacity(teams.len());
 		for row in rows {
-			models.entry(row.team_id).or_default().push(format!("{}/{}", row.provider_name.to_ascii_lowercase(), row.model_id));
+			models.entry(row.team_id).or_default().push(public_model_id(&row.provider_name, &row.model_id));
 		}
 		Ok(teams
 			.into_iter()

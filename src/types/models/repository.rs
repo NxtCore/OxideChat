@@ -684,6 +684,15 @@ impl ModelPricing {
 		Ok(Some(input_cost + output_cost))
 	}
 
+	/// Prices an estimate for a model; unpriced models estimate to zero.
+	///
+	/// # Errors
+	/// Returns an error when pricing cannot be loaded.
+	pub async fn estimate_cost(pool: &sqlx::PgPool, model_id: &Uuid, tokens: crate::types::TokenEstimate) -> Result<Decimal, sqlx::Error> {
+		let clamp = |value: u64| i32::try_from(value).unwrap_or(i32::MAX);
+		Ok(Self::usage_cost(pool, model_id, clamp(tokens.input), clamp(tokens.output), 0).await?.unwrap_or(Decimal::ZERO))
+	}
+
 	/// All pricing overrides keyed by the model's string identifier, for pushing
 	/// into the omniference catalog as programmatic overrides.
 	pub async fn all_overrides(pool: &sqlx::PgPool) -> Result<Vec<(String, Value)>, sqlx::Error> {

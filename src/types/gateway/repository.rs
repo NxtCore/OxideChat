@@ -1,7 +1,6 @@
 use super::{GatewayAuthContext, GatewayAuthError, GatewayCredential, GatewayInference, GatewayModel, GatewayModelAccessError};
 use super::{GatewayRatePolicy, GatewayRateRule};
-use crate::types::Budget;
-use crate::types::models::ModelPricing;
+use crate::types::{BudgetAdmission, BudgetLedger, TokenEstimate};
 use crate::utils::auth::{hash_password, verify_password};
 use chrono::Utc;
 use omniference::types::providers::OpenAIModel;
@@ -13,6 +12,7 @@ use uuid::Uuid;
 
 struct ResolvedModel {
 	id: Uuid,
+	engine_model_id: String,
 	max_tokens: Option<i32>,
 	context_length: Option<i32>,
 }
@@ -21,8 +21,10 @@ impl From<ResolvedModel> for GatewayInference {
 	fn from(model: ResolvedModel) -> Self {
 		Self {
 			model_id: model.id,
+			engine_model_id: model.engine_model_id,
 			max_output_tokens: model.max_tokens.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
 			context_length: model.context_length.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
+			budget: BudgetAdmission::default(),
 		}
 	}
 }
@@ -176,9 +178,9 @@ impl GatewayModel {
 
 	/// Resolves one enabled provider/model identifier accessible to the context.
 	///
-	/// Provider-qualified identifiers match provider names case-insensitively.
-	/// An unqualified identifier resolves only when exactly one distinct model is
-	/// accessible; otherwise this returns `None`.
+	/// The stored model id and the legacy `provider/stored-id` form both resolve,
+	/// matched case-insensitively. An id matching more than one accessible model
+	/// resolves to `None`.
 	///
 	/// # Errors
 	///
@@ -188,19 +190,18 @@ impl GatewayModel {
 	}
 
 	async fn resolve_model(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<Option<ResolvedModel>, sqlx::Error> {
-		let (provider_name, model_id) = requested_id.split_once('/').map_or((None, requested_id), |(provider, model)| (Some(provider), model));
 		let mut matches = sqlx::query_as!(
 			ResolvedModel,
 			r#"
 			SELECT DISTINCT
 				m.id,
+				m.model_id AS engine_model_id,
 				COALESCE(c.max_output_tokens, m.max_tokens) AS max_tokens,
 				COALESCE(c.context_length, m.context_length) AS context_length
 			FROM models m
 			JOIN providers p ON p.id = m.provider_id
 			LEFT JOIN model_configs c ON c.model_id = m.id AND c.owner_id IS NULL
-			WHERE m.model_id = $3
-			  AND ($4::text IS NULL OR LOWER(p.name) = LOWER($4))
+			WHERE (m.model_id = $3 OR LOWER(p.name || '/' || m.model_id) = LOWER($3))
 			  AND m.is_enabled = TRUE
 			  AND p.is_enabled = TRUE
 			  AND EXISTS (
@@ -219,30 +220,44 @@ impl GatewayModel {
 			"#,
 			context.user_id,
 			context.team_id,
-			model_id,
-			provider_name
+			requested_id
 		)
 		.fetch_all(pool)
 		.await?;
 		Ok(if matches.len() == 1 { matches.pop() } else { None })
 	}
 
-	/// Resolves model access and checks budget admission.
-	///
-	/// Free models bypass budget enforcement. Paid requests are admitted while
-	/// every blocking budget remains below its configured amount.
+	/// Resolves one accessible model into the bounds gateway inference needs.
 	///
 	/// # Errors
 	///
-	/// Returns [`GatewayModelAccessError::NotFound`] for inaccessible or
-	/// ambiguous models, [`GatewayModelAccessError::BudgetExceeded`] for blocked
-	/// budgets, and a database error when policy evaluation fails.
-	pub async fn authorize_inference(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<GatewayInference, GatewayModelAccessError> {
+	/// Returns [`GatewayModelAccessError::NotFound`] for inaccessible or ambiguous
+	/// models and a database error when model access cannot be queried.
+	pub async fn resolve_inference(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<GatewayInference, GatewayModelAccessError> {
 		let model = Self::resolve_model(pool, context, requested_id).await?.ok_or(GatewayModelAccessError::NotFound)?;
-		if !ModelPricing::is_free(pool, &model.id).await? && !Budget::allows_inference(pool, &context.user_id).await? {
-			return Err(GatewayModelAccessError::BudgetExceeded);
-		}
 		Ok(model.into())
+	}
+
+	/// Reserves the estimated cost of a resolved model against the key's budgets.
+	///
+	/// Free models bypass budget enforcement. Paid requests are admitted while
+	/// every blocking budget has room, and the reservation travels with the
+	/// returned inference.
+	///
+	/// # Errors
+	///
+	/// Returns [`GatewayModelAccessError::BudgetExceeded`] for blocked budgets,
+	/// [`GatewayModelAccessError::BudgetUnavailable`] when reservation stopped, and
+	/// a database error when policy evaluation fails.
+	pub async fn authorize_inference(
+		pool: &PgPool,
+		ledger: &BudgetLedger,
+		context: &GatewayAuthContext,
+		mut inference: GatewayInference,
+		tokens: TokenEstimate,
+	) -> Result<GatewayInference, GatewayModelAccessError> {
+		inference.budget = ledger.reserve_for_model(pool, context.budget_subject(), &inference.model_id, tokens).await?;
+		Ok(inference)
 	}
 }
 

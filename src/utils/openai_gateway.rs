@@ -1,7 +1,7 @@
 use crate::ai;
 use crate::i18n::I18n;
 use crate::types::{
-	API_KEY_ID_HEADER, GatewayAuthContext, GatewayInference, GatewayModel, GatewayModelAccessError, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState,
+	API_KEY_ID_HEADER, BUDGET_RESERVATION_METADATA_KEY, GatewayAuthContext, GatewayInference, GatewayModel, GatewayModelAccessError, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState,
 	RESERVATION_METADATA_KEY, TEAM_ID_HEADER,
 };
 use axum::extract::{Request, State};
@@ -90,7 +90,9 @@ pub async fn run_chat(request: OpenAIChatRequest, context: &GatewayAuthContext, 
 	let engine = engine.read().await;
 	let skin_context = SkinContext::with_service(engine.service().clone());
 	drop(engine);
-	OpenAIChatSkin::handle_chat(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await
+	let response = OpenAIChatSkin::handle_chat(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await;
+	log_upstream_failure(&response, context, usage_type);
+	inference.finish(response)
 }
 
 /// Runs an authorized `OpenAI` responses request.
@@ -112,7 +114,16 @@ pub async fn run_responses(request: OpenAIResponsesRequestPayload, context: &Gat
 	let engine = engine.read().await;
 	let skin_context = SkinContext::with_service(engine.service().clone());
 	drop(engine);
-	OpenAIResponsesSkin::handle_responses(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(raw_request)).await
+	let response = OpenAIResponsesSkin::handle_responses(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(raw_request)).await;
+	log_upstream_failure(&response, context, usage_type);
+	inference.finish(response)
+}
+
+fn log_upstream_failure(response: &Response, context: &GatewayAuthContext, usage_type: &str) {
+	let status = response.status();
+	if status.is_server_error() {
+		tracing::error!(status = status.as_u16(), key_id = %context.key_id, team_id = %context.team_id, usage_type, "gateway inference request failed upstream");
+	}
 }
 
 /// Axum middleware requiring gateway model-read permission.
@@ -161,6 +172,12 @@ pub fn model_access_error_response(error: GatewayModelAccessError, requested_id:
 			"insufficient_quota",
 			"budget_exceeded",
 		),
+		GatewayModelAccessError::BudgetUnavailable => error_response(
+			StatusCode::SERVICE_UNAVAILABLE,
+			translation("gateway.errors.budget_unavailable"),
+			"server_error",
+			"gateway_budget_unavailable",
+		),
 		GatewayModelAccessError::Database(error) => {
 			tracing::error!(%error, model_id = requested_id, "failed to evaluate gateway model and budget policy");
 			error_response(
@@ -191,6 +208,9 @@ fn invalid_bearer_response() -> Response {
 fn request_metadata(context: &GatewayAuthContext, inference: &GatewayInference, reservation_id: Uuid, usage_type: &str) -> SkinRequestMetadata {
 	let mut metadata = BTreeMap::new();
 	metadata.insert(RESERVATION_METADATA_KEY.to_string(), reservation_id.to_string());
+	if let Some(budget_id) = inference.budget_reservation_id() {
+		metadata.insert(BUDGET_RESERVATION_METADATA_KEY.to_string(), budget_id.to_string());
+	}
 	metadata.insert("oxide_user_id".to_string(), context.user_id.to_string());
 	metadata.insert("oxide_api_key_id".to_string(), context.key_id.to_string());
 	metadata.insert("oxide_model_id".to_string(), inference.model_id.to_string());

@@ -1,4 +1,4 @@
-use crate::types::{AnalyticsQuery, Budget, JobState, RequestContext, UsageEvent, UsageFilter};
+use crate::types::{AnalyticsQuery, Budget, BudgetSubject, JobState, RequestContext, UsageEvent, UsageFilter};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	extract::{Extension, Query, State},
@@ -33,7 +33,7 @@ pub async fn get_my_budget(State(state): State<Arc<JobState>>, Extension(Request
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
-	match Budget::status_for_user(&state.db, &user.id).await {
+	match Budget::status_for(&state.db, BudgetSubject::user(user.id)).await {
 		Ok(status) => ResponseBuilder::new(ResponseBody::Json(status)).build(),
 		Err(e) => {
 			eprintln!("[USERS] Failed to fetch budget status for user {}: {e}", user.id);

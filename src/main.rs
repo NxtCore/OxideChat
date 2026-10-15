@@ -11,7 +11,7 @@ mod tests;
 mod types;
 mod utils;
 
-use crate::types::{GatewayLimiter, JobState};
+use crate::types::{BudgetLedger, GatewayLimiter, JobState};
 use axum::{Router, extract::DefaultBodyLimit};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
@@ -72,6 +72,7 @@ async fn main() {
 
 	let app_state = Arc::new(JobState {
 		gateway_limiter: GatewayLimiter::spawn(),
+		budget_ledger: BudgetLedger::spawn(),
 		db: pool,
 		mcp_pool: crate::utils::tools::McpConnectionPool::new(),
 		client_tool_pending: crate::types::state::ClientToolPending::new(),

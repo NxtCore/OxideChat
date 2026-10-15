@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod base;
+pub mod budgets;
 pub mod catalog;
 pub mod config;
 pub mod developer_keys;
