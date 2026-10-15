@@ -18,3 +18,9 @@ export function errorMessage(error: any, fallback: string): string {
 export function gatewayBaseUrl(): string {
 	return `${window.location.origin}/openai/v1`;
 }
+
+export function formatMoney(value: string | number): string {
+	const amount = Number(value);
+	const small = amount > 0 && amount < 0.01;
+	return `$${amount.toFixed(small ? 6 : 2)}`;
+}

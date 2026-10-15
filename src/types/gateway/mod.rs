@@ -120,6 +120,7 @@ impl GatewayAuthContext {
 #[derive(Debug)]
 pub struct GatewayInference {
 	pub model_id: Uuid,
+	pub engine_model_id: String,
 	pub max_output_tokens: Option<u32>,
 	pub context_length: Option<u32>,
 	pub budget: BudgetAdmission,

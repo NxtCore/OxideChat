@@ -34,10 +34,11 @@ pub async fn chat_completions(
 		Ok(inference) => inference,
 		Err(error) => return model_access_error_response(error, &request.model),
 	};
+	let requested_model = std::mem::replace(&mut request.model, inference.engine_model_id.clone());
 	let estimate = inference.chat_estimate(&context.policy, &mut request);
 	let inference = match GatewayModel::authorize_inference(&state.db, &state.budget_ledger, &context, inference, estimate.tokens()).await {
 		Ok(inference) => inference,
-		Err(error) => return model_access_error_response(error, &request.model),
+		Err(error) => return model_access_error_response(error, &requested_model),
 	};
 	let tokens = estimate.limiter_tokens();
 	gateway_limits::run_limited(&state, &context, GatewayRoute::CHAT, tokens, |id| run_chat(request, &context, inference, id, GatewayRoute::CHAT.usage_type)).await
@@ -62,6 +63,7 @@ pub async fn responses(
 		Err(error) => return model_access_error_response(error, model),
 	};
 	let model = model.to_owned();
+	request.model = Some(inference.engine_model_id.clone());
 	let estimate = inference.responses_estimate(&context.policy, &mut request);
 	let inference = match GatewayModel::authorize_inference(&state.db, &state.budget_ledger, &context, inference, estimate.tokens()).await {
 		Ok(inference) => inference,

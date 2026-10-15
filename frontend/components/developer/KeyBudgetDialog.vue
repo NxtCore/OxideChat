@@ -88,10 +88,6 @@ const percent = computed(() => {
 	return amount > 0 ? Math.min(100, (Number(current.value?.spent ?? 0) / amount) * 100) : 0;
 });
 
-function formatMoney(value: string | number) {
-	return `$${Number(value).toFixed(2)}`;
-}
-
 function applyCurrent(budget: DeveloperKeyBudget | null) {
 	current.value = budget;
 	form.amount = budget ? Number(budget.amount) : '';

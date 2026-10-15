@@ -88,10 +88,6 @@ const health = ref<'checking' | 'ok' | 'down'>('checking');
 
 const budgetBlocked = computed(() => budgetStore.myStatus?.decision === 'block');
 
-function formatMoney(value: number) {
-	return `$${value.toFixed(2)}`;
-}
-
 async function load() {
 	await developer.load().catch(() => {});
 }

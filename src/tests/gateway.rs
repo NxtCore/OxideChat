@@ -580,6 +580,7 @@ mod estimate {
 	fn token_estimation_uses_output_and_external_input_bounds() -> TestResult {
 		let inference = GatewayInference {
 			model_id: Uuid::nil(),
+			engine_model_id: String::new(),
 			max_output_tokens: Some(100),
 			context_length: Some(1000),
 			budget: BudgetAdmission::default(),
@@ -593,6 +594,7 @@ mod estimate {
 		assert_eq!(inference.estimate_tokens(&external, None, 1)?, 1100);
 		let unknown = GatewayInference {
 			model_id: Uuid::nil(),
+			engine_model_id: String::new(),
 			max_output_tokens: None,
 			context_length: None,
 			budget: BudgetAdmission::default(),
