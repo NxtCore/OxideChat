@@ -1,6 +1,6 @@
 use crate::types::{
 	CreateGatewayKeyRequest, GatewayApiKey, GatewayKeyError, GatewayKeyRotationResponse, GatewayKeyTokenResponse, GatewayTeamResponse, JobState, RequestContext,
-	RotateGatewayKeyRequest, SetGatewayKeyLimitsRequest, UpdateGatewayKeyRequest,
+	RotateGatewayKeyRequest, SetGatewayKeyBudgetRequest, SetGatewayKeyLimitsRequest, UpdateGatewayKeyRequest,
 };
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
@@ -24,6 +24,7 @@ fn error_code(error: &GatewayKeyError) -> ErrorCode {
 		GatewayKeyError::InvalidConcurrency => ErrorCode::ApiKeyConcurrencyInvalid,
 		GatewayKeyError::InvalidOverlap => ErrorCode::ApiKeyOverlapInvalid,
 		GatewayKeyError::InvalidRule => ErrorCode::ApiKeyRuleInvalid,
+		GatewayKeyError::InvalidBudget => ErrorCode::ApiKeyBudgetInvalid,
 		GatewayKeyError::DuplicateRule => ErrorCode::ApiKeyRuleDuplicate,
 		GatewayKeyError::Secret | GatewayKeyError::Database(_) => ErrorCode::InternalError,
 	}
@@ -178,6 +179,44 @@ pub async fn clear_limits(State(state): State<Arc<JobState>>, Extension(RequestC
 	};
 	match GatewayApiKey::replace_rules(&state.db, &user.id, &id, &[]).await {
 		Ok(rules) => json_response(StatusCode::OK, rules),
+		Err(error) => failure(&error),
+	}
+}
+
+/// GET /api/v1/developer/keys/{id}/budget
+pub async fn get_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = user else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	match GatewayApiKey::budget(&state.db, &user.id, &id).await {
+		Ok(budget) => json_response(StatusCode::OK, budget),
+		Err(error) => failure(&error),
+	}
+}
+
+/// PUT /api/v1/developer/keys/{id}/budget
+pub async fn set_budget(
+	State(state): State<Arc<JobState>>,
+	Extension(RequestContext { user }): Extension<RequestContext>,
+	Path(id): Path<Uuid>,
+	Json(request): Json<SetGatewayKeyBudgetRequest>,
+) -> impl IntoResponse {
+	let Some(user) = user else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	match GatewayApiKey::replace_budget(&state.db, &user.id, &id, &request).await {
+		Ok(budget) => json_response(StatusCode::OK, budget),
+		Err(error) => failure(&error),
+	}
+}
+
+/// DELETE /api/v1/developer/keys/{id}/budget
+pub async fn clear_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
+	let Some(user) = user else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	match GatewayApiKey::clear_budget(&state.db, &user.id, &id).await {
+		Ok(()) => json_response(StatusCode::OK, Option::<()>::None),
 		Err(error) => failure(&error),
 	}
 }

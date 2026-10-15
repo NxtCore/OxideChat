@@ -4,11 +4,13 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod ledger;
 mod repository;
 mod requests;
 mod responses;
 mod rows;
 
+pub use ledger::*;
 pub use requests::*;
 pub use responses::*;
 
@@ -33,6 +35,7 @@ pub struct EffectiveBudget {
 	pub assignment_id: Uuid,
 	pub team_id: Option<Uuid>,
 	pub user_id: Option<Uuid>,
+	pub api_key_id: Option<Uuid>,
 	pub assigned_at: DateTime<Utc>,
 }
 

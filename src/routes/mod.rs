@@ -184,6 +184,10 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 			"/api/v1/developer/keys/{id}/limits",
 			get(public::developer::get_limits).put(public::developer::set_limits).delete(public::developer::clear_limits),
 		)
+		.route(
+			"/api/v1/developer/keys/{id}/budget",
+			get(public::developer::get_budget).put(public::developer::set_budget).delete(public::developer::clear_budget),
+		)
 		// Images CDN (public, no auth)
 		.route("/api/v1/images/{id}", get(public::images::serve_image))
 		.route("/api/v1/images", post(public::images::upload_image))

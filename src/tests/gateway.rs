@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod support {
+pub mod support {
 	use crate::types::*;
 	use crate::utils::auth::hash_password;
 	use omniference::types::{ModelRef, ProviderConfig, ProviderEndpoint, ProviderKind};
@@ -49,6 +49,7 @@ mod support {
 		Arc::new(JobState {
 			db,
 			gateway_limiter: GatewayLimiter::spawn(),
+			budget_ledger: BudgetLedger::spawn(),
 			mcp_pool: crate::utils::tools::McpConnectionPool::new(),
 			client_tool_pending: crate::types::state::ClientToolPending::new(),
 		})
@@ -581,6 +582,7 @@ mod estimate {
 			model_id: Uuid::nil(),
 			max_output_tokens: Some(100),
 			context_length: Some(1000),
+			budget: BudgetAdmission::default(),
 		};
 		let text = serde_json::to_vec(&serde_json::json!({"messages": [{"role": "user", "content": "hello"}]}))?;
 		let external = serde_json::to_vec(&serde_json::json!({"previous_response_id": "opaque-history"}))?;
@@ -593,6 +595,7 @@ mod estimate {
 			model_id: Uuid::nil(),
 			max_output_tokens: None,
 			context_length: None,
+			budget: BudgetAdmission::default(),
 		};
 		assert!(unknown.estimate_tokens(&text, None, 1).is_err());
 		assert!(unknown.estimate_tokens(&external, Some(100), 1).is_err());
@@ -769,8 +772,11 @@ mod models {
 		let (_, model_id) = create_provider_model(&pool, "Postpaid Provider", "paid").await?;
 		let (_, token) = create_key(&pool, user_id, team_id, json!(["inference:write"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
-		let first = GatewayModel::authorize_inference(&pool, &context, "postpaid provider/paid").await?;
-		let second = GatewayModel::authorize_inference(&pool, &context, "postpaid provider/paid").await?;
+		let ledger = BudgetLedger::spawn();
+		let first = GatewayModel::resolve_inference(&pool, &context, "postpaid provider/paid").await?;
+		let first = GatewayModel::authorize_inference(&pool, &ledger, &context, first, TokenEstimate::default()).await?;
+		let second = GatewayModel::resolve_inference(&pool, &context, "postpaid provider/paid").await?;
+		let second = GatewayModel::authorize_inference(&pool, &ledger, &context, second, TokenEstimate::default()).await?;
 		assert_eq!(first.model_id, model_id);
 		assert_eq!(second.model_id, model_id);
 		Ok(())

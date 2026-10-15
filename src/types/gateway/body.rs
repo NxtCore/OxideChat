@@ -1,15 +1,14 @@
-use super::limiter::GatewayReservation;
 use axum::body::{Body, Bytes, HttpBody};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-pub(super) struct ReservedBody {
+pub(crate) struct ReservedBody<T> {
 	body: Body,
-	reservation: Option<GatewayReservation>,
+	reservation: Option<T>,
 }
 
-impl ReservedBody {
-	pub(super) fn new(body: Body, reservation: GatewayReservation) -> Self {
+impl<T> ReservedBody<T> {
+	pub(crate) fn new(body: Body, reservation: T) -> Self {
 		Self {
 			body,
 			reservation: Some(reservation),
@@ -17,7 +16,7 @@ impl ReservedBody {
 	}
 }
 
-impl HttpBody for ReservedBody {
+impl<T: Send + Unpin + 'static> HttpBody for ReservedBody<T> {
 	type Data = Bytes;
 	type Error = axum::Error;
 
