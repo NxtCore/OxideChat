@@ -11,7 +11,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS budget_assignments_api_key_unique
 
 CREATE OR REPLACE FUNCTION delete_api_key_budget() RETURNS trigger AS $$
 BEGIN
-    DELETE FROM budgets WHERE id = OLD.budget_id;
+    DELETE FROM budgets WHERE id = OLD.budget_id AND NOT EXISTS (SELECT 1 FROM budget_assignments WHERE budget_id = OLD.budget_id);
     RETURN OLD;
 END;
 $$ LANGUAGE plpgsql;

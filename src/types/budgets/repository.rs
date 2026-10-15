@@ -456,7 +456,7 @@ impl Budget {
 				let shared = budget.api_key_id.is_some() || (budget.team_id.is_some() && budget.budget.kind == "pooled");
 				BudgetCheck {
 					scope: BudgetScope {
-						assignment_id: budget.assignment_id,
+						assignment_id: if budget.api_key_id.is_some() { budget.budget.id } else { budget.assignment_id },
 						user_id: if shared { None } else { subject.user_id },
 					},
 					amount: budget.amount,
@@ -517,20 +517,22 @@ impl Budget {
 		let mut team_ids = Vec::with_capacity(budgets.len());
 		let mut is_pooled_team = Vec::with_capacity(budgets.len());
 		let mut api_key_ids = Vec::with_capacity(budgets.len());
+		let mut budget_ids = Vec::with_capacity(budgets.len());
 		for budget in budgets {
 			assignment_ids.push(budget.assignment_id);
 			team_ids.push(budget.team_id.unwrap_or_else(Uuid::nil));
 			api_key_ids.push(budget.api_key_id);
+			budget_ids.push(budget.budget.id);
 			is_pooled_team.push(budget.budget.kind == "pooled" && budget.team_id.is_some());
 		}
 		let rows = sqlx::query_as::<_, BudgetSpentRow>(
 			r#"
 			SELECT budget_windows.assignment_id, COALESCE(SUM(ue.cost_total), 0)::numeric AS spent
-			FROM UNNEST($1::uuid[], $2::uuid[], $3::bool[], $4::timestamptz[], $6::uuid[]) AS budget_windows(assignment_id, team_id, is_pooled_team, window_start, api_key_id)
+			FROM UNNEST($1::uuid[], $2::uuid[], $3::bool[], $4::timestamptz[], $6::uuid[], $7::uuid[]) AS budget_windows(assignment_id, team_id, is_pooled_team, window_start, api_key_id, budget_id)
 			LEFT JOIN usage_events ue
 			  ON ue.created_at >= budget_windows.window_start
 			 AND (
-			     (budget_windows.api_key_id IS NOT NULL AND ue.api_key_id = budget_windows.api_key_id)
+			     (budget_windows.api_key_id IS NOT NULL AND ue.api_key_id IN (SELECT ka.api_key_id FROM budget_assignments ka WHERE ka.budget_id = budget_windows.budget_id))
 			     OR (budget_windows.api_key_id IS NULL AND budget_windows.is_pooled_team AND EXISTS (
 			         SELECT 1 FROM team_members tm
 			         WHERE tm.team_id = budget_windows.team_id AND tm.user_id = ue.user_id
@@ -546,6 +548,7 @@ impl Budget {
 		.bind(window_starts)
 		.bind(user_id)
 		.bind(&api_key_ids)
+		.bind(&budget_ids)
 		.fetch_all(pool)
 		.await?;
 		Ok(rows.into_iter().map(|row| (row.assignment_id, row.spent)).collect())

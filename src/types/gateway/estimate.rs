@@ -61,7 +61,7 @@ impl GatewayInference {
 		let input = if has_external_input(body) {
 			self.context_length.map(u64::from).ok_or(GatewayLimitError::Misconfigured)?
 		} else {
-			u64::try_from(body.len()).unwrap_or(u64::MAX).saturating_mul(2).saturating_add(1024)
+			TokenEstimate::input_for_bytes(u64::try_from(body.len()).unwrap_or(u64::MAX))
 		};
 		let choices = choices.max(1);
 		Ok(TokenEstimate {

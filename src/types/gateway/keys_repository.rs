@@ -347,17 +347,10 @@ impl GatewayApiKey {
 		.execute(&mut *tx)
 		.await?;
 		sqlx::query(
-			"WITH copied AS (
-				INSERT INTO budgets (name, amount, kind, interval, reset_strategy, on_exceed)
-				SELECT $3, b.amount, b.kind, b.interval, b.reset_strategy, b.on_exceed
-				FROM budget_assignments ba JOIN budgets b ON b.id = ba.budget_id WHERE ba.api_key_id = $1
-				RETURNING id
-			)
-			INSERT INTO budget_assignments (budget_id, api_key_id) SELECT id, $2 FROM copied",
+			"INSERT INTO budget_assignments (budget_id, api_key_id) SELECT budget_id, $2 FROM budget_assignments WHERE api_key_id = $1",
 		)
 		.bind(key_id)
 		.bind(replacement.id)
-		.bind(format!("key:{}", replacement.id))
 		.execute(&mut *tx)
 		.await?;
 		let overlap_end = Utc::now() + Duration::seconds(overlap);
@@ -507,7 +500,7 @@ impl GatewayApiKey {
 	pub async fn clear_budget(pool: &PgPool, user_id: &Uuid, key_id: &Uuid) -> Result<(), GatewayKeyError> {
 		let mut tx = pool.begin().await?;
 		Self::lock_active(&mut tx, user_id, key_id).await?;
-		let removed = sqlx::query("DELETE FROM budget_assignments WHERE api_key_id = $1").bind(key_id).execute(&mut *tx).await?;
+		let removed = sqlx::query("DELETE FROM budget_assignments WHERE budget_id IN (SELECT budget_id FROM budget_assignments WHERE api_key_id = $1)").bind(key_id).execute(&mut *tx).await?;
 		if removed.rows_affected() > 0 {
 			write_audit(&mut tx, "gateway_api_key_budget_cleared", user_id, key_id, json!({})).await?;
 		}

@@ -11,7 +11,7 @@ use tokio::time::Instant;
 use uuid::Uuid;
 
 const ADMISSION_QUEUE: usize = 256;
-const MAX_ATTEMPTS: usize = 4;
+const SETTLED_WINDOW: Duration = Duration::from_secs(60);
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(300);
 const EVICTION_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -61,6 +61,12 @@ pub struct TokenEstimate {
 }
 
 impl TokenEstimate {
+	#[must_use]
+	/// Conservative input tokens for a request body of the given size.
+	pub fn input_for_bytes(bytes: u64) -> u64 {
+		bytes.saturating_mul(2).saturating_add(1024)
+	}
+
 	#[must_use]
 	/// Input and output tokens together.
 	pub fn total(&self) -> u64 {
@@ -161,14 +167,13 @@ struct Admit {
 	reservation: BudgetReservation,
 	checks: Vec<BudgetCheck>,
 	estimated_cost: Decimal,
-	epoch: Option<u64>,
+	epoch: u64,
 	reply: oneshot::Sender<Reply>,
 }
 
 enum Reply {
 	Admitted(BudgetAdmission),
 	Exceeded,
-	Stale,
 }
 
 #[derive(Debug)]
@@ -176,7 +181,7 @@ enum Control {
 	Release(Uuid),
 	Finalize(Uuid),
 	Reconcile(Uuid, Decimal),
-	Settle(Uuid),
+	Settle(Uuid, u64),
 	#[cfg(test)]
 	Inspect(oneshot::Sender<BudgetStateCounts>),
 }
@@ -196,8 +201,15 @@ struct Record {
 	reconciled: bool,
 }
 
+struct Settled {
+	epoch: u64,
+	scopes: Vec<BudgetScope>,
+	amount: Decimal,
+	at: Instant,
+}
+
 struct Owner {
-	epoch: Arc<AtomicU64>,
+	settled: Vec<Settled>,
 	reserved: HashMap<BudgetScope, Decimal>,
 	records: HashMap<Uuid, Record>,
 }
@@ -210,7 +222,7 @@ impl BudgetLedger {
 		let (control, controls) = mpsc::unbounded_channel();
 		let epoch = Arc::new(AtomicU64::new(0));
 		let owner = Owner {
-			epoch: Arc::clone(&epoch),
+			settled: Vec::new(),
 			reserved: HashMap::new(),
 			records: HashMap::new(),
 		};
@@ -246,17 +258,9 @@ impl BudgetLedger {
 	/// Returns [`BudgetError::Exceeded`] when a blocking budget is exhausted, [`BudgetError::Unavailable`]
 	/// when the reservation owner stopped, and a database error when budget status cannot be loaded.
 	pub async fn reserve(&self, pool: &PgPool, request: BudgetRequest) -> Result<BudgetAdmission, BudgetError> {
-		for attempt in 1..=MAX_ATTEMPTS {
-			let epoch = self.epoch.load(Ordering::Acquire);
-			let checks = Budget::checks(pool, request.subject).await?;
-			let verified = (attempt < MAX_ATTEMPTS).then_some(epoch);
-			match self.submit(checks, request.estimated_cost, verified).await? {
-				Reply::Admitted(admission) => return Ok(admission),
-				Reply::Exceeded => return Err(BudgetError::Exceeded),
-				Reply::Stale => {}
-			}
-		}
-		Err(BudgetError::Unavailable)
+		let epoch = self.epoch.load(Ordering::Acquire);
+		let checks = Budget::checks(pool, request.subject).await?;
+		self.admit_at(checks, request.estimated_cost, epoch).await
 	}
 
 	/// Prices the estimate for a model and reserves it; free models bypass budgets.
@@ -276,9 +280,26 @@ impl BudgetLedger {
 	/// # Errors
 	/// Returns [`BudgetError::Exceeded`] or [`BudgetError::Unavailable`].
 	pub async fn admit_checks(&self, checks: Vec<BudgetCheck>, estimated_cost: Decimal) -> Result<BudgetAdmission, BudgetError> {
-		match self.submit(checks, estimated_cost, None).await? {
+		self.admit_at(checks, estimated_cost, self.epoch()).await
+	}
+
+	#[must_use]
+	/// Settle counter to read before loading budget checks.
+	pub fn epoch(&self) -> u64 {
+		self.epoch.load(Ordering::Acquire)
+	}
+
+	/// Admits against budget checks that were loaded after the given epoch was read.
+	///
+	/// Usage settled after that epoch may or may not be part of the loaded spend, so the
+	/// ledger counts it again; this can only reject early, never overshoot.
+	///
+	/// # Errors
+	/// Returns [`BudgetError::Exceeded`] or [`BudgetError::Unavailable`].
+	pub async fn admit_at(&self, checks: Vec<BudgetCheck>, estimated_cost: Decimal, epoch: u64) -> Result<BudgetAdmission, BudgetError> {
+		match self.submit(checks, estimated_cost, epoch).await? {
 			Reply::Admitted(admission) => Ok(admission),
-			Reply::Exceeded | Reply::Stale => Err(BudgetError::Exceeded),
+			Reply::Exceeded => Err(BudgetError::Exceeded),
 		}
 	}
 
@@ -294,8 +315,8 @@ impl BudgetLedger {
 
 	/// Drops a reservation after its usage was stored, where stored spend now counts instead.
 	pub fn settle(&self, id: Uuid) {
-		self.epoch.fetch_add(1, Ordering::AcqRel);
-		self.send(Control::Settle(id));
+		let epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+		self.send(Control::Settle(id, epoch));
 	}
 
 	fn send(&self, control: Control) {
@@ -304,7 +325,7 @@ impl BudgetLedger {
 		}
 	}
 
-	async fn submit(&self, checks: Vec<BudgetCheck>, estimated_cost: Decimal, epoch: Option<u64>) -> Result<Reply, BudgetError> {
+	async fn submit(&self, checks: Vec<BudgetCheck>, estimated_cost: Decimal, epoch: u64) -> Result<Reply, BudgetError> {
 		let reservation = BudgetReservation {
 			id: Uuid::new_v4(),
 			control: self.control.clone(),
@@ -346,13 +367,10 @@ impl Owner {
 		let _ = reply.send(outcome);
 	}
 
-	fn admit(&mut self, reservation: BudgetReservation, checks: &[BudgetCheck], estimated_cost: Decimal, epoch: Option<u64>) -> Reply {
-		if epoch.is_some_and(|epoch| epoch != self.epoch.load(Ordering::Acquire)) {
-			return Reply::Stale;
-		}
+	fn admit(&mut self, reservation: BudgetReservation, checks: &[BudgetCheck], estimated_cost: Decimal, epoch: u64) -> Reply {
 		let mut warn = false;
 		for check in checks {
-			if check.spent + self.reserved_for(&check.scope) < check.amount {
+			if check.spent + self.reserved_for(&check.scope) + self.settled_since(&check.scope, epoch) < check.amount {
 				continue;
 			}
 			match check.action {
@@ -380,6 +398,14 @@ impl Owner {
 		})
 	}
 
+	fn settled_since(&self, scope: &BudgetScope, epoch: u64) -> Decimal {
+		self.settled
+			.iter()
+			.filter(|settled| settled.epoch > epoch && settled.scopes.contains(scope))
+			.map(|settled| settled.amount)
+			.sum()
+	}
+
 	fn reserved_for(&self, scope: &BudgetScope) -> Decimal {
 		self.reserved.get(scope).copied().unwrap_or(Decimal::ZERO)
 	}
@@ -397,7 +423,7 @@ impl Owner {
 				}
 			}
 			Control::Reconcile(id, actual) => self.reconcile(id, actual),
-			Control::Settle(id) => self.remove(id),
+			Control::Settle(id, epoch) => self.settle(id, epoch),
 			#[cfg(test)]
 			Control::Inspect(reply) => {
 				let _ = reply.send(BudgetStateCounts {
@@ -422,6 +448,18 @@ impl Owner {
 		record.finalized.get_or_insert_with(Instant::now);
 	}
 
+	fn settle(&mut self, id: Uuid, epoch: u64) {
+		if let Some(record) = self.records.get(&id) {
+			self.settled.push(Settled {
+				epoch,
+				scopes: record.scopes.clone(),
+				amount: record.amount,
+				at: Instant::now(),
+			});
+		}
+		self.remove(id);
+	}
+
 	fn remove(&mut self, id: Uuid) {
 		let Some(record) = self.records.remove(&id) else {
 			return;
@@ -437,6 +475,7 @@ impl Owner {
 	}
 
 	fn evict(&mut self) {
+		self.settled.retain(|settled| settled.at.elapsed() < SETTLED_WINDOW);
 		let expired: Vec<Uuid> = self
 			.records
 			.iter()

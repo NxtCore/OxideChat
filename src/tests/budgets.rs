@@ -187,6 +187,22 @@ mod ledger {
 	}
 
 	#[tokio::test]
+	async fn usage_settled_after_the_spend_was_read_is_still_counted() -> TestResult {
+		let ledger = BudgetLedger::spawn();
+		let first = ledger.admit_checks(vec![check(1, 6, 0, BudgetAction::Block)], Decimal::from(3)).await?;
+		let id = reservation_id(&first)?;
+		let epoch = ledger.epoch();
+		ledger.settle(id);
+		let stale = || vec![check(1, 6, 0, BudgetAction::Block)];
+		let second = ledger.admit_at(stale(), Decimal::from(3), epoch).await?;
+		assert!(matches!(ledger.admit_at(stale(), Decimal::from(3), epoch).await, Err(BudgetError::Exceeded)));
+		let fresh = ledger.epoch();
+		assert!(matches!(ledger.admit_at(vec![check(1, 6, 3, BudgetAction::Block)], Decimal::from(1), fresh).await, Err(BudgetError::Exceeded)));
+		drop((first, second));
+		Ok(())
+	}
+
+	#[tokio::test]
 	async fn stopped_ledger_fails_closed() {
 		let ledger = BudgetLedger::unavailable();
 		assert!(matches!(ledger.admit_checks(Vec::new(), Decimal::ZERO).await, Err(BudgetError::Unavailable)));
@@ -342,6 +358,46 @@ mod scope {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn requests_settling_during_admission_never_exceed_the_limit_by_more_than_one_estimate(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool, 1_000_000.0).await?;
+		let budget = create_budget(&pool, "10", "block").await?;
+		assign(&pool, budget, Some(fixture.user_id), None, None).await?;
+		let ledger = BudgetLedger::spawn();
+		let subject = BudgetSubject::user(fixture.user_id);
+		let handles = (0..24)
+			.map(|_| {
+				let (pool, ledger) = (pool.clone(), ledger.clone());
+				let (user_id, team_id, provider_id, model_id) = (fixture.user_id, fixture.team_id, fixture.provider_id, fixture.model_id);
+				tokio::spawn(async move {
+					let request = BudgetRequest { subject, estimated_cost: Decimal::from(3) };
+					let admission = ledger.reserve(&pool, request).await.ok()?;
+					let id = admission.reservation.as_ref()?.id;
+					ledger.finalize(id);
+					sqlx::query("INSERT INTO usage_events (user_id, team_id, model_id, provider_id, request_type, cost_total) VALUES ($1, $2, $3, $4, 'chat', 3)")
+						.bind(user_id)
+						.bind(team_id)
+						.bind(model_id)
+						.bind(provider_id)
+						.execute(&pool)
+						.await
+						.ok()?;
+					ledger.reconcile(id, Decimal::from(3));
+					ledger.settle(id);
+					Some(admission)
+				})
+			})
+			.collect::<Vec<_>>();
+		let mut admitted = 0_u64;
+		for handle in handles {
+			admitted += u64::from(handle.await?.is_some());
+		}
+		let stored: Decimal = sqlx::query_scalar("SELECT COALESCE(SUM(cost_total), 0) FROM usage_events").fetch_one(&pool).await?;
+		assert_eq!(stored, Decimal::from(admitted * 3));
+		assert!(stored < Decimal::from(10 + 3));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn reset_keeps_usage_history_and_reopens_the_budget(pool: PgPool) -> TestResult {
 		let fixture = fixture(&pool, 1_000_000.0).await?;
 		let budget = create_budget(&pool, "5", "block").await?;
@@ -440,13 +496,36 @@ mod keys {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn rotation_copies_the_key_budget(pool: PgPool) -> TestResult {
+	async fn rotation_keeps_one_shared_allowance_and_past_spend(pool: PgPool) -> TestResult {
 		let fixture = fixture(&pool, 1_000_000.0).await?;
 		GatewayApiKey::replace_budget(&pool, &fixture.user_id, &fixture.key_id, &budget_request(5, "total", "block")).await?;
-		let (replacement, _, _) = GatewayApiKey::rotate(&pool, &fixture.user_id, &fixture.key_id, Some(60)).await?;
-		let copied = GatewayApiKey::budget(&pool, &fixture.user_id, &replacement.id).await?.ok_or("missing copied budget")?;
-		assert_eq!(copied.amount, Decimal::from(5));
-		assert!(GatewayApiKey::budget(&pool, &fixture.user_id, &fixture.key_id).await?.is_some());
+		spend(&pool, &fixture, Some(fixture.key_id), 5).await?;
+		let (replacement, _, token) = GatewayApiKey::rotate(&pool, &fixture.user_id, &fixture.key_id, Some(60)).await?;
+		let shared: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM budgets").fetch_one(&pool).await?;
+		assert_eq!(shared, 1);
+		let copied = GatewayApiKey::budget(&pool, &fixture.user_id, &replacement.id).await?.ok_or("missing shared budget")?;
+		assert_eq!((copied.amount, copied.spent, copied.exhausted), (Decimal::from(5), Decimal::from(5), true));
+		let ledger = BudgetLedger::spawn();
+		let new_context = context(&pool, &token).await?;
+		assert!(matches!(authorize(&pool, &ledger, &new_context, tokens(1)).await, Err(GatewayModelAccessError::BudgetExceeded)));
+		let old_context = context(&pool, &fixture.token).await?;
+		assert!(matches!(authorize(&pool, &ledger, &old_context, tokens(1)).await, Err(GatewayModelAccessError::BudgetExceeded)));
+		GatewayApiKey::clear_budget(&pool, &fixture.user_id, &replacement.id).await?;
+		assert!(GatewayApiKey::budget(&pool, &fixture.user_id, &fixture.key_id).await?.is_none());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn overlapping_keys_share_in_flight_reservations(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool, 1_000_000.0).await?;
+		GatewayApiKey::replace_budget(&pool, &fixture.user_id, &fixture.key_id, &budget_request(5, "total", "block")).await?;
+		let (_, _, token) = GatewayApiKey::rotate(&pool, &fixture.user_id, &fixture.key_id, Some(60)).await?;
+		let ledger = BudgetLedger::spawn();
+		let old_context = context(&pool, &fixture.token).await?;
+		let new_context = context(&pool, &token).await?;
+		let held = authorize(&pool, &ledger, &old_context, tokens(5)).await?;
+		assert!(matches!(authorize(&pool, &ledger, &new_context, tokens(1)).await, Err(GatewayModelAccessError::BudgetExceeded)));
+		drop(held);
 		Ok(())
 	}
 

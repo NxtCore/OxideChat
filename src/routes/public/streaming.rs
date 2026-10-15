@@ -561,8 +561,24 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, Extension(Req
 		}
 	}
 
+	let user_model_config = ModelConfig::find_for_user_by_stable_key(&state.db, ModelConfigViewer { user_id: &user.id }, &req.model_key)
+		.await
+		.ok()
+		.flatten();
+
+	let system_model_config = ModelConfig::find_system_by_stable_key(&state.db, &req.model_key).await.ok().flatten();
+
+	let history_bytes = match Message::active_prompt_bytes(&state.db, &chat_id).await {
+		Ok(bytes) => bytes,
+		Err(e) => {
+			eprintln!("[STREAM] Failed to measure chat history: {e}");
+			return error_stream("internal_error", "Failed to check budget status").into_response();
+		}
+	};
+	let system_bytes = system_model_config.as_ref().and_then(|config| config.system_prompt.as_deref()).map_or(0, str::len);
+	let prompt_bytes = history_bytes.saturating_add(req.content.len() as u64).saturating_add(system_bytes as u64);
 	let estimate = TokenEstimate {
-		input: (req.content.len() as u64).saturating_mul(2).saturating_add(1024),
+		input: TokenEstimate::input_for_bytes(prompt_bytes),
 		output: model.max_tokens.and_then(|tokens| u64::try_from(tokens).ok()).filter(|tokens| *tokens > 0).unwrap_or(DEFAULT_OUTPUT_ESTIMATE),
 	};
 	let budget = match state.budget_ledger.reserve_for_model(&state.db, BudgetSubject::user(user.id), &model.id, estimate).await {
@@ -573,13 +589,6 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, Extension(Req
 			return error_stream("internal_error", "Failed to check budget status").into_response();
 		}
 	};
-
-	let user_model_config = ModelConfig::find_for_user_by_stable_key(&state.db, ModelConfigViewer { user_id: &user.id }, &req.model_key)
-		.await
-		.ok()
-		.flatten();
-
-	let system_model_config = ModelConfig::find_system_by_stable_key(&state.db, &req.model_key).await.ok().flatten();
 
 	let reasoning_details = crate::types::ReasoningDetails {
 		effort: req.reasoning_effort.clone(),
