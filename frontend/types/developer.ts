@@ -49,6 +49,33 @@ export type KeyStatus = 'active' | 'disabled' | 'expired' | 'revoked';
 
 export const KEY_SCOPES = ['inference:read', 'inference:write'] as const;
 
+export type RequestLogStatus = 'success' | 'error';
+
+export interface DeveloperRequestLog {
+	id: string;
+	user_id: string;
+	team_id: string | null;
+	api_key_id: string | null;
+	model_id: string | null;
+	public_model_id: string;
+	request_type: string;
+	status: RequestLogStatus;
+	status_code: number | null;
+	input_tokens: number;
+	output_tokens: number;
+	reasoning_tokens: number;
+	cost_total: string;
+	created_at: string;
+}
+
+export interface RequestLogFilters {
+	team_id: string | null;
+	api_key_id: string | null;
+	status: RequestLogStatus | null;
+	from: string | null;
+	to: string | null;
+}
+
 export type BudgetInterval = 'daily' | 'weekly' | 'monthly' | 'total';
 export type BudgetOnExceed = 'block' | 'warn';
 

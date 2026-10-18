@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import {ArrowLeft, LayoutDashboard, KeyRound, BarChart3, Bot, FlaskConical, BookOpen, ShieldCheck} from 'lucide-vue-next';
+import {ArrowLeft, LayoutDashboard, KeyRound, BarChart3, ScrollText, Bot, FlaskConical, BookOpen, ShieldCheck} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 definePageMeta({
@@ -63,6 +63,7 @@ const tabs = [
 	{id: 'overview', label: 'developer.nav.overview', icon: LayoutDashboard},
 	{id: 'keys', label: 'developer.nav.keys', icon: KeyRound},
 	{id: 'usage', label: 'developer.nav.usage', icon: BarChart3},
+	{id: 'logs', label: 'developer.nav.logs', icon: ScrollText},
 	{id: 'models', label: 'developer.nav.models', icon: Bot},
 	{id: 'playground', label: 'developer.nav.playground', icon: FlaskConical},
 	{id: 'docs', label: 'developer.nav.docs', icon: BookOpen},

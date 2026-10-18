@@ -1,5 +1,10 @@
 import {defineStore} from 'pinia';
-import type {CreateKeyPayload, DeveloperKey, DeveloperKeyBudget, DeveloperKeyRotation, DeveloperKeyRule, DeveloperKeyWithToken, DeveloperTeam, SetKeyBudgetPayload} from '~/types/developer';
+import type {CreateKeyPayload, DeveloperKey, DeveloperKeyBudget, DeveloperKeyRotation, DeveloperKeyRule, DeveloperKeyWithToken, DeveloperRequestLog, DeveloperTeam, RequestLogFilters, SetKeyBudgetPayload} from '~/types/developer';
+
+interface Paginated<T> {
+	has_more: boolean;
+	items: T[];
+}
 
 export const useDeveloperStore = defineStore('developer', {
 	state: () => ({
@@ -89,6 +94,29 @@ export const useDeveloperStore = defineStore('developer', {
 		async clearBudget(id: string) {
 			const {$customFetch} = useNuxtApp();
 			await $customFetch(`/api/v1/developer/keys/${id}/budget`, {method: 'DELETE'});
+		},
+		async loadRequestLogs(filters: RequestLogFilters, page = 1, limit = 50): Promise<Paginated<DeveloperRequestLog>> {
+			const {$customFetch} = useNuxtApp();
+			const params = Object.fromEntries(Object.entries({...filters, page, limit}).filter(([, value]) => value !== null && value !== undefined && value !== ''));
+			return (await $customFetch<Paginated<DeveloperRequestLog>>('/api/v1/developer/request-logs', {params})) ?? {has_more: false, items: []};
+		},
+		async exportRequestLogs(filters: RequestLogFilters): Promise<DeveloperRequestLog[]> {
+			const {$customFetch} = useNuxtApp();
+			const params = Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== null && value !== undefined && value !== ''));
+			return (await $customFetch<DeveloperRequestLog[]>('/api/v1/developer/request-logs/export', {params})) ?? [];
+		},
+		async getRequestLogRetention(): Promise<number> {
+			const {$customFetch} = useNuxtApp();
+			const response = await $customFetch<{retention_days: number}>('/api/v1/developer/request-logs/retention');
+			return response?.retention_days ?? 30;
+		},
+		async setRequestLogRetention(days: number): Promise<number> {
+			const {$customFetch} = useNuxtApp();
+			const response = await $customFetch<{retention_days: number}>('/api/v1/developer/request-logs/retention', {
+				method: 'PUT',
+				body: {retention_days: days},
+			});
+			return response?.retention_days ?? days;
 		},
 	},
 });
