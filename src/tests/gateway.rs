@@ -581,6 +581,7 @@ mod estimate {
 		let inference = GatewayInference {
 			model_id: Uuid::nil(),
 			engine_model_id: String::new(),
+			public_model_id: String::new(),
 			max_output_tokens: Some(100),
 			context_length: Some(1000),
 			budget: BudgetAdmission::default(),
@@ -595,6 +596,7 @@ mod estimate {
 		let unknown = GatewayInference {
 			model_id: Uuid::nil(),
 			engine_model_id: String::new(),
+			public_model_id: String::new(),
 			max_output_tokens: None,
 			context_length: None,
 			budget: BudgetAdmission::default(),

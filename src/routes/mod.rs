@@ -188,6 +188,13 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 			"/api/v1/developer/keys/{id}/budget",
 			get(public::developer::get_budget).put(public::developer::set_budget).delete(public::developer::clear_budget),
 		)
+		// Developer Request Logs
+		.route("/api/v1/developer/request-logs", get(public::developer::list_request_logs))
+		.route("/api/v1/developer/request-logs/export", get(public::developer::export_request_logs))
+		.route(
+			"/api/v1/developer/request-logs/retention",
+			get(public::developer::get_request_log_retention).put(public::developer::set_request_log_retention),
+		)
 		// Images CDN (public, no auth)
 		.route("/api/v1/images/{id}", get(public::images::serve_image))
 		.route("/api/v1/images", post(public::images::upload_image))

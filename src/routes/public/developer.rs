@@ -1,11 +1,12 @@
 use crate::types::{
-	CreateGatewayKeyRequest, GatewayApiKey, GatewayKeyError, GatewayKeyRotationResponse, GatewayKeyTokenResponse, GatewayTeamResponse, JobState, RequestContext,
-	RotateGatewayKeyRequest, SetGatewayKeyBudgetRequest, SetGatewayKeyLimitsRequest, UpdateGatewayKeyRequest,
+	CreateGatewayKeyRequest, GatewayApiKey, GatewayKeyError, GatewayKeyRotationResponse, GatewayKeyTokenResponse, GatewayTeamResponse, JobState, MAX_REQUEST_LOG_RETENTION_DAYS, RequestContext,
+	RequestLog, RequestLogQuery, RequestLogRetentionResponse, RotateGatewayKeyRequest, SetGatewayKeyBudgetRequest, SetGatewayKeyLimitsRequest, SetRequestLogRetentionRequest,
+	UpdateGatewayKeyRequest,
 };
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Extension, Path, State},
+	extract::{Extension, Path, Query, State},
 	http::{HeaderValue, StatusCode, header},
 	response::{IntoResponse, Response},
 };
@@ -218,5 +219,77 @@ pub async fn clear_budget(State(state): State<Arc<JobState>>, Extension(RequestC
 	match GatewayApiKey::clear_budget(&state.db, &user.id, &id).await {
 		Ok(()) => json_response(StatusCode::OK, Option::<()>::None),
 		Err(error) => failure(&error),
+	}
+}
+
+/// GET /api/v1/developer/request-logs
+pub async fn list_request_logs(
+	State(state): State<Arc<JobState>>,
+	Extension(RequestContext { user }): Extension<RequestContext>,
+	Query(params): Query<RequestLogQuery>,
+) -> impl IntoResponse {
+	let Some(user) = user else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	let filter = params.filter(user.id);
+	match RequestLog::list(&state.db, filter, params.page.unwrap_or(1), params.limit.unwrap_or(50)).await {
+		Ok(logs) => json_response(StatusCode::OK, logs),
+		Err(error) => {
+			tracing::error!(%error, "failed to list request logs");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
+	}
+}
+
+/// GET /api/v1/developer/request-logs/export
+pub async fn export_request_logs(
+	State(state): State<Arc<JobState>>,
+	Extension(RequestContext { user }): Extension<RequestContext>,
+	Query(params): Query<RequestLogQuery>,
+) -> impl IntoResponse {
+	let Some(user) = user else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	match RequestLog::list_for_export(&state.db, params.filter(user.id)).await {
+		Ok(logs) => json_response(StatusCode::OK, logs),
+		Err(error) => {
+			tracing::error!(%error, "failed to export request logs");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
+	}
+}
+
+/// GET /api/v1/developer/request-logs/retention
+pub async fn get_request_log_retention(State(state): State<Arc<JobState>>, Extension(RequestContext { user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = user else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	match RequestLog::retention_days(&state.db, &user.id).await {
+		Ok(days) => json_response(StatusCode::OK, RequestLogRetentionResponse { retention_days: days }),
+		Err(error) => {
+			tracing::error!(%error, "failed to load request log retention");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
+	}
+}
+
+/// PUT /api/v1/developer/request-logs/retention
+pub async fn set_request_log_retention(
+	State(state): State<Arc<JobState>>,
+	Extension(RequestContext { user }): Extension<RequestContext>,
+	Json(request): Json<SetRequestLogRetentionRequest>,
+) -> impl IntoResponse {
+	let Some(user) = user else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	if request.retention_days < 1 || request.retention_days > MAX_REQUEST_LOG_RETENTION_DAYS {
+		return ErrorBuilder::new(ErrorCode::RequestLogRetentionInvalid).build();
+	}
+	match RequestLog::set_retention_days(&state.db, &user.id, request.retention_days).await {
+		Ok(()) => json_response(StatusCode::OK, RequestLogRetentionResponse { retention_days: request.retention_days }),
+		Err(error) => {
+			tracing::error!(%error, "failed to store request log retention");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
 	}
 }

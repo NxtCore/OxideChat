@@ -29,6 +29,8 @@ pub const INFERENCE_WRITE_SCOPE: &str = "inference:write";
 pub const RESERVATION_METADATA_KEY: &str = "oxide_reservation_id";
 /// Request metadata key carrying the budget reservation id to usage reporting.
 pub const BUDGET_RESERVATION_METADATA_KEY: &str = "oxide_budget_reservation_id";
+/// Request metadata key carrying the public gateway model id to usage reporting.
+pub const PUBLIC_MODEL_METADATA_KEY: &str = "oxide_public_model_id";
 /// Response header set when a warning budget is exhausted.
 pub const BUDGET_WARNING_HEADER: &str = "x-oxide-budget-warning";
 /// Response header naming the authenticated API key.
@@ -134,6 +136,7 @@ impl GatewayAuthContext {
 pub struct GatewayInference {
 	pub model_id: Uuid,
 	pub engine_model_id: String,
+	pub public_model_id: String,
 	pub max_output_tokens: Option<u32>,
 	pub context_length: Option<u32>,
 	pub budget: BudgetAdmission,
@@ -160,6 +163,14 @@ impl GatewayInference {
 			None => response,
 		}
 	}
+}
+
+/// Shared inputs for one gateway inference run.
+pub struct GatewayRun<'a> {
+	pub db: &'a sqlx::PgPool,
+	pub context: &'a GatewayAuthContext,
+	pub reservation_id: Uuid,
+	pub usage_type: &'static str,
 }
 
 /// Failures produced while authenticating a gateway credential.

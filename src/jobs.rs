@@ -3,6 +3,7 @@
 //! Contains scheduled tasks like session cleanup and provider model sync that run periodically.
 
 use crate::types::providers::Provider;
+use crate::types::request_logs::RequestLog;
 use crate::types::tools::McpServer;
 use crate::utils::provider_billing::refresh_provider_billing;
 use crate::utils::providers::sync_provider_models;
@@ -15,6 +16,7 @@ use std::time::Duration;
 const SESSION_CLEANUP_INTERVAL_SECS: u64 = 3600; // 1 hour
 const PROVIDER_SYNC_INTERVAL_SECS: u64 = 500; // 5 minutes
 const PROVIDER_BILLING_INTERVAL_SECS: u64 = 900; // 15 minutes
+const REQUEST_LOG_PRUNE_INTERVAL_SECS: u64 = 3600; // 1 hour
 /// How often to reap idle MCP clients and health-check system servers.
 const MCP_MAINTENANCE_INTERVAL_SECS: u64 = 300; // 5 minutes
 /// Close pooled MCP clients that have been idle for longer than this.
@@ -31,6 +33,7 @@ pub async fn start_job_scheduler(state: Arc<super::JobState>) {
 		tokio::spawn(provider_sync_job(Arc::clone(&state))),
 		tokio::spawn(provider_billing_job(Arc::clone(&state))),
 		tokio::spawn(mcp_maintenance_job(Arc::clone(&state))),
+		tokio::spawn(request_log_prune_job(Arc::clone(&state))),
 	];
 
 	for handle in handles {
@@ -116,6 +119,23 @@ async fn mcp_maintenance_job(state: Arc<super::JobState>) {
 			}
 			Err(e) => eprintln!("[JOBS] Failed to list MCP servers for health check: {e}"),
 		}
+	}
+}
+
+/// Deletes request logs past each user's retention once per hour.
+async fn request_log_prune_job(state: Arc<super::JobState>) {
+	println!("[JOBS] Request log prune job started");
+
+	loop {
+		match RequestLog::prune(&state.db).await {
+			Ok(count) => {
+				if count > 0 {
+					println!("[JOBS] Pruned {count} request logs");
+				}
+			}
+			Err(e) => eprintln!("[JOBS] Request log prune error: {e}"),
+		}
+		tokio::time::sleep(Duration::from_secs(REQUEST_LOG_PRUNE_INTERVAL_SECS)).await;
 	}
 }
 

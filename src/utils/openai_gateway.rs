@@ -1,8 +1,8 @@
 use crate::ai;
 use crate::i18n::I18n;
 use crate::types::{
-	API_KEY_ID_HEADER, BUDGET_RESERVATION_METADATA_KEY, GatewayAuthContext, GatewayInference, GatewayModel, GatewayModelAccessError, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState,
-	RESERVATION_METADATA_KEY, TEAM_ID_HEADER,
+	API_KEY_ID_HEADER, BUDGET_RESERVATION_METADATA_KEY, PUBLIC_MODEL_METADATA_KEY, GatewayAuthContext, GatewayInference, GatewayModel, GatewayModelAccessError, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState,
+	GatewayRun, RequestLog, RequestLogRecord, RequestLogStatus, RESERVATION_METADATA_KEY, TEAM_ID_HEADER,
 };
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -84,20 +84,20 @@ pub async fn run_models(state: &JobState, context: &GatewayAuthContext) -> Respo
 }
 
 /// Runs an authorized `OpenAI` chat request.
-pub async fn run_chat(request: OpenAIChatRequest, context: &GatewayAuthContext, inference: GatewayInference, reservation_id: Uuid, usage_type: &'static str) -> Response {
-	let metadata = request_metadata(context, &inference, reservation_id, usage_type);
+pub async fn run_chat(request: OpenAIChatRequest, inference: GatewayInference, run: GatewayRun<'_>) -> Response {
+	let metadata = request_metadata(run.context, &inference, run.reservation_id, run.usage_type);
 	let engine = ai::get();
 	let engine = engine.read().await;
 	let skin_context = SkinContext::with_service(engine.service().clone());
 	drop(engine);
 	let response = OpenAIChatSkin::handle_chat(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await;
-	log_upstream_failure(&response, context, usage_type);
+	log_upstream_failure(run.db, response.status(), run.context, &inference, run.usage_type).await;
 	inference.finish(response)
 }
 
 /// Runs an authorized `OpenAI` responses request.
-pub async fn run_responses(request: OpenAIResponsesRequestPayload, context: &GatewayAuthContext, inference: GatewayInference, reservation_id: Uuid, usage_type: &'static str) -> Response {
-	let metadata = request_metadata(context, &inference, reservation_id, usage_type);
+pub async fn run_responses(request: OpenAIResponsesRequestPayload, inference: GatewayInference, run: GatewayRun<'_>) -> Response {
+	let metadata = request_metadata(run.context, &inference, run.reservation_id, run.usage_type);
 	let raw_request = match serde_json::to_value(request) {
 		Ok(raw_request) => raw_request,
 		Err(error) => {
@@ -115,14 +115,32 @@ pub async fn run_responses(request: OpenAIResponsesRequestPayload, context: &Gat
 	let skin_context = SkinContext::with_service(engine.service().clone());
 	drop(engine);
 	let response = OpenAIResponsesSkin::handle_responses(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(raw_request)).await;
-	log_upstream_failure(&response, context, usage_type);
+	log_upstream_failure(run.db, response.status(), run.context, &inference, run.usage_type).await;
 	inference.finish(response)
 }
 
-fn log_upstream_failure(response: &Response, context: &GatewayAuthContext, usage_type: &str) {
-	let status = response.status();
-	if status.is_server_error() {
-		tracing::error!(status = status.as_u16(), key_id = %context.key_id, team_id = %context.team_id, usage_type, "gateway inference request failed upstream");
+/// Records every upstream server failure as a request log row.
+async fn log_upstream_failure(db: &PgPool, status: StatusCode, context: &GatewayAuthContext, inference: &GatewayInference, usage_type: &str) {
+	if !status.is_server_error() {
+		return;
+	}
+	tracing::error!(status = status.as_u16(), key_id = %context.key_id, team_id = %context.team_id, usage_type, "gateway inference request failed upstream");
+	let record = RequestLogRecord {
+		user_id: context.user_id,
+		team_id: Some(context.team_id),
+		api_key_id: Some(context.key_id),
+		model_id: Some(inference.model_id),
+		public_model_id: &inference.public_model_id,
+		request_type: usage_type,
+		status: RequestLogStatus::Error,
+		status_code: Some(i32::from(status.as_u16())),
+		input_tokens: 0,
+		output_tokens: 0,
+		reasoning_tokens: 0,
+		cost_total: rust_decimal::Decimal::ZERO,
+	};
+	if let Err(error) = RequestLog::record(db, record).await {
+		tracing::warn!(%error, "failed to record gateway request failure");
 	}
 }
 
@@ -214,6 +232,7 @@ fn request_metadata(context: &GatewayAuthContext, inference: &GatewayInference, 
 	metadata.insert("oxide_user_id".to_string(), context.user_id.to_string());
 	metadata.insert("oxide_api_key_id".to_string(), context.key_id.to_string());
 	metadata.insert("oxide_model_id".to_string(), inference.model_id.to_string());
+	metadata.insert(PUBLIC_MODEL_METADATA_KEY.to_string(), inference.public_model_id.clone());
 	metadata.insert("oxide_team_id".to_string(), context.team_id.to_string());
 	metadata.insert("oxide_request_type".to_string(), usage_type.to_string());
 	SkinRequestMetadata(metadata)

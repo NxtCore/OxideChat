@@ -1,4 +1,4 @@
-use crate::types::{GatewayAuthContext, GatewayModel, GatewayRoute, JobState};
+use crate::types::{GatewayAuthContext, GatewayModel, GatewayRoute, GatewayRun, JobState};
 use crate::utils::gateway_limits;
 use crate::utils::openai_gateway::{error_response, model_access_error_response, run_chat, run_models, run_responses, translation};
 use axum::extract::{Extension, State};
@@ -41,7 +41,19 @@ pub async fn chat_completions(
 		Err(error) => return model_access_error_response(error, &requested_model),
 	};
 	let tokens = estimate.limiter_tokens();
-	gateway_limits::run_limited(&state, &context, GatewayRoute::CHAT, tokens, |id| run_chat(request, &context, inference, id, GatewayRoute::CHAT.usage_type)).await
+	gateway_limits::run_limited(&state, &context, GatewayRoute::CHAT, tokens, |id| {
+		run_chat(
+			request,
+			inference,
+			GatewayRun {
+				db: &state.db,
+				context: &context,
+				reservation_id: id,
+				usage_type: GatewayRoute::CHAT.usage_type,
+			},
+		)
+	})
+	.await
 }
 
 /// Runs an authorized OpenAI-compatible responses request.
@@ -70,5 +82,17 @@ pub async fn responses(
 		Err(error) => return model_access_error_response(error, &model),
 	};
 	let tokens = estimate.limiter_tokens();
-	gateway_limits::run_limited(&state, &context, GatewayRoute::RESPONSES, tokens, |id| run_responses(request, &context, inference, id, GatewayRoute::RESPONSES.usage_type)).await
+	gateway_limits::run_limited(&state, &context, GatewayRoute::RESPONSES, tokens, |id| {
+		run_responses(
+			request,
+			inference,
+			GatewayRun {
+				db: &state.db,
+				context: &context,
+				reservation_id: id,
+				usage_type: GatewayRoute::RESPONSES.usage_type,
+			},
+		)
+	})
+	.await
 }

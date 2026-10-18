@@ -11,6 +11,7 @@ pub mod images;
 pub mod logging;
 pub mod mcp;
 pub mod models;
+pub mod request_logs;
 pub mod response;
 pub mod teams;
 pub mod workspaces;

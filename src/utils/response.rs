@@ -213,6 +213,7 @@ pub enum ErrorCode {
 	ApiKeyOverlapInvalid,
 	ApiKeyRuleInvalid,
 	ApiKeyBudgetInvalid,
+	RequestLogRetentionInvalid,
 
 	// 401 Unauthorized
 	Unauthorized,
@@ -292,6 +293,7 @@ impl ErrorCode {
 			| Self::ApiKeyOverlapInvalid
 			| Self::ApiKeyRuleInvalid
 			| Self::ApiKeyBudgetInvalid
+			| Self::RequestLogRetentionInvalid
 			=> StatusCode::BAD_REQUEST,
 
 			Self::Unauthorized
@@ -343,6 +345,7 @@ impl ErrorCode {
 			Self::ApiKeyOverlapInvalid => "developer.errors.overlap_invalid",
 			Self::ApiKeyRuleInvalid => "developer.errors.rule_invalid",
 			Self::ApiKeyBudgetInvalid => "developer.errors.budget_invalid",
+			Self::RequestLogRetentionInvalid => "developer.errors.retention_invalid",
 
 			Self::Unauthorized => "auth.errors.unauthorized",
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
@@ -413,6 +416,7 @@ impl ErrorCode {
 			Self::ApiKeyOverlapInvalid => "api_key_overlap_invalid",
 			Self::ApiKeyRuleInvalid => "api_key_rule_invalid",
 			Self::ApiKeyBudgetInvalid => "api_key_budget_invalid",
+			Self::RequestLogRetentionInvalid => "request_log_retention_invalid",
 
 			Self::Unauthorized => "unauthorized",
 			Self::NotAuthenticated => "not_authenticated",

@@ -1,5 +1,8 @@
 use crate::types::models::{Model, ModelPricing};
-use crate::types::{BUDGET_RESERVATION_METADATA_KEY, Budget, BudgetLedger, GatewayLimitBackend, GatewayLimiter, JobState, RESERVATION_METADATA_KEY, UsageEvent, UsageEventRecord};
+use crate::types::{
+	BUDGET_RESERVATION_METADATA_KEY, Budget, BudgetLedger, GatewayLimitBackend, GatewayLimiter, JobState, PUBLIC_MODEL_METADATA_KEY, RequestLog, RequestLogRecord, RequestLogStatus,
+	RESERVATION_METADATA_KEY, UsageEvent, UsageEventRecord,
+};
 use omniference::catalog::UsageBreakdown;
 use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
 use omniference::stream::CostDetails;
@@ -70,6 +73,24 @@ impl OxideCostSink {
 			cost_total,
 		};
 		UsageEvent::record(&self.state.db, usage).await?;
+		RequestLog::record(
+			&self.state.db,
+			RequestLogRecord {
+				user_id,
+				team_id,
+				api_key_id: metadata_uuid(record, "oxide_api_key_id"),
+				model_id: Some(model.id),
+				public_model_id: record.metadata.get(PUBLIC_MODEL_METADATA_KEY).map_or(model.model_id.as_str(), String::as_str),
+				request_type: record.metadata.get("oxide_request_type").map_or("gateway", String::as_str),
+				status: RequestLogStatus::Success,
+				status_code: None,
+				input_tokens,
+				output_tokens,
+				reasoning_tokens,
+				cost_total,
+			},
+		)
+		.await?;
 		Ok(())
 	}
 }

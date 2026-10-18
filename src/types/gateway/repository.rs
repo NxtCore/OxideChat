@@ -1,4 +1,4 @@
-use super::{GatewayAuthContext, GatewayAuthError, GatewayCredential, GatewayInference, GatewayModel, GatewayModelAccessError};
+use super::{GatewayAuthContext, GatewayAuthError, GatewayCredential, GatewayInference, GatewayModel, GatewayModelAccessError, public_model_id};
 use super::{GatewayRatePolicy, GatewayRateRule};
 use crate::types::{BudgetAdmission, BudgetLedger, TokenEstimate};
 use crate::utils::auth::{hash_password, verify_password};
@@ -13,6 +13,7 @@ use uuid::Uuid;
 struct ResolvedModel {
 	id: Uuid,
 	engine_model_id: String,
+	provider_name: String,
 	max_tokens: Option<i32>,
 	context_length: Option<i32>,
 }
@@ -21,7 +22,8 @@ impl From<ResolvedModel> for GatewayInference {
 	fn from(model: ResolvedModel) -> Self {
 		Self {
 			model_id: model.id,
-			engine_model_id: model.engine_model_id,
+			engine_model_id: model.engine_model_id.clone(),
+			public_model_id: public_model_id(&model.provider_name, &model.engine_model_id),
 			max_output_tokens: model.max_tokens.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
 			context_length: model.context_length.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
 			budget: BudgetAdmission::default(),
@@ -196,6 +198,7 @@ impl GatewayModel {
 			SELECT DISTINCT
 				m.id,
 				m.model_id AS engine_model_id,
+				p.name AS provider_name,
 				COALESCE(c.max_output_tokens, m.max_tokens) AS max_tokens,
 				COALESCE(c.context_length, m.context_length) AS context_length
 			FROM models m
