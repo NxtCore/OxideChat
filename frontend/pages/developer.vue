@@ -27,6 +27,14 @@
 							<span>{{ store.getTranslation(tab.label) }}</span>
 						</NuxtLink>
 						<NuxtLink
+							v-if="store.hasPermission('admin.developer.view')"
+							to="/settings/gateway-admin"
+							class="flex shrink-0 items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-[15px] text-muted-foreground transition-all duration-200 hover:bg-accent/50 hover:text-foreground"
+						>
+							<ShieldCheck class="h-4 w-4" />
+							<span>{{ store.getTranslation('developer.nav.gateway_admin') }}</span>
+						</NuxtLink>
+						<NuxtLink
 							v-if="store.isAdmin"
 							to="/settings/admin-config"
 							class="flex shrink-0 items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-[15px] text-muted-foreground transition-all duration-200 hover:bg-accent/50 hover:text-foreground lg:mt-4 lg:border-t lg:border-border lg:pt-4"
