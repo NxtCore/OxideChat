@@ -1,6 +1,6 @@
 use super::{
 	DEFAULT_REQUEST_LOG_RETENTION_DAYS, REQUEST_LOG_EXPORT_LIMIT, RequestLog, RequestLogErrorCategory, RequestLogFailure, RequestLogFilter, RequestLogRecord, RequestLogResponse, RequestLogStatus,
-	RequestLogTrace,
+	RequestLogSummary, RequestLogTrace,
 };
 use crate::types::{BaseType, axum::PaginatedResponse};
 use chrono::Utc;
@@ -137,6 +137,42 @@ impl RequestLog {
 			.fetch_all(pool)
 			.await?;
 		Ok(rows.into_iter().map(|row| row.to_response()).collect())
+	}
+
+	/// Summarizes the logged requests matching the filter.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the rows cannot be read.
+	pub async fn summary(pool: &PgPool, filter: RequestLogFilter) -> Result<RequestLogSummary, sqlx::Error> {
+		sqlx::query_as::<_, RequestLogSummary>(
+			r#"
+			SELECT COUNT(*) AS total_requests,
+			       COUNT(*) FILTER (WHERE status = 'error') AS error_requests,
+			       COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS requests_24h,
+			       COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+			       COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+			       COALESCE(SUM(cost_total), 0) AS cost_total,
+			       MAX(created_at) AS last_request_at
+			FROM gateway_request_logs
+			WHERE ($1::uuid IS NULL OR user_id = $1)
+			  AND ($2::uuid IS NULL OR team_id = $2)
+			  AND ($3::uuid IS NULL OR api_key_id = $3)
+			  AND ($4::text IS NULL OR status = $4)
+			  AND ($5::text IS NULL OR error_category = $5)
+			  AND ($6::timestamptz IS NULL OR created_at >= $6)
+			  AND ($7::timestamptz IS NULL OR created_at <= $7)
+			"#,
+		)
+		.bind(filter.user_id)
+		.bind(filter.team_id)
+		.bind(filter.api_key_id)
+		.bind(filter.status.map(RequestLogStatus::as_str))
+		.bind(filter.error_category.map(RequestLogErrorCategory::as_str))
+		.bind(filter.from)
+		.bind(filter.to)
+		.fetch_one(pool)
+		.await
 	}
 
 	/// Returns the user's retention in days, defaulting when unset.

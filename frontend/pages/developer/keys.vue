@@ -57,6 +57,7 @@
 							<template v-if="apiKey.max_concurrent_requests"> · {{ store.getTranslation('developer.keys.concurrency', {count: apiKey.max_concurrent_requests}) }}</template>
 						</p>
 						<p v-if="keyStatus(apiKey) === 'expired'" class="text-xs text-destructive">{{ store.getTranslation('developer.keys.expired_hint') }}</p>
+						<p v-if="apiKey.admin_disabled" class="text-xs text-destructive">{{ store.getTranslation('developer.keys.admin_disabled_hint') }}</p>
 						<p v-if="keyStatus(apiKey) === 'revoked'" class="text-xs text-destructive">
 							{{ store.getTranslation('developer.keys.revoked_hint', {date: formatDate(apiKey.revoked_at ?? '')}) }}
 						</p>
@@ -65,7 +66,8 @@
 					<div v-if="!apiKey.revoked_at" class="flex flex-wrap items-center gap-2">
 						<div class="flex items-center gap-2 pr-2">
 							<ShadSwitch
-								:model-value="apiKey.is_enabled"
+								:model-value="apiKey.is_enabled && !apiKey.admin_disabled"
+								:disabled="apiKey.admin_disabled"
 								:aria-label="store.getTranslation('developer.keys.enabled')"
 								@update:model-value="toggleEnabled(apiKey, $event === true)"
 							/>

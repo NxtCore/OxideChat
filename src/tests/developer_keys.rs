@@ -89,6 +89,7 @@ mod requests {
 			last_four: "wxyz".to_string(),
 			scopes: sqlx::types::Json(vec!["inference:read".to_string()]),
 			is_enabled: true,
+			admin_disabled: false,
 			expires_at: None,
 			revoked_at: None,
 			last_used_at: None,

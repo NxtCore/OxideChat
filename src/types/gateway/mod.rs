@@ -1,3 +1,7 @@
+mod admin;
+mod admin_audit;
+mod admin_keys;
+mod admin_teams;
 mod body;
 mod estimate;
 mod keys;
@@ -7,6 +11,7 @@ mod policy;
 mod repository;
 
 pub(crate) use body::ReservedBody;
+pub use admin::*;
 pub use keys::*;
 pub use limiter::*;
 pub use policy::*;
@@ -90,6 +95,8 @@ pub struct GatewayCredential {
 	pub expires_at: Option<DateTime<Utc>>,
 	pub revoked_at: Option<DateTime<Utc>>,
 	pub is_member: bool,
+	pub team_enabled: bool,
+	pub admin_disabled: bool,
 	pub team_rules: Json<Vec<GatewayRateRule>>,
 	pub key_rules: Json<Vec<GatewayRateRule>>,
 	pub team_concurrency: Option<i32>,

@@ -15,4 +15,9 @@ pub mod consts {
 	pub const ADMIN_CONFIG_EDIT: &str = "admin.config.edit";
 	pub const ADMIN_TOOLS_VIEW: &str = "admin.tools.view";
 	pub const ADMIN_TOOLS_EDIT: &str = "admin.tools.edit";
+	pub const ADMIN_DEVELOPER_VIEW: &str = "admin.developer.view";
+	pub const ADMIN_DEVELOPER_KEYS_EDIT: &str = "admin.developer.keys.edit";
+	pub const ADMIN_DEVELOPER_LIMITS_EDIT: &str = "admin.developer.limits.edit";
+	pub const ADMIN_DEVELOPER_ACCESS_EDIT: &str = "admin.developer.access.edit";
+	pub const ADMIN_DEVELOPER_AUDIT_VIEW: &str = "admin.developer.audit.view";
 }

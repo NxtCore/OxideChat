@@ -13,6 +13,7 @@ export interface DeveloperKey {
 	last_four: string;
 	scopes: string[];
 	is_enabled: boolean;
+	admin_disabled: boolean;
 	expires_at: string | null;
 	revoked_at: string | null;
 	last_used_at: string | null;

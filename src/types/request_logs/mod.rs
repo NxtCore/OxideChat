@@ -266,6 +266,18 @@ pub struct RequestLogResponse {
 	pub latency_ms: Option<i32>,
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+/// Request counts, tokens and spend over the logged requests matching a filter.
+pub struct RequestLogSummary {
+	pub total_requests: i64,
+	pub error_requests: i64,
+	pub requests_24h: i64,
+	pub input_tokens: i64,
+	pub output_tokens: i64,
+	pub cost_total: Decimal,
+	pub last_request_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Serialize)]
 /// The caller's effective request log retention.
 pub struct RequestLogRetentionResponse {

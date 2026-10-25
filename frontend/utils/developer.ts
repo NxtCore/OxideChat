@@ -3,7 +3,7 @@ import type {DeveloperKey, DeveloperRequestLog, KeyStatus} from '~/types/develop
 export function keyStatus(key: DeveloperKey): KeyStatus {
 	if (key.revoked_at) return 'revoked';
 	if (key.expires_at && new Date(key.expires_at).getTime() <= Date.now()) return 'expired';
-	if (!key.is_enabled) return 'disabled';
+	if (!key.is_enabled || key.admin_disabled) return 'disabled';
 	return 'active';
 }
 

@@ -200,7 +200,7 @@ pub async fn set_team_models(State(state): State<Arc<JobState>>, Extension(Reque
 		}
 	};
 
-	match team.set_model_access(&state.db, &req.provider_ids, &req.model_ids).await {
+	match team.update_model_access(&state.db, &user.id, &req.provider_ids, &req.model_ids).await {
 		Ok(()) => match team.detailed_response(&state.db).await {
 			Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),
 			Err(e) => {

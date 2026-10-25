@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import {User, ArrowLeft, Cpu, Bot, Package, Users, Network, CreditCard, BarChart3, SlidersHorizontal} from 'lucide-vue-next';
+import {User, ArrowLeft, Cpu, Bot, Package, Users, Network, CreditCard, BarChart3, SlidersHorizontal, ShieldCheck} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 definePageMeta({
@@ -63,6 +63,7 @@ const tabs = [
 	{id: 'models', label: 'settings.tabs.models', icon: Bot, permission: 'admin.providers.view'},
 	{id: 'teams', label: 'settings.tabs.teams', icon: Network, permission: 'admin.teams.view'},
 	{id: 'budgets', label: 'settings.tabs.budgets', icon: CreditCard, permission: 'admin.budgets.view'},
+	{id: 'gateway-admin', label: 'settings.tabs.gateway_admin', icon: ShieldCheck, permission: 'admin.developer.view'},
 	{id: 'analytics', label: 'settings.tabs.analytics', icon: BarChart3, permission: 'admin.analytics.view'},
 	{id: 'users', label: 'settings.tabs.admin_users', icon: Users, permission: 'admin.users.view'},
 	{id: 'admin-config', label: 'settings.tabs.admin_config', icon: SlidersHorizontal, permission: 'admin.config.view'},
