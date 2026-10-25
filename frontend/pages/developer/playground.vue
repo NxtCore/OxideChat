@@ -12,7 +12,7 @@
 		</div>
 
 		<div v-else class="space-y-4 rounded-lg border border-border bg-card p-4">
-			<div class="grid gap-4 sm:grid-cols-2">
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<div class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.playground.key') }}</ShadLabel>
 					<ShadSelect v-model="keyId">
