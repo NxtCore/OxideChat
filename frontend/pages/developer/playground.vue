@@ -24,12 +24,7 @@
 				</div>
 				<div class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.playground.model') }}</ShadLabel>
-					<ShadSelect v-model="model" :disabled="!models.length">
-						<ShadSelectTrigger class="w-full"><ShadSelectValue :placeholder="store.getTranslation('developer.playground.pick_model')" /></ShadSelectTrigger>
-						<ShadSelectContent>
-							<ShadSelectItem v-for="entry in models" :key="entry" :value="entry">{{ entry }}</ShadSelectItem>
-						</ShadSelectContent>
-					</ShadSelect>
+					<DeveloperModelCombobox v-model="model" :models="models" :disabled="!models.length" />
 				</div>
 			</div>
 
