@@ -83,10 +83,10 @@
 									<ShadButton
 										variant="ghost"
 										size="icon"
-										:aria-label="store.getTranslation(apiKey.is_enabled ? 'developer.admin.keys.disable' : 'developer.admin.keys.enable')"
-										@click="ask(apiKey, apiKey.is_enabled ? 'disable' : 'enable')"
+										:aria-label="store.getTranslation(apiKey.admin_disabled ? 'developer.admin.keys.enable' : 'developer.admin.keys.disable')"
+										@click="ask(apiKey, apiKey.admin_disabled ? 'enable' : 'disable')"
 									>
-										<component :is="apiKey.is_enabled ? Ban : CheckCircle2" class="h-4 w-4" />
+										<component :is="apiKey.admin_disabled ? CheckCircle2 : Ban" class="h-4 w-4" />
 									</ShadButton>
 									<ShadButton variant="ghost" size="icon" :aria-label="store.getTranslation('developer.admin.keys.revoke')" @click="ask(apiKey, 'revoke')">
 										<Trash2 class="h-4 w-4 text-destructive" />
