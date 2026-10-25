@@ -21,11 +21,11 @@ macro_rules! select_keys {
 		       k.key_prefix, k.last_four, k.scopes,
 		       CASE
 		           WHEN k.revoked_at IS NOT NULL THEN 'revoked'
-		           WHEN NOT k.is_enabled THEN 'disabled'
+		           WHEN k.admin_disabled_at IS NOT NULL OR NOT k.is_enabled THEN 'disabled'
 		           WHEN k.expires_at IS NOT NULL AND k.expires_at <= NOW() THEN 'expired'
 		           ELSE 'active'
 		       END AS status,
-		       k.is_enabled, k.expires_at, k.revoked_at, k.last_used_at, k.max_concurrent_requests, k.created_at
+		       k.is_enabled, (k.admin_disabled_at IS NOT NULL) AS admin_disabled, k.expires_at, k.revoked_at, k.last_used_at, k.max_concurrent_requests, k.created_at
 		FROM gateway_api_keys k
 		JOIN teams t ON t.id = k.team_id
 		JOIN users u ON u.id = k.user_id
@@ -46,15 +46,15 @@ impl GatewayKeyAdminAction {
 	const fn update_sql(self) -> &'static str {
 		match self {
 			Self::Revoke => "UPDATE gateway_api_keys SET revoked_at = NOW(), revoked_by = $2 WHERE id = $1",
-			Self::Disable => "UPDATE gateway_api_keys SET is_enabled = FALSE WHERE id = $1",
-			Self::Enable => "UPDATE gateway_api_keys SET is_enabled = TRUE WHERE id = $1",
+			Self::Disable => "UPDATE gateway_api_keys SET admin_disabled_at = NOW(), admin_disabled_by = $2 WHERE id = $1",
+			Self::Enable => "UPDATE gateway_api_keys SET admin_disabled_at = NULL, admin_disabled_by = NULL WHERE id = $1",
 		}
 	}
 }
 
 #[derive(sqlx::FromRow)]
 struct LockedKey {
-	is_enabled: bool,
+	admin_disabled: bool,
 	revoked_at: Option<chrono::DateTime<chrono::Utc>>,
 	key_prefix: String,
 	user_id: Uuid,
@@ -143,19 +143,19 @@ impl GatewayAdminKeyResponse {
 			return Err(GatewayAdminError::KeyRevoked);
 		}
 		let update = sqlx::query(action.update_sql()).bind(key_id);
-		let update = if action == GatewayKeyAdminAction::Revoke { update.bind(actor_id) } else { update };
+		let update = if action == GatewayKeyAdminAction::Enable { update } else { update.bind(actor_id) };
 		update.execute(&mut *tx).await?;
-		let after_enabled = match action {
-			GatewayKeyAdminAction::Revoke => before.is_enabled,
-			GatewayKeyAdminAction::Disable => false,
-			GatewayKeyAdminAction::Enable => true,
+		let after_admin_disabled = match action {
+			GatewayKeyAdminAction::Revoke => before.admin_disabled,
+			GatewayKeyAdminAction::Disable => true,
+			GatewayKeyAdminAction::Enable => false,
 		};
 		let metadata = json!({
 			"key_prefix": before.key_prefix,
 			"owner_user_id": before.user_id,
 			"team_id": before.team_id,
-			"before": { "is_enabled": before.is_enabled, "revoked": false },
-			"after": { "is_enabled": after_enabled, "revoked": action == GatewayKeyAdminAction::Revoke },
+			"before": { "admin_disabled": before.admin_disabled, "revoked": false },
+			"after": { "admin_disabled": after_admin_disabled, "revoked": action == GatewayKeyAdminAction::Revoke },
 		});
 		let entry = AdminAudit {
 			event: action.event(),
@@ -171,7 +171,7 @@ impl GatewayAdminKeyResponse {
 }
 
 async fn lock_key(tx: &mut Transaction<'_, Postgres>, key_id: &Uuid) -> Result<LockedKey, GatewayAdminError> {
-	sqlx::query_as::<_, LockedKey>("SELECT is_enabled, revoked_at, key_prefix, user_id, team_id FROM gateway_api_keys WHERE id = $1 FOR UPDATE")
+	sqlx::query_as::<_, LockedKey>("SELECT (admin_disabled_at IS NOT NULL) AS admin_disabled, revoked_at, key_prefix, user_id, team_id FROM gateway_api_keys WHERE id = $1 FOR UPDATE")
 		.bind(key_id)
 		.fetch_optional(&mut **tx)
 		.await?

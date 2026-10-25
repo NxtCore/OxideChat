@@ -96,6 +96,7 @@ pub struct GatewayCredential {
 	pub revoked_at: Option<DateTime<Utc>>,
 	pub is_member: bool,
 	pub team_enabled: bool,
+	pub admin_disabled: bool,
 	pub team_rules: Json<Vec<GatewayRateRule>>,
 	pub key_rules: Json<Vec<GatewayRateRule>>,
 	pub team_concurrency: Option<i32>,

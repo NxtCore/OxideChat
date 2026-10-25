@@ -212,6 +212,43 @@ mod keys {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn owner_cannot_undo_an_admin_disable(pool: PgPool) -> TestResult {
+		let user = create_user(&pool).await?;
+		let admin = create_user(&pool).await?;
+		let team = create_team(&pool, user).await?;
+		let (key, token) = create_key(&pool, user, team).await?;
+		GatewayAdminKeyResponse::apply_action(&pool, &admin, &key.id, GatewayKeyAdminAction::Disable, None).await?;
+		let enable = UpdateGatewayKeyRequest {
+			is_enabled: Some(true),
+			..Default::default()
+		};
+		let result = GatewayApiKey::update(&pool, &user, &key.id, &enable).await;
+		assert!(matches!(result, Err(GatewayKeyError::AdminDisabled)));
+		let rotate = GatewayApiKey::rotate(&pool, &user, &key.id, None).await;
+		assert!(matches!(rotate, Err(GatewayKeyError::AdminDisabled)));
+		let rename = UpdateGatewayKeyRequest {
+			name: Some("Renamed".to_string()),
+			is_enabled: Some(false),
+			..Default::default()
+		};
+		let renamed = GatewayApiKey::update(&pool, &user, &key.id, &rename).await?;
+		assert!(renamed.admin_disabled && renamed.to_response().admin_disabled);
+		assert!(GatewayCredential::authenticate(&pool, &token).await.is_err());
+		let stored = GatewayAdminKeyResponse::find(&pool, &key.id).await?;
+		assert!(stored.admin_disabled && stored.status == "disabled");
+		GatewayAdminKeyResponse::apply_action(&pool, &admin, &key.id, GatewayKeyAdminAction::Enable, None).await?;
+		let cleared = GatewayApiKey::find_owned(&pool, &user, &key.id).await?;
+		assert!(!cleared.admin_disabled);
+		let again = UpdateGatewayKeyRequest {
+			is_enabled: Some(true),
+			..Default::default()
+		};
+		GatewayApiKey::update(&pool, &user, &key.id, &again).await?;
+		assert!(GatewayCredential::authenticate(&pool, &token).await.is_ok());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn admin_action_errors(pool: PgPool) -> TestResult {
 		let admin = create_user(&pool).await?;
 		let missing = GatewayAdminKeyResponse::apply_action(&pool, &admin, &Uuid::new_v4(), GatewayKeyAdminAction::Revoke, None).await;

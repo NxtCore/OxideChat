@@ -18,6 +18,7 @@ fn error_code(error: &GatewayKeyError) -> ErrorCode {
 	match error {
 		GatewayKeyError::NotFound => ErrorCode::ApiKeyNotFound,
 		GatewayKeyError::Revoked => ErrorCode::ApiKeyRevoked,
+		GatewayKeyError::AdminDisabled => ErrorCode::ApiKeyAdminDisabled,
 		GatewayKeyError::TeamForbidden => ErrorCode::ApiKeyTeamForbidden,
 		GatewayKeyError::InvalidName => ErrorCode::ApiKeyNameInvalid,
 		GatewayKeyError::InvalidScopes => ErrorCode::ApiKeyScopesInvalid,

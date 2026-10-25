@@ -151,6 +151,7 @@ pub struct GatewayAdminKeyResponse {
 	pub scopes: Json<Vec<String>>,
 	pub status: String,
 	pub is_enabled: bool,
+	pub admin_disabled: bool,
 	pub expires_at: Option<DateTime<Utc>>,
 	pub revoked_at: Option<DateTime<Utc>>,
 	pub last_used_at: Option<DateTime<Utc>>,

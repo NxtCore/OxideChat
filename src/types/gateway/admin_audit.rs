@@ -210,7 +210,7 @@ impl GatewayEventResponse {
 			r#"
 			SELECT id, name, team_id, expires_at
 			FROM gateway_api_keys
-			WHERE revoked_at IS NULL AND is_enabled AND expires_at > NOW() AND expires_at <= NOW() + make_interval(days => $1::int)
+			WHERE revoked_at IS NULL AND is_enabled AND admin_disabled_at IS NULL AND expires_at > NOW() AND expires_at <= NOW() + make_interval(days => $1::int)
 			ORDER BY expires_at, id
 			LIMIT $2
 			"#,
@@ -261,7 +261,7 @@ impl GatewayEventResponse {
 				events.extend(budget_event("team", (team.team_id, team.team_name.clone(), Some(team.team_id)), budget.budget.amount, budget.spent, threshold));
 			}
 		}
-		events.sort_by(|left, right| right.percent_used.cmp(&left.percent_used));
+		events.sort_by_key(|event| std::cmp::Reverse(event.percent_used));
 		Ok(events)
 	}
 }

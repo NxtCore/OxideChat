@@ -84,6 +84,7 @@ pub struct GatewayKeyResponse {
 	pub last_four: String,
 	pub scopes: Vec<String>,
 	pub is_enabled: bool,
+	pub admin_disabled: bool,
 	pub expires_at: Option<DateTime<Utc>>,
 	pub revoked_at: Option<DateTime<Utc>>,
 	pub last_used_at: Option<DateTime<Utc>>,
@@ -165,6 +166,7 @@ pub struct GatewayApiKey {
 	pub last_four: String,
 	pub scopes: Json<Vec<String>>,
 	pub is_enabled: bool,
+	pub admin_disabled: bool,
 	pub expires_at: Option<DateTime<Utc>>,
 	pub revoked_at: Option<DateTime<Utc>>,
 	pub last_used_at: Option<DateTime<Utc>>,
@@ -184,6 +186,7 @@ impl GatewayApiKey {
 			last_four: self.last_four.clone(),
 			scopes: self.scopes.0.clone(),
 			is_enabled: self.is_enabled,
+			admin_disabled: self.admin_disabled,
 			expires_at: self.expires_at,
 			revoked_at: self.revoked_at,
 			last_used_at: self.last_used_at,
@@ -269,6 +272,9 @@ pub enum GatewayKeyError {
 	/// The budget amount, interval or action is unsupported.
 	#[error("gateway_key_budget_invalid")]
 	InvalidBudget,
+	/// An administrator disabled the key and only an administrator can enable it.
+	#[error("gateway_key_admin_disabled")]
+	AdminDisabled,
 	/// The secret could not be generated or hashed.
 	#[error("gateway_key_secret_failed")]
 	Secret,

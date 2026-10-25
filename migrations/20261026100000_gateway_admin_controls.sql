@@ -1,5 +1,8 @@
 ALTER TABLE teams ADD COLUMN IF NOT EXISTS gateway_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 
+ALTER TABLE gateway_api_keys ADD COLUMN IF NOT EXISTS admin_disabled_at TIMESTAMPTZ;
+ALTER TABLE gateway_api_keys ADD COLUMN IF NOT EXISTS admin_disabled_by UUID REFERENCES users(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS gateway_api_keys_expires_idx ON gateway_api_keys(expires_at) WHERE revoked_at IS NULL AND expires_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS gateway_api_keys_last_used_idx ON gateway_api_keys(last_used_at);
 

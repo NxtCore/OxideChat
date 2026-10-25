@@ -31,7 +31,7 @@ macro_rules! select_teams {
 	SELECT t.id, t.name, t.is_default, t.gateway_enabled, t.gateway_max_concurrent_requests,
 	       (SELECT COUNT(*) FROM gateway_api_keys k WHERE k.team_id = t.id) AS key_count,
 	       (SELECT COUNT(*) FROM gateway_api_keys k
-	        WHERE k.team_id = t.id AND k.revoked_at IS NULL AND k.is_enabled AND (k.expires_at IS NULL OR k.expires_at > NOW())) AS active_key_count
+	        WHERE k.team_id = t.id AND k.revoked_at IS NULL AND k.is_enabled AND k.admin_disabled_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > NOW())) AS active_key_count
 	FROM teams t
 "#
 	};

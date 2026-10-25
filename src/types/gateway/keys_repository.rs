@@ -22,7 +22,7 @@ const MAX_BUDGET_UNITS: i64 = 999_999_999_999;
 
 macro_rules! key_columns {
 	() => {
-		"id, name, team_id, key_prefix, last_four, scopes, is_enabled, expires_at, revoked_at, last_used_at, max_concurrent_requests, created_at"
+		"id, name, team_id, key_prefix, last_four, scopes, is_enabled, (admin_disabled_at IS NOT NULL) AS admin_disabled, expires_at, revoked_at, last_used_at, max_concurrent_requests, created_at"
 	};
 }
 
@@ -294,6 +294,9 @@ impl GatewayApiKey {
 		}
 		let mut tx = pool.begin().await?;
 		let before = Self::lock_active(&mut tx, user_id, key_id).await?;
+		if before.admin_disabled && request.is_enabled == Some(true) {
+			return Err(GatewayKeyError::AdminDisabled);
+		}
 		let updated = sqlx::query_as::<_, Self>(concat!(
 			"UPDATE gateway_api_keys SET name = $2, is_enabled = $3, scopes = $4, expires_at = $5, max_concurrent_requests = $6 WHERE id = $1 RETURNING ",
 			key_columns!()
@@ -352,6 +355,9 @@ impl GatewayApiKey {
 		let mut tx = pool.begin().await?;
 		let old = Self::lock_active(&mut tx, user_id, key_id).await?;
 		validate_expiry(old.expires_at)?;
+		if old.admin_disabled {
+			return Err(GatewayKeyError::AdminDisabled);
+		}
 		if !is_team_member(&mut tx, user_id, &old.team_id).await? {
 			return Err(GatewayKeyError::TeamForbidden);
 		}
