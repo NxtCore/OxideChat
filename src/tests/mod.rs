@@ -6,6 +6,7 @@ pub mod config;
 pub mod developer_keys;
 pub mod encryption;
 pub mod gateway;
+pub mod gateway_admin;
 pub mod i18n;
 pub mod images;
 pub mod logging;

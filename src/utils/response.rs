@@ -214,6 +214,7 @@ pub enum ErrorCode {
 	ApiKeyRuleInvalid,
 	ApiKeyBudgetInvalid,
 	RequestLogRetentionInvalid,
+	GatewayAdminReasonInvalid,
 
 	// 401 Unauthorized
 	Unauthorized,
@@ -294,6 +295,7 @@ impl ErrorCode {
 			| Self::ApiKeyRuleInvalid
 			| Self::ApiKeyBudgetInvalid
 			| Self::RequestLogRetentionInvalid
+			| Self::GatewayAdminReasonInvalid
 			=> StatusCode::BAD_REQUEST,
 
 			Self::Unauthorized
@@ -346,6 +348,7 @@ impl ErrorCode {
 			Self::ApiKeyRuleInvalid => "developer.errors.rule_invalid",
 			Self::ApiKeyBudgetInvalid => "developer.errors.budget_invalid",
 			Self::RequestLogRetentionInvalid => "developer.errors.retention_invalid",
+			Self::GatewayAdminReasonInvalid => "developer.admin.errors.reason_invalid",
 
 			Self::Unauthorized => "auth.errors.unauthorized",
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
@@ -417,6 +420,7 @@ impl ErrorCode {
 			Self::ApiKeyRuleInvalid => "api_key_rule_invalid",
 			Self::ApiKeyBudgetInvalid => "api_key_budget_invalid",
 			Self::RequestLogRetentionInvalid => "request_log_retention_invalid",
+			Self::GatewayAdminReasonInvalid => "gateway_admin_reason_invalid",
 
 			Self::Unauthorized => "unauthorized",
 			Self::NotAuthenticated => "not_authenticated",

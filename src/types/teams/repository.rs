@@ -3,8 +3,8 @@ use super::{
 	UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest,
 };
 use crate::types::axum::PaginatedResponse;
-use crate::types::{BaseType, Budget};
-use sqlx::{PgPool, Postgres, QueryBuilder};
+use crate::types::{AUDIT_TEAM_TARGET, BaseType, Budget, EVENT_TEAM_MODELS_UPDATED};
+use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -248,9 +248,47 @@ impl Team {
 
 	pub async fn set_model_access(&self, pool: &PgPool, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
+		self.replace_model_access(&mut tx, provider_ids, model_ids).await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	/// Replaces the team's model access and audits the change in the same transaction.
+	///
+	/// # Errors
+	///
+	/// Returns an error when model access cannot be stored.
+	pub async fn update_model_access(&self, pool: &PgPool, actor_id: &Uuid, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let before_providers: Vec<Uuid> = sqlx::query_scalar("SELECT provider_id FROM team_model_access WHERE team_id = $1 AND provider_id IS NOT NULL ORDER BY provider_id")
+			.bind(self.id)
+			.fetch_all(&mut *tx)
+			.await?;
+		let before_models: Vec<Uuid> = sqlx::query_scalar("SELECT model_id FROM team_model_access WHERE team_id = $1 AND model_id IS NOT NULL ORDER BY model_id")
+			.bind(self.id)
+			.fetch_all(&mut *tx)
+			.await?;
+		self.replace_model_access(&mut tx, provider_ids, model_ids).await?;
+		let metadata = serde_json::json!({
+			"before": { "provider_ids": before_providers, "model_ids": before_models },
+			"after": { "provider_ids": provider_ids, "model_ids": model_ids },
+		});
+		sqlx::query("INSERT INTO audit_logs (event, actor_id, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5)")
+			.bind(EVENT_TEAM_MODELS_UPDATED)
+			.bind(actor_id)
+			.bind(AUDIT_TEAM_TARGET)
+			.bind(self.id)
+			.bind(metadata)
+			.execute(&mut *tx)
+			.await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	async fn replace_model_access(&self, tx: &mut Transaction<'_, Postgres>, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		sqlx::query("DELETE FROM team_model_access WHERE team_id = $1")
 			.bind(self.id)
-			.execute(&mut *tx)
+			.execute(&mut **tx)
 			.await?;
 
 		if !provider_ids.is_empty() {
@@ -259,7 +297,7 @@ impl Team {
 				row.push_bind(self.id).push_bind(provider_id);
 			});
 			builder.push(" ON CONFLICT DO NOTHING");
-			builder.build().execute(&mut *tx).await?;
+			builder.build().execute(&mut **tx).await?;
 		}
 
 		if !model_ids.is_empty() {
@@ -268,10 +306,9 @@ impl Team {
 				row.push_bind(self.id).push_bind(model_id);
 			});
 			builder.push(" ON CONFLICT DO NOTHING");
-			builder.build().execute(&mut *tx).await?;
+			builder.build().execute(&mut **tx).await?;
 		}
 
-		tx.commit().await?;
 		Ok(())
 	}
 

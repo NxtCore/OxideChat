@@ -46,6 +46,33 @@ struct NewKey<'a> {
 	is_enabled: bool,
 }
 
+pub(super) struct RuleColumns {
+	pub classes: Vec<&'static str>,
+	pub metrics: Vec<&'static str>,
+	pub capacities: Vec<i64>,
+	pub periods: Vec<i32>,
+}
+
+impl RuleColumns {
+	pub(super) fn validated(rules: &[GatewayKeyRuleRequest]) -> Result<Self, GatewayKeyError> {
+		let stored = rules.iter().map(GatewayKeyRuleRequest::to_rule).collect::<Vec<_>>();
+		GatewayRatePolicy::from_stored(Vec::new(), stored, None, None).map_err(|_| GatewayKeyError::InvalidRule)?;
+		let windows = rules
+			.iter()
+			.map(|rule| (route_class_str(rule.route_class), metric_str(rule.metric), rule.refill_period_seconds))
+			.collect::<HashSet<_>>();
+		if windows.len() != rules.len() {
+			return Err(GatewayKeyError::DuplicateRule);
+		}
+		Ok(Self {
+			classes: rules.iter().map(|rule| route_class_str(rule.route_class)).collect(),
+			metrics: rules.iter().map(|rule| metric_str(rule.metric)).collect(),
+			capacities: rules.iter().map(|rule| i64::try_from(rule.capacity).unwrap_or(i64::MAX)).collect(),
+			periods: rules.iter().map(|rule| i32::try_from(rule.refill_period_seconds).unwrap_or(i32::MAX)).collect(),
+		})
+	}
+}
+
 impl IssuedSecret {
 	async fn generate() -> Result<Self, GatewayKeyError> {
 		let id = Uuid::new_v4();
@@ -98,7 +125,7 @@ fn validate_expiry(expires_at: Option<DateTime<Utc>>) -> Result<(), GatewayKeyEr
 	}
 }
 
-fn validate_concurrency(value: Option<i32>) -> Result<(), GatewayKeyError> {
+pub(super) fn validate_concurrency(value: Option<i32>) -> Result<(), GatewayKeyError> {
 	match value {
 		Some(value) if value <= 0 => Err(GatewayKeyError::InvalidConcurrency),
 		_ => Ok(()),
@@ -113,14 +140,14 @@ fn validate_budget(request: &SetGatewayKeyBudgetRequest) -> Result<(), GatewayKe
 	if valid { Ok(()) } else { Err(GatewayKeyError::InvalidBudget) }
 }
 
-fn route_class_str(class: GatewayRouteClass) -> &'static str {
+pub(super) fn route_class_str(class: GatewayRouteClass) -> &'static str {
 	match class {
 		GatewayRouteClass::Inference => "inference",
 		GatewayRouteClass::Utility => "utility",
 	}
 }
 
-fn metric_str(metric: GatewayRuleMetric) -> &'static str {
+pub(super) fn metric_str(metric: GatewayRuleMetric) -> &'static str {
 	match metric {
 		GatewayRuleMetric::Requests => "requests",
 		GatewayRuleMetric::Tokens => "tokens",
@@ -398,20 +425,7 @@ impl GatewayApiKey {
 	/// Returns [`GatewayKeyError::InvalidRule`] or [`GatewayKeyError::DuplicateRule`] for rules the
 	/// limiter cannot enforce, the usual lookup errors, or a storage error.
 	pub async fn replace_rules(pool: &PgPool, user_id: &Uuid, key_id: &Uuid, rules: &[GatewayKeyRuleRequest]) -> Result<Vec<GatewayKeyRuleResponse>, GatewayKeyError> {
-		let stored = rules.iter().map(GatewayKeyRuleRequest::to_rule).collect::<Vec<_>>();
-		GatewayRatePolicy::from_stored(Vec::new(), stored, None, None).map_err(|_| GatewayKeyError::InvalidRule)?;
-		let classes = rules.iter().map(|rule| route_class_str(rule.route_class)).collect::<Vec<_>>();
-		let metrics = rules.iter().map(|rule| metric_str(rule.metric)).collect::<Vec<_>>();
-		let windows = rules
-			.iter()
-			.map(|rule| (rule.route_class, rule.metric, rule.refill_period_seconds))
-			.map(|(class, metric, period)| (route_class_str(class), metric_str(metric), period))
-			.collect::<HashSet<_>>();
-		if windows.len() != rules.len() {
-			return Err(GatewayKeyError::DuplicateRule);
-		}
-		let capacities = rules.iter().map(|rule| i64::try_from(rule.capacity).unwrap_or(i64::MAX)).collect::<Vec<_>>();
-		let periods = rules.iter().map(|rule| i32::try_from(rule.refill_period_seconds).unwrap_or(i32::MAX)).collect::<Vec<_>>();
+		let columns = RuleColumns::validated(rules)?;
 		let mut tx = pool.begin().await?;
 		Self::lock_active(&mut tx, user_id, key_id).await?;
 		sqlx::query("DELETE FROM gateway_rate_limit_rules WHERE api_key_id = $1").bind(key_id).execute(&mut *tx).await?;
@@ -422,10 +436,10 @@ impl GatewayApiKey {
 			 RETURNING id, route_class, metric, capacity, refill_period_seconds",
 		)
 		.bind(key_id)
-		.bind(&classes)
-		.bind(&metrics)
-		.bind(&capacities)
-		.bind(&periods)
+		.bind(&columns.classes)
+		.bind(&columns.metrics)
+		.bind(&columns.capacities)
+		.bind(&columns.periods)
 		.fetch_all(&mut *tx)
 		.await?;
 		let summary = rows

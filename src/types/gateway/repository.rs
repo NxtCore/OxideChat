@@ -77,6 +77,7 @@ impl GatewayCredential {
 			return Err(GatewayAuthError::Invalid.into());
 		};
 		if !credential.is_member
+			|| !credential.team_enabled
 			|| !credential.key_enabled
 			|| credential.revoked_at.is_some()
 			|| credential.expires_at.is_some_and(|expires_at| expires_at <= Utc::now())
@@ -132,6 +133,7 @@ impl GatewayCredential {
 				k.expires_at,
 				k.revoked_at,
 				(tm.user_id IS NOT NULL) AS "is_member!",
+				t.gateway_enabled AS "team_enabled!",
 				t.gateway_max_concurrent_requests AS team_concurrency,
 				k.max_concurrent_requests AS key_concurrency,
 				rules.team_rules AS "team_rules!: Json<Vec<GatewayRateRule>>",
