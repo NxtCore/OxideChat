@@ -11,7 +11,7 @@ pub use keys::*;
 pub use limiter::*;
 pub use policy::*;
 
-use crate::types::{BudgetAdmission, BudgetError, BudgetSubject};
+use crate::types::{BudgetAdmission, BudgetError, BudgetSubject, RequestLogContext, RequestLogOwner, RequestLogTrace};
 use axum::body::Body;
 use axum::http::HeaderValue;
 use axum::response::Response;
@@ -89,6 +89,7 @@ pub struct GatewayCredential {
 	pub key_enabled: bool,
 	pub expires_at: Option<DateTime<Utc>>,
 	pub revoked_at: Option<DateTime<Utc>>,
+	pub is_member: bool,
 	pub team_rules: Json<Vec<GatewayRateRule>>,
 	pub key_rules: Json<Vec<GatewayRateRule>>,
 	pub team_concurrency: Option<i32>,
@@ -110,6 +111,16 @@ impl GatewayAuthContext {
 	#[must_use]
 	pub fn allows(&self, scope: &str) -> bool {
 		self.scopes.iter().any(|candidate| candidate == "*" || candidate == scope)
+	}
+
+	#[must_use]
+	/// The account request log rows for this key belong to.
+	pub fn owner(&self) -> RequestLogOwner {
+		RequestLogOwner {
+			user_id: self.user_id,
+			team_id: self.team_id,
+			api_key_id: self.key_id,
+		}
 	}
 
 	#[must_use]
@@ -137,6 +148,7 @@ pub struct GatewayInference {
 	pub model_id: Uuid,
 	pub engine_model_id: String,
 	pub public_model_id: String,
+	pub provider_name: String,
 	pub max_output_tokens: Option<u32>,
 	pub context_length: Option<u32>,
 	pub budget: BudgetAdmission,
@@ -165,12 +177,42 @@ impl GatewayInference {
 	}
 }
 
-/// Shared inputs for one gateway inference run.
-pub struct GatewayRun<'a> {
+/// Request-scoped inputs shared by every outcome of one gateway inference request.
+#[derive(Clone, Copy)]
+pub struct GatewayRequestScope<'a> {
 	pub db: &'a sqlx::PgPool,
 	pub context: &'a GatewayAuthContext,
-	pub reservation_id: Uuid,
+	pub log: RequestLogContext,
 	pub usage_type: &'static str,
+	pub streaming: bool,
+}
+
+impl GatewayRequestScope<'_> {
+	#[must_use]
+	/// Describes this request for its log row, naming the model when it is known.
+	pub fn trace<'b>(&self, public_model_id: &'b str, model_id: Option<Uuid>, provider: Option<&'b str>) -> RequestLogTrace<'b> {
+		RequestLogTrace {
+			context: self.log,
+			owner: self.context.owner(),
+			request_type: self.usage_type,
+			public_model_id,
+			model_id,
+			provider,
+			streaming: self.streaming,
+		}
+	}
+
+	#[must_use]
+	/// Describes this request for its log row using a resolved model.
+	pub fn inference_trace<'b>(&self, inference: &'b GatewayInference) -> RequestLogTrace<'b> {
+		self.trace(&inference.public_model_id, Some(inference.model_id), Some(&inference.provider_name))
+	}
+}
+
+/// Shared inputs for one gateway inference run.
+pub struct GatewayRun<'a> {
+	pub scope: GatewayRequestScope<'a>,
+	pub reservation_id: Uuid,
 }
 
 /// Failures produced while authenticating a gateway credential.
@@ -182,6 +224,19 @@ pub enum GatewayAuthError {
 	/// Credential storage or password verification is unavailable.
 	#[error("gateway_auth_unavailable")]
 	Unavailable,
+}
+
+/// An authentication failure and, when the key's secret verified, the key's owner.
+#[derive(Debug)]
+pub struct GatewayAuthFailure {
+	pub error: GatewayAuthError,
+	pub owner: Option<RequestLogOwner>,
+}
+
+impl From<GatewayAuthError> for GatewayAuthFailure {
+	fn from(error: GatewayAuthError) -> Self {
+		Self { error, owner: None }
+	}
 }
 
 /// Failures produced while authorizing a model for gateway inference.

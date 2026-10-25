@@ -51,6 +51,10 @@ export const KEY_SCOPES = ['inference:read', 'inference:write'] as const;
 
 export type RequestLogStatus = 'success' | 'error';
 
+export const REQUEST_LOG_ERROR_CATEGORIES = ['upstream', 'interrupted', 'budget', 'rate_limit', 'auth', 'model_access'] as const;
+
+export type RequestLogErrorCategory = (typeof REQUEST_LOG_ERROR_CATEGORIES)[number];
+
 export interface DeveloperRequestLog {
 	id: string;
 	user_id: string;
@@ -66,12 +70,18 @@ export interface DeveloperRequestLog {
 	reasoning_tokens: number;
 	cost_total: string;
 	created_at: string;
+	request_id: string | null;
+	provider: string | null;
+	error_category: RequestLogErrorCategory | null;
+	streaming: boolean;
+	latency_ms: number | null;
 }
 
 export interface RequestLogFilters {
 	team_id: string | null;
 	api_key_id: string | null;
 	status: RequestLogStatus | null;
+	error_category: RequestLogErrorCategory | null;
 	from: string | null;
 	to: string | null;
 }

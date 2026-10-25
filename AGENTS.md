@@ -36,6 +36,7 @@
     - `repository.rs` - Database access for credentials, policies, and model access; a key belongs to a user and is pinned to one of their teams (no projects), and authentication requires the user to still be a member of that team
     - `keys.rs` / `keys_repository.rs` - API key management DTOs, errors, and SQL (create, update, revoke, rotate, key-scoped limit rules, per-key budget, team picker); audit events are written to `audit_logs` in the same transaction
     - `mod.rs` - Shared gateway types and constants
+- `src/types/request_logs/` - `gateway_request_logs` rows: one row per gateway inference request, keyed by the `x-request-id` the client received (`add_request_id` stores a `RequestLogContext` in request extensions); successes come from `OxideCostSink`, rejections and upstream failures from `RequestLog::record_failure`, and a repeated `request_id` merges into one row
 - `src/utils/gateway_limits.rs` - HTTP glue only: admission for a route and Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter
 - `src/routes/` - HTTP route handlers (handlers only, no type definitions)
 - `migrations/` - SQLx database migrations

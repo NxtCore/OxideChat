@@ -1,6 +1,6 @@
-use crate::types::{GatewayAuthContext, GatewayModel, GatewayRoute, GatewayRun, JobState};
+use crate::types::{GatewayAuthContext, GatewayModel, GatewayRequestScope, GatewayRoute, GatewayRun, JobState, RequestLogContext};
 use crate::utils::gateway_limits;
-use crate::utils::openai_gateway::{error_response, model_access_error_response, run_chat, run_models, run_responses, translation};
+use crate::utils::openai_gateway::{error_response, reject_limited, reject_model_access, run_chat, run_models, run_responses, translation};
 use axum::extract::{Extension, State};
 use axum::http::StatusCode;
 use axum::response::Response;
@@ -28,40 +28,51 @@ pub async fn list_models(State(state): State<Arc<JobState>>, Extension(context):
 pub async fn chat_completions(
 	State(state): State<Arc<JobState>>,
 	Extension(context): Extension<GatewayAuthContext>,
+	Extension(log): Extension<RequestLogContext>,
 	SkinAwareJson(mut request): SkinAwareJson<OpenAIChatRequest>,
 ) -> Response {
-	let inference = match GatewayModel::resolve_inference(&state.db, &context, &request.model).await {
+	let scope = GatewayRequestScope {
+		db: &state.db,
+		context: &context,
+		log,
+		usage_type: GatewayRoute::CHAT.usage_type,
+		streaming: request.stream.unwrap_or(false),
+	};
+	let mut inference = match GatewayModel::resolve_inference(&state.db, &context, &request.model).await {
 		Ok(inference) => inference,
-		Err(error) => return model_access_error_response(error, &request.model),
+		Err(error) => return reject_model_access(&scope, None, error, &request.model).await,
 	};
 	let requested_model = std::mem::replace(&mut request.model, inference.engine_model_id.clone());
 	let estimate = inference.chat_estimate(&context.policy, &mut request);
-	let inference = match GatewayModel::authorize_inference(&state.db, &state.budget_ledger, &context, inference, estimate.tokens()).await {
-		Ok(inference) => inference,
-		Err(error) => return model_access_error_response(error, &requested_model),
+	if let Err(error) = GatewayModel::reserve_budget(&state.db, &state.budget_ledger, &context, &mut inference, estimate.tokens()).await {
+		return reject_model_access(&scope, Some(&inference), error, &requested_model).await;
+	}
+	let admission = match gateway_limits::admit(&state, &context, GatewayRoute::CHAT, estimate.limiter_tokens()).await {
+		Ok(admission) => admission,
+		Err(error) => return reject_limited(&scope, &inference, error).await,
 	};
-	let tokens = estimate.limiter_tokens();
-	gateway_limits::run_limited(&state, &context, GatewayRoute::CHAT, tokens, |id| {
-		run_chat(
-			request,
-			inference,
-			GatewayRun {
-				db: &state.db,
-				context: &context,
-				reservation_id: id,
-				usage_type: GatewayRoute::CHAT.usage_type,
-			},
-		)
-	})
-	.await
+	let run = GatewayRun {
+		scope,
+		reservation_id: admission.reservation.id,
+	};
+	let response = run_chat(request, inference, run).await;
+	gateway_limits::complete(&state, admission, response)
 }
 
 /// Runs an authorized OpenAI-compatible responses request.
 pub async fn responses(
 	State(state): State<Arc<JobState>>,
 	Extension(context): Extension<GatewayAuthContext>,
+	Extension(log): Extension<RequestLogContext>,
 	SkinAwareJson(mut request): SkinAwareJson<OpenAIResponsesRequestPayload>,
 ) -> Response {
+	let scope = GatewayRequestScope {
+		db: &state.db,
+		context: &context,
+		log,
+		usage_type: GatewayRoute::RESPONSES.usage_type,
+		streaming: request.stream.unwrap_or(false),
+	};
 	let Some(model) = request.model.as_deref() else {
 		return error_response(
 			StatusCode::BAD_REQUEST,
@@ -70,29 +81,24 @@ pub async fn responses(
 			"missing_required_parameter",
 		);
 	};
-	let inference = match GatewayModel::resolve_inference(&state.db, &context, model).await {
+	let mut inference = match GatewayModel::resolve_inference(&state.db, &context, model).await {
 		Ok(inference) => inference,
-		Err(error) => return model_access_error_response(error, model),
+		Err(error) => return reject_model_access(&scope, None, error, model).await,
 	};
 	let model = model.to_owned();
 	request.model = Some(inference.engine_model_id.clone());
 	let estimate = inference.responses_estimate(&context.policy, &mut request);
-	let inference = match GatewayModel::authorize_inference(&state.db, &state.budget_ledger, &context, inference, estimate.tokens()).await {
-		Ok(inference) => inference,
-		Err(error) => return model_access_error_response(error, &model),
+	if let Err(error) = GatewayModel::reserve_budget(&state.db, &state.budget_ledger, &context, &mut inference, estimate.tokens()).await {
+		return reject_model_access(&scope, Some(&inference), error, &model).await;
+	}
+	let admission = match gateway_limits::admit(&state, &context, GatewayRoute::RESPONSES, estimate.limiter_tokens()).await {
+		Ok(admission) => admission,
+		Err(error) => return reject_limited(&scope, &inference, error).await,
 	};
-	let tokens = estimate.limiter_tokens();
-	gateway_limits::run_limited(&state, &context, GatewayRoute::RESPONSES, tokens, |id| {
-		run_responses(
-			request,
-			inference,
-			GatewayRun {
-				db: &state.db,
-				context: &context,
-				reservation_id: id,
-				usage_type: GatewayRoute::RESPONSES.usage_type,
-			},
-		)
-	})
-	.await
+	let run = GatewayRun {
+		scope,
+		reservation_id: admission.reservation.id,
+	};
+	let response = run_responses(request, inference, run).await;
+	gateway_limits::complete(&state, admission, response)
 }

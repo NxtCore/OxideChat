@@ -25,6 +25,11 @@ export function formatMoney(value: string | number): string {
 	return `$${amount.toFixed(small ? 6 : 2)}`;
 }
 
+export function formatLatency(value: number | null): string {
+	if (value === null) return '–';
+	return value >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${value} ms`;
+}
+
 export function requestLogsCsv(logs: DeveloperRequestLog[]): string {
 	const headers = [
 		'created_at',
@@ -32,6 +37,11 @@ export function requestLogsCsv(logs: DeveloperRequestLog[]): string {
 		'request_type',
 		'status',
 		'status_code',
+		'error_category',
+		'request_id',
+		'provider',
+		'streaming',
+		'latency_ms',
 		'input_tokens',
 		'output_tokens',
 		'reasoning_tokens',
@@ -48,6 +58,11 @@ export function requestLogsCsv(logs: DeveloperRequestLog[]): string {
 			log.request_type,
 			log.status,
 			log.status_code ?? '',
+			log.error_category ?? '',
+			log.request_id ?? '',
+			log.provider ?? '',
+			log.streaming,
+			log.latency_ms ?? '',
 			log.input_tokens,
 			log.output_tokens,
 			log.reasoning_tokens,
