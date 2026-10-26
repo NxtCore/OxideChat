@@ -35,6 +35,8 @@ pub const EVENT_TEAM_LIMITS_UPDATED: &str = "gateway_team_limits_updated";
 pub const EVENT_TEAM_ACCESS_UPDATED: &str = "gateway_team_access_updated";
 /// Audit event written when a team's model access changes.
 pub const EVENT_TEAM_MODELS_UPDATED: &str = "team_models_updated";
+/// Audit event written when a team's budget assignment changes.
+pub const EVENT_TEAM_BUDGET_UPDATED: &str = "team_budget_updated";
 
 const SENSITIVE_KEY_PARTS: [&str; 9] = ["secret", "password", "hash", "authorization", "credential", "prompt", "content", "bearer", "cookie"];
 

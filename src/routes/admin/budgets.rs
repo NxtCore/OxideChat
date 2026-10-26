@@ -125,7 +125,7 @@ pub async fn assign_budget(State(state): State<Arc<JobState>>, Extension(Request
 			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 		}
 	};
-	match budget.assign(&state.db, &req).await {
+	match budget.assign(&state.db, &user.id, &req).await {
 		Ok(()) => ResponseBuilder::<()>::new(ResponseBody::Empty).build(),
 		Err(e) => {
 			eprintln!("[BUDGETS] Failed to assign budget: {e}");

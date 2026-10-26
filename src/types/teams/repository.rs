@@ -189,22 +189,14 @@ impl Team {
 			.flatten()
 	}
 
-	pub async fn update_budget(&self, pool: &PgPool, req: &UpdateTeamBudgetRequest) -> Result<Self, sqlx::Error> {
-		let updated = sqlx::query_as::<_, Self>(
-			r#"
-			UPDATE teams
-			SET budget_id = $2,
-				updated_at = NOW()
-			WHERE id = $1
-			RETURNING *
-			"#,
-		)
-		.bind(self.id)
-		.bind(req.budget_id)
-		.fetch_one(pool)
-		.await?;
-		Budget::replace_team_budget_from_legacy(pool, &self.id, req.budget_id).await?;
-		Ok(updated)
+	/// Changes the team's budget and audits it in one transaction.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the budget cannot be stored; nothing is changed then.
+	pub async fn update_budget(&self, pool: &PgPool, actor_id: &Uuid, req: &UpdateTeamBudgetRequest) -> Result<Self, sqlx::Error> {
+		Budget::replace_team_budget_from_legacy(pool, actor_id, &self.id, req.budget_id).await?;
+		Self::find_by_id(pool, &self.id).await?.ok_or(sqlx::Error::RowNotFound)
 	}
 
 	pub async fn delete(&self, pool: &PgPool) -> Result<bool, sqlx::Error> {

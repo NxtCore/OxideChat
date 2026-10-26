@@ -238,7 +238,7 @@ pub async fn update_team_budget(
 		}
 	};
 
-	match team.update_budget(&state.db, &req).await {
+	match team.update_budget(&state.db, &user.id, &req).await {
 		Ok(updated) => match updated.detailed_response(&state.db).await {
 			Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),
 			Err(e) => {

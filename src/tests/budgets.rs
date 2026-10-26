@@ -539,3 +539,86 @@ mod keys {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod team_budget_audit {
+	use super::support::*;
+	use crate::tests::gateway::support::create_user;
+	use crate::types::*;
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	async fn team_events(pool: &PgPool, team_id: Uuid) -> TestResult<Vec<(String, Option<Uuid>, serde_json::Value)>> {
+		Ok(sqlx::query_as("SELECT event, actor_id, metadata FROM audit_logs WHERE target_id = $1 ORDER BY created_at, id")
+			.bind(team_id)
+			.fetch_all(pool)
+			.await?)
+	}
+
+	async fn admin_and_team(pool: &PgPool) -> TestResult<(Uuid, Team)> {
+		let admin = create_user(pool).await?;
+		let team_id = create_team(pool, admin, "Audited Team", false).await?;
+		let team = Team::find_by_id(pool, &team_id).await?.ok_or("team")?;
+		Ok((admin, team))
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn team_budget_change_writes_audit_row(pool: PgPool) -> TestResult {
+		let (admin, team) = admin_and_team(&pool).await?;
+		let budget = create_budget(&pool, "10", "block").await?;
+		let updated = team.update_budget(&pool, &admin, &UpdateTeamBudgetRequest { budget_id: Some(budget) }).await?;
+		assert_eq!(updated.budget_id, Some(budget));
+		let events = team_events(&pool, team.id).await?;
+		assert_eq!(events.len(), 1);
+		assert_eq!(events[0].0, "team_budget_updated");
+		assert_eq!(events[0].1, Some(admin));
+		assert_eq!(events[0].2["after"]["budget_ids"], serde_json::json!([budget]));
+		team.update_budget(&pool, &admin, &UpdateTeamBudgetRequest { budget_id: None }).await?;
+		let events = team_events(&pool, team.id).await?;
+		assert_eq!(events.len(), 2);
+		assert_eq!(events[1].2["before"]["budget_ids"], serde_json::json!([budget]));
+		assert_eq!(events[1].2["after"]["budget_ids"], serde_json::json!([]));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn unknown_budget_changes_nothing(pool: PgPool) -> TestResult {
+		let (admin, team) = admin_and_team(&pool).await?;
+		let budget = create_budget(&pool, "10", "block").await?;
+		team.update_budget(&pool, &admin, &UpdateTeamBudgetRequest { budget_id: Some(budget) }).await?;
+		let result = team.update_budget(&pool, &admin, &UpdateTeamBudgetRequest { budget_id: Some(Uuid::new_v4()) }).await;
+		assert!(result.is_err());
+		let stored: Option<Uuid> = sqlx::query_scalar("SELECT budget_id FROM teams WHERE id = $1").bind(team.id).fetch_one(&pool).await?;
+		assert_eq!(stored, Some(budget));
+		assert_eq!(Budget::list_assignments(&pool, &budget).await?.len(), 1);
+		assert_eq!(team_events(&pool, team.id).await?.len(), 1);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn failed_audit_write_rolls_back_the_change(pool: PgPool) -> TestResult {
+		let (admin, team) = admin_and_team(&pool).await?;
+		sqlx::query("ALTER TABLE audit_logs ADD CONSTRAINT audit_always_fails CHECK (event <> 'team_budget_updated')").execute(&pool).await?;
+		let budget = create_budget(&pool, "10", "block").await?;
+		let result = team.update_budget(&pool, &admin, &UpdateTeamBudgetRequest { budget_id: Some(budget) }).await;
+		assert!(result.is_err());
+		let stored: Option<Uuid> = sqlx::query_scalar("SELECT budget_id FROM teams WHERE id = $1").bind(team.id).fetch_one(&pool).await?;
+		assert_eq!(stored, None);
+		assert!(Budget::list_assignments(&pool, &budget).await?.is_empty());
+		assert!(team_events(&pool, team.id).await?.is_empty());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn assigning_a_budget_to_a_team_is_audited(pool: PgPool) -> TestResult {
+		let (admin, team) = admin_and_team(&pool).await?;
+		let budget_id = create_budget(&pool, "10", "block").await?;
+		let budget = Budget::find_by_id(&pool, &budget_id).await?.ok_or("budget")?;
+		let request = BudgetAssignmentRequest { team_id: Some(team.id), user_id: None };
+		budget.assign(&pool, &admin, &request).await?;
+		let events = team_events(&pool, team.id).await?;
+		assert_eq!(events.len(), 1);
+		assert_eq!(events[0].0, "team_budget_updated");
+		Ok(())
+	}
+}

@@ -1,6 +1,6 @@
 use super::{
 	DEFAULT_BUDGET_THRESHOLD_PERCENT, DEFAULT_EVENT_WINDOW_DAYS, EVENT_KEY_ADMIN_DISABLED, EVENT_KEY_ADMIN_ENABLED, EVENT_KEY_ADMIN_REVOKED, EVENT_TEAM_ACCESS_UPDATED,
-	EVENT_TEAM_LIMITS_UPDATED, EVENT_TEAM_MODELS_UPDATED, GatewayAdminError, GatewayAuditEntryResponse, GatewayAuditQuery, GatewayEventQuery, GatewayEventResponse,
+	EVENT_TEAM_BUDGET_UPDATED, EVENT_TEAM_LIMITS_UPDATED, EVENT_TEAM_MODELS_UPDATED, GatewayAdminError, GatewayAuditEntryResponse, GatewayAuditQuery, GatewayEventQuery, GatewayEventResponse,
 	MAX_EVENT_BUDGET_KEYS, MAX_EVENT_WINDOW_DAYS, redact_metadata,
 };
 use crate::types::axum::PaginatedResponse;
@@ -29,7 +29,7 @@ const AUDIT_CATEGORIES: [(&str, &[&str]); 5] = [
 		],
 	),
 	("limit", &["gateway_api_key_limits_updated", EVENT_TEAM_LIMITS_UPDATED]),
-	("budget", &["gateway_api_key_budget_updated", "gateway_api_key_budget_cleared"]),
+	("budget", &["gateway_api_key_budget_updated", "gateway_api_key_budget_cleared", EVENT_TEAM_BUDGET_UPDATED]),
 	("model_policy", &[EVENT_TEAM_MODELS_UPDATED]),
 	("access", &[EVENT_TEAM_ACCESS_UPDATED]),
 ];
