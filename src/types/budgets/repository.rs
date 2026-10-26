@@ -342,13 +342,32 @@ impl Budget {
 		Ok(())
 	}
 
-	pub async fn delete_assignment(pool: &PgPool, budget_id: &Uuid, assignment_id: &Uuid) -> Result<(), sqlx::Error> {
+	/// Deletes an assignment and audits it in the same transaction when it belonged to a team.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the assignment cannot be removed or audited; nothing is changed then.
+	pub async fn delete_assignment(pool: &PgPool, actor_id: &Uuid, budget_id: &Uuid, assignment_id: &Uuid) -> Result<(), sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let team_id: Option<Uuid> = sqlx::query_scalar("SELECT team_id FROM budget_assignments WHERE id = $1 AND budget_id = $2")
+			.bind(assignment_id)
+			.bind(budget_id)
+			.fetch_optional(&mut *tx)
+			.await?
+			.flatten();
+		let before = match team_id {
+			Some(team_id) => Self::team_budget_ids(&mut tx, &team_id).await?,
+			None => Vec::new(),
+		};
 		sqlx::query("DELETE FROM budget_assignments WHERE id = $1 AND budget_id = $2")
 			.bind(assignment_id)
 			.bind(budget_id)
-			.execute(pool)
+			.execute(&mut *tx)
 			.await?;
-		Ok(())
+		if let Some(team_id) = team_id {
+			Self::audit_team_budget(&mut tx, actor_id, &team_id, &before).await?;
+		}
+		tx.commit().await
 	}
 
 	pub async fn list_assignments(pool: &PgPool, budget_id: &Uuid) -> Result<Vec<BudgetAssignmentInfo>, sqlx::Error> {
@@ -1110,11 +1129,14 @@ impl Budget {
 	pub async fn replace_team_budget_from_legacy(pool: &PgPool, actor_id: &Uuid, team_id: &Uuid, budget_id: Option<Uuid>) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
 		let before = Self::team_budget_ids(&mut tx, team_id).await?;
-		sqlx::query("UPDATE teams SET budget_id = $2, updated_at = NOW() WHERE id = $1")
+		let updated = sqlx::query("UPDATE teams SET budget_id = $2, updated_at = NOW() WHERE id = $1")
 			.bind(team_id)
 			.bind(budget_id)
 			.execute(&mut *tx)
 			.await?;
+		if updated.rows_affected() == 0 {
+			return Err(sqlx::Error::RowNotFound);
+		}
 		match budget_id {
 			None => {
 				sqlx::query("DELETE FROM budget_assignments WHERE team_id = $1").bind(team_id).execute(&mut *tx).await?;

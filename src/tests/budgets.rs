@@ -621,4 +621,40 @@ mod team_budget_audit {
 		assert_eq!(events[0].0, "team_budget_updated");
 		Ok(())
 	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn deleting_a_team_assignment_is_audited(pool: PgPool) -> TestResult {
+		let (admin, team) = admin_and_team(&pool).await?;
+		let budget = create_budget(&pool, "10", "block").await?;
+		let assignment = assign(&pool, budget, None, Some(team.id), None).await?;
+		Budget::delete_assignment(&pool, &admin, &budget, &assignment).await?;
+		assert!(Budget::list_assignments(&pool, &budget).await?.is_empty());
+		let events = team_events(&pool, team.id).await?;
+		assert_eq!(events.len(), 1);
+		assert_eq!(events[0].1, Some(admin));
+		assert_eq!(events[0].2["before"]["budget_ids"], serde_json::json!([budget]));
+		assert_eq!(events[0].2["after"]["budget_ids"], serde_json::json!([]));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn failed_audit_keeps_the_team_assignment(pool: PgPool) -> TestResult {
+		let (admin, team) = admin_and_team(&pool).await?;
+		let budget = create_budget(&pool, "10", "block").await?;
+		let assignment = assign(&pool, budget, None, Some(team.id), None).await?;
+		sqlx::query("ALTER TABLE audit_logs ADD CONSTRAINT audit_always_fails CHECK (event <> 'team_budget_updated')").execute(&pool).await?;
+		assert!(Budget::delete_assignment(&pool, &admin, &budget, &assignment).await.is_err());
+		assert_eq!(Budget::list_assignments(&pool, &budget).await?.len(), 1);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn missing_team_gets_no_audit_row(pool: PgPool) -> TestResult {
+		let (admin, _) = admin_and_team(&pool).await?;
+		let missing = Uuid::new_v4();
+		let result = Budget::replace_team_budget_from_legacy(&pool, &admin, &missing, None).await;
+		assert!(matches!(result, Err(sqlx::Error::RowNotFound)));
+		assert!(team_events(&pool, missing).await?.is_empty());
+		Ok(())
+	}
 }

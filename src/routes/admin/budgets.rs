@@ -157,7 +157,7 @@ pub async fn delete_assignment(State(state): State<Arc<JobState>>, Extension(Req
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
-	match Budget::delete_assignment(&state.db, &budget_id, &assignment_id).await {
+	match Budget::delete_assignment(&state.db, &user.id, &budget_id, &assignment_id).await {
 		Ok(()) => (StatusCode::NO_CONTENT, "").into_response(),
 		Err(e) => {
 			eprintln!("[BUDGETS] Failed to delete assignment: {e}");
