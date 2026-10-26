@@ -68,10 +68,12 @@
 							<ShadSwitch
 								:model-value="apiKey.is_enabled && !apiKey.admin_disabled"
 								:disabled="apiKey.admin_disabled"
-								:aria-label="store.getTranslation('developer.keys.enabled')"
+								:aria-label="store.getTranslation(apiKey.admin_disabled ? 'developer.keys.admin_disabled' : 'developer.keys.enabled')"
 								@update:model-value="toggleEnabled(apiKey, $event === true)"
 							/>
-							<span class="text-xs text-muted-foreground">{{ store.getTranslation('developer.keys.enabled') }}</span>
+							<span :class="apiKey.admin_disabled ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'">
+								{{ store.getTranslation(apiKey.admin_disabled ? 'developer.keys.admin_disabled' : 'developer.keys.enabled') }}
+							</span>
 						</div>
 						<ShadButton variant="outline" size="sm" @click="renameTarget = apiKey; renameValue = apiKey.name">
 							<Pencil class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rename') }}
@@ -82,7 +84,7 @@
 						<ShadButton variant="outline" size="sm" @click="budgetTarget = apiKey">
 							<Wallet class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.budget') }}
 						</ShadButton>
-						<ShadButton variant="outline" size="sm" @click="rotateTarget = apiKey">
+						<ShadButton v-if="!apiKey.admin_disabled" variant="outline" size="sm" @click="rotateTarget = apiKey">
 							<RefreshCw class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rotate') }}
 						</ShadButton>
 						<ShadButton variant="outline" size="sm" class="text-destructive hover:text-destructive" @click="revokeTarget = apiKey">

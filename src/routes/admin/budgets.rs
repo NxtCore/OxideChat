@@ -125,7 +125,7 @@ pub async fn assign_budget(State(state): State<Arc<JobState>>, Extension(Request
 			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 		}
 	};
-	match budget.assign(&state.db, &req).await {
+	match budget.assign(&state.db, &user.id, &req).await {
 		Ok(()) => ResponseBuilder::<()>::new(ResponseBody::Empty).build(),
 		Err(e) => {
 			eprintln!("[BUDGETS] Failed to assign budget: {e}");
@@ -157,7 +157,7 @@ pub async fn delete_assignment(State(state): State<Arc<JobState>>, Extension(Req
 	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
 		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
 	}
-	match Budget::delete_assignment(&state.db, &budget_id, &assignment_id).await {
+	match Budget::delete_assignment(&state.db, &user.id, &budget_id, &assignment_id).await {
 		Ok(()) => (StatusCode::NO_CONTENT, "").into_response(),
 		Err(e) => {
 			eprintln!("[BUDGETS] Failed to delete assignment: {e}");
