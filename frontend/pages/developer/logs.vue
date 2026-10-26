@@ -18,7 +18,7 @@
 		</div>
 
 		<div class="space-y-3 rounded-lg border border-border bg-card p-4">
-			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
 				<div class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.logs.team') }}</ShadLabel>
 					<ShadSelect v-model="teamFilter" @update:model-value="reload">
@@ -69,6 +69,14 @@
 							</ShadSelectItem>
 						</ShadSelectContent>
 					</ShadSelect>
+				</div>
+				<div class="space-y-1.5">
+					<ShadLabel>{{ store.getTranslation('developer.logs.model') }}</ShadLabel>
+					<ShadInput v-model="modelFilter" :placeholder="store.getTranslation('developer.logs.model_placeholder')" @change="reload" />
+				</div>
+				<div class="space-y-1.5">
+					<ShadLabel>{{ store.getTranslation('developer.logs.provider') }}</ShadLabel>
+					<ShadInput v-model="providerFilter" :placeholder="store.getTranslation('developer.logs.provider_placeholder')" @change="reload" />
 				</div>
 				<div class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.logs.from') }}</ShadLabel>
@@ -201,6 +209,8 @@ const teamFilter = ref('all');
 const keyFilter = ref('all');
 const statusFilter = ref('all');
 const categoryFilter = ref('all');
+const modelFilter = ref('');
+const providerFilter = ref('');
 const fromFilter = ref('');
 const toFilter = ref('');
 const logs = ref<DeveloperRequestLog[]>([]);
@@ -218,6 +228,8 @@ function filters(): RequestLogFilters {
 		api_key_id: keyFilter.value === 'all' ? null : keyFilter.value,
 		status: statusFilter.value === 'all' ? null : (statusFilter.value as RequestLogStatus),
 		error_category: categoryFilter.value === 'all' ? null : (categoryFilter.value as RequestLogErrorCategory),
+		model: modelFilter.value.trim() || null,
+		provider: providerFilter.value.trim() || null,
 		from: fromFilter.value || null,
 		to: toFilter.value || null,
 	};
