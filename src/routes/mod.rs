@@ -82,6 +82,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.route("/api/v1/admin/teams/{id}", patch(admin::teams::update_team))
 		.route("/api/v1/admin/teams/{id}", delete(admin::teams::delete_team))
 		.route("/api/v1/admin/teams/{id}/members", put(admin::teams::set_team_members))
+		.route("/api/v1/admin/teams/{id}/members/{user_id}/role", put(admin::teams::set_team_member_role))
 		.route("/api/v1/admin/teams/{id}/models", put(admin::teams::set_team_models))
 		.route("/api/v1/admin/teams/{id}/budget", patch(admin::teams::update_team_budget))
 		// Admin Budgets
@@ -189,6 +190,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.route("/api/v1/mcp-servers/{id}/sync-tools", post(public::mcp::sync_tools_from_client))
 		// Developer Gateway Keys
 		.route("/api/v1/developer/teams", get(public::developer::list_teams))
+		.route("/api/v1/developer/team-keys", get(public::developer::list_team_keys))
 		.route("/api/v1/developer/keys", get(public::developer::list_keys).post(public::developer::create_key))
 		.route("/api/v1/developer/keys/{id}", patch(public::developer::update_key))
 		.route("/api/v1/developer/keys/{id}/revoke", post(public::developer::revoke_key))

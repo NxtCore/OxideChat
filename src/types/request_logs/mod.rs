@@ -126,7 +126,7 @@ impl RequestLogErrorCategory {
 #[derive(Clone, Copy, Debug)]
 /// The account a logged request belongs to.
 pub struct RequestLogOwner {
-	pub user_id: Uuid,
+	pub user_id: Option<Uuid>,
 	pub team_id: Uuid,
 	pub api_key_id: Uuid,
 }
@@ -154,7 +154,7 @@ pub struct RequestLogFailure {
 /// One logged gateway request, without prompt or response content.
 pub struct RequestLog {
 	pub id: Uuid,
-	pub user_id: Uuid,
+	pub user_id: Option<Uuid>,
 	pub team_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
 	pub model_id: Option<Uuid>,
@@ -175,7 +175,7 @@ pub struct RequestLog {
 }
 
 pub struct RequestLogRecord<'a> {
-	pub user_id: Uuid,
+	pub user_id: Option<Uuid>,
 	pub team_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
 	pub model_id: Option<Uuid>,
@@ -246,7 +246,7 @@ impl RequestLogQuery {
 /// A request log as shown to its owner; never includes request content.
 pub struct RequestLogResponse {
 	pub id: Uuid,
-	pub user_id: Uuid,
+	pub user_id: Option<Uuid>,
 	pub team_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
 	pub model_id: Option<Uuid>,

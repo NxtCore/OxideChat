@@ -59,7 +59,7 @@ mod logs {
 
 	fn success_record(user_id: Uuid, team_id: Option<Uuid>, api_key_id: Option<Uuid>, model: &str) -> RequestLogRecord<'_> {
 		RequestLogRecord {
-			user_id,
+			user_id: Some(user_id),
 			team_id,
 			api_key_id,
 			model_id: None,
@@ -259,7 +259,7 @@ mod categories {
 		let user_id = create_user(&pool).await?;
 		let team_id = create_team(&pool, user_id).await?;
 		let api_key_id = create_key(&pool, user_id, team_id).await?;
-		let owner = RequestLogOwner { user_id, team_id, api_key_id };
+		let owner = RequestLogOwner { user_id: Some(user_id), team_id, api_key_id };
 		let context = RequestLogContext::start();
 		let row = RequestLog::record_failure(
 			&pool,
@@ -295,10 +295,10 @@ mod categories {
 		let user_id = create_user(&pool).await?;
 		let team_id = create_team(&pool, user_id).await?;
 		let api_key_id = create_key(&pool, user_id, team_id).await?;
-		let owner = RequestLogOwner { user_id, team_id, api_key_id };
+		let owner = RequestLogOwner { user_id: Some(user_id), team_id, api_key_id };
 		let context = RequestLogContext::start();
 		let first = RequestLogRecord {
-			user_id,
+			user_id: Some(user_id),
 			team_id: Some(team_id),
 			api_key_id: Some(api_key_id),
 			model_id: None,
@@ -341,7 +341,7 @@ mod categories {
 		let user_id = create_user(&pool).await?;
 		let team_id = create_team(&pool, user_id).await?;
 		let api_key_id = create_key(&pool, user_id, team_id).await?;
-		let mut owner = RequestLogOwner { user_id, team_id, api_key_id };
+		let mut owner = RequestLogOwner { user_id: Some(user_id), team_id, api_key_id };
 		for _ in 0..2 {
 			let record = RequestLogRecord {
 				user_id: owner.user_id,
@@ -366,7 +366,7 @@ mod categories {
 		}
 		let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gateway_request_logs").fetch_one(&pool).await?;
 		assert_eq!(count, 2);
-		owner.user_id = Uuid::new_v4();
+		owner.user_id = Some(Uuid::new_v4());
 		let failure = RequestLogFailure {
 			category: RequestLogErrorCategory::Auth,
 			status_code: Some(401),
@@ -522,7 +522,7 @@ mod finalization {
 		let trace = crate::types::RequestLogTrace {
 			context,
 			owner: crate::types::RequestLogOwner {
-				user_id: setup.user_id,
+				user_id: Some(setup.user_id),
 				team_id: setup.team_id,
 				api_key_id: setup.key_id,
 			},

@@ -8,7 +8,7 @@ mod repository;
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct UsageEvent {
 	pub id: Uuid,
-	pub user_id: Uuid,
+	pub user_id: Option<Uuid>,
 	pub team_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
 	pub model_id: Option<Uuid>,
@@ -22,7 +22,7 @@ pub struct UsageEvent {
 }
 
 pub struct UsageEventRecord<'a> {
-	pub user_id: &'a Uuid,
+	pub user_id: Option<&'a Uuid>,
 	pub team_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
 	pub model_id: &'a Uuid,

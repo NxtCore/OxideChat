@@ -37,6 +37,8 @@ pub const EVENT_TEAM_ACCESS_UPDATED: &str = "gateway_team_access_updated";
 pub const EVENT_TEAM_MODELS_UPDATED: &str = "team_models_updated";
 /// Audit event written when a team's budget assignment changes.
 pub const EVENT_TEAM_BUDGET_UPDATED: &str = "team_budget_updated";
+/// Audit event written when a team member's role changes.
+pub const EVENT_TEAM_MEMBER_ROLE_UPDATED: &str = "team_member_role_updated";
 
 const SENSITIVE_KEY_PARTS: [&str; 9] = ["secret", "password", "hash", "authorization", "credential", "prompt", "content", "bearer", "cookie"];
 
@@ -146,8 +148,9 @@ pub struct GatewayAdminKeyResponse {
 	pub name: String,
 	pub team_id: Uuid,
 	pub team_name: String,
-	pub user_id: Uuid,
-	pub owner_username: String,
+	pub user_id: Option<Uuid>,
+	pub owner_username: Option<String>,
+	pub service_account: bool,
 	pub key_prefix: String,
 	pub last_four: String,
 	pub scopes: Json<Vec<String>>,

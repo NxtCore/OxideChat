@@ -622,7 +622,7 @@ mod authentication {
 		let (key_id, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read", "inference:write"])).await?;
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
 		assert_eq!(context.key_id, key_id);
-		assert_eq!(context.user_id, user_id);
+		assert_eq!(context.user_id, Some(user_id));
 		assert!(context.allows("inference:write"));
 		let last_used: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar("SELECT last_used_at FROM gateway_api_keys WHERE id = $1")
 			.bind(key_id)
@@ -660,11 +660,13 @@ mod authentication {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn key_without_user_is_rejected(pool: PgPool) -> TestResult {
+	async fn key_without_user_authenticates_as_a_service_account(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
 		let team_id = create_team(&pool, user_id, "Service Team", false).await?;
 		let (_, token) = insert_key(&pool, None, team_id, json!(["inference:read"])).await?;
-		assert!(matches!(GatewayCredential::authenticate(&pool, &token).await, Err(GatewayAuthError::Invalid)));
+		let context = GatewayCredential::authenticate(&pool, &token).await?;
+		assert_eq!(context.user_id, None);
+		assert_eq!(context.team_id, team_id);
 		Ok(())
 	}
 

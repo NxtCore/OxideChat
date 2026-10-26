@@ -403,12 +403,14 @@ impl Budget {
 			          WHERE tm.team_id = ba.team_id AND tm.user_id = $1
 			      ))
 			      OR ($2::uuid IS NOT NULL AND ba.api_key_id = $2)
+			      OR ($3::uuid IS NOT NULL AND ba.team_id = $3 AND b.kind = 'pooled')
 			  )
 			ORDER BY b.name ASC
 			"#,
 		)
 		.bind(subject.user_id)
 		.bind(subject.api_key_id)
+		.bind(subject.service_team_id)
 		.fetch_all(pool)
 		.await?;
 		Ok(rows.into_iter().map(Self::budget_from_row).collect())
@@ -583,6 +585,7 @@ impl Budget {
 			  ON ue.created_at >= budget_windows.window_start
 			 AND (
 			     (budget_windows.api_key_id IS NOT NULL AND ue.api_key_id IN (SELECT ka.api_key_id FROM budget_assignments ka WHERE ka.budget_id = budget_windows.budget_id))
+			     OR (budget_windows.api_key_id IS NULL AND budget_windows.is_pooled_team AND ue.user_id IS NULL AND ue.team_id = budget_windows.team_id)
 			     OR (budget_windows.api_key_id IS NULL AND budget_windows.is_pooled_team AND EXISTS (
 			         SELECT 1 FROM team_members tm
 			         WHERE tm.team_id = budget_windows.team_id AND tm.user_id = ue.user_id
@@ -1054,9 +1057,12 @@ impl Budget {
 			SELECT COALESCE(SUM(ue.cost_total), 0)::numeric
 			FROM usage_events ue
 			WHERE ue.created_at >= $1
-			  AND EXISTS (
-			      SELECT 1 FROM team_members tm
-			      WHERE tm.team_id = $2 AND tm.user_id = ue.user_id
+			  AND (
+			      (ue.user_id IS NULL AND ue.team_id = $2)
+			      OR EXISTS (
+			          SELECT 1 FROM team_members tm
+			          WHERE tm.team_id = $2 AND tm.user_id = ue.user_id
+			      )
 			  )
 			"#,
 		)

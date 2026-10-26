@@ -17,7 +17,7 @@ macro_rules! select_keys {
 	() => {
 		r#"
 	SELECT * FROM (
-		SELECT k.id, k.name, k.team_id, t.name AS team_name, k.user_id, u.username AS owner_username,
+		SELECT k.id, k.name, k.team_id, t.name AS team_name, k.user_id, u.username AS owner_username, (k.user_id IS NULL) AS service_account,
 		       k.key_prefix, k.last_four, k.scopes,
 		       CASE
 		           WHEN k.revoked_at IS NOT NULL THEN 'revoked'
@@ -28,7 +28,7 @@ macro_rules! select_keys {
 		       k.is_enabled, (k.admin_disabled_at IS NOT NULL) AS admin_disabled, k.expires_at, k.revoked_at, k.last_used_at, k.max_concurrent_requests, k.created_at
 		FROM gateway_api_keys k
 		JOIN teams t ON t.id = k.team_id
-		JOIN users u ON u.id = k.user_id
+		LEFT JOIN users u ON u.id = k.user_id
 	) keys
 "#
 	};
@@ -57,7 +57,7 @@ struct LockedKey {
 	admin_disabled: bool,
 	revoked_at: Option<chrono::DateTime<chrono::Utc>>,
 	key_prefix: String,
-	user_id: Uuid,
+	user_id: Option<Uuid>,
 	team_id: Uuid,
 }
 
@@ -204,7 +204,7 @@ impl GatewayAdminKeyDetailResponse {
 		.into_iter()
 		.map(GatewayKeyRuleResponse::from)
 		.collect();
-		let budgets = Budget::evaluate(pool, BudgetSubject::user_key(key.user_id, key.id)).await?;
+		let budgets = Budget::evaluate(pool, key.user_id.map_or_else(|| BudgetSubject::service_key(key.team_id, key.id), |user_id| BudgetSubject::user_key(user_id, key.id))).await?;
 		let usage = RequestLog::summary(
 			pool,
 			RequestLogFilter {
