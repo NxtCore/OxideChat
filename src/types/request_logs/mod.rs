@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 mod repository;
@@ -92,6 +93,7 @@ pub enum RequestLogErrorCategory {
 	RateLimit,
 	Auth,
 	ModelAccess,
+	Internal,
 }
 
 impl RequestLogErrorCategory {
@@ -105,6 +107,7 @@ impl RequestLogErrorCategory {
 			Self::RateLimit => "rate_limit",
 			Self::Auth => "auth",
 			Self::ModelAccess => "model_access",
+			Self::Internal => "internal",
 		}
 	}
 
@@ -118,6 +121,7 @@ impl RequestLogErrorCategory {
 			"rate_limit" => Some(Self::RateLimit),
 			"auth" => Some(Self::Auth),
 			"model_access" => Some(Self::ModelAccess),
+			"internal" => Some(Self::Internal),
 			_ => None,
 		}
 	}
@@ -141,6 +145,19 @@ pub struct RequestLogTrace<'a> {
 	pub model_id: Option<Uuid>,
 	pub provider: Option<&'a str>,
 	pub streaming: bool,
+}
+
+#[derive(Debug)]
+/// Owned description of a response, used to log it when the client drops it before it ends.
+pub struct RequestLogAbort {
+	pool: PgPool,
+	context: RequestLogContext,
+	owner: RequestLogOwner,
+	request_type: String,
+	public_model_id: String,
+	model_id: Option<Uuid>,
+	provider: Option<String>,
+	streaming: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -194,15 +211,25 @@ pub struct RequestLogRecord<'a> {
 	pub latency_ms: Option<i32>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct RequestLogFilter {
 	pub user_id: Option<Uuid>,
 	pub team_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
 	pub status: Option<RequestLogStatus>,
 	pub error_category: Option<RequestLogErrorCategory>,
+	pub model: Option<String>,
+	pub provider: Option<String>,
 	pub from: Option<DateTime<Utc>>,
 	pub to: Option<DateTime<Utc>>,
+}
+
+impl RequestLogFilter {
+	#[must_use]
+	/// Trims a requested text filter and drops it when nothing is left.
+	pub fn text(value: Option<&str>) -> Option<String> {
+		value.map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned)
+	}
 }
 
 // Request Types
@@ -213,6 +240,8 @@ pub struct RequestLogQuery {
 	pub api_key_id: Option<Uuid>,
 	pub status: Option<String>,
 	pub error_category: Option<String>,
+	pub model: Option<String>,
+	pub provider: Option<String>,
 	pub from: Option<DateTime<Utc>>,
 	pub to: Option<DateTime<Utc>>,
 	pub page: Option<i64>,
@@ -234,6 +263,8 @@ impl RequestLogQuery {
 			api_key_id: self.api_key_id,
 			status: self.status.as_deref().and_then(RequestLogStatus::from_stored),
 			error_category: self.error_category.as_deref().and_then(RequestLogErrorCategory::from_stored),
+			model: RequestLogFilter::text(self.model.as_deref()),
+			provider: RequestLogFilter::text(self.provider.as_deref()),
 			from: self.from,
 			to: self.to,
 		}

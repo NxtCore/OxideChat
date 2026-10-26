@@ -16,7 +16,7 @@ pub use keys::*;
 pub use limiter::*;
 pub use policy::*;
 
-use crate::types::{BudgetAdmission, BudgetError, BudgetSubject, RequestLogContext, RequestLogOwner, RequestLogTrace};
+use crate::types::{BudgetAdmission, BudgetError, BudgetSubject, RequestLogAbort, RequestLogContext, RequestLogOwner, RequestLogTrace};
 use axum::body::Body;
 use axum::http::HeaderValue;
 use axum::response::Response;
@@ -170,17 +170,19 @@ impl GatewayInference {
 
 	#[must_use]
 	/// Adds the budget warning header and ties the budget reservation to the response body.
-	pub fn finish(self, mut response: Response) -> Response {
+	///
+	/// A successful response dropped before its body ends is logged as interrupted.
+	pub fn finish(self, mut response: Response, scope: &GatewayRequestScope<'_>) -> Response {
 		if self.budget.warn {
 			response.headers_mut().insert(BUDGET_WARNING_HEADER, HeaderValue::from_static("exceeded"));
 		}
-		match self.budget.reservation {
-			Some(reservation) => {
-				let (parts, body) = response.into_parts();
-				Response::from_parts(parts, Body::new(ReservedBody::new(body, reservation)))
-			}
-			None => response,
+		let abort_log = response.status().is_success().then(|| RequestLogAbort::new(scope.db, &scope.inference_trace(&self)));
+		let (parts, body) = response.into_parts();
+		let mut body = ReservedBody::new(body, self.budget.reservation);
+		if let Some(abort_log) = abort_log {
+			body = body.with_abort_log(abort_log);
 		}
+		Response::from_parts(parts, Body::new(body))
 	}
 }
 

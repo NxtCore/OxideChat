@@ -1,5 +1,5 @@
 use super::{
-	DEFAULT_REQUEST_LOG_RETENTION_DAYS, REQUEST_LOG_EXPORT_LIMIT, RequestLog, RequestLogErrorCategory, RequestLogFailure, RequestLogFilter, RequestLogRecord, RequestLogResponse, RequestLogStatus,
+	DEFAULT_REQUEST_LOG_RETENTION_DAYS, REQUEST_LOG_EXPORT_LIMIT, RequestLog, RequestLogAbort, RequestLogErrorCategory, RequestLogFailure, RequestLogFilter, RequestLogRecord, RequestLogResponse, RequestLogStatus,
 	RequestLogSummary, RequestLogTrace,
 };
 use crate::types::{BaseType, axum::PaginatedResponse};
@@ -29,8 +29,16 @@ impl RequestLog {
 			)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 			ON CONFLICT (request_id) WHERE request_id IS NOT NULL DO UPDATE SET
+				status = CASE
+					WHEN gateway_request_logs.error_category = 'interrupted' AND EXCLUDED.status = 'success' THEN 'success'
+					ELSE gateway_request_logs.status
+				END,
 				status_code = COALESCE(gateway_request_logs.status_code, EXCLUDED.status_code),
-				error_category = COALESCE(gateway_request_logs.error_category, EXCLUDED.error_category),
+				error_category = CASE
+					WHEN gateway_request_logs.status = 'success' THEN NULL
+					WHEN gateway_request_logs.error_category = 'interrupted' AND EXCLUDED.status = 'success' THEN NULL
+					ELSE COALESCE(gateway_request_logs.error_category, EXCLUDED.error_category)
+				END,
 				provider = COALESCE(gateway_request_logs.provider, EXCLUDED.provider),
 				input_tokens = GREATEST(gateway_request_logs.input_tokens, EXCLUDED.input_tokens),
 				output_tokens = GREATEST(gateway_request_logs.output_tokens, EXCLUDED.output_tokens),
@@ -101,14 +109,7 @@ impl RequestLog {
 	/// Returns an error when the rows cannot be read.
 	pub async fn list(pool: &PgPool, filter: RequestLogFilter, page: i64, size: i64) -> Result<PaginatedResponse<RequestLogResponse>, sqlx::Error> {
 		let pagination = Self::pagination(page, size);
-		let rows = sqlx::query_as::<_, Self>(Self::SELECT)
-			.bind(filter.user_id)
-			.bind(filter.team_id)
-			.bind(filter.api_key_id)
-			.bind(filter.status.map(RequestLogStatus::as_str))
-			.bind(filter.error_category.map(RequestLogErrorCategory::as_str))
-			.bind(filter.from)
-			.bind(filter.to)
+		let rows = Self::bind_filter(sqlx::query_as::<_, Self>(Self::SELECT), &filter)
 			.bind(pagination.limit)
 			.bind(pagination.offset)
 			.fetch_all(pool)
@@ -124,14 +125,7 @@ impl RequestLog {
 	///
 	/// Returns an error when the rows cannot be read.
 	pub async fn list_for_export(pool: &PgPool, filter: RequestLogFilter) -> Result<Vec<RequestLogResponse>, sqlx::Error> {
-		let rows = sqlx::query_as::<_, Self>(Self::SELECT)
-			.bind(filter.user_id)
-			.bind(filter.team_id)
-			.bind(filter.api_key_id)
-			.bind(filter.status.map(RequestLogStatus::as_str))
-			.bind(filter.error_category.map(RequestLogErrorCategory::as_str))
-			.bind(filter.from)
-			.bind(filter.to)
+		let rows = Self::bind_filter(sqlx::query_as::<_, Self>(Self::SELECT), &filter)
 			.bind(REQUEST_LOG_EXPORT_LIMIT)
 			.bind(0_i64)
 			.fetch_all(pool)
@@ -145,7 +139,8 @@ impl RequestLog {
 	///
 	/// Returns an error when the rows cannot be read.
 	pub async fn summary(pool: &PgPool, filter: RequestLogFilter) -> Result<RequestLogSummary, sqlx::Error> {
-		sqlx::query_as::<_, RequestLogSummary>(
+		Self::bind_filter(
+			sqlx::query_as::<_, RequestLogSummary>(
 			r#"
 			SELECT COUNT(*) AS total_requests,
 			       COUNT(*) FILTER (WHERE status = 'error') AS error_requests,
@@ -160,17 +155,14 @@ impl RequestLog {
 			  AND ($3::uuid IS NULL OR api_key_id = $3)
 			  AND ($4::text IS NULL OR status = $4)
 			  AND ($5::text IS NULL OR error_category = $5)
-			  AND ($6::timestamptz IS NULL OR created_at >= $6)
-			  AND ($7::timestamptz IS NULL OR created_at <= $7)
+			  AND ($6::text IS NULL OR POSITION(LOWER($6) IN LOWER(public_model_id)) > 0)
+			  AND ($7::text IS NULL OR LOWER(provider) = LOWER($7))
+			  AND ($8::timestamptz IS NULL OR created_at >= $8)
+			  AND ($9::timestamptz IS NULL OR created_at <= $9)
 			"#,
+			),
+			&filter,
 		)
-		.bind(filter.user_id)
-		.bind(filter.team_id)
-		.bind(filter.api_key_id)
-		.bind(filter.status.map(RequestLogStatus::as_str))
-		.bind(filter.error_category.map(RequestLogErrorCategory::as_str))
-		.bind(filter.from)
-		.bind(filter.to)
 		.fetch_one(pool)
 		.await
 	}
@@ -230,6 +222,50 @@ impl RequestLog {
 	}
 }
 
+impl RequestLogAbort {
+	#[must_use]
+	/// Captures what the log row of an interrupted response needs.
+	pub fn new(pool: &PgPool, trace: &RequestLogTrace<'_>) -> Self {
+		Self {
+			pool: pool.clone(),
+			context: trace.context,
+			owner: trace.owner,
+			request_type: trace.request_type.to_owned(),
+			public_model_id: trace.public_model_id.to_owned(),
+			model_id: trace.model_id,
+			provider: trace.provider.map(str::to_owned),
+			streaming: trace.streaming,
+		}
+	}
+
+	/// Stores the interrupted request in the background; does nothing outside a Tokio runtime.
+	///
+	/// A request that already reported usage keeps its row, because rows merge by request id.
+	pub fn record_in_background(self) {
+		let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+			return;
+		};
+		runtime.spawn(async move {
+			let trace = RequestLogTrace {
+				context: self.context,
+				owner: self.owner,
+				request_type: &self.request_type,
+				public_model_id: &self.public_model_id,
+				model_id: self.model_id,
+				provider: self.provider.as_deref(),
+				streaming: self.streaming,
+			};
+			let failure = RequestLogFailure {
+				category: RequestLogErrorCategory::Interrupted,
+				status_code: None,
+			};
+			if let Err(error) = RequestLog::record_failure(&self.pool, &trace, failure).await {
+				tracing::warn!(%error, "failed to record interrupted gateway request");
+			}
+		});
+	}
+}
+
 impl RequestLog {
 	const SELECT: &str = r#"
 		SELECT id, user_id, team_id, api_key_id, model_id, public_model_id, request_type, status, status_code,
@@ -241,9 +277,27 @@ impl RequestLog {
 		  AND ($3::uuid IS NULL OR api_key_id = $3)
 		  AND ($4::text IS NULL OR status = $4)
 		  AND ($5::text IS NULL OR error_category = $5)
-		  AND ($6::timestamptz IS NULL OR created_at >= $6)
-		  AND ($7::timestamptz IS NULL OR created_at <= $7)
+		  AND ($6::text IS NULL OR POSITION(LOWER($6) IN LOWER(public_model_id)) > 0)
+		  AND ($7::text IS NULL OR LOWER(provider) = LOWER($7))
+		  AND ($8::timestamptz IS NULL OR created_at >= $8)
+		  AND ($9::timestamptz IS NULL OR created_at <= $9)
 		ORDER BY created_at DESC
-		LIMIT $8 OFFSET $9
+		LIMIT $10 OFFSET $11
 		"#;
+
+	fn bind_filter<'q, O>(
+		query: sqlx::query::QueryAs<'q, sqlx::Postgres, O, sqlx::postgres::PgArguments>,
+		filter: &'q RequestLogFilter,
+	) -> sqlx::query::QueryAs<'q, sqlx::Postgres, O, sqlx::postgres::PgArguments> {
+		query
+			.bind(filter.user_id)
+			.bind(filter.team_id)
+			.bind(filter.api_key_id)
+			.bind(filter.status.map(RequestLogStatus::as_str))
+			.bind(filter.error_category.map(RequestLogErrorCategory::as_str))
+			.bind(filter.model.as_deref())
+			.bind(filter.provider.as_deref())
+			.bind(filter.from)
+			.bind(filter.to)
+	}
 }

@@ -20,6 +20,9 @@ pub async fn method_not_allowed() -> Response {
 }
 
 /// Lists enabled models accessible to the authenticated gateway API key.
+///
+/// This route is not logged: a model listing runs no inference, so it has no model, tokens or cost
+/// and would only fill the request log with non-inference rows.
 pub async fn list_models(State(state): State<Arc<JobState>>, Extension(context): Extension<GatewayAuthContext>) -> Response {
 	gateway_limits::run_limited(&state, &context, GatewayRoute::MODELS, Ok(0), |_| run_models(&state, &context)).await
 }

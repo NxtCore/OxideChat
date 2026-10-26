@@ -82,13 +82,58 @@ mod logs {
 	fn filter(user_id: Uuid) -> RequestLogFilter {
 		RequestLogFilter {
 			user_id: Some(user_id),
-			team_id: None,
-			api_key_id: None,
-			status: None,
-			error_category: None,
-			from: None,
-			to: None,
+			..RequestLogFilter::default()
 		}
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn model_and_provider_filters_apply_to_list_summary_and_export(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let mut first = success_record(user_id, None, None, "OpenAI/GPT-4o-mini");
+		first.provider = Some("openai");
+		RequestLog::record(&pool, first).await?;
+		let mut second = success_record(user_id, None, None, "anthropic/claude-3-5-sonnet");
+		second.provider = Some("anthropic");
+		RequestLog::record(&pool, second).await?;
+		RequestLog::record(&pool, success_record(user_id, None, None, "local/untagged")).await?;
+		let by_model = RequestLogFilter {
+			model: Some("gpt-4O".to_string()),
+			..filter(user_id)
+		};
+		let by_provider = RequestLogFilter {
+			provider: Some("ANTHROPIC".to_string()),
+			..filter(user_id)
+		};
+		let by_both = RequestLogFilter {
+			model: Some("claude".to_string()),
+			provider: Some("openai".to_string()),
+			..filter(user_id)
+		};
+		let by_partial_provider = RequestLogFilter {
+			provider: Some("anthro".to_string()),
+			..filter(user_id)
+		};
+		let listed = RequestLog::list(&pool, by_model.clone(), 1, 50).await?.items;
+		assert_eq!(listed.len(), 1);
+		assert_eq!(listed[0].public_model_id, "OpenAI/GPT-4o-mini");
+		assert_eq!(RequestLog::list(&pool, by_provider.clone(), 1, 50).await?.items.len(), 1);
+		assert!(RequestLog::list(&pool, by_both.clone(), 1, 50).await?.items.is_empty());
+		assert!(RequestLog::list(&pool, by_partial_provider, 1, 50).await?.items.is_empty());
+		assert_eq!(RequestLog::summary(&pool, by_model.clone()).await?.total_requests, 1);
+		assert_eq!(RequestLog::summary(&pool, by_both).await?.total_requests, 0);
+		assert_eq!(RequestLog::summary(&pool, filter(user_id)).await?.total_requests, 3);
+		let exported = RequestLog::list_for_export(&pool, by_provider).await?;
+		assert_eq!(exported.len(), 1);
+		assert_eq!(exported[0].provider.as_deref(), Some("anthropic"));
+		assert_eq!(RequestLog::list_for_export(&pool, by_model).await?.len(), 1);
+		Ok(())
+	}
+
+	#[test]
+	fn text_filters_are_trimmed_and_empty_ones_dropped() {
+		assert_eq!(RequestLogFilter::text(Some("  openai ")), Some("openai".to_string()));
+		assert_eq!(RequestLogFilter::text(Some("   ")), None);
+		assert_eq!(RequestLogFilter::text(None), None);
 	}
 
 	#[test]
@@ -215,13 +260,14 @@ mod categories {
 	use sqlx::PgPool;
 	use uuid::Uuid;
 
-	const ALL: [RequestLogErrorCategory; 6] = [
+	const ALL: [RequestLogErrorCategory; 7] = [
 		RequestLogErrorCategory::Upstream,
 		RequestLogErrorCategory::Interrupted,
 		RequestLogErrorCategory::Budget,
 		RequestLogErrorCategory::RateLimit,
 		RequestLogErrorCategory::Auth,
 		RequestLogErrorCategory::ModelAccess,
+		RequestLogErrorCategory::Internal,
 	];
 
 	fn trace(context: RequestLogContext, owner: RequestLogOwner) -> RequestLogTrace<'static> {
@@ -281,7 +327,7 @@ mod categories {
 			..RequestLogFilter::default()
 		};
 		by_category.error_category = Some(RequestLogErrorCategory::RateLimit);
-		assert_eq!(RequestLog::list(&pool, by_category, 1, 50).await?.items.len(), 1);
+		assert_eq!(RequestLog::list(&pool, by_category.clone(), 1, 50).await?.items.len(), 1);
 		by_category.error_category = Some(RequestLogErrorCategory::Budget);
 		assert!(RequestLog::list(&pool, by_category, 1, 50).await?.items.is_empty());
 		let exported = RequestLog::list_for_export(&pool, RequestLogFilter { user_id: Some(user_id), ..RequestLogFilter::default() }).await?;
@@ -772,6 +818,305 @@ mod http {
 		let response = router.clone().oneshot(request).await?;
 		assert_eq!(response.status().as_u16(), 403);
 		assert_eq!(total_rows(&pool).await?, 0);
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod dropped_streams {
+	use super::support::{TestResult, create_key, create_team, create_user};
+	use crate::types::{
+		RequestLog, RequestLogAbort, RequestLogContext, RequestLogErrorCategory, RequestLogFilter, RequestLogOwner, RequestLogRecord, RequestLogResponse, RequestLogStatus, RequestLogTrace,
+		ReservedBody,
+	};
+	use ::axum::body::{Body, Bytes, HttpBody};
+	use futures_util::{StreamExt, stream};
+	use rust_decimal::Decimal;
+	use sqlx::PgPool;
+	use std::convert::Infallible;
+	use std::pin::Pin;
+	use std::time::Duration;
+	use uuid::Uuid;
+
+	struct Setup {
+		user_id: Uuid,
+		owner: RequestLogOwner,
+		context: RequestLogContext,
+	}
+
+	async fn setup(pool: &PgPool) -> TestResult<Setup> {
+		let user_id = create_user(pool).await?;
+		let team_id = create_team(pool, user_id).await?;
+		let api_key_id = create_key(pool, user_id, team_id).await?;
+		Ok(Setup {
+			user_id,
+			owner: RequestLogOwner { user_id, team_id, api_key_id },
+			context: RequestLogContext::start(),
+		})
+	}
+
+	fn abort_log(pool: &PgPool, setup: &Setup) -> RequestLogAbort {
+		RequestLogAbort::new(
+			pool,
+			&RequestLogTrace {
+				context: setup.context,
+				owner: setup.owner,
+				request_type: "gateway.chat",
+				public_model_id: "provider/model",
+				model_id: None,
+				provider: Some("provider"),
+				streaming: true,
+			},
+		)
+	}
+
+	fn endless_body() -> Body {
+		let first = stream::once(async { Ok::<_, Infallible>(Bytes::from_static(b"data: hello\n\n")) });
+		Body::from_stream(first.chain(stream::pending()))
+	}
+
+	fn finite_body() -> Body {
+		Body::from_stream(stream::iter([Ok::<_, Infallible>(Bytes::from_static(b"data: hello\n\n"))]))
+	}
+
+	async fn next_frame<T: Send + Unpin + 'static>(body: &mut ReservedBody<T>) -> bool {
+		futures_util::future::poll_fn(|context| Pin::new(&mut *body).poll_frame(context)).await.is_some()
+	}
+
+	async fn logged(pool: &PgPool, user_id: Uuid) -> TestResult<Vec<RequestLogResponse>> {
+		let filter = RequestLogFilter {
+			user_id: Some(user_id),
+			..RequestLogFilter::default()
+		};
+		Ok(RequestLog::list(pool, filter, 1, 50).await?.items)
+	}
+
+	async fn wait_for_rows(pool: &PgPool, user_id: Uuid) -> TestResult<Vec<RequestLogResponse>> {
+		for _ in 0..100 {
+			let rows = logged(pool, user_id).await?;
+			if !rows.is_empty() {
+				return Ok(rows);
+			}
+			tokio::time::sleep(Duration::from_millis(20)).await;
+		}
+		Ok(Vec::new())
+	}
+
+	fn usage_record(setup: &Setup, status: RequestLogStatus, category: Option<RequestLogErrorCategory>) -> RequestLogRecord<'static> {
+		RequestLogRecord {
+			user_id: setup.user_id,
+			team_id: Some(setup.owner.team_id),
+			api_key_id: Some(setup.owner.api_key_id),
+			model_id: None,
+			public_model_id: "provider/model",
+			request_type: "gateway.chat",
+			status,
+			status_code: None,
+			input_tokens: 30,
+			output_tokens: 12,
+			reasoning_tokens: 0,
+			cost_total: Decimal::new(2, 3),
+			request_id: Some(setup.context.request_id),
+			provider: Some("provider"),
+			error_category: category,
+			streaming: true,
+			latency_ms: Some(80),
+		}
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_stream_dropped_before_usage_is_logged_as_interrupted(pool: PgPool) -> TestResult {
+		let setup = setup(&pool).await?;
+		let mut body = ReservedBody::new(endless_body(), ()).with_abort_log(abort_log(&pool, &setup));
+		assert!(next_frame(&mut body).await);
+		drop(body);
+		let rows = wait_for_rows(&pool, setup.user_id).await?;
+		assert_eq!(rows.len(), 1);
+		assert_eq!(rows[0].status, "error");
+		assert_eq!(rows[0].error_category.as_deref(), Some("interrupted"));
+		assert_eq!(rows[0].request_id, Some(setup.context.request_id));
+		assert_eq!(rows[0].public_model_id, "provider/model");
+		assert_eq!(rows[0].provider.as_deref(), Some("provider"));
+		assert_eq!(rows[0].status_code, None);
+		assert!(rows[0].streaming);
+		assert_eq!(rows[0].input_tokens, 0);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_stream_read_to_the_end_writes_nothing(pool: PgPool) -> TestResult {
+		let setup = setup(&pool).await?;
+		let mut body = ReservedBody::new(finite_body(), ()).with_abort_log(abort_log(&pool, &setup));
+		assert!(next_frame(&mut body).await);
+		assert!(!next_frame(&mut body).await);
+		drop(body);
+		tokio::time::sleep(Duration::from_millis(300)).await;
+		assert!(logged(&pool, setup.user_id).await?.is_empty());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn an_empty_body_dropped_unread_writes_nothing(pool: PgPool) -> TestResult {
+		let setup = setup(&pool).await?;
+		let body = ReservedBody::new(Body::empty(), ()).with_abort_log(abort_log(&pool, &setup));
+		drop(body);
+		tokio::time::sleep(Duration::from_millis(300)).await;
+		assert!(logged(&pool, setup.user_id).await?.is_empty());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_drop_after_usage_keeps_the_single_usage_row(pool: PgPool) -> TestResult {
+		let setup = setup(&pool).await?;
+		RequestLog::record(&pool, usage_record(&setup, RequestLogStatus::Success, None)).await?;
+		let mut body = ReservedBody::new(endless_body(), ()).with_abort_log(abort_log(&pool, &setup));
+		assert!(next_frame(&mut body).await);
+		drop(body);
+		tokio::time::sleep(Duration::from_millis(300)).await;
+		let rows = logged(&pool, setup.user_id).await?;
+		assert_eq!(rows.len(), 1);
+		assert_eq!(rows[0].status, "success");
+		assert_eq!(rows[0].error_category, None);
+		assert_eq!(rows[0].input_tokens, 30);
+		assert_eq!(rows[0].cost_total, Decimal::new(2, 3));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn usage_arriving_after_the_drop_row_fills_it_in(pool: PgPool) -> TestResult {
+		let setup = setup(&pool).await?;
+		let mut body = ReservedBody::new(endless_body(), ()).with_abort_log(abort_log(&pool, &setup));
+		assert!(next_frame(&mut body).await);
+		drop(body);
+		wait_for_rows(&pool, setup.user_id).await?;
+		RequestLog::record(&pool, usage_record(&setup, RequestLogStatus::Error, Some(RequestLogErrorCategory::Interrupted))).await?;
+		let interrupted = logged(&pool, setup.user_id).await?;
+		assert_eq!(interrupted.len(), 1);
+		assert_eq!(interrupted[0].status, "error");
+		assert_eq!(interrupted[0].input_tokens, 30);
+		RequestLog::record(&pool, usage_record(&setup, RequestLogStatus::Success, None)).await?;
+		let finished = logged(&pool, setup.user_id).await?;
+		assert_eq!(finished.len(), 1);
+		assert_eq!(finished[0].status, "success");
+		assert_eq!(finished[0].error_category, None);
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod unlogged_failures {
+	use super::support::TestResult;
+	use crate::tests::gateway::support::{create_provider_model, create_team, create_user, insert_key};
+	use crate::types::{
+		BudgetAdmission, GatewayAuthContext, GatewayCredential, GatewayInference, GatewayLimitError, GatewayModelAccessError, GatewayRequestScope, RequestLog, RequestLogContext,
+		RequestLogFilter, RequestLogResponse,
+	};
+	use crate::utils::openai_gateway::{reject_limited, reject_model_access};
+	use serde_json::json;
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	async fn context(pool: &PgPool) -> TestResult<(Uuid, GatewayAuthContext)> {
+		crate::config::Config::init(pool).await;
+		crate::i18n::I18n::init(pool).await;
+		let user_id = create_user(pool).await?;
+		let team_id = create_team(pool, user_id, "Failure Team", true).await?;
+		let (_, token) = insert_key(pool, Some(user_id), team_id, json!(["inference:write"])).await?;
+		Ok((user_id, GatewayCredential::authenticate(pool, &token).await?))
+	}
+
+	async fn inference(pool: &PgPool) -> TestResult<GatewayInference> {
+		let (_, model_id) = create_provider_model(pool, "Provider", "model").await?;
+		Ok(GatewayInference {
+			model_id,
+			engine_model_id: "model".to_string(),
+			public_model_id: "provider/model".to_string(),
+			provider_name: "Provider".to_string(),
+			max_output_tokens: None,
+			context_length: None,
+			budget: BudgetAdmission { reservation: None, warn: false },
+		})
+	}
+
+	async fn only_row(pool: &PgPool, user_id: Uuid) -> TestResult<RequestLogResponse> {
+		let filter = RequestLogFilter {
+			user_id: Some(user_id),
+			..RequestLogFilter::default()
+		};
+		let mut rows = RequestLog::list(pool, filter, 1, 50).await?.items;
+		assert_eq!(rows.len(), 1);
+		Ok(rows.remove(0))
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn budget_unavailable_is_logged_as_budget(pool: PgPool) -> TestResult {
+		let (user_id, context) = context(&pool).await?;
+		let log = RequestLogContext::start();
+		let scope = GatewayRequestScope { db: &pool, context: &context, log, usage_type: "gateway.chat", streaming: false };
+		let response = reject_model_access(&scope, None, GatewayModelAccessError::BudgetUnavailable, "provider/model").await;
+		assert_eq!(response.status().as_u16(), 503);
+		let row = only_row(&pool, user_id).await?;
+		assert_eq!(row.error_category.as_deref(), Some("budget"));
+		assert_eq!(row.status_code, Some(503));
+		assert_eq!(row.request_id, Some(log.request_id));
+		assert_eq!(row.public_model_id, "provider/model");
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn database_errors_are_logged_as_internal(pool: PgPool) -> TestResult {
+		let (user_id, context) = context(&pool).await?;
+		let scope = GatewayRequestScope { db: &pool, context: &context, log: RequestLogContext::start(), usage_type: "gateway.responses", streaming: true };
+		let response = reject_model_access(&scope, None, GatewayModelAccessError::Database(sqlx::Error::PoolTimedOut), "provider/model").await;
+		assert_eq!(response.status().as_u16(), 500);
+		let row = only_row(&pool, user_id).await?;
+		assert_eq!(row.error_category.as_deref(), Some("internal"));
+		assert_eq!(row.status, "error");
+		assert_eq!(row.status_code, Some(500));
+		assert_eq!(row.request_type, "gateway.responses");
+		assert!(row.streaming);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn limiter_overload_is_logged_as_rate_limit(pool: PgPool) -> TestResult {
+		let (user_id, context) = context(&pool).await?;
+		let scope = GatewayRequestScope { db: &pool, context: &context, log: RequestLogContext::start(), usage_type: "gateway.chat", streaming: false };
+		let inference = inference(&pool).await?;
+		let response = reject_limited(&scope, &inference, GatewayLimitError::Overloaded).await;
+		assert_eq!(response.status().as_u16(), 503);
+		let row = only_row(&pool, user_id).await?;
+		assert_eq!(row.error_category.as_deref(), Some("rate_limit"));
+		assert_eq!(row.status_code, Some(503));
+		assert_eq!(row.model_id, Some(inference.model_id));
+		assert_eq!(row.provider.as_deref(), Some("Provider"));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn limiter_unavailable_is_logged_as_internal(pool: PgPool) -> TestResult {
+		let (user_id, context) = context(&pool).await?;
+		let scope = GatewayRequestScope { db: &pool, context: &context, log: RequestLogContext::start(), usage_type: "gateway.chat", streaming: false };
+		let inference = inference(&pool).await?;
+		let response = reject_limited(&scope, &inference, GatewayLimitError::Unavailable).await;
+		assert_eq!(response.status().as_u16(), 503);
+		let row = only_row(&pool, user_id).await?;
+		assert_eq!(row.error_category.as_deref(), Some("internal"));
+		assert_eq!(row.status_code, Some(503));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn the_models_route_is_not_an_inference_request_and_stays_unlogged(pool: PgPool) -> TestResult {
+		let (user_id, context) = context(&pool).await?;
+		let state = crate::tests::gateway::support::job_state(pool.clone());
+		let response = crate::utils::openai_gateway::run_models(&state, &context).await;
+		assert_eq!(response.status().as_u16(), 200);
+		let filter = RequestLogFilter {
+			user_id: Some(user_id),
+			..RequestLogFilter::default()
+		};
+		assert!(RequestLog::list(&pool, filter, 1, 50).await?.items.is_empty());
 		Ok(())
 	}
 }

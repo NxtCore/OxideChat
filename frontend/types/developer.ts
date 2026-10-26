@@ -52,7 +52,7 @@ export const KEY_SCOPES = ['inference:read', 'inference:write'] as const;
 
 export type RequestLogStatus = 'success' | 'error';
 
-export const REQUEST_LOG_ERROR_CATEGORIES = ['upstream', 'interrupted', 'budget', 'rate_limit', 'auth', 'model_access'] as const;
+export const REQUEST_LOG_ERROR_CATEGORIES = ['upstream', 'interrupted', 'budget', 'rate_limit', 'auth', 'model_access', 'internal'] as const;
 
 export type RequestLogErrorCategory = (typeof REQUEST_LOG_ERROR_CATEGORIES)[number];
 
@@ -83,6 +83,8 @@ export interface RequestLogFilters {
 	api_key_id: string | null;
 	status: RequestLogStatus | null;
 	error_category: RequestLogErrorCategory | null;
+	model: string | null;
+	provider: string | null;
 	from: string | null;
 	to: string | null;
 }

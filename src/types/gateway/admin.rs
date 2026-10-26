@@ -94,6 +94,8 @@ pub struct GatewayAdminRequestQuery {
 	pub api_key_id: Option<Uuid>,
 	pub status: Option<String>,
 	pub error_category: Option<String>,
+	pub model: Option<String>,
+	pub provider: Option<String>,
 	pub from: Option<DateTime<Utc>>,
 	pub to: Option<DateTime<Utc>>,
 	pub page: Option<i64>,
@@ -110,6 +112,8 @@ impl GatewayAdminRequestQuery {
 			api_key_id: api_key_id.or(self.api_key_id),
 			status: self.status.as_deref().and_then(RequestLogStatus::from_stored),
 			error_category: self.error_category.as_deref().and_then(RequestLogErrorCategory::from_stored),
+			model: RequestLogFilter::text(self.model.as_deref()),
+			provider: RequestLogFilter::text(self.provider.as_deref()),
 			from: self.from,
 			to: self.to,
 		}

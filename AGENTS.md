@@ -38,6 +38,7 @@
     - `admin.rs` / `admin_keys.rs` / `admin_teams.rs` / `admin_audit.rs` - Installation-admin gateway controls under `/api/v1/admin/gateway/...` gated by `admin.developer.*` permissions: all-keys listing and inspection, revoke/disable/enable, team rate rules, concurrency cap and `teams.gateway_enabled`, audit trail view and query-able events (expiring keys, budget thresholds); audit rows are written in the same transaction through `write_admin_audit`, and metadata is run through `redact_metadata`; the limiter reads team policy on every authentication so changes apply to the next request
     - `mod.rs` - Shared gateway types and constants
 - `src/types/request_logs/` - `gateway_request_logs` rows: one row per gateway inference request, keyed by the `x-request-id` the client received (`add_request_id` stores a `RequestLogContext` in request extensions); successes come from `OxideCostSink`, rejections and upstream failures from `RequestLog::record_failure`, and a repeated `request_id` merges into one row
+    - Streams dropped before their body ends are logged as `interrupted` by `ReservedBody` (via `RequestLogAbort`); `/models` is not an inference request and is deliberately not logged; `internal` covers database and limiter-unavailable failures
 - `src/utils/gateway_limits.rs` - HTTP glue only: admission for a route and Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter
 - `src/routes/` - HTTP route handlers (handlers only, no type definitions)
 - `migrations/` - SQLx database migrations
