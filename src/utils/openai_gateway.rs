@@ -97,7 +97,7 @@ pub async fn run_chat(request: OpenAIChatRequest, inference: GatewayInference, r
 	drop(engine);
 	let response = OpenAIChatSkin::handle_chat(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await;
 	log_upstream_failure(&run.scope, &inference, response.status()).await;
-	inference.finish(response)
+	inference.finish(response, &run.scope)
 }
 
 /// Runs an authorized `OpenAI` responses request.
@@ -107,12 +107,18 @@ pub async fn run_responses(request: OpenAIResponsesRequestPayload, inference: Ga
 		Ok(raw_request) => raw_request,
 		Err(error) => {
 			tracing::error!(%error, "failed to convert OpenAI responses request");
-			return error_response(
+			let response = error_response(
 				StatusCode::INTERNAL_SERVER_ERROR,
 				translation("gateway.errors.request_conversion"),
 				"server_error",
 				"internal_error",
 			);
+			let failure = RequestLogFailure {
+				category: RequestLogErrorCategory::Internal,
+				status_code: Some(i32::from(response.status().as_u16())),
+			};
+			log_request_failure(run.scope.db, &run.scope.inference_trace(&inference), failure).await;
+			return response;
 		}
 	};
 	let engine = ai::get();
@@ -121,7 +127,7 @@ pub async fn run_responses(request: OpenAIResponsesRequestPayload, inference: Ga
 	drop(engine);
 	let response = OpenAIResponsesSkin::handle_responses(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(raw_request)).await;
 	log_upstream_failure(&run.scope, &inference, response.status()).await;
-	inference.finish(response)
+	inference.finish(response, &run.scope)
 }
 
 /// Records every upstream server failure as a request log row.
@@ -145,36 +151,35 @@ pub async fn log_request_failure(db: &PgPool, trace: &RequestLogTrace<'_>, failu
 	}
 }
 
-/// Answers a model or budget refusal and logs it for the key's owner.
+/// Answers a model, budget or policy storage refusal and logs it for the key's owner.
 pub async fn reject_model_access(scope: &GatewayRequestScope<'_>, inference: Option<&GatewayInference>, error: GatewayModelAccessError, requested_id: &str) -> Response {
 	let category = match &error {
-		GatewayModelAccessError::NotFound => Some(RequestLogErrorCategory::ModelAccess),
-		GatewayModelAccessError::BudgetExceeded => Some(RequestLogErrorCategory::Budget),
-		GatewayModelAccessError::BudgetUnavailable | GatewayModelAccessError::Database(_) => None,
+		GatewayModelAccessError::NotFound => RequestLogErrorCategory::ModelAccess,
+		GatewayModelAccessError::BudgetExceeded | GatewayModelAccessError::BudgetUnavailable => RequestLogErrorCategory::Budget,
+		GatewayModelAccessError::Database(_) => RequestLogErrorCategory::Internal,
 	};
 	let response = model_access_error_response(error, requested_id);
-	if let Some(category) = category {
-		let trace = inference.map_or_else(|| scope.trace(requested_id, None, None), |inference| scope.inference_trace(inference));
-		let failure = RequestLogFailure {
-			category,
-			status_code: Some(i32::from(response.status().as_u16())),
-		};
-		log_request_failure(scope.db, &trace, failure).await;
-	}
+	let trace = inference.map_or_else(|| scope.trace(requested_id, None, None), |inference| scope.inference_trace(inference));
+	let failure = RequestLogFailure {
+		category,
+		status_code: Some(i32::from(response.status().as_u16())),
+	};
+	log_request_failure(scope.db, &trace, failure).await;
 	response
 }
 
-/// Answers a limiter refusal and logs rate limit rejections for the key's owner.
+/// Answers a limiter refusal and logs it for the key's owner.
 pub async fn reject_limited(scope: &GatewayRequestScope<'_>, inference: &GatewayInference, error: GatewayLimitError) -> Response {
-	let rejected = matches!(error, GatewayLimitError::Rejected { .. });
+	let category = match &error {
+		GatewayLimitError::Rejected { .. } | GatewayLimitError::Overloaded => RequestLogErrorCategory::RateLimit,
+		GatewayLimitError::Unavailable | GatewayLimitError::Misconfigured => RequestLogErrorCategory::Internal,
+	};
 	let response = limit_error_response(error);
-	if rejected {
-		let failure = RequestLogFailure {
-			category: RequestLogErrorCategory::RateLimit,
-			status_code: Some(i32::from(response.status().as_u16())),
-		};
-		log_request_failure(scope.db, &scope.inference_trace(inference), failure).await;
-	}
+	let failure = RequestLogFailure {
+		category,
+		status_code: Some(i32::from(response.status().as_u16())),
+	};
+	log_request_failure(scope.db, &scope.inference_trace(inference), failure).await;
 	response
 }
 

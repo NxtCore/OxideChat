@@ -278,11 +278,18 @@ mod scope {
 		assign(&pool, budget, Some(fixture.user_id), None, None).await?;
 		let ledger = BudgetLedger::spawn();
 		let context = context(&pool, &fixture.token).await?;
+		let scope = GatewayRequestScope {
+			db: &pool,
+			context: &context,
+			log: RequestLogContext::start(),
+			usage_type: "gateway.chat",
+			streaming: false,
+		};
 		let quiet = authorize(&pool, &ledger, &context, tokens(1)).await?;
-		assert!(quiet.finish(Response::new(::axum::body::Body::empty())).headers().get(BUDGET_WARNING_HEADER).is_none());
+		assert!(quiet.finish(Response::new(::axum::body::Body::empty()), &scope).headers().get(BUDGET_WARNING_HEADER).is_none());
 		spend(&pool, &fixture, None, 5).await?;
 		let warned = authorize(&pool, &ledger, &context, tokens(1)).await?;
-		assert!(warned.finish(Response::new(::axum::body::Body::empty())).headers().contains_key(BUDGET_WARNING_HEADER));
+		assert!(warned.finish(Response::new(::axum::body::Body::empty()), &scope).headers().contains_key(BUDGET_WARNING_HEADER));
 		Ok(())
 	}
 
