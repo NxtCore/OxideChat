@@ -21,10 +21,13 @@ export interface TeamList {
 	updated_at: string;
 }
 
+export type TeamRole = 'member' | 'admin';
+
 export interface TeamMember {
 	id: string;
 	email: string;
 	username: string;
+	role: TeamRole;
 }
 
 export interface TeamDetailed extends Omit<TeamList, 'member_count'> {

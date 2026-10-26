@@ -2,8 +2,8 @@
 	<ShadDialog :open="open" @update:open="emit('update:open', $event)">
 		<ShadDialogContent class="max-h-[90dvh] overflow-y-auto sm:max-w-[520px]">
 			<ShadDialogHeader>
-				<ShadDialogTitle>{{ store.getTranslation('developer.create.title') }}</ShadDialogTitle>
-				<ShadDialogDescription>{{ store.getTranslation('developer.create.description') }}</ShadDialogDescription>
+				<ShadDialogTitle>{{ store.getTranslation(serviceAccount ? 'developer.service.create_title' : 'developer.create.title') }}</ShadDialogTitle>
+				<ShadDialogDescription>{{ store.getTranslation(serviceAccount ? 'developer.service.create_description' : 'developer.create.description') }}</ShadDialogDescription>
 			</ShadDialogHeader>
 			<div class="space-y-4 py-2">
 				<div class="space-y-1.5">
@@ -13,12 +13,12 @@
 
 				<div class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.create.team') }}</ShadLabel>
-					<p v-if="!developer.teams.length" class="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+					<p v-if="!teams.length" class="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
 						{{ store.getTranslation('developer.create.no_teams') }}
 					</p>
 					<div v-else class="space-y-2">
 						<button
-							v-for="team in developer.teams"
+							v-for="team in teams"
 							:key="team.id"
 							type="button"
 							class="w-full rounded-md border p-3 text-left transition-colors"
@@ -27,9 +27,9 @@
 						>
 							<div class="flex items-center justify-between gap-2">
 								<span class="font-medium text-foreground">{{ team.name }}</span>
-								<span class="text-xs text-muted-foreground">{{ store.getTranslation('developer.models_count', {count: team.models.length}) }}</span>
+								<span v-if="team.models" class="text-xs text-muted-foreground">{{ store.getTranslation('developer.models_count', {count: team.models.length}) }}</span>
 							</div>
-							<p class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">
+							<p v-if="team.models" class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">
 								{{ team.models.length ? team.models.join(', ') : store.getTranslation('developer.no_models') }}
 							</p>
 						</button>
@@ -77,17 +77,19 @@ import {useMainStore} from '@/stores';
 import {useDeveloperStore} from '@/stores/developerStore';
 import {KEY_SCOPES, type DeveloperKeyWithToken} from '~/types/developer';
 
-const props = defineProps<{open: boolean}>();
+const props = defineProps<{open: boolean; serviceAccount?: boolean}>();
 const emit = defineEmits<{'update:open': [value: boolean]; created: [key: DeveloperKeyWithToken]}>();
 
 const store = useMainStore();
 const developer = useDeveloperStore();
 const saving = ref(false);
 
+const teams = computed<{id: string; name: string; models?: string[]}[]>(() => (props.serviceAccount ? developer.managedTeams : developer.teams));
+
 function emptyForm() {
 	return {
 		name: '',
-		team_id: developer.teams.find(team => team.is_default)?.id ?? developer.teams[0]?.id ?? '',
+		team_id: (props.serviceAccount ? teams.value[0]?.id : developer.teams.find(team => team.is_default)?.id) ?? teams.value[0]?.id ?? '',
 		scopes: [...KEY_SCOPES] as string[],
 		expires_at: '',
 		max_concurrent_requests: '' as string | number,
@@ -119,6 +121,7 @@ async function submit() {
 			scopes: form.scopes,
 			expires_at: form.expires_at ? new Date(form.expires_at).toISOString() : null,
 			max_concurrent_requests: concurrency > 0 ? concurrency : null,
+			...(props.serviceAccount ? {service_account: true} : {}),
 		});
 		emit('update:open', false);
 		emit('created', created);

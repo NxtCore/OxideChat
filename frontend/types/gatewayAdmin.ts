@@ -18,8 +18,9 @@ export interface AdminKey {
 	name: string;
 	team_id: string;
 	team_name: string;
-	user_id: string;
-	owner_username: string;
+	user_id: string | null;
+	owner_username: string | null;
+	service_account: boolean;
 	key_prefix: string;
 	last_four: string;
 	scopes: string[];

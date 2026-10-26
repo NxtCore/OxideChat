@@ -1,5 +1,19 @@
 import {defineStore} from 'pinia';
-import type {CreateKeyPayload, DeveloperKey, DeveloperKeyBudget, DeveloperKeyRotation, DeveloperKeyRule, DeveloperKeyWithToken, DeveloperRequestLog, DeveloperTeam, RequestLogFilters, SetKeyBudgetPayload} from '~/types/developer';
+import type {
+	CreateKeyPayload,
+	DeveloperKey,
+	DeveloperKeyBudget,
+	DeveloperKeyRotation,
+	DeveloperKeyRule,
+	DeveloperKeyWithToken,
+	DeveloperManagedTeam,
+	DeveloperRequestLog,
+	DeveloperTeam,
+	DeveloperTeamKey,
+	DeveloperTeamKeys,
+	RequestLogFilters,
+	SetKeyBudgetPayload,
+} from '~/types/developer';
 
 interface Paginated<T> {
 	has_more: boolean;
@@ -10,6 +24,8 @@ export const useDeveloperStore = defineStore('developer', {
 	state: () => ({
 		teams: [] as DeveloperTeam[],
 		keys: [] as DeveloperKey[],
+		managedTeams: [] as DeveloperManagedTeam[],
+		teamKeys: [] as DeveloperTeamKey[],
 		loading: false,
 		loaded: false,
 		sessionTokens: {} as Record<string, string>,
@@ -27,9 +43,15 @@ export const useDeveloperStore = defineStore('developer', {
 			this.loading = true;
 			this.error = null;
 			try {
-				const [teams, keys] = await Promise.all([$customFetch<DeveloperTeam[]>('/api/v1/developer/teams'), $customFetch<DeveloperKey[]>('/api/v1/developer/keys')]);
+				const [teams, keys, teamKeys] = await Promise.all([
+					$customFetch<DeveloperTeam[]>('/api/v1/developer/teams'),
+					$customFetch<DeveloperKey[]>('/api/v1/developer/keys'),
+					$customFetch<DeveloperTeamKeys>('/api/v1/developer/team-keys'),
+				]);
 				this.teams = teams ?? [];
 				this.keys = keys ?? [];
+				this.managedTeams = teamKeys?.teams ?? [];
+				this.teamKeys = teamKeys?.keys ?? [];
 				this.loaded = true;
 			} catch (e: any) {
 				this.error = errorMessage(e, '');
@@ -40,15 +62,24 @@ export const useDeveloperStore = defineStore('developer', {
 		},
 		replaceKey(key: DeveloperKey) {
 			const index = this.keys.findIndex(existing => existing.id === key.id);
-			if (index === -1) this.keys.unshift(key);
-			else this.keys[index] = key;
+			if (index !== -1) this.keys[index] = key;
+			const teamIndex = this.teamKeys.findIndex(existing => existing.id === key.id);
+			if (teamIndex !== -1) this.teamKeys[teamIndex] = {...this.teamKeys[teamIndex], ...key};
+		},
+		addKey(key: DeveloperKey) {
+			if (!key.service_account) {
+				this.keys.unshift(key);
+				return;
+			}
+			const team = this.managedTeams.find(managed => managed.id === key.team_id);
+			this.teamKeys.unshift({...key, team_name: team?.name ?? '', owner_username: null});
 		},
 		async createKey(payload: CreateKeyPayload): Promise<DeveloperKeyWithToken> {
 			const {$customFetch} = useNuxtApp();
 			const created = await $customFetch<DeveloperKeyWithToken>('/api/v1/developer/keys', {method: 'POST', body: payload});
 			const {token, ...key} = created;
 			this.sessionTokens[key.id] = token;
-			this.replaceKey(key);
+			this.addKey(key);
 			return created;
 		},
 		async updateKey(id: string, patch: Record<string, unknown>) {
@@ -69,7 +100,7 @@ export const useDeveloperStore = defineStore('developer', {
 			const {token, ...key} = rotation.key;
 			this.sessionTokens[key.id] = token;
 			this.replaceKey(rotation.previous);
-			this.replaceKey(key);
+			this.addKey(key);
 			return rotation;
 		},
 		async getLimits(id: string): Promise<DeveloperKeyRule[]> {

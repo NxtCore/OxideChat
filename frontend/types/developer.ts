@@ -9,6 +9,8 @@ export interface DeveloperKey {
 	id: string;
 	name: string;
 	team_id: string;
+	user_id: string | null;
+	service_account: boolean;
 	key_prefix: string;
 	last_four: string;
 	scopes: string[];
@@ -19,6 +21,21 @@ export interface DeveloperKey {
 	last_used_at: string | null;
 	max_concurrent_requests: number | null;
 	created_at: string;
+}
+
+export interface DeveloperManagedTeam {
+	id: string;
+	name: string;
+}
+
+export interface DeveloperTeamKey extends DeveloperKey {
+	team_name: string;
+	owner_username: string | null;
+}
+
+export interface DeveloperTeamKeys {
+	teams: DeveloperManagedTeam[];
+	keys: DeveloperTeamKey[];
 }
 
 export interface DeveloperKeyWithToken extends DeveloperKey {
@@ -44,6 +61,7 @@ export interface CreateKeyPayload {
 	scopes: string[];
 	expires_at?: string | null;
 	max_concurrent_requests?: number | null;
+	service_account?: boolean;
 }
 
 export type KeyStatus = 'active' | 'disabled' | 'expired' | 'revoked';
