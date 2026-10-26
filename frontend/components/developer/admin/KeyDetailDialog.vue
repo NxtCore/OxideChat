@@ -10,7 +10,7 @@
 				<section class="grid grid-cols-2 gap-3 sm:grid-cols-3">
 					<div>
 						<p class="text-xs text-muted-foreground">{{ store.getTranslation('developer.admin.keys.owner') }}</p>
-						<p class="text-foreground">{{ detail.key.owner_username }}</p>
+						<p class="text-foreground">{{ detail.key.owner_username ?? store.getTranslation('developer.service.badge') }}</p>
 					</div>
 					<div>
 						<p class="text-xs text-muted-foreground">{{ store.getTranslation('developer.admin.keys.team') }}</p>

@@ -1106,7 +1106,7 @@ pub async fn stream_completion(State(state): State<Arc<JobState>>, Extension(Req
 												budget_ledger.reconcile(reservation.id, final_cost_total);
 											}
 											let usage_recorded = UsageEvent::record(&db, UsageEventRecord {
-												user_id: &user.id,
+												user_id: Some(&user.id),
 												team_id: Budget::primary_team_id(&db, &user.id).await.ok().flatten(),
 												api_key_id: None,
 												model_id: &model.id,

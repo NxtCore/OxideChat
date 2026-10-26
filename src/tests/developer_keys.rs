@@ -38,6 +38,7 @@ mod support {
 			scopes: vec!["inference:read".to_string(), "inference:write".to_string()],
 			expires_at: None,
 			max_concurrent_requests: None,
+			service_account: false,
 		}
 	}
 
@@ -85,6 +86,7 @@ mod requests {
 			id: uuid::Uuid::new_v4(),
 			name: "Key".to_string(),
 			team_id: uuid::Uuid::new_v4(),
+			user_id: Some(uuid::Uuid::new_v4()),
 			key_prefix: "oxc_abc".to_string(),
 			last_four: "wxyz".to_string(),
 			scopes: sqlx::types::Json(vec!["inference:read".to_string()]),
@@ -120,7 +122,7 @@ mod keys {
 		assert!(token.starts_with(&key.key_prefix));
 		assert!(token.ends_with(&key.last_four));
 		let context = GatewayCredential::authenticate(&pool, &token).await?;
-		assert_eq!((context.key_id, context.user_id, context.team_id), (key.id, user_id, team_id));
+		assert_eq!((context.key_id, context.user_id, context.team_id), (key.id, Some(user_id), team_id));
 		let (hash, created_by): (String, Option<Uuid>) = sqlx::query_as("SELECT secret_hash, created_by FROM gateway_api_keys WHERE id = $1")
 			.bind(key.id)
 			.fetch_one(&pool)

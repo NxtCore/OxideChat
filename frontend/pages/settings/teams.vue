@@ -115,6 +115,18 @@
 									<span class="block truncate text-sm text-foreground">{{ user.username }}</span>
 									<span class="block truncate text-xs text-muted-foreground">{{ user.email }}</span>
 								</span>
+								<ShadSelect
+									v-if="savedMemberRole(user.id)"
+									:model-value="savedMemberRole(user.id) ?? undefined"
+									:disabled="!canEdit || saving"
+									@update:model-value="role => setMemberRole(user.id, role as TeamRole)"
+								>
+									<ShadSelectTrigger class="h-8 w-32" :data-testid="`member-role-${user.username}`" @click.stop><ShadSelectValue /></ShadSelectTrigger>
+									<ShadSelectContent>
+										<ShadSelectItem value="member">{{ store.getTranslation('settings.teams.role_member') }}</ShadSelectItem>
+										<ShadSelectItem value="admin">{{ store.getTranslation('settings.teams.role_admin') }}</ShadSelectItem>
+									</ShadSelectContent>
+								</ShadSelect>
 							</label>
 						</div>
 					</ShadTabsContent>
@@ -290,7 +302,7 @@ import {Bot, Loader2, Network, Plus, Search, Trash2, Users} from 'lucide-vue-nex
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
-import type {ModelListAdmin, PaginatedResponse, TeamDetailed, TeamList} from '~/types/chat';
+import type {ModelListAdmin, PaginatedResponse, TeamDetailed, TeamList, TeamRole} from '~/types/chat';
 
 interface UserListItem {
 	id: string;
@@ -485,6 +497,27 @@ async function selectTeam(id: string) {
 		applySelected(team);
 	} catch (e: any) {
 		store.toast(store.getTranslation('settings.teams.load_error'), {type: 'error', description: e?.message});
+	}
+}
+
+function savedMemberRole(userId: string): TeamRole | null {
+	return selectedTeam.value?.members.find(member => member.id === userId)?.role ?? null;
+}
+
+async function setMemberRole(userId: string, role: TeamRole) {
+	if (!selectedTeam.value || !canEdit.value || savedMemberRole(userId) === role) return;
+	saving.value = true;
+	try {
+		const updated = await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${selectedTeam.value.id}/members/${userId}/role`, {
+			method: 'PUT',
+			body: {role},
+		});
+		selectedTeam.value = updated;
+		store.toast(store.getTranslation('settings.teams.role_saved'), {type: 'success'});
+	} catch (e: any) {
+		store.toast(store.getTranslation('settings.teams.role_error'), {type: 'error', description: e?.message});
+	} finally {
+		saving.value = false;
 	}
 }
 

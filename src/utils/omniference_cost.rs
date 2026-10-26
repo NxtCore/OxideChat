@@ -39,9 +39,12 @@ impl OxideCostSink {
 	}
 
 	async fn store(&self, record: &CostRecord, budget_id: Option<Uuid>, finished_at: DateTime<Utc>) -> Result<(), sqlx::Error> {
-		let Some(user_id) = metadata_uuid(record, "oxide_user_id") else {
+		let user_id = metadata_uuid(record, "oxide_user_id");
+		let api_key_id = metadata_uuid(record, "oxide_api_key_id");
+		let metadata_team_id = metadata_uuid(record, "oxide_team_id");
+		if user_id.is_none() && (metadata_team_id.is_none() || api_key_id.is_none()) {
 			return Ok(());
-		};
+		}
 		let Some(model_id) = metadata_uuid(record, "oxide_model_id") else {
 			return Ok(());
 		};
@@ -54,17 +57,18 @@ impl OxideCostSink {
 		let cost_total = ModelPricing::usage_cost(&self.state.db, &model.id, input_tokens, output_tokens, reasoning_tokens)
 			.await?
 			.unwrap_or_else(|| Decimal::from_f64(record.cost.total).unwrap_or(Decimal::ZERO));
-		let team_id = match metadata_uuid(record, "oxide_team_id") {
-			Some(team_id) => Some(team_id),
-			None => Budget::primary_team_id(&self.state.db, &user_id).await?,
+		let team_id = match (metadata_team_id, user_id.as_ref()) {
+			(Some(team_id), _) => Some(team_id),
+			(None, Some(user_id)) => Budget::primary_team_id(&self.state.db, user_id).await?,
+			(None, None) => None,
 		};
 		if let Some(id) = budget_id {
 			self.state.budget_ledger.reconcile(id, cost_total);
 		}
 		let usage = UsageEventRecord {
-			user_id: &user_id,
+			user_id: user_id.as_ref(),
 			team_id,
-			api_key_id: metadata_uuid(record, "oxide_api_key_id"),
+			api_key_id,
 			model_id: &model.id,
 			provider_id: &model.provider_id,
 			request_type: record.metadata.get("oxide_request_type").map_or("gateway", String::as_str),
@@ -80,7 +84,7 @@ impl OxideCostSink {
 			RequestLogRecord {
 				user_id,
 				team_id,
-				api_key_id: metadata_uuid(record, "oxide_api_key_id"),
+				api_key_id,
 				model_id: Some(model.id),
 				public_model_id: record.metadata.get(PUBLIC_MODEL_METADATA_KEY).map_or(model.model_id.as_str(), String::as_str),
 				request_type: record.metadata.get("oxide_request_type").map_or("gateway", String::as_str),

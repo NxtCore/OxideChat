@@ -126,14 +126,14 @@ impl GatewayCredential {
 			r#"
 			SELECT
 				k.id AS "key_id!",
-				k.user_id AS "user_id!",
+				k.user_id,
 				k.team_id,
 				k.secret_hash,
 				k.scopes AS "scopes!: Json<Vec<String>>",
 				k.is_enabled AS "key_enabled!",
 				k.expires_at,
 				k.revoked_at,
-				(tm.user_id IS NOT NULL) AS "is_member!",
+				(k.user_id IS NULL OR tm.user_id IS NOT NULL) AS "is_member!",
 				t.gateway_enabled AS "team_enabled!",
 				(k.admin_disabled_at IS NOT NULL) AS "admin_disabled!",
 				t.gateway_max_concurrent_requests AS team_concurrency,
@@ -153,7 +153,7 @@ impl GatewayCredential {
 					WHERE is_enabled AND (team_id = t.id OR api_key_id = k.id)
 				) r
 			) rules
-			WHERE k.id = $1 AND k.user_id IS NOT NULL
+			WHERE k.id = $1
 			"#,
 			key_id
 		)
@@ -184,13 +184,12 @@ impl GatewayModel {
 			  AND p.is_enabled = TRUE
 			  AND EXISTS (
 				SELECT 1
-				FROM team_members tm
-				JOIN teams t ON t.id = tm.team_id
+				FROM teams t
 				LEFT JOIN team_model_access model_access
 					ON model_access.team_id = t.id AND model_access.model_id = m.id
 				LEFT JOIN team_model_access provider_access
 					ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
-				WHERE tm.user_id = $1
+				WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = t.id AND tm.user_id = $1))
 				  AND t.id = $2
 				  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
 			  )
@@ -235,13 +234,12 @@ impl GatewayModel {
 			  AND p.is_enabled = TRUE
 			  AND EXISTS (
 				SELECT 1
-				FROM team_members tm
-				JOIN teams t ON t.id = tm.team_id
+				FROM teams t
 				LEFT JOIN team_model_access model_access
 					ON model_access.team_id = t.id AND model_access.model_id = m.id
 				LEFT JOIN team_model_access provider_access
 					ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
-				WHERE tm.user_id = $1
+				WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = t.id AND tm.user_id = $1))
 				  AND t.id = $2
 				  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
 			  )

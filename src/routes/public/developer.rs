@@ -1,8 +1,9 @@
 use crate::types::{
-	CreateGatewayKeyRequest, GatewayApiKey, GatewayKeyError, GatewayKeyRotationResponse, GatewayKeyTokenResponse, GatewayTeamResponse, JobState, MAX_REQUEST_LOG_RETENTION_DAYS, RequestContext,
+	CreateGatewayKeyRequest, GatewayApiKey, GatewayKeyError, GatewayKeyRotationResponse, GatewayKeyTokenResponse, GatewayTeamKeysResponse, GatewayTeamResponse, JobState, KeyActor, User, MAX_REQUEST_LOG_RETENTION_DAYS, RequestContext,
 	RequestLog, RequestLogQuery, RequestLogRetentionResponse, RotateGatewayKeyRequest, SetGatewayKeyBudgetRequest, SetGatewayKeyLimitsRequest, SetRequestLogRetentionRequest,
 	UpdateGatewayKeyRequest,
 };
+use crate::types::consts::ADMIN_DEVELOPER_KEYS_EDIT;
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -20,6 +21,7 @@ fn error_code(error: &GatewayKeyError) -> ErrorCode {
 		GatewayKeyError::Revoked => ErrorCode::ApiKeyRevoked,
 		GatewayKeyError::AdminDisabled => ErrorCode::ApiKeyAdminDisabled,
 		GatewayKeyError::TeamForbidden => ErrorCode::ApiKeyTeamForbidden,
+		GatewayKeyError::ServiceAccountForbidden => ErrorCode::ApiKeyServiceAccountForbidden,
 		GatewayKeyError::InvalidName => ErrorCode::ApiKeyNameInvalid,
 		GatewayKeyError::InvalidScopes => ErrorCode::ApiKeyScopesInvalid,
 		GatewayKeyError::InvalidExpiry => ErrorCode::ApiKeyExpiryInvalid,
@@ -30,6 +32,10 @@ fn error_code(error: &GatewayKeyError) -> ErrorCode {
 		GatewayKeyError::DuplicateRule => ErrorCode::ApiKeyRuleDuplicate,
 		GatewayKeyError::Secret | GatewayKeyError::Database(_) => ErrorCode::InternalError,
 	}
+}
+
+async fn key_actor(state: &JobState, user: &User) -> KeyActor {
+	KeyActor::new(&user.id, user.has_permission(&state.db, ADMIN_DEVELOPER_KEYS_EDIT).await)
 }
 
 fn failure(error: &GatewayKeyError) -> Response {
@@ -62,6 +68,18 @@ pub async fn list_teams(State(state): State<Arc<JobState>>, Extension(RequestCon
 	}
 }
 
+/// GET /api/v1/developer/team-keys
+pub async fn list_team_keys(State(state): State<Arc<JobState>>, Extension(RequestContext { user }): Extension<RequestContext>) -> impl IntoResponse {
+	let Some(user) = user else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+	let actor = key_actor(&state, &user).await;
+	match GatewayTeamKeysResponse::load(&state.db, actor).await {
+		Ok(keys) => json_response(StatusCode::OK, keys),
+		Err(error) => failure(&GatewayKeyError::Database(error)),
+	}
+}
+
 /// GET /api/v1/developer/keys
 pub async fn list_keys(State(state): State<Arc<JobState>>, Extension(RequestContext { user }): Extension<RequestContext>) -> impl IntoResponse {
 	let Some(user) = user else {
@@ -82,7 +100,8 @@ pub async fn create_key(
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match GatewayApiKey::create(&state.db, &user.id, &request).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::create(&state.db, actor, &request).await {
 		Ok((key, token)) => token_response(
 			StatusCode::CREATED,
 			GatewayKeyTokenResponse {
@@ -104,7 +123,8 @@ pub async fn update_key(
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match GatewayApiKey::update(&state.db, &user.id, &id, &request).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::update(&state.db, actor, &id, &request).await {
 		Ok(key) => json_response(StatusCode::OK, key.to_response()),
 		Err(error) => failure(&error),
 	}
@@ -115,7 +135,8 @@ pub async fn revoke_key(State(state): State<Arc<JobState>>, Extension(RequestCon
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match GatewayApiKey::revoke(&state.db, &user.id, &id).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::revoke(&state.db, actor, &id).await {
 		Ok(key) => json_response(StatusCode::OK, key.to_response()),
 		Err(error) => failure(&error),
 	}
@@ -132,7 +153,8 @@ pub async fn rotate_key(
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 	let overlap_seconds = request.and_then(|Json(request)| request.overlap_seconds);
-	match GatewayApiKey::rotate(&state.db, &user.id, &id, overlap_seconds).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::rotate(&state.db, actor, &id, overlap_seconds).await {
 		Ok((key, previous, token)) => token_response(
 			StatusCode::CREATED,
 			GatewayKeyRotationResponse {
@@ -152,7 +174,8 @@ pub async fn get_limits(State(state): State<Arc<JobState>>, Extension(RequestCon
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match GatewayApiKey::list_rules(&state.db, &user.id, &id).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::list_rules(&state.db, actor, &id).await {
 		Ok(rules) => json_response(StatusCode::OK, rules),
 		Err(error) => failure(&error),
 	}
@@ -168,7 +191,8 @@ pub async fn set_limits(
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match GatewayApiKey::replace_rules(&state.db, &user.id, &id, &request.rules).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::replace_rules(&state.db, actor, &id, &request.rules).await {
 		Ok(rules) => json_response(StatusCode::OK, rules),
 		Err(error) => failure(&error),
 	}
@@ -179,7 +203,8 @@ pub async fn clear_limits(State(state): State<Arc<JobState>>, Extension(RequestC
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match GatewayApiKey::replace_rules(&state.db, &user.id, &id, &[]).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::replace_rules(&state.db, actor, &id, &[]).await {
 		Ok(rules) => json_response(StatusCode::OK, rules),
 		Err(error) => failure(&error),
 	}
@@ -190,7 +215,8 @@ pub async fn get_budget(State(state): State<Arc<JobState>>, Extension(RequestCon
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match GatewayApiKey::budget(&state.db, &user.id, &id).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::budget(&state.db, actor, &id).await {
 		Ok(budget) => json_response(StatusCode::OK, budget),
 		Err(error) => failure(&error),
 	}
@@ -206,7 +232,8 @@ pub async fn set_budget(
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match GatewayApiKey::replace_budget(&state.db, &user.id, &id, &request).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::replace_budget(&state.db, actor, &id, &request).await {
 		Ok(budget) => json_response(StatusCode::OK, budget),
 		Err(error) => failure(&error),
 	}
@@ -217,7 +244,8 @@ pub async fn clear_budget(State(state): State<Arc<JobState>>, Extension(RequestC
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match GatewayApiKey::clear_budget(&state.db, &user.id, &id).await {
+	let actor = key_actor(&state, &user).await;
+	match GatewayApiKey::clear_budget(&state.db, actor, &id).await {
 		Ok(()) => json_response(StatusCode::OK, Option::<()>::None),
 		Err(error) => failure(&error),
 	}

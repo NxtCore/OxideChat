@@ -65,7 +65,7 @@
 							<p class="text-foreground">{{ apiKey.name }}</p>
 							<p class="font-mono text-xs text-muted-foreground">{{ apiKey.key_prefix }}…{{ apiKey.last_four }}</p>
 						</td>
-						<td class="px-4 py-3 text-muted-foreground">{{ apiKey.owner_username }}</td>
+						<td class="px-4 py-3 text-muted-foreground">{{ apiKey.owner_username ?? store.getTranslation('developer.service.badge') }}</td>
 						<td class="px-4 py-3 text-muted-foreground">{{ apiKey.team_name }}</td>
 						<td class="px-4 py-3">
 							<ShadBadge :variant="apiKey.status === 'active' ? 'default' : apiKey.status === 'revoked' ? 'destructive' : 'secondary'">

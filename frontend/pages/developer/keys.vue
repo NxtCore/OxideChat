@@ -95,6 +95,8 @@
 			</li>
 		</ul>
 
+		<DeveloperTeamKeys v-if="developer.managedTeams.length" />
+
 		<DeveloperCreateKeyDialog v-model:open="createOpen" @created="onCreated" />
 		<DeveloperRotateKeyDialog :open="!!rotateTarget" :api-key="rotateTarget" @update:open="rotateTarget = null" @rotated="onRotated" />
 		<DeveloperKeyLimitsDialog :open="!!limitsTarget" :api-key="limitsTarget" @update:open="limitsTarget = null" />

@@ -33,6 +33,7 @@ mod support {
 			scopes: vec!["inference:read".to_string()],
 			expires_at: None,
 			max_concurrent_requests: None,
+			service_account: false,
 		};
 		Ok(GatewayApiKey::create(pool, &user_id, &request).await?)
 	}

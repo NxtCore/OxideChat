@@ -298,7 +298,9 @@ fn request_metadata(run: &GatewayRun<'_>, inference: &GatewayInference) -> SkinR
 	if let Some(budget_id) = inference.budget_reservation_id() {
 		metadata.insert(BUDGET_RESERVATION_METADATA_KEY.to_string(), budget_id.to_string());
 	}
-	metadata.insert("oxide_user_id".to_string(), scope.context.user_id.to_string());
+	if let Some(user_id) = scope.context.user_id {
+		metadata.insert("oxide_user_id".to_string(), user_id.to_string());
+	}
 	metadata.insert("oxide_api_key_id".to_string(), scope.context.key_id.to_string());
 	metadata.insert("oxide_model_id".to_string(), inference.model_id.to_string());
 	metadata.insert(PUBLIC_MODEL_METADATA_KEY.to_string(), inference.public_model_id.clone());

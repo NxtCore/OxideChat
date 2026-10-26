@@ -156,7 +156,7 @@ impl ImageGenExecutor {
 		if let Err(error) = UsageEvent::record(
 			db,
 			UsageEventRecord {
-				user_id: &user_id,
+				user_id: Some(&user_id),
 				team_id,
 				api_key_id: None,
 				model_id: &model.id,

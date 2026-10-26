@@ -87,7 +87,7 @@ impl From<GatewayModel> for OpenAIModel {
 #[derive(Debug, sqlx::FromRow)]
 pub struct GatewayCredential {
 	pub key_id: Uuid,
-	pub user_id: Uuid,
+	pub user_id: Option<Uuid>,
 	pub team_id: Uuid,
 	pub secret_hash: String,
 	pub scopes: Json<Vec<String>>,
@@ -107,7 +107,7 @@ pub struct GatewayCredential {
 #[derive(Clone, Debug)]
 pub struct GatewayAuthContext {
 	pub key_id: Uuid,
-	pub user_id: Uuid,
+	pub user_id: Option<Uuid>,
 	pub team_id: Uuid,
 	pub scopes: Vec<String>,
 	pub policy: Arc<GatewayRatePolicy>,
@@ -133,7 +133,7 @@ impl GatewayAuthContext {
 	#[must_use]
 	/// The identity whose budgets apply to this key's requests.
 	pub fn budget_subject(&self) -> BudgetSubject {
-		BudgetSubject::user_key(self.user_id, self.key_id)
+		self.user_id.map_or_else(|| BudgetSubject::service_key(self.team_id, self.key_id), |user_id| BudgetSubject::user_key(user_id, self.key_id))
 	}
 
 	#[must_use]

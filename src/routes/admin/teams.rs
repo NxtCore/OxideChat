@@ -1,5 +1,5 @@
 use crate::types::consts::{ADMIN_TEAMS_EDIT, ADMIN_TEAMS_VIEW};
-use crate::types::{CreateTeamRequest, JobState, ListTeamsQuery, RequestContext, Team, UpdateTeamBudgetRequest, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest};
+use crate::types::{CreateTeamRequest, JobState, ListTeamsQuery, RequestContext, Team, UpdateTeamBudgetRequest, UpdateTeamMemberRoleRequest, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -248,6 +248,45 @@ pub async fn update_team_budget(
 		},
 		Err(e) => {
 			eprintln!("[TEAMS] Failed to update team budget: {e}");
+			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+		}
+	}
+}
+
+pub async fn set_team_member_role(
+	State(state): State<Arc<JobState>>,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
+	Path((id, user_id)): Path<(Uuid, Uuid)>,
+	Json(req): Json<UpdateTeamMemberRoleRequest>,
+) -> impl IntoResponse {
+	let Some(user) = current_user else {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	};
+
+	if !user.has_permission(&state.db, ADMIN_TEAMS_EDIT).await {
+		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	}
+
+	let team = match Team::find_by_id(&state.db, &id).await {
+		Ok(Some(team)) => team,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[TEAMS] Failed to fetch team for role update: {e}");
+			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+		}
+	};
+
+	match team.set_member_role(&state.db, &user.id, &user_id, req.role).await {
+		Ok(true) => match team.detailed_response(&state.db).await {
+			Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),
+			Err(e) => {
+				eprintln!("[TEAMS] Failed to build role response: {e}");
+				ErrorBuilder::new(ErrorCode::DatabaseError).build()
+			}
+		},
+		Ok(false) => ErrorBuilder::new(ErrorCode::NotFound).build(),
+		Err(e) => {
+			eprintln!("[TEAMS] Failed to update team member role: {e}");
 			ErrorBuilder::new(ErrorCode::DatabaseError).build()
 		}
 	}

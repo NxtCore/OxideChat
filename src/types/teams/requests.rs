@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer};
+use super::TeamRole;
 use uuid::Uuid;
 
 fn deserialize_nullable_field<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -49,4 +50,9 @@ pub struct UpdateTeamModelsRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateTeamBudgetRequest {
 	pub budget_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateTeamMemberRoleRequest {
+	pub role: TeamRole,
 }

@@ -18,10 +18,11 @@ const EVICTION_INTERVAL: Duration = Duration::from_secs(60);
 // Request Types
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-/// Who a request is spending for; a missing user is reserved for service-account keys.
+/// Who a request is spending for; a missing user is a service-account key, which also carries its team.
 pub struct BudgetSubject {
 	pub user_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
+	pub service_team_id: Option<Uuid>,
 }
 
 impl BudgetSubject {
@@ -31,6 +32,7 @@ impl BudgetSubject {
 		Self {
 			user_id: Some(user_id),
 			api_key_id: None,
+			service_team_id: None,
 		}
 	}
 
@@ -40,15 +42,27 @@ impl BudgetSubject {
 		Self {
 			user_id: Some(user_id),
 			api_key_id: Some(api_key_id),
+			service_team_id: None,
 		}
 	}
 
 	#[must_use]
-	/// A request made by a key that has no owning user.
+	/// Only the budgets assigned to one key.
 	pub fn key(api_key_id: Uuid) -> Self {
 		Self {
 			user_id: None,
 			api_key_id: Some(api_key_id),
+			service_team_id: None,
+		}
+	}
+
+	#[must_use]
+	/// A request made by a service-account key: its own budgets and its team's pooled budgets.
+	pub fn service_key(team_id: Uuid, api_key_id: Uuid) -> Self {
+		Self {
+			user_id: None,
+			api_key_id: Some(api_key_id),
+			service_team_id: Some(team_id),
 		}
 	}
 }

@@ -29,6 +29,8 @@ pub struct CreateGatewayKeyRequest {
 	pub scopes: Vec<String>,
 	pub expires_at: Option<DateTime<Utc>>,
 	pub max_concurrent_requests: Option<i32>,
+	#[serde(default)]
+	pub service_account: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -80,6 +82,8 @@ pub struct GatewayKeyResponse {
 	pub id: Uuid,
 	pub name: String,
 	pub team_id: Uuid,
+	pub user_id: Option<Uuid>,
+	pub service_account: bool,
 	pub key_prefix: String,
 	pub last_four: String,
 	pub scopes: Vec<String>,
@@ -90,6 +94,29 @@ pub struct GatewayKeyResponse {
 	pub last_used_at: Option<DateTime<Utc>>,
 	pub max_concurrent_requests: Option<i32>,
 	pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+/// A key of a team the caller administers, with its owner and team names.
+pub struct GatewayTeamKeyResponse {
+	#[serde(flatten)]
+	pub key: GatewayKeyResponse,
+	pub team_name: String,
+	pub owner_username: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+/// A team the caller can issue service-account keys for.
+pub struct GatewayManagedTeamResponse {
+	pub id: Uuid,
+	pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+/// The teams the caller administers and every key pinned to them.
+pub struct GatewayTeamKeysResponse {
+	pub teams: Vec<GatewayManagedTeamResponse>,
+	pub keys: Vec<GatewayTeamKeyResponse>,
 }
 
 #[derive(Debug, Serialize)]
@@ -162,6 +189,7 @@ pub struct GatewayApiKey {
 	pub id: Uuid,
 	pub name: String,
 	pub team_id: Uuid,
+	pub user_id: Option<Uuid>,
 	pub key_prefix: String,
 	pub last_four: String,
 	pub scopes: Json<Vec<String>>,
@@ -182,6 +210,8 @@ impl GatewayApiKey {
 			id: self.id,
 			name: self.name.clone(),
 			team_id: self.team_id,
+			user_id: self.user_id,
+			service_account: self.user_id.is_none(),
 			key_prefix: self.key_prefix.clone(),
 			last_four: self.last_four.clone(),
 			scopes: self.scopes.0.clone(),
@@ -193,6 +223,48 @@ impl GatewayApiKey {
 			max_concurrent_requests: self.max_concurrent_requests,
 			created_at: self.created_at,
 		}
+	}
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct GatewayTeamKeyRow {
+	#[sqlx(flatten)]
+	pub key: GatewayApiKey,
+	pub team_name: String,
+	pub owner_username: Option<String>,
+}
+
+impl GatewayTeamKeyRow {
+	pub(super) fn to_response(&self) -> GatewayTeamKeyResponse {
+		GatewayTeamKeyResponse {
+			key: self.key.to_response(),
+			team_name: self.team_name.clone(),
+			owner_username: self.owner_username.clone(),
+		}
+	}
+}
+
+#[derive(Clone, Copy, Debug)]
+/// The user managing keys and whether they act as an installation administrator.
+pub struct KeyActor {
+	pub user_id: Uuid,
+	pub installation_admin: bool,
+}
+
+impl KeyActor {
+	#[must_use]
+	/// Builds an actor from a user id and their key administration permission.
+	pub fn new(user_id: &Uuid, installation_admin: bool) -> Self {
+		Self {
+			user_id: *user_id,
+			installation_admin,
+		}
+	}
+}
+
+impl From<&Uuid> for KeyActor {
+	fn from(user_id: &Uuid) -> Self {
+		Self::new(user_id, false)
 	}
 }
 
@@ -248,6 +320,9 @@ pub enum GatewayKeyError {
 	/// The caller is not a member of the requested team.
 	#[error("gateway_key_team_forbidden")]
 	TeamForbidden,
+	/// The caller is not allowed to manage service-account keys of the team.
+	#[error("gateway_key_service_account_forbidden")]
+	ServiceAccountForbidden,
 	/// The name is empty or too long.
 	#[error("gateway_key_name_invalid")]
 	InvalidName,
