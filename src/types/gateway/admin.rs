@@ -118,6 +118,7 @@ impl GatewayAdminRequestQuery {
 			provider: RequestLogFilter::text(self.provider.as_deref()),
 			from: self.from,
 			to: self.to,
+			service_accounts_only: false,
 		}
 	}
 }

@@ -19,7 +19,21 @@
 
 		<div class="space-y-3 rounded-lg border border-border bg-card p-4">
 			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-				<div class="space-y-1.5">
+				<div v-if="developer.managedTeams.length" class="space-y-1.5">
+					<ShadLabel>{{ store.getTranslation('developer.logs.scope') }}</ShadLabel>
+					<ShadSelect v-model="scopeFilter" @update:model-value="changeScope">
+						<ShadSelectTrigger class="w-full">
+							<ShadSelectValue />
+						</ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem value="mine">{{ store.getTranslation('developer.logs.scope_mine') }}</ShadSelectItem>
+							<ShadSelectItem v-for="team in developer.managedTeams" :key="team.id" :value="team.id">
+								{{ store.getTranslation('developer.logs.scope_service', {team: team.name}) }}
+							</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+				</div>
+				<div v-if="!serviceScope" class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.logs.team') }}</ShadLabel>
 					<ShadSelect v-model="teamFilter" @update:model-value="reload">
 						<ShadSelectTrigger class="w-full">
@@ -39,7 +53,7 @@
 						</ShadSelectTrigger>
 						<ShadSelectContent>
 							<ShadSelectItem value="all">{{ store.getTranslation('developer.logs.all_keys') }}</ShadSelectItem>
-							<ShadSelectItem v-for="apiKey in developer.keys" :key="apiKey.id" :value="apiKey.id">{{ apiKey.name }}</ShadSelectItem>
+							<ShadSelectItem v-for="apiKey in keyOptions" :key="apiKey.id" :value="apiKey.id">{{ apiKey.name }}</ShadSelectItem>
 						</ShadSelectContent>
 					</ShadSelect>
 				</div>
@@ -205,6 +219,7 @@ import type {DeveloperRequestLog, RequestLogErrorCategory, RequestLogFilters, Re
 const store = useMainStore();
 const developer = useDeveloperStore();
 
+const scopeFilter = ref('mine');
 const teamFilter = ref('all');
 const keyFilter = ref('all');
 const statusFilter = ref('all');
@@ -222,9 +237,22 @@ const exporting = ref(false);
 const retentionDays = ref('30');
 const retentionOptions = [7, 14, 30, 90, 365];
 
+const serviceScope = computed(() => scopeFilter.value !== 'mine');
+
+const keyOptions = computed(() =>
+	serviceScope.value ? developer.teamKeys.filter(key => key.team_id === scopeFilter.value && key.owner_username === null) : developer.keys,
+);
+
+function changeScope() {
+	keyFilter.value = 'all';
+	teamFilter.value = 'all';
+	reload();
+}
+
 function filters(): RequestLogFilters {
 	return {
-		team_id: teamFilter.value === 'all' ? null : teamFilter.value,
+		scope: serviceScope.value ? 'team_service' : null,
+		team_id: serviceScope.value ? scopeFilter.value : teamFilter.value === 'all' ? null : teamFilter.value,
 		api_key_id: keyFilter.value === 'all' ? null : keyFilter.value,
 		status: statusFilter.value === 'all' ? null : (statusFilter.value as RequestLogStatus),
 		error_category: categoryFilter.value === 'all' ? null : (categoryFilter.value as RequestLogErrorCategory),
@@ -236,7 +264,7 @@ function filters(): RequestLogFilters {
 }
 
 function keyName(id: string | null): string {
-	return (id && developer.keys.find(key => key.id === id)?.name) || '–';
+	return (id && (developer.keys.find(key => key.id === id) ?? developer.teamKeys.find(key => key.id === id))?.name) || '–';
 }
 
 async function copyRequestId(id: string) {

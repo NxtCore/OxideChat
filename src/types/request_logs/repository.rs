@@ -1,8 +1,9 @@
 use super::{
+	REQUEST_LOG_SCOPE_TEAM_SERVICE, RequestLogQuery, RequestLogScopeError,
 	DEFAULT_REQUEST_LOG_RETENTION_DAYS, REQUEST_LOG_EXPORT_LIMIT, RequestLog, RequestLogAbort, RequestLogErrorCategory, RequestLogFailure, RequestLogFilter, RequestLogRecord, RequestLogResponse, RequestLogStatus,
 	RequestLogSummary, RequestLogTrace,
 };
-use crate::types::{BaseType, axum::PaginatedResponse};
+use crate::types::{BaseType, Team, axum::PaginatedResponse};
 use chrono::Utc;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
@@ -159,6 +160,7 @@ impl RequestLog {
 			  AND ($7::text IS NULL OR LOWER(provider) = LOWER($7))
 			  AND ($8::timestamptz IS NULL OR created_at >= $8)
 			  AND ($9::timestamptz IS NULL OR created_at <= $9)
+			  AND (NOT $10::bool OR user_id IS NULL)
 			"#,
 			),
 			&filter,
@@ -266,6 +268,28 @@ impl RequestLogAbort {
 	}
 }
 
+impl RequestLogQuery {
+	/// Resolves the filter for the caller, checking team administration for the service scope.
+	///
+	/// # Errors
+	///
+	/// Returns `RequestLogScopeError::Forbidden` when the caller may not read the requested scope
+	/// and `RequestLogScopeError::Database` when membership cannot be checked.
+	pub async fn scoped_filter(&self, pool: &PgPool, user_id: &Uuid, installation_admin: bool) -> Result<RequestLogFilter, RequestLogScopeError> {
+		if self.scope.as_deref() != Some(REQUEST_LOG_SCOPE_TEAM_SERVICE) {
+			return Ok(self.filter(*user_id));
+		}
+		let team_id = self.team_id.ok_or(RequestLogScopeError::Forbidden)?;
+		if !installation_admin && !Team::is_admin(pool, &team_id, user_id).await? {
+			return Err(RequestLogScopeError::Forbidden);
+		}
+		let mut filter = self.filter(*user_id);
+		filter.user_id = None;
+		filter.service_accounts_only = true;
+		Ok(filter)
+	}
+}
+
 impl RequestLog {
 	const SELECT: &str = r#"
 		SELECT id, user_id, team_id, api_key_id, model_id, public_model_id, request_type, status, status_code,
@@ -281,8 +305,9 @@ impl RequestLog {
 		  AND ($7::text IS NULL OR LOWER(provider) = LOWER($7))
 		  AND ($8::timestamptz IS NULL OR created_at >= $8)
 		  AND ($9::timestamptz IS NULL OR created_at <= $9)
+		  AND (NOT $10::bool OR user_id IS NULL)
 		ORDER BY created_at DESC
-		LIMIT $10 OFFSET $11
+		LIMIT $11 OFFSET $12
 		"#;
 
 	fn bind_filter<'q, O>(
@@ -299,5 +324,6 @@ impl RequestLog {
 			.bind(filter.provider.as_deref())
 			.bind(filter.from)
 			.bind(filter.to)
+			.bind(filter.service_accounts_only)
 	}
 }
