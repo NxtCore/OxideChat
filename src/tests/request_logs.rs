@@ -1120,3 +1120,121 @@ mod unlogged_failures {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod service_scope {
+	use super::support::{TestResult, create_team, create_user};
+	use crate::types::{RequestLog, RequestLogQuery, RequestLogRecord, RequestLogScopeError, RequestLogStatus};
+	use rust_decimal::Decimal;
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	fn record(user_id: Option<Uuid>, team_id: Uuid, model: &str) -> RequestLogRecord<'_> {
+		RequestLogRecord {
+			user_id,
+			team_id: Some(team_id),
+			api_key_id: None,
+			model_id: None,
+			public_model_id: model,
+			request_type: "gateway.chat",
+			status: RequestLogStatus::Success,
+			status_code: None,
+			input_tokens: 1,
+			output_tokens: 1,
+			reasoning_tokens: 0,
+			cost_total: Decimal::ZERO,
+			request_id: None,
+			provider: None,
+			error_category: None,
+			streaming: false,
+			latency_ms: None,
+		}
+	}
+
+	fn query(scope: Option<&str>, team_id: Option<Uuid>) -> RequestLogQuery {
+		RequestLogQuery {
+			scope: scope.map(str::to_owned),
+			team_id,
+			api_key_id: None,
+			status: None,
+			error_category: None,
+			model: None,
+			provider: None,
+			from: None,
+			to: None,
+			page: None,
+			limit: None,
+		}
+	}
+
+	async fn make_admin(pool: &PgPool, team_id: Uuid, user_id: Uuid) -> TestResult {
+		sqlx::query("UPDATE team_members SET role = 'admin' WHERE team_id = $1 AND user_id = $2")
+			.bind(team_id)
+			.bind(user_id)
+			.execute(pool)
+			.await?;
+		Ok(())
+	}
+
+	async fn add_member(pool: &PgPool, team_id: Uuid, user_id: Uuid) -> TestResult {
+		sqlx::query("INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)").bind(team_id).bind(user_id).execute(pool).await?;
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn admin_sees_only_service_rows_of_their_team(pool: PgPool) -> TestResult {
+		let admin_id = create_user(&pool).await?;
+		let member_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, admin_id).await?;
+		add_member(&pool, team_id, member_id).await?;
+		make_admin(&pool, team_id, admin_id).await?;
+		let other_team = create_team(&pool, member_id).await?;
+		RequestLog::record(&pool, record(None, team_id, "service/model")).await?;
+		RequestLog::record(&pool, record(Some(member_id), team_id, "member/model")).await?;
+		RequestLog::record(&pool, record(Some(admin_id), team_id, "admin/model")).await?;
+		RequestLog::record(&pool, record(None, other_team, "other/model")).await?;
+
+		let filter = query(Some("team_service"), Some(team_id)).scoped_filter(&pool, &admin_id, false).await?;
+		let items = RequestLog::list(&pool, filter.clone(), 1, 50).await?.items;
+		assert_eq!(items.len(), 1);
+		assert_eq!(items[0].public_model_id, "service/model");
+		assert_eq!(RequestLog::list_for_export(&pool, filter.clone()).await?.len(), 1);
+		assert_eq!(RequestLog::summary(&pool, filter).await?.total_requests, 1);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn member_and_outsider_are_forbidden(pool: PgPool) -> TestResult {
+		let admin_id = create_user(&pool).await?;
+		let member_id = create_user(&pool).await?;
+		let outsider_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, admin_id).await?;
+		add_member(&pool, team_id, member_id).await?;
+		make_admin(&pool, team_id, admin_id).await?;
+		let scoped = query(Some("team_service"), Some(team_id));
+		assert!(matches!(scoped.scoped_filter(&pool, &member_id, false).await, Err(RequestLogScopeError::Forbidden)));
+		assert!(matches!(scoped.scoped_filter(&pool, &outsider_id, false).await, Err(RequestLogScopeError::Forbidden)));
+		assert!(scoped.scoped_filter(&pool, &outsider_id, true).await.is_ok());
+		assert!(matches!(query(Some("team_service"), None).scoped_filter(&pool, &admin_id, false).await, Err(RequestLogScopeError::Forbidden)));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn mine_scope_is_unchanged(pool: PgPool) -> TestResult {
+		let admin_id = create_user(&pool).await?;
+		let member_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, admin_id).await?;
+		add_member(&pool, team_id, member_id).await?;
+		make_admin(&pool, team_id, admin_id).await?;
+		RequestLog::record(&pool, record(None, team_id, "service/model")).await?;
+		RequestLog::record(&pool, record(Some(member_id), team_id, "member/model")).await?;
+		RequestLog::record(&pool, record(Some(admin_id), team_id, "admin/model")).await?;
+		for scope in [None, Some("mine")] {
+			let filter = query(scope, None).scoped_filter(&pool, &admin_id, false).await?;
+			let items = RequestLog::list(&pool, filter, 1, 50).await?.items;
+			assert_eq!(items.len(), 1);
+			assert_eq!(items[0].public_model_id, "admin/model");
+		}
+		Ok(())
+	}
+}

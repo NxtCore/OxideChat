@@ -1,6 +1,6 @@
 use crate::types::{
 	CreateGatewayKeyRequest, GatewayApiKey, GatewayKeyError, GatewayKeyRotationResponse, GatewayKeyTokenResponse, GatewayTeamKeysResponse, GatewayTeamResponse, JobState, KeyActor, User, MAX_REQUEST_LOG_RETENTION_DAYS, RequestContext,
-	RequestLog, RequestLogQuery, RequestLogRetentionResponse, RotateGatewayKeyRequest, SetGatewayKeyBudgetRequest, SetGatewayKeyLimitsRequest, SetRequestLogRetentionRequest,
+	RequestLog, RequestLogFilter, RequestLogQuery, RequestLogScopeError, RequestLogRetentionResponse, RotateGatewayKeyRequest, SetGatewayKeyBudgetRequest, SetGatewayKeyLimitsRequest, SetRequestLogRetentionRequest,
 	UpdateGatewayKeyRequest,
 };
 use crate::types::consts::ADMIN_DEVELOPER_KEYS_EDIT;
@@ -36,6 +36,18 @@ fn error_code(error: &GatewayKeyError) -> ErrorCode {
 
 async fn key_actor(state: &JobState, user: &User) -> KeyActor {
 	KeyActor::new(&user.id, user.has_permission(&state.db, ADMIN_DEVELOPER_KEYS_EDIT).await)
+}
+
+async fn request_log_filter(state: &JobState, user: &User, params: &RequestLogQuery) -> Result<RequestLogFilter, Response> {
+	let installation_admin = user.has_permission(&state.db, ADMIN_DEVELOPER_KEYS_EDIT).await;
+	match params.scoped_filter(&state.db, &user.id, installation_admin).await {
+		Ok(filter) => Ok(filter),
+		Err(RequestLogScopeError::Forbidden) => Err(ErrorBuilder::new(ErrorCode::ApiKeyTeamForbidden).build()),
+		Err(RequestLogScopeError::Database(error)) => {
+			tracing::error!(%error, "failed to resolve request log scope");
+			Err(ErrorBuilder::new(ErrorCode::DatabaseError).build())
+		}
+	}
 }
 
 fn failure(error: &GatewayKeyError) -> Response {
@@ -260,7 +272,10 @@ pub async fn list_request_logs(
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	let filter = params.filter(user.id);
+	let filter = match request_log_filter(&state, &user, &params).await {
+		Ok(filter) => filter,
+		Err(response) => return response,
+	};
 	match RequestLog::list(&state.db, filter, params.page.unwrap_or(1), params.limit.unwrap_or(50)).await {
 		Ok(logs) => json_response(StatusCode::OK, logs),
 		Err(error) => {
@@ -279,7 +294,11 @@ pub async fn export_request_logs(
 	let Some(user) = user else {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
-	match RequestLog::list_for_export(&state.db, params.filter(user.id)).await {
+	let filter = match request_log_filter(&state, &user, &params).await {
+		Ok(filter) => filter,
+		Err(response) => return response,
+	};
+	match RequestLog::list_for_export(&state.db, filter).await {
 		Ok(logs) => json_response(StatusCode::OK, logs),
 		Err(error) => {
 			tracing::error!(%error, "failed to export request logs");

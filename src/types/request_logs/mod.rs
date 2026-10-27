@@ -211,6 +211,16 @@ pub struct RequestLogRecord<'a> {
 	pub latency_ms: Option<i32>,
 }
 
+pub const REQUEST_LOG_SCOPE_TEAM_SERVICE: &str = "team_service";
+
+#[derive(Debug, thiserror::Error)]
+pub enum RequestLogScopeError {
+	#[error("request log scope is forbidden")]
+	Forbidden,
+	#[error(transparent)]
+	Database(#[from] sqlx::Error),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RequestLogFilter {
 	pub user_id: Option<Uuid>,
@@ -222,6 +232,7 @@ pub struct RequestLogFilter {
 	pub provider: Option<String>,
 	pub from: Option<DateTime<Utc>>,
 	pub to: Option<DateTime<Utc>>,
+	pub service_accounts_only: bool,
 }
 
 impl RequestLogFilter {
@@ -236,6 +247,7 @@ impl RequestLogFilter {
 
 #[derive(Debug, Deserialize)]
 pub struct RequestLogQuery {
+	pub scope: Option<String>,
 	pub team_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
 	pub status: Option<String>,
@@ -267,6 +279,7 @@ impl RequestLogQuery {
 			provider: RequestLogFilter::text(self.provider.as_deref()),
 			from: self.from,
 			to: self.to,
+			service_accounts_only: false,
 		}
 	}
 }

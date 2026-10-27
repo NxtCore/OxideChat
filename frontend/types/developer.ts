@@ -97,6 +97,7 @@ export interface DeveloperRequestLog {
 }
 
 export interface RequestLogFilters {
+	scope: 'team_service' | null;
 	team_id: string | null;
 	api_key_id: string | null;
 	status: RequestLogStatus | null;
