@@ -71,7 +71,7 @@ mod support {
 	}
 
 	pub async fn events_for(pool: &PgPool, target_id: Uuid) -> TestResult<Vec<String>> {
-		Ok(sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_id = $1 ORDER BY created_at, id").bind(target_id).fetch_all(pool).await?)
+		Ok(sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_id = $1 ORDER BY xmin::text::bigint, id").bind(target_id).fetch_all(pool).await?)
 	}
 
 	pub async fn personal_key(pool: &PgPool, user_id: Uuid, team_id: Uuid) -> TestResult<Uuid> {

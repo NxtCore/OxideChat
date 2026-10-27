@@ -39,7 +39,7 @@ mod support {
 	}
 
 	pub async fn events_for(pool: &PgPool, target_id: Uuid) -> TestResult<Vec<String>> {
-		Ok(sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_id = $1 ORDER BY created_at, id").bind(target_id).fetch_all(pool).await?)
+		Ok(sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_id = $1 ORDER BY xmin::text::bigint, id").bind(target_id).fetch_all(pool).await?)
 	}
 
 	pub fn limits(rules: Vec<GatewayKeyRuleRequest>, max_concurrent_requests: Option<i32>) -> SetGatewayTeamLimitsRequest {
@@ -285,7 +285,7 @@ mod teams {
 		assert_eq!(context.policy.team_rules.len(), 1);
 		let cleared = GatewayAdminTeamResponse::replace_limits(&pool, &admin, &team, &limits(Vec::new(), None)).await?;
 		assert!(cleared.rules.is_empty() && cleared.max_concurrent_requests.is_none());
-		let metadata: serde_json::Value = sqlx::query_scalar("SELECT metadata FROM audit_logs WHERE target_id = $1 ORDER BY created_at DESC, id LIMIT 1").bind(team).fetch_one(&pool).await?;
+		let metadata: serde_json::Value = sqlx::query_scalar("SELECT metadata FROM audit_logs WHERE target_id = $1 ORDER BY xmin::text::bigint DESC, id LIMIT 1").bind(team).fetch_one(&pool).await?;
 		assert_eq!(metadata["before"]["max_concurrent_requests"], 4);
 		assert_eq!(metadata["reason"], "capacity");
 		assert_eq!(events_for(&pool, team).await?, vec!["gateway_team_limits_updated", "gateway_team_limits_updated"]);

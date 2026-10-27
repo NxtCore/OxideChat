@@ -48,7 +48,7 @@ mod support {
 
 	pub async fn audit_events(pool: &PgPool, key_id: Uuid) -> TestResult<Vec<String>> {
 		Ok(
-			sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_type = 'gateway_api_key' AND target_id = $1 ORDER BY created_at, id")
+			sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_type = 'gateway_api_key' AND target_id = $1 ORDER BY xmin::text::bigint, id")
 				.bind(key_id)
 				.fetch_all(pool)
 				.await?,
