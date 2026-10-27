@@ -632,7 +632,10 @@ const byDayModel = computed(() => {
 	if (props.isAdmin) return budgetStore.analytics.byDayModel;
 	return budgetStore.myAnalytics.byDayModel;
 });
-const byUser = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byUser : []);
+const byUser = computed(() => {
+	if (!props.isAdmin || selectedUserId.value) return [];
+	return budgetStore.analytics.byUser.map(row => (row.id === null ? {...row, label: store.getTranslation('settings.analytics.service_accounts')} : row));
+});
 const byTeam = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byTeam : []);
 const byApiKey = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byApiKey : []);
 
