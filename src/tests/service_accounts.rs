@@ -521,7 +521,10 @@ mod usage {
 		assert_eq!(by_team.len(), 1);
 		assert_eq!(by_team[0].request_count, 1);
 		let by_user = UsageEvent::analytics(&pool, None, None, "user", team_filter).await?;
-		assert!(by_user.is_empty());
+		assert_eq!(by_user.len(), 1);
+		assert_eq!(by_user[0].id, None);
+		assert_eq!(by_user[0].request_count, 1);
+		assert_eq!(by_user[0].cost_total, by_team[0].cost_total);
 		let by_key = UsageEvent::api_key_analytics(&pool, None, None, team_filter).await?;
 		assert_eq!(by_key.len(), 1);
 		assert_eq!(by_key[0].id, Some(key.id));
@@ -530,6 +533,19 @@ mod usage {
 			..UsageFilter::default()
 		};
 		assert!(UsageEvent::analytics(&pool, None, None, "model", for_user).await?.is_empty());
+		assert!(UsageEvent::analytics(&pool, None, None, "user", for_user).await?.is_empty());
+		let mut personal = metadata(&setup, None, true);
+		personal.insert("oxide_user_id".to_string(), setup.admin_id.to_string());
+		record(&pool, &personal).await;
+		let by_user = UsageEvent::analytics(&pool, None, None, "user", team_filter).await?;
+		let by_team = UsageEvent::analytics(&pool, None, None, "team", team_filter).await?;
+		assert_eq!(by_user.len(), 2);
+		assert_eq!(by_user.iter().filter(|row| row.id.is_none()).count(), 1);
+		assert_eq!(by_user.iter().map(|row| row.request_count).sum::<i64>(), by_team[0].request_count);
+		assert_eq!(by_user.iter().map(|row| row.cost_total).sum::<rust_decimal::Decimal>(), by_team[0].cost_total);
+		let only_admin = UsageEvent::analytics(&pool, None, None, "user", for_user).await?;
+		assert_eq!(only_admin.len(), 1);
+		assert_eq!(only_admin[0].id, Some(setup.admin_id));
 		Ok(())
 	}
 }

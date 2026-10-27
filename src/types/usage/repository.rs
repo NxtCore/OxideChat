@@ -145,14 +145,14 @@ impl UsageEvent {
 	async fn by_user(pool: &PgPool, start: DateTime<Utc>, end: DateTime<Utc>, filter: UsageFilter) -> Result<Vec<AnalyticsRow>, sqlx::Error> {
 		sqlx::query_as::<_, AnalyticsRow>(
 			r#"
-			SELECT u.id, COALESCE(u.username, u.email) AS label,
+			SELECT u.id, COALESCE(u.username, u.email, '') AS label,
 			       COALESCE(SUM(ue.input_tokens), 0)::bigint AS input_tokens,
 			       COALESCE(SUM(ue.output_tokens), 0)::bigint AS output_tokens,
 			       COALESCE(SUM(ue.reasoning_tokens), 0)::bigint AS reasoning_tokens,
 			       COALESCE(SUM(ue.cost_total), 0)::numeric AS cost_total,
 			       COUNT(*)::bigint AS request_count
 			FROM usage_events ue
-			JOIN users u ON u.id = ue.user_id
+			LEFT JOIN users u ON u.id = ue.user_id
 			WHERE ue.created_at >= $1 AND ue.created_at <= $2
 			  AND ($3::uuid IS NULL OR ue.user_id = $3)
 			  AND ($4::uuid IS NULL OR ue.team_id = $4)
