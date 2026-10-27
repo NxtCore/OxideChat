@@ -556,7 +556,7 @@ mod team_budget_audit {
 	use uuid::Uuid;
 
 	async fn team_events(pool: &PgPool, team_id: Uuid) -> TestResult<Vec<(String, Option<Uuid>, serde_json::Value)>> {
-		Ok(sqlx::query_as("SELECT event, actor_id, metadata FROM audit_logs WHERE target_id = $1 ORDER BY created_at, id")
+		Ok(sqlx::query_as("SELECT event, actor_id, metadata FROM audit_logs WHERE target_id = $1 ORDER BY xmin::text::bigint, id")
 			.bind(team_id)
 			.fetch_all(pool)
 			.await?)
