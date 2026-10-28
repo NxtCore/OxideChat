@@ -428,7 +428,7 @@ mod usage {
 	use crate::types::*;
 	use crate::utils::omniference_cost::OxideCostQueue;
 	use omniference::catalog::UsageBreakdown;
-	use omniference::middleware::cost::{CostFinalization, CostSink};
+	use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
 	use omniference::stream::CostDetails;
 	use sqlx::PgPool;
 	use std::collections::BTreeMap;
@@ -464,7 +464,16 @@ mod usage {
 			output_tokens: 4,
 			..Default::default()
 		};
-		queue.record_with_context("Budget Provider", "paid", &cost, CostFinalization::Done, metadata, &usage);
+		queue.record_with_context(&CostRecord {
+			provider: "Budget Provider".to_owned(),
+			model: "paid".to_owned(),
+			cost,
+			finalization: CostFinalization::Done,
+			metadata: metadata.clone(),
+			usage,
+			finish_reason: None,
+			time_to_first_token: None,
+		});
 		queue.shutdown().await;
 	}
 

@@ -76,6 +76,8 @@ mod logs {
 			error_category: None,
 			streaming: false,
 			latency_ms: None,
+			finish_reason: None,
+			time_to_first_token_ms: None,
 		}
 	}
 
@@ -220,6 +222,40 @@ mod logs {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn finish_reason_and_first_token_time_are_stored_listed_and_exported(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let record = RequestLogRecord {
+			finish_reason: Some("tool_calls"),
+			time_to_first_token_ms: Some(250),
+			..success_record(user_id, None, None, "openai/gpt-4o-mini")
+		};
+		let stored = RequestLog::record(&pool, record).await?;
+		assert_eq!(stored.finish_reason.as_deref(), Some("tool_calls"));
+		assert_eq!(stored.time_to_first_token_ms, Some(250));
+		let listed = RequestLog::list(&pool, filter(user_id), 1, 10).await?;
+		assert_eq!(listed.items[0].finish_reason.as_deref(), Some("tool_calls"));
+		assert_eq!(listed.items[0].time_to_first_token_ms, Some(250));
+		let exported = RequestLog::list_for_export(&pool, filter(user_id)).await?;
+		assert_eq!(exported[0].finish_reason.as_deref(), Some("tool_calls"));
+		assert_eq!(exported[0].time_to_first_token_ms, Some(250));
+		let json = serde_json::to_value(&exported[0])?;
+		assert_eq!(json["finish_reason"], "tool_calls");
+		assert_eq!(json["time_to_first_token_ms"], 250);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn unknown_finish_reasons_are_rejected_by_the_database(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let record = RequestLogRecord {
+			finish_reason: Some("bogus"),
+			..success_record(user_id, None, None, "openai/gpt-4o-mini")
+		};
+		assert!(RequestLog::record(&pool, record).await.is_err());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn retention_defaults_and_updates(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;
 		assert_eq!(RequestLog::retention_days(&pool, &user_id).await?, DEFAULT_REQUEST_LOG_RETENTION_DAYS);
@@ -333,6 +369,8 @@ mod categories {
 		let exported = RequestLog::list_for_export(&pool, RequestLogFilter { user_id: Some(user_id), ..RequestLogFilter::default() }).await?;
 		assert_eq!(exported[0].request_id, Some(context.request_id));
 		assert_eq!(exported[0].error_category.as_deref(), Some("rate_limit"));
+		assert_eq!(exported[0].finish_reason, None);
+		assert_eq!(exported[0].time_to_first_token_ms, None);
 		Ok(())
 	}
 
@@ -361,6 +399,8 @@ mod categories {
 			error_category: Some(RequestLogErrorCategory::Upstream),
 			streaming: false,
 			latency_ms: Some(40),
+			finish_reason: None,
+			time_to_first_token_ms: None,
 		};
 		let stored = RequestLog::record(&pool, first).await?;
 		let merged = RequestLog::record_failure(
@@ -379,6 +419,49 @@ mod categories {
 		assert_eq!(merged.provider.as_deref(), Some("provider"));
 		let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gateway_request_logs").fetch_one(&pool).await?;
 		assert_eq!(count, 1);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_repeated_request_id_keeps_finish_reason_and_first_token_time(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, user_id).await?;
+		let api_key_id = create_key(&pool, user_id, team_id).await?;
+		let owner = RequestLogOwner { user_id: Some(user_id), team_id, api_key_id };
+		let context = RequestLogContext::start();
+		let record = RequestLogRecord {
+			user_id: Some(user_id),
+			team_id: Some(team_id),
+			api_key_id: Some(api_key_id),
+			model_id: None,
+			public_model_id: "provider/model",
+			request_type: "gateway.chat",
+			status: RequestLogStatus::Success,
+			status_code: None,
+			input_tokens: 5,
+			output_tokens: 5,
+			reasoning_tokens: 0,
+			cost_total: Decimal::ZERO,
+			request_id: Some(context.request_id),
+			provider: None,
+			error_category: None,
+			streaming: true,
+			latency_ms: Some(300),
+			finish_reason: Some("stop"),
+			time_to_first_token_ms: Some(120),
+		};
+		RequestLog::record(&pool, record).await?;
+		let merged = RequestLog::record_failure(
+			&pool,
+			&trace(context, owner),
+			RequestLogFailure {
+				category: RequestLogErrorCategory::Interrupted,
+				status_code: None,
+			},
+		)
+		.await?;
+		assert_eq!(merged.finish_reason.as_deref(), Some("stop"));
+		assert_eq!(merged.time_to_first_token_ms, Some(120));
 		Ok(())
 	}
 
@@ -407,6 +490,8 @@ mod categories {
 				error_category: None,
 				streaming: false,
 				latency_ms: None,
+				finish_reason: None,
+				time_to_first_token_ms: None,
 			};
 			RequestLog::record(&pool, record).await?;
 		}
@@ -439,8 +524,9 @@ mod finalization {
 	use crate::types::{REQUEST_ID_METADATA_KEY, RequestLog, RequestLogFilter, RequestLogResponse, STARTED_AT_METADATA_KEY, STREAMING_METADATA_KEY};
 	use crate::utils::omniference_cost::OxideCostQueue;
 	use omniference::catalog::UsageBreakdown;
-	use omniference::middleware::cost::{CostFinalization, CostSink};
-	use omniference::stream::CostDetails;
+	use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
+	use omniference::stream::{CostDetails, FinishReason};
+	use std::time::Duration;
 	use sqlx::PgPool;
 	use std::collections::BTreeMap;
 	use uuid::Uuid;
@@ -506,9 +592,22 @@ mod finalization {
 	async fn finalize(pool: &PgPool, setup: &Setup, finalization: CostFinalization) -> TestResult<Uuid> {
 		let request_id = Uuid::new_v4();
 		let queue = OxideCostQueue::spawn(job_state(pool.clone()));
-		queue.record_with_context("Final Provider", "final-model", &cost(), finalization, &metadata(setup, request_id), &usage());
+		queue.record_with_context(&cost_record(setup, request_id, finalization));
 		queue.shutdown().await;
 		Ok(request_id)
+	}
+
+	fn cost_record(setup: &Setup, request_id: Uuid, finalization: CostFinalization) -> CostRecord {
+		CostRecord {
+			provider: "Final Provider".to_owned(),
+			model: "final-model".to_owned(),
+			cost: cost(),
+			finalization,
+			metadata: metadata(setup, request_id),
+			usage: usage(),
+			finish_reason: Some(FinishReason::Length),
+			time_to_first_token: Some(Duration::from_millis(321)),
+		}
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
@@ -526,6 +625,8 @@ mod finalization {
 			assert!(logged[0].streaming);
 			assert!(logged[0].latency_ms.is_some_and(|latency| latency >= 1500));
 			assert_eq!((logged[0].input_tokens, logged[0].output_tokens), (7, 9));
+			assert_eq!(logged[0].finish_reason.as_deref(), Some("length"));
+			assert_eq!(logged[0].time_to_first_token_ms, Some(321));
 		}
 		Ok(())
 	}
@@ -921,6 +1022,8 @@ mod dropped_streams {
 			error_category: category,
 			streaming: true,
 			latency_ms: Some(80),
+			finish_reason: None,
+			time_to_first_token_ms: None,
 		}
 	}
 
@@ -1148,6 +1251,8 @@ mod service_scope {
 			error_category: None,
 			streaming: false,
 			latency_ms: None,
+			finish_reason: None,
+			time_to_first_token_ms: None,
 		}
 	}
 
