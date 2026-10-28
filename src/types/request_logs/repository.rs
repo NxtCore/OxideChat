@@ -273,7 +273,8 @@ impl RequestLogQuery {
 	///
 	/// # Errors
 	///
-	/// Returns `RequestLogScopeError::Forbidden` when the caller may not read the requested scope
+	/// Returns `RequestLogScopeError::Forbidden` when the caller is not a member of the requested team,
+	/// `RequestLogScopeError::AdminRequired` when the caller is a member but not a team admin,
 	/// and `RequestLogScopeError::Database` when membership cannot be checked.
 	pub async fn scoped_filter(&self, pool: &PgPool, user_id: &Uuid, installation_admin: bool) -> Result<RequestLogFilter, RequestLogScopeError> {
 		if self.scope.as_deref() != Some(REQUEST_LOG_SCOPE_TEAM_SERVICE) {
@@ -281,7 +282,11 @@ impl RequestLogQuery {
 		}
 		let team_id = self.team_id.ok_or(RequestLogScopeError::Forbidden)?;
 		if !installation_admin && !Team::is_admin(pool, &team_id, user_id).await? {
-			return Err(RequestLogScopeError::Forbidden);
+			return Err(if Team::is_member(pool, &team_id, user_id).await? {
+				RequestLogScopeError::AdminRequired
+			} else {
+				RequestLogScopeError::Forbidden
+			});
 		}
 		let mut filter = self.filter(*user_id);
 		filter.user_id = None;

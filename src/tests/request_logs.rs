@@ -1212,7 +1212,7 @@ mod service_scope {
 		add_member(&pool, team_id, member_id).await?;
 		make_admin(&pool, team_id, admin_id).await?;
 		let scoped = query(Some("team_service"), Some(team_id));
-		assert!(matches!(scoped.scoped_filter(&pool, &member_id, false).await, Err(RequestLogScopeError::Forbidden)));
+		assert!(matches!(scoped.scoped_filter(&pool, &member_id, false).await, Err(RequestLogScopeError::AdminRequired)));
 		assert!(matches!(scoped.scoped_filter(&pool, &outsider_id, false).await, Err(RequestLogScopeError::Forbidden)));
 		assert!(scoped.scoped_filter(&pool, &outsider_id, true).await.is_ok());
 		assert!(matches!(query(Some("team_service"), None).scoped_filter(&pool, &admin_id, false).await, Err(RequestLogScopeError::Forbidden)));

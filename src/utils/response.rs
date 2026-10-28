@@ -233,6 +233,7 @@ pub enum ErrorCode {
 	InsufficientPermissions,
 	AccountDisabled,
 	ApiKeyTeamForbidden,
+	ApiKeyTeamAdminRequired,
 	ApiKeyServiceAccountForbidden,
 
 	// 404 Not Found
@@ -310,7 +311,7 @@ impl ErrorCode {
 			| Self::OAuthStateMismatch
 			| Self::OAuthTokenError
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
-			Self::Forbidden | Self::InsufficientPermissions | Self::AccountDisabled | Self::ApiKeyTeamForbidden | Self::ApiKeyServiceAccountForbidden => StatusCode::FORBIDDEN,
+			Self::Forbidden | Self::InsufficientPermissions | Self::AccountDisabled | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden => StatusCode::FORBIDDEN,
 			Self::NotFound | Self::UserNotFound | Self::ResourceNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
 			Self::Conflict | Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::OAuthEmailConflict | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled => StatusCode::CONFLICT,
 			Self::UnprocessableEntity => StatusCode::UNPROCESSABLE_ENTITY,
@@ -367,6 +368,7 @@ impl ErrorCode {
 			Self::InsufficientPermissions => "errors.insufficient_permissions",
 			Self::AccountDisabled => "auth.errors.account_disabled",
 			Self::ApiKeyTeamForbidden => "developer.errors.team_forbidden",
+			Self::ApiKeyTeamAdminRequired => "developer.errors.team_admin_required",
 			Self::ApiKeyServiceAccountForbidden => "developer.errors.service_account_forbidden",
 
 			Self::NotFound => "errors.not_found",
@@ -441,6 +443,7 @@ impl ErrorCode {
 			Self::InsufficientPermissions => "insufficient_permissions",
 			Self::AccountDisabled => "account_disabled",
 			Self::ApiKeyTeamForbidden => "api_key_team_forbidden",
+			Self::ApiKeyTeamAdminRequired => "api_key_team_admin_required",
 			Self::ApiKeyServiceAccountForbidden => "api_key_service_account_forbidden",
 
 			Self::NotFound => "not_found",

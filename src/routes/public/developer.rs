@@ -43,6 +43,7 @@ async fn request_log_filter(state: &JobState, user: &User, params: &RequestLogQu
 	match params.scoped_filter(&state.db, &user.id, installation_admin).await {
 		Ok(filter) => Ok(filter),
 		Err(RequestLogScopeError::Forbidden) => Err(ErrorBuilder::new(ErrorCode::ApiKeyTeamForbidden).build()),
+		Err(RequestLogScopeError::AdminRequired) => Err(ErrorBuilder::new(ErrorCode::ApiKeyTeamAdminRequired).build()),
 		Err(RequestLogScopeError::Database(error)) => {
 			tracing::error!(%error, "failed to resolve request log scope");
 			Err(ErrorBuilder::new(ErrorCode::DatabaseError).build())
