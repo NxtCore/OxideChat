@@ -244,6 +244,19 @@ impl Team {
 		Ok(())
 	}
 
+	/// Tells whether the user is a member of the team.
+	///
+	/// # Errors
+	///
+	/// Returns an error when membership cannot be queried.
+	pub async fn is_member<'e, E: sqlx::PgExecutor<'e>>(executor: E, team_id: &Uuid, user_id: &Uuid) -> Result<bool, sqlx::Error> {
+		sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM team_members WHERE team_id = $1 AND user_id = $2)")
+			.bind(team_id)
+			.bind(user_id)
+			.fetch_one(executor)
+			.await
+	}
+
 	/// Tells whether the user holds the admin role in the team.
 	///
 	/// # Errors

@@ -34,7 +34,7 @@
 					</nav>
 				</aside>
 
-				<main class="col-span-3 flex-1">
+				<main class="col-span-3 min-w-0 flex-1">
 					<div class="animate-in fade-in slide-in-from-bottom-2 duration-300">
 						<NuxtPage />
 					</div>

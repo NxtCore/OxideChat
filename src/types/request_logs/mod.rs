@@ -217,6 +217,8 @@ pub const REQUEST_LOG_SCOPE_TEAM_SERVICE: &str = "team_service";
 pub enum RequestLogScopeError {
 	#[error("request log scope is forbidden")]
 	Forbidden,
+	#[error("request log scope requires team admin")]
+	AdminRequired,
 	#[error(transparent)]
 	Database(#[from] sqlx::Error),
 }
