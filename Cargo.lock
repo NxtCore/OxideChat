@@ -2168,9 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "omniference"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dbf12dc683632c1b0352b9cd257a3a0d8b38b7ca8521152f17d3e9fd1d2b1f3"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2187,6 +2185,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",

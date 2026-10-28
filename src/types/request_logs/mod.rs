@@ -189,6 +189,8 @@ pub struct RequestLog {
 	pub error_category: Option<String>,
 	pub streaming: bool,
 	pub latency_ms: Option<i32>,
+	pub finish_reason: Option<String>,
+	pub time_to_first_token_ms: Option<i32>,
 }
 
 pub struct RequestLogRecord<'a> {
@@ -209,6 +211,8 @@ pub struct RequestLogRecord<'a> {
 	pub error_category: Option<RequestLogErrorCategory>,
 	pub streaming: bool,
 	pub latency_ms: Option<i32>,
+	pub finish_reason: Option<&'a str>,
+	pub time_to_first_token_ms: Option<i32>,
 }
 
 pub const REQUEST_LOG_SCOPE_TEAM_SERVICE: &str = "team_service";
@@ -310,6 +314,8 @@ pub struct RequestLogResponse {
 	pub error_category: Option<String>,
 	pub streaming: bool,
 	pub latency_ms: Option<i32>,
+	pub finish_reason: Option<String>,
+	pub time_to_first_token_ms: Option<i32>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -354,6 +360,8 @@ impl RequestLog {
 			error_category: self.error_category.clone(),
 			streaming: self.streaming,
 			latency_ms: self.latency_ms,
+			finish_reason: self.finish_reason.clone(),
+			time_to_first_token_ms: self.time_to_first_token_ms,
 		}
 	}
 }

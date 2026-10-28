@@ -94,6 +94,8 @@ export interface DeveloperRequestLog {
 	error_category: RequestLogErrorCategory | null;
 	streaming: boolean;
 	latency_ms: number | null;
+	finish_reason: string | null;
+	time_to_first_token_ms: number | null;
 }
 
 export interface RequestLogFilters {

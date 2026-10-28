@@ -6,7 +6,7 @@ use crate::types::{
 use chrono::{DateTime, Utc};
 use omniference::catalog::UsageBreakdown;
 use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
-use omniference::stream::CostDetails;
+use omniference::stream::{CostDetails, FinishReason};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use std::collections::BTreeMap;
@@ -99,6 +99,8 @@ impl OxideCostSink {
 				error_category,
 				streaming: record.metadata.get(STREAMING_METADATA_KEY).is_some_and(|value| value == "true"),
 				latency_ms: latency_ms(record, finished_at),
+				finish_reason: record.finish_reason.map(FinishReason::as_str),
+				time_to_first_token_ms: record.time_to_first_token.map(|duration| i32::try_from(duration.as_millis()).unwrap_or(i32::MAX)),
 			},
 		)
 		.await?;
@@ -205,42 +207,24 @@ impl CostSink for OxideCostQueue {
 	}
 
 	fn record(&self, provider: &str, model: &str, cost: &CostDetails, finalization: CostFinalization) {
-		self.record_with_context(provider, model, cost, finalization, &BTreeMap::new(), &UsageBreakdown::default());
-	}
-
-	fn record_with_context(
-		&self,
-		provider: &str,
-		model: &str,
-		cost: &CostDetails,
-		finalization: CostFinalization,
-		metadata: &BTreeMap<String, String>,
-		usage: &UsageBreakdown,
-	) {
 		self.queue_record(CostRecord {
 			provider: provider.to_string(),
 			model: model.to_string(),
 			cost: cost.clone(),
 			finalization,
-			metadata: metadata.clone(),
-			usage: usage.clone(),
+			metadata: BTreeMap::new(),
+			usage: UsageBreakdown::default(),
+			finish_reason: None,
+			time_to_first_token: None,
 		});
 	}
 
-	fn record_usage(&self, provider: &str, model: &str, finalization: CostFinalization, metadata: &BTreeMap<String, String>, usage: &UsageBreakdown) {
-		self.record_with_context(
-			provider,
-			model,
-			&CostDetails {
-				total: 0.0,
-				prompt: None,
-				completion: None,
-				reasoning: None,
-			},
-			finalization,
-			metadata,
-			usage,
-		);
+	fn record_with_context(&self, record: &CostRecord) {
+		self.queue_record(record.clone());
+	}
+
+	fn record_usage(&self, record: &CostRecord) {
+		self.queue_record(record.clone());
 	}
 }
 

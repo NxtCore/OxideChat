@@ -139,7 +139,7 @@
 		</div>
 
 		<div v-else class="overflow-x-auto rounded-lg border border-border bg-card">
-			<table class="w-full min-w-[1100px] text-sm">
+			<table class="w-full min-w-[1250px] text-sm">
 				<thead>
 					<tr class="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
 						<th class="px-4 py-3 font-medium">{{ store.getTranslation('developer.logs.time') }}</th>
@@ -149,6 +149,7 @@
 						<th class="px-4 py-3 font-medium">{{ store.getTranslation('developer.logs.api_key') }}</th>
 						<th class="px-4 py-3 font-medium">{{ store.getTranslation('developer.logs.status') }}</th>
 						<th class="px-4 py-3 text-right font-medium">{{ store.getTranslation('developer.logs.latency') }}</th>
+						<th class="px-4 py-3 text-right font-medium">{{ store.getTranslation('developer.logs.ttft') }}</th>
 						<th class="px-4 py-3 text-right font-medium">{{ store.getTranslation('developer.logs.tokens') }}</th>
 						<th class="px-4 py-3 text-right font-medium">{{ store.getTranslation('developer.logs.cost') }}</th>
 					</tr>
@@ -186,8 +187,12 @@
 								{{ log.status_code ? log.status_code : store.getTranslation(`developer.logs.status_${log.status}`) }}
 							</span>
 							<p v-if="log.error_category" class="mt-1 text-xs text-muted-foreground">{{ store.getTranslation(`developer.logs.category_${log.error_category}`) }}</p>
+							<p v-else-if="log.finish_reason" class="mt-1 text-xs text-muted-foreground" :title="store.getTranslation('developer.logs.finish_reason')">
+								{{ store.getTranslation(`developer.logs.finish_${log.finish_reason}`) }}
+							</p>
 						</td>
 						<td class="whitespace-nowrap px-4 py-3 text-right tabular-nums text-muted-foreground">{{ formatLatency(log.latency_ms) }}</td>
+						<td class="whitespace-nowrap px-4 py-3 text-right tabular-nums text-muted-foreground">{{ formatLatency(log.time_to_first_token_ms) }}</td>
 						<td class="whitespace-nowrap px-4 py-3 text-right tabular-nums text-muted-foreground">
 							{{ log.input_tokens.toLocaleString() }} / {{ log.output_tokens.toLocaleString() }}
 						</td>
