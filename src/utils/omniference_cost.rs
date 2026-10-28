@@ -79,6 +79,7 @@ impl OxideCostSink {
 		};
 		UsageEvent::record(&self.state.db, usage).await?;
 		let (status, error_category) = request_outcome(record.finalization);
+		let streaming = record.metadata.get(STREAMING_METADATA_KEY).is_some_and(|value| value == "true");
 		RequestLog::record(
 			&self.state.db,
 			RequestLogRecord {
@@ -97,10 +98,13 @@ impl OxideCostSink {
 				request_id: metadata_uuid(record, REQUEST_ID_METADATA_KEY),
 				provider: Some(record.provider.as_str()),
 				error_category,
-				streaming: record.metadata.get(STREAMING_METADATA_KEY).is_some_and(|value| value == "true"),
+				streaming,
 				latency_ms: latency_ms(record, finished_at),
 				finish_reason: record.finish_reason.map(FinishReason::as_str),
-				time_to_first_token_ms: record.time_to_first_token.map(|duration| i32::try_from(duration.as_millis()).unwrap_or(i32::MAX)),
+				time_to_first_token_ms: record
+					.time_to_first_token
+					.filter(|_| streaming)
+					.map(|duration| i32::try_from(duration.as_millis()).unwrap_or(i32::MAX)),
 			},
 		)
 		.await?;

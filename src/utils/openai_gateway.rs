@@ -130,9 +130,9 @@ pub async fn run_responses(request: OpenAIResponsesRequestPayload, inference: Ga
 	inference.finish(response, &run.scope)
 }
 
-/// Records every upstream server failure as a request log row.
+/// Records every failed upstream response, including passed-through client errors, as a request log row.
 async fn log_upstream_failure(scope: &GatewayRequestScope<'_>, inference: &GatewayInference, status: StatusCode) {
-	if !status.is_server_error() {
+	if !status.is_client_error() && !status.is_server_error() {
 		return;
 	}
 	let context = scope.context;

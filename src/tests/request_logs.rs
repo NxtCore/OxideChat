@@ -632,6 +632,22 @@ mod finalization {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn non_streaming_requests_have_no_time_to_first_token(pool: PgPool) -> TestResult {
+		let setup = setup(&pool).await?;
+		let mut record = cost_record(&setup, Uuid::new_v4(), CostFinalization::Done);
+		record.metadata.insert(STREAMING_METADATA_KEY.to_string(), "false".to_string());
+		let queue = OxideCostQueue::spawn(job_state(pool.clone()));
+		queue.record_with_context(&record);
+		queue.shutdown().await;
+		let logged = rows(&pool, setup.user_id).await?;
+		assert_eq!(logged.len(), 1);
+		assert!(!logged[0].streaming);
+		assert_eq!(logged[0].finish_reason.as_deref(), Some("length"));
+		assert_eq!(logged[0].time_to_first_token_ms, None);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn dropped_and_unfinished_streams_are_interrupted(pool: PgPool) -> TestResult {
 		let setup = setup(&pool).await?;
 		for finalization in [CostFinalization::Dropped, CostFinalization::EndOfStream] {
