@@ -1,0 +1,85 @@
+name: E2E
+
+on:
+    push:
+        branches: [master]
+    pull_request:
+        branches: [master]
+    workflow_dispatch:
+
+concurrency:
+    group: e2e-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    e2e:
+        name: Playwright
+        runs-on: ubuntu-24.04
+        timeout-minutes: 45
+        services:
+            postgres:
+                image: postgres:17
+                env:
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: postgres
+                    POSTGRES_DB: oxidechat
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd "pg_isready -U postgres -d oxidechat"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+        env:
+            DATABASE_URL: postgres://postgres:postgres@localhost:5432/oxidechat
+            E2E_PG_HOST: 127.0.0.1
+            E2E_PG_PORT: 5432
+            E2E_PG_USER: postgres
+            E2E_PG_PASSWORD: postgres
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Cache cargo
+              uses: Swatinem/rust-cache@v2
+
+            - name: Install SQLx CLI
+              run: cargo install sqlx-cli --no-default-features --features postgres --locked
+
+            - name: Run migrations
+              run: sqlx migrate run
+
+            - name: Build backend
+              run: cargo build
+
+            - name: Install Bun
+              uses: oven-sh/setup-bun@v2
+
+            - name: Install frontend dependencies
+              working-directory: frontend
+              run: bun install --frozen-lockfile
+
+            - name: Install e2e dependencies
+              working-directory: e2e
+              run: bun install
+
+            - name: Install Playwright browser
+              working-directory: e2e
+              run: bunx playwright install --with-deps chromium
+
+            - name: Run e2e tests
+              working-directory: e2e
+              run: bunx playwright test
+
+            - name: Upload Playwright report
+              if: ${{ !cancelled() }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: playwright-report
+                  path: |
+                      e2e/playwright-report/
+                      e2e/test-results/
+                  retention-days: 14
