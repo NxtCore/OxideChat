@@ -258,6 +258,14 @@ pub async fn upload_wasm(State(state): State<Arc<JobState>>, Extension(RequestCo
 		}
 	};
 
+	if blob.len() > 4 * 1024 * 1024 {
+		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+	}
+
+	if blob.first_chunk::<4>() != Some(&[0x00, 0x61, 0x73, 0x6D]) {
+		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+	}
+
 	let extension = req.filename.split('.').last().unwrap_or("");
 	let compiled_from = match extension {
 		"wasm" => "wasm",

@@ -7,13 +7,15 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::lookup_host;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+
+use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
 use super::executor::{ToolContext, ToolError, ToolExecutor};
 
@@ -231,6 +233,9 @@ fn is_public_ipv4(ip: Ipv4Addr) -> bool {
 }
 
 fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+	if let Some(mapped) = ip.to_ipv4_mapped() {
+		return is_public_ipv4(mapped);
+	}
 	!(ip.is_loopback()
 		|| ip.is_unspecified()
 		|| ip.is_unique_local()
@@ -238,6 +243,34 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
 		|| ip.segments()[0] & 0xffc0 == 0xfe80
 		|| ip.segments()[0] & 0xff00 == 0xff00
 		|| (ip.segments()[0] == 0x2001 && ip.segments()[1] == 0x0db8))
+}
+
+struct PublicIpOnlyResolver;
+
+impl Resolve for PublicIpOnlyResolver {
+	fn resolve(&self, name: Name) -> Resolving {
+		let host = name.as_str().to_string();
+		Box::pin(async move {
+			let addrs = tokio::net::lookup_host(host.as_str())
+				.await
+				.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+			let filtered: Vec<SocketAddr> = addrs.filter(|addr| is_public_ip(addr.ip())).collect();
+			if filtered.is_empty() {
+				return Err(format!("host {host} resolved only to restricted network addresses").into());
+			}
+			let addrs: Addrs = Box::new(filtered.into_iter());
+			Ok(addrs)
+		})
+	}
+}
+
+fn public_only_http_client() -> Result<reqwest::Client, ToolError> {
+	reqwest::Client::builder()
+		.timeout(std::time::Duration::from_secs(30))
+		.redirect(reqwest::redirect::Policy::none())
+		.dns_resolver(Arc::new(PublicIpOnlyResolver))
+		.build()
+		.map_err(|e| ToolError::McpError(format!("Failed to create HTTP client: {e}")))
 }
 
 /// Streamable HTTP transport (MCP 2025-03-26+).
@@ -258,11 +291,14 @@ struct StreamableHttpTransport {
 impl StreamableHttpTransport {
 	pub fn new(url: String, headers: HashMap<String, String>, url_policy: McpUrlPolicy) -> Result<Self, ToolError> {
 		parse_remote_mcp_url(&url, url_policy)?;
-		let client = reqwest::Client::builder()
-			.timeout(std::time::Duration::from_secs(30))
-			.redirect(reqwest::redirect::Policy::none())
-			.build()
-			.map_err(|e| ToolError::McpError(format!("Failed to create HTTP client: {e}")))?;
+		let client = match url_policy {
+			McpUrlPolicy::PublicOnly => public_only_http_client()?,
+			McpUrlPolicy::TrustedAdmin => reqwest::Client::builder()
+				.timeout(std::time::Duration::from_secs(30))
+				.redirect(reqwest::redirect::Policy::none())
+				.build()
+				.map_err(|e| ToolError::McpError(format!("Failed to create HTTP client: {e}")))?,
+		};
 
 		Ok(Self {
 			url,
@@ -612,5 +648,121 @@ impl McpConnectionPool {
 			}
 		}
 		closed
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
+		IpAddr::V4(Ipv4Addr::new(a, b, c, d))
+	}
+
+	#[test]
+	fn restricted_hostnames_are_rejected() {
+		for host in [
+			"localhost",
+			"LOCALHOST",
+			"foo.localhost",
+			"printer.local",
+			"metadata.internal",
+			"localhost.",
+			"foo.Local.",
+		] {
+			assert!(is_restricted_hostname(host), "expected {host} to be restricted");
+		}
+		for host in ["example.com", "localhost.example.com", "localfoo", "internal.example.org"] {
+			assert!(!is_restricted_hostname(host), "expected {host} to be allowed");
+		}
+	}
+
+	#[test]
+	fn restricted_hostnames_rejected_at_parse() {
+		for url in [
+			"http://localhost/mcp",
+			"http://foo.localhost/mcp",
+			"http://printer.local/mcp",
+			"http://metadata.internal/mcp",
+		] {
+			assert!(parse_remote_mcp_url(url, McpUrlPolicy::PublicOnly).is_err(), "expected {url} to be rejected");
+		}
+		assert!(parse_remote_mcp_url("https://example.com/mcp", McpUrlPolicy::PublicOnly).is_ok());
+	}
+
+	#[test]
+	fn non_public_ipv4_addresses_are_rejected() {
+		for ip in [
+			v4(127, 0, 0, 1),
+			v4(127, 1, 2, 3),
+			v4(0, 0, 0, 0),
+			v4(0, 1, 2, 3),
+			v4(169, 254, 169, 254),
+			v4(100, 64, 0, 1),
+			v4(100, 127, 255, 255),
+			v4(10, 0, 0, 1),
+			v4(192, 168, 1, 1),
+			v4(172, 16, 0, 1),
+			v4(224, 0, 0, 1),
+			v4(255, 255, 255, 255),
+			v4(192, 0, 2, 1),
+			v4(198, 51, 100, 1),
+			v4(203, 0, 113, 1),
+		] {
+			assert!(!is_public_ip(ip), "expected {ip} to be rejected");
+		}
+	}
+
+	#[test]
+	fn non_public_ipv6_addresses_are_rejected() {
+		let cases = [
+			"::1",
+			"::",
+			"::ffff:127.0.0.1",
+			"::ffff:10.0.0.1",
+			"::ffff:169.254.169.254",
+			"::ffff:0.0.0.0",
+			"fd00::1",
+			"fe80::1",
+			"ff02::1",
+			"2001:db8::1",
+		];
+		for case in cases {
+			let ip = IpAddr::V6(case.parse::<Ipv6Addr>().unwrap());
+			assert!(!is_public_ip(ip), "expected {case} to be rejected");
+		}
+	}
+
+	#[test]
+	fn ipv4_mapped_ipv6_delegates_to_ipv4_check() {
+		let loopback_mapped: Ipv6Addr = "::ffff:127.0.0.1".parse().unwrap();
+		assert!(!is_public_ipv6(loopback_mapped));
+		let public_mapped: Ipv6Addr = "::ffff:8.8.8.8".parse().unwrap();
+		assert!(is_public_ipv6(public_mapped));
+	}
+
+	#[test]
+	fn public_addresses_are_accepted() {
+		for ip in [v4(8, 8, 8, 8), v4(1, 1, 1, 1), v4(100, 128, 0, 1)] {
+			assert!(is_public_ip(ip), "expected {ip} to be accepted");
+		}
+		let v6: IpAddr = IpAddr::V6("2606:4700:4700::1111".parse().unwrap());
+		assert!(is_public_ip(v6));
+	}
+
+	#[test]
+	fn numeric_ipv4_host_forms_parse_to_ip_hosts() {
+		for url in ["http://2130706433/mcp", "http://0x7f000001/mcp", "http://127.1/mcp"] {
+			let parsed = reqwest::Url::parse(url).unwrap();
+			assert!(parsed.host_str().is_some_and(|h| h.parse::<IpAddr>().is_ok()), "expected {url} to normalize to an IP host");
+		}
+	}
+
+	#[test]
+	fn ip_literal_host_passes_parse_but_fails_public_ip_check() {
+		let parsed = parse_remote_mcp_url("http://169.254.169.254/latest/meta-data", McpUrlPolicy::PublicOnly).unwrap();
+		let host = parsed.host_str().unwrap();
+		let ip: IpAddr = host.parse().unwrap();
+		assert!(!is_public_ip(ip));
 	}
 }

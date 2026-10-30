@@ -7,7 +7,7 @@ use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::JobState;
 use crate::types::User;
 use crate::types::oauth::{OAuthCallbackParams, OAuthState, OAuthUserInfo};
-use crate::utils::auth::create_session;
+use crate::utils::auth::{cookie_secure_from_env, create_session};
 use crate::utils::oauth::{self, OAuthError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use axum::extract::{Path, Query, State};
@@ -74,7 +74,7 @@ pub async fn oauth_init(Path(provider): Path<String>, cookies: Cookies) -> Respo
 
 	let mut cookie = Cookie::new(OAUTH_STATE_COOKIE, state_json);
 	cookie.set_http_only(true);
-	cookie.set_secure(true);
+	cookie.set_secure(cookie_secure_from_env());
 	cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
 	cookie.set_path("/");
 	cookie.set_max_age(tower_cookies::cookie::time::Duration::minutes(10));
@@ -152,6 +152,12 @@ pub async fn oauth_callback(Path(provider): Path<String>, Query(params): Query<O
 	// Validate that email is provided by OAuth provider
 	if user_info.email.is_none() {
 		eprintln!("[OAUTH] OAuth provider did not return an email address");
+		AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
+		return ErrorBuilder::new(ErrorCode::OAuthUserInfoError).build();
+	}
+
+	if user_info.email_verified == Some(false) {
+		eprintln!("[OAUTH] OAuth provider returned an unverified email address");
 		AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
 		return ErrorBuilder::new(ErrorCode::OAuthUserInfoError).build();
 	}

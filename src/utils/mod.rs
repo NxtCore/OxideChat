@@ -2,6 +2,7 @@ pub mod auth;
 pub mod encryption;
 pub mod gateway_limits;
 pub mod images;
+pub mod login_limit;
 pub mod oauth;
 pub mod omniference_cost;
 pub mod openai_gateway;

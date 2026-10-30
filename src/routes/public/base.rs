@@ -4,9 +4,9 @@
 
 use crate::i18n::I18n;
 use crate::types::JobState;
-use crate::types::{BaseResponse, User};
+use crate::types::{BaseResponse, RequestContext, User};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use axum::extract::State;
+use axum::extract::{Extension, State};
 use axum::response::IntoResponse;
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ pub async fn health() -> impl IntoResponse {
 /// # Errors
 ///
 /// Returns 500 if the database query fails.
-pub async fn get_base(State(state): State<Arc<JobState>>) -> impl IntoResponse {
+pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestContext { user }): Extension<RequestContext>) -> impl IntoResponse {
 	let i18n = I18n::get().all();
 
 	// Check if any users exist (needs_setup = true if no users)
@@ -37,10 +37,13 @@ pub async fn get_base(State(state): State<Arc<JobState>>) -> impl IntoResponse {
 		}
 	};
 
-	let roles = crate::types::Role::list_all(&state.db).await.unwrap_or_else(|e| {
-		eprintln!("[BASE] Failed to list roles: {e}");
-		vec![]
-	});
+	let roles = match user {
+		Some(_) => crate::types::Role::list_all(&state.db).await.unwrap_or_else(|e| {
+			eprintln!("[BASE] Failed to list roles: {e}");
+			vec![]
+		}),
+		None => vec![],
+	};
 
 	ResponseBuilder::new(ResponseBody::Json(BaseResponse {
 		i18n,

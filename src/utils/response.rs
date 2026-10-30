@@ -129,19 +129,6 @@ impl<T: Serialize> ResponseBuilder<T> {
 		Ok(self)
 	}
 
-	/// Set permissive CORS headers (allow all origins, methods, headers).
-	#[must_use]
-	pub fn cors_permissive(mut self) -> Self {
-		self.headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
-		self.headers.insert(
-			header::ACCESS_CONTROL_ALLOW_METHODS,
-			HeaderValue::from_static("GET, POST, PUT, DELETE, PATCH, OPTIONS"),
-		);
-		self.headers
-			.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("Content-Type, Authorization"));
-		self
-	}
-
 	/// Add common security headers.
 	#[must_use]
 	pub fn security_headers(mut self) -> Self {

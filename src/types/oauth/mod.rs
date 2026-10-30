@@ -16,6 +16,7 @@ pub struct OAuthUserInfo {
 	pub provider: String,
 	pub provider_user_id: String,
 	pub email: Option<String>,
+	pub email_verified: Option<bool>,
 	pub username: Option<String>,
 	pub avatar_url: Option<String>,
 	pub raw_data: serde_json::Value,
@@ -23,8 +24,10 @@ pub struct OAuthUserInfo {
 
 #[derive(Debug, Deserialize)]
 pub struct GoogleUserInfo {
-	pub id: String,
+	#[serde(alias = "id")]
+	pub sub: String,
 	pub email: String,
+	pub email_verified: Option<bool>,
 	pub name: Option<String>,
 	pub picture: Option<String>,
 }
@@ -33,11 +36,12 @@ impl From<GoogleUserInfo> for OAuthUserInfo {
 	fn from(g: GoogleUserInfo) -> Self {
 		Self {
 			provider: "google".to_string(),
-			provider_user_id: g.id.clone(),
+			provider_user_id: g.sub.clone(),
 			email: Some(g.email),
+			email_verified: g.email_verified,
 			username: g.name,
 			avatar_url: g.picture,
-			raw_data: serde_json::json!({ "id": g.id }),
+			raw_data: serde_json::json!({ "sub": g.sub }),
 		}
 	}
 }
@@ -46,6 +50,7 @@ impl From<GoogleUserInfo> for OAuthUserInfo {
 pub struct DiscordUserInfo {
 	pub id: String,
 	pub email: String,
+	pub verified: Option<bool>,
 	pub username: String,
 	pub avatar: Option<String>,
 }
@@ -60,6 +65,7 @@ impl From<DiscordUserInfo> for OAuthUserInfo {
 			provider: "discord".to_string(),
 			provider_user_id: d.id.clone(),
 			email: Some(d.email),
+			email_verified: d.verified,
 			username: Some(d.username),
 			avatar_url,
 			raw_data: serde_json::json!({ "id": d.id }),

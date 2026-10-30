@@ -6,6 +6,10 @@ export default defineNuxtConfig({
 	devtools: {enabled: true},
 	modules: ['@pinia/nuxt', 'floating-vue/nuxt', '@nuxt/devtools', 'shadcn-nuxt', 'vue-sonner/nuxt', 'nuxt-charts', 'nuxt-shiki'],
 	plugins: ['plugins/fetch.ts'],
+	runtimeConfig: {
+		baseURL: '',
+		public: {baseURL: ''},
+	},
 	vite: {
 		server: {
 			allowedHosts: ['.local'],

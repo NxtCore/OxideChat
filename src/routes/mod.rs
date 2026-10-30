@@ -6,6 +6,7 @@ pub mod public;
 use crate::types::JobState;
 use axum::{
 	Router,
+	extract::DefaultBodyLimit,
 	middleware::{from_fn, from_fn_with_state},
 	routing::{delete, get, patch, post, put},
 };
@@ -30,6 +31,14 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.method_not_allowed_fallback(public::openai::method_not_allowed)
 		.fallback(public::openai::not_found)
 		.layer(from_fn(crate::utils::openai_gateway::add_request_id));
+	let auth_router = Router::new()
+		.route("/setup", post(public::auth::setup))
+		.route("/register", post(public::auth::register))
+		.route("/login", post(public::auth::login))
+		.route("/logout", post(public::auth::logout))
+		.route("/oauth/{provider}", get(public::oauth::oauth_init))
+		.route("/oauth/{provider}/callback", get(public::oauth::oauth_callback))
+		.layer(DefaultBodyLimit::max(64 * 1024));
 	Router::new()
 		.nest("/openai/v1", openai_router)
 		.route("/api/v1/health", get(public::base::health))
@@ -137,12 +146,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		// Public Config
 		.route("/api/v1/config", get(admin::config::get_global_config))
 		// Auth
-		.route("/api/v1/auth/setup", post(public::auth::setup))
-		.route("/api/v1/auth/register", post(public::auth::register))
-		.route("/api/v1/auth/login", post(public::auth::login))
-		.route("/api/v1/auth/logout", post(public::auth::logout))
-		.route("/api/v1/auth/oauth/{provider}", get(public::oauth::oauth_init))
-		.route("/api/v1/auth/oauth/{provider}/callback", get(public::oauth::oauth_callback))
+		.nest("/api/v1/auth", auth_router)
 		// Users
 		.route("/api/v1/users/@me", get(public::users::get_me))
 		.route("/api/v1/me/budget", get(public::users::get_my_budget))
@@ -210,10 +214,12 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 			"/api/v1/developer/request-logs/retention",
 			get(public::developer::get_request_log_retention).put(public::developer::set_request_log_retention),
 		)
-		// Images CDN (public, no auth)
+		// Images CDN
 		.route("/api/v1/images/{id}", get(public::images::serve_image))
 		.route("/api/v1/images", post(public::images::upload_image))
 		.layer(from_fn_with_state(state.clone(), crate::middleware::load_current_user))
 		.layer(CookieManagerLayer::new())
+		.layer(crate::middleware::cors_layer())
+		.layer(from_fn(crate::middleware::security_headers))
 		.with_state(state)
 }

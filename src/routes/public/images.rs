@@ -6,6 +6,7 @@
 
 use crate::types::{JobState, RequestContext, UploadImageRequest, UploadImageResponse};
 use crate::utils::images::{get_image, image_url, safe_image_mime, store_from_data_uri};
+use crate::utils::response::{ErrorBuilder, ErrorCode};
 use axum::{
 	Json,
 	extract::{Extension, Path, State},
@@ -42,11 +43,18 @@ pub async fn upload_image(
 /// Serve an image by ID
 ///
 /// GET /api/v1/images/:id
-pub async fn serve_image(State(state): State<Arc<JobState>>, Path(id): Path<Uuid>) -> Response {
+pub async fn serve_image(
+	State(state): State<Arc<JobState>>,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
+	Path(id): Path<Uuid>,
+) -> Response {
+	if current_user.is_none() {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	}
 	match get_image(&state.db, id).await {
 		Ok(Some((data, mime_type))) => {
 			let mut headers = HeaderMap::new();
-			headers.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("public, max-age=31536000, immutable"));
+			headers.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=3600"));
 			headers.insert(header::X_CONTENT_TYPE_OPTIONS, header::HeaderValue::from_static("nosniff"));
 
 			if let Some(safe_mime) = safe_image_mime(&data, &mime_type) {

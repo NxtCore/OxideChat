@@ -74,6 +74,30 @@ mod tests {
 		}
 	}
 
+	mod cookie_secure {
+		use crate::utils::auth::cookie_secure_for_base_url;
+
+		#[test]
+		fn https_base_url_is_secure() {
+			assert!(cookie_secure_for_base_url("https://chat.example.com"));
+		}
+
+		#[test]
+		fn http_base_url_is_not_secure() {
+			assert!(!cookie_secure_for_base_url("http://localhost:8080"));
+		}
+
+		#[test]
+		fn http_scheme_match_is_case_insensitive() {
+			assert!(!cookie_secure_for_base_url("HTTP://localhost:8080"));
+		}
+
+		#[test]
+		fn missing_scheme_defaults_to_secure() {
+			assert!(cookie_secure_for_base_url("example.com"));
+		}
+	}
+
 	mod password {
 		use argon2::{
 			Argon2,
@@ -106,6 +130,67 @@ mod tests {
 
 			let parsed_hash = PasswordHash::new(&hash_str).unwrap();
 			assert!(argon2.verify_password(wrong_password.as_bytes(), &parsed_hash).is_err());
+		}
+	}
+
+	mod login_limit {
+		use crate::utils::login_limit::LoginRateLimiter;
+		use std::net::{IpAddr, Ipv4Addr};
+		use std::time::Duration;
+
+		const IP_A: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+		const IP_B: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+
+		#[tokio::test(start_paused = true)]
+		async fn failures_up_to_limit_are_allowed_then_rejected() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..10 {
+				assert!(limiter.allow(IP_A, "a@example.com").await);
+				limiter.record_failure(IP_A, "a@example.com");
+			}
+			assert!(!limiter.allow(IP_A, "a@example.com").await);
+			assert!(!limiter.allow(IP_A, "other@example.com").await);
+		}
+
+		#[tokio::test(start_paused = true)]
+		async fn ip_limit_blocks_all_emails_from_that_ip() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..10 {
+				limiter.record_failure(IP_A, "a@example.com");
+			}
+			assert!(!limiter.allow(IP_A, "b@example.com").await);
+			assert!(limiter.allow(IP_B, "b@example.com").await);
+		}
+
+		#[tokio::test(start_paused = true)]
+		async fn email_limit_is_scoped_to_its_own_ip() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..10 {
+				limiter.record_failure(IP_A, "a@example.com");
+			}
+			assert!(!limiter.allow(IP_A, "a@example.com").await);
+			assert!(limiter.allow(IP_B, "a@example.com").await);
+		}
+
+		#[tokio::test(start_paused = true)]
+		async fn failures_expire_after_the_window() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..10 {
+				limiter.record_failure(IP_A, "a@example.com");
+			}
+			assert!(!limiter.allow(IP_A, "a@example.com").await);
+			tokio::time::advance(Duration::from_secs(5 * 60)).await;
+			assert!(limiter.allow(IP_A, "a@example.com").await);
+		}
+
+		#[tokio::test(start_paused = true)]
+		async fn allowed_attempts_do_not_consume_failures() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..20 {
+				assert!(limiter.allow(IP_A, "a@example.com").await);
+			}
+			limiter.record_failure(IP_A, "a@example.com");
+			assert!(limiter.allow(IP_A, "a@example.com").await);
 		}
 	}
 }

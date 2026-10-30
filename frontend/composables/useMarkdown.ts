@@ -237,7 +237,15 @@ export function extractCodeForPreview(element: HTMLElement): {code: string; lang
 }
 
 /**
- * Generate HTML for a preview iframe.
+ * Generate HTML for a code preview.
+ *
+ * Security contract: the returned string embeds untrusted, model-generated
+ * HTML/SVG/JavaScript and must only ever be rendered inside a sandboxed
+ * context with an opaque origin (an iframe with sandbox="allow-scripts"
+ * and no allow-same-origin, or a blob: URL opened in a new tab). It must
+ * never be inserted into the main document (e.g. via v-html) or written
+ * into a same-origin window, otherwise generated scripts could access the
+ * app's origin, cookies, and APIs.
  */
 export function generatePreviewHtml(code: string, language: string): string {
 	if (language === 'html' || language === 'svg') {
