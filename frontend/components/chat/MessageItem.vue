@@ -1,5 +1,5 @@
 <template>
-	<div class="group flex gap-4" :class="isUser ? 'flex-row-reverse' : ''">
+	<div class="group flex gap-4" :class="isUser ? 'flex-row-reverse' : ''" data-testid="message" :data-role="message.role">
 		<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full overflow-hidden bg-muted">
 			<User v-if="isUser" class="h-4 w-4 text-muted-foreground" />
 			<template v-else>

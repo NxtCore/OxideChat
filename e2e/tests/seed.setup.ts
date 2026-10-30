@@ -1,7 +1,8 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {request as playwrightRequest} from '@playwright/test';
 import {test, expect, Api, type Seed} from './support/fixtures';
-import {ADMIN, AUTH_FILES, MEMBER, MOCK_LLM_URL, MOCK_PRICING} from './support/constants';
+import {ADMIN, AUTH_FILES, LLM, MEMBER} from './support/constants';
+import {createSyncedProvider, ensurePricing} from './support/providers';
 
 test.use({storageState: {cookies: [], origins: []}});
 
@@ -23,24 +24,9 @@ test('first-run setup creates the admin and seeds test data', async ({page, t, b
 	const api = new Api(page.request);
 	const me = await api.get('/api/v1/users/@me');
 
-	const provider = await api.post('/api/v1/admin/providers', {
-		kind: 'OPENAI_COMPAT',
-		name: 'Mock',
-		base_url: MOCK_LLM_URL,
-		api_key: 'mock-key',
-	});
-	const sync = await api.post(`/api/v1/admin/providers/${provider.id}/sync`);
-	expect(sync.success, JSON.stringify(sync)).toBe(true);
-
-	const providerModels: any[] = await api.get(`/api/v1/admin/providers/${provider.id}/models`);
-	const models: Seed['models'] = {};
-	for (const model of providerModels) {
-		await api.put(`/api/v1/admin/models/${model.id}/pricing`, {
-			pricing: {input: MOCK_PRICING.input, output: MOCK_PRICING.output, cache_read: null, cache_write: null, reasoning: null, input_audio: null, output_audio: null, tiers: []},
-		});
-		models[String(model.model_id).split('/').pop()!] = {id: model.id, publicId: model.model_id};
-	}
-	expect(Object.keys(models).sort()).toEqual(['mock-chat', 'mock-error', 'mock-slow']);
+	const {providerId, model} = await createSyncedProvider(api, LLM.isMock ? 'Mock' : 'E2E Provider');
+	const pricing = await ensurePricing(api, model.id);
+	expect(pricing.input + pricing.output, 'model pricing').toBeGreaterThan(0);
 
 	const member = await api.post('/api/v1/admin/users', {
 		email: MEMBER.email,
@@ -63,7 +49,7 @@ test('first-run setup creates the admin and seeds test data', async ({page, t, b
 	await memberContext.storageState({path: AUTH_FILES.member});
 	await memberContext.dispose();
 
-	const seed: Seed = {adminId: me.id, memberId: member.id ?? member.user?.id, providerId: provider.id, teamId: team.id ?? team.team?.id, teamName, models};
+	const seed: Seed = {adminId: me.id, memberId: member.id, providerId, teamId: team.id, teamName, model, pricing};
 	writeFileSync(AUTH_FILES.seed, JSON.stringify(seed, null, 2));
-	console.log('[seed]', JSON.stringify(seed));
+	console.log(`[seed] ${LLM.isMock ? 'local mock provider' : `real provider ${LLM.kind} ${LLM.baseUrl}`}, model ${model.publicId}, pricing ${pricing.input}/${pricing.output} per 1M`);
 });

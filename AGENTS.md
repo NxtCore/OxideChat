@@ -108,7 +108,7 @@
 - Clean up test data or use transactions that rollback
 - Test error cases, not just happy paths
 - Use `Result<(), Error>` return type in tests for cleaner error propagation
-- UI end-to-end tests live in `e2e/` (Playwright, run with Bun) against the real backend, an isolated `oxidechat_e2e` database and a fake OpenAI-compatible provider with fixed token usage; see `e2e/README.md`
+- UI end-to-end tests live in `e2e/` (Playwright, run with Bun) against the real backend, an isolated `oxidechat_e2e` database and a real LLM provider with a cheap model (configured in `e2e/.env`; without a key it falls back to a local stand-in); see `e2e/README.md`
 - New UI features get an e2e spec; locate elements through the `t()` fixture (translations) or `data-testid`, never hardcoded English text
 
 ## Frontend

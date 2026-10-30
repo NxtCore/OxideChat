@@ -8,7 +8,8 @@ export type Seed = {
 	providerId: string;
 	teamId: string;
 	teamName: string;
-	models: Record<string, {id: string; publicId: string}>;
+	model: import('./providers').SyncedModel;
+	pricing: import('./cost').Pricing;
 };
 
 type Translator = (key: string, args?: Record<string, string | number>) => string;
@@ -23,7 +24,7 @@ type Fixtures = {
 type WorkerFixtures = {translations: Record<string, unknown>};
 
 export class Api {
-	constructor(private readonly request: APIRequestContext) {}
+	constructor(readonly request: APIRequestContext) {}
 
 	async call<T = any>(method: string, url: string, data?: unknown): Promise<T> {
 		const response = await this.request.fetch(url, {method, data});

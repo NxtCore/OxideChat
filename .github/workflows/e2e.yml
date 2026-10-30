@@ -36,6 +36,10 @@ jobs:
             E2E_PG_PORT: 5432
             E2E_PG_USER: postgres
             E2E_PG_PASSWORD: postgres
+            E2E_LLM_KIND: ${{ vars.E2E_LLM_KIND || 'OPENROUTER' }}
+            E2E_LLM_BASE_URL: ${{ vars.E2E_LLM_BASE_URL || 'https://openrouter.ai/api' }}
+            E2E_LLM_MODEL: ${{ vars.E2E_LLM_MODEL || 'openai/gpt-6-luna' }}
+            E2E_LLM_API_KEY: ${{ secrets.E2E_LLM_API_KEY }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v4

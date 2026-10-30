@@ -86,6 +86,10 @@ const server = http.createServer(async (req, res) => {
 	const url = new URL(req.url, `http://localhost:${port}`);
 	if (req.method === 'GET' && url.pathname === '/health') return sendJson(res, 200, {ok: true});
 
+	if (req.headers.authorization !== 'Bearer mock-key') {
+		return sendJson(res, 401, {error: {message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key'}});
+	}
+
 	if (req.method === 'GET' && url.pathname === '/v1/models') {
 		return sendJson(res, 200, {object: 'list', data: MODELS.map(id => ({id, object: 'model', created: 0, owned_by: 'mock'}))});
 	}
@@ -98,6 +102,9 @@ const server = http.createServer(async (req, res) => {
 			return sendJson(res, 400, {error: {message: 'invalid json', type: 'invalid_request_error'}});
 		}
 		const model = body.model ?? 'mock-chat';
+		if (typeof body.temperature === 'number' && (body.temperature < 0 || body.temperature > 2)) {
+			return sendJson(res, 400, {error: {message: `Invalid 'temperature': decimal above maximum value. Expected a value <= 2, but got ${body.temperature} instead.`, type: 'invalid_request_error', param: 'temperature'}});
+		}
 		if (model === 'mock-error') {
 			return sendJson(res, 500, {error: {message: 'mock upstream failure', type: 'server_error'}});
 		}

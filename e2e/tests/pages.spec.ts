@@ -42,8 +42,8 @@ test.describe('every page renders as admin', () => {
 	}
 
 	test('model detail page renders', async ({page, seed}) => {
-		await visit(page, `/settings/models/${seed.models['mock-chat'].id}`);
-		await expect(page.getByText('mock-chat').first()).toBeVisible();
+		await visit(page, `/settings/models/${seed.model.id}`);
+		await expect(page.getByText(seed.model.displayName).first()).toBeVisible();
 		expect(await untranslatedKeys(page)).toEqual([]);
 	});
 });

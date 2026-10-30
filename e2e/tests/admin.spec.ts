@@ -1,5 +1,5 @@
 import {test, expect} from './support/fixtures';
-import {MOCK_LLM_URL} from './support/constants';
+import {LLM} from './support/constants';
 import {uniqueName} from './support/gateway';
 
 test.describe('admin settings', () => {
@@ -9,8 +9,8 @@ test.describe('admin settings', () => {
 		await page.getByRole('button', {name: t('settings.providers.add_custom')}).click();
 		const dialog = page.getByRole('dialog');
 		await dialog.locator('#provider-name').fill(name);
-		await dialog.locator('#api-key').fill('mock-key');
-		await dialog.locator('#base-url').fill(MOCK_LLM_URL);
+		await dialog.locator('#api-key').fill(LLM.apiKey);
+		await dialog.locator('#base-url').fill(LLM.baseUrl);
 		await dialog.getByRole('button', {name: t('common.save'), exact: true}).click();
 		await expect(page.getByText(t('settings.providers.save_success')).first()).toBeVisible();
 		await expect(page.getByText(name).first()).toBeVisible();
@@ -20,16 +20,15 @@ test.describe('admin settings', () => {
 		expect(created).toBeTruthy();
 		await expect
 			.poll(async () => ((await api.get(`/api/v1/admin/providers/${created!.id}/models`)) as unknown[]).length, {timeout: 15_000})
-			.toBe(3);
+			.toBeGreaterThan(0);
 
 		await api.delete(`/api/v1/admin/providers/${created!.id}`);
 	});
 
-	test('synced mock models are listed on the models page', async ({page}) => {
+	test('the synced test model is listed on the models page', async ({page, t, seed}) => {
 		await page.goto('/settings/models');
-		for (const model of ['mock-chat', 'mock-error', 'mock-slow']) {
-			await expect(page.getByText(model, {exact: true}).first()).toBeVisible();
-		}
+		await page.getByPlaceholder(t('settings.models.search')).fill(seed.model.displayName);
+		await expect(page.getByText(seed.model.displayName, {exact: true}).first()).toBeVisible();
 	});
 
 	test('a team can be created in the UI', async ({page, t, api}) => {
