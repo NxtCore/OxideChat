@@ -255,6 +255,7 @@ pub enum ErrorCode {
 
 	// 429 Too Many Requests
 	RateLimited,
+	TooManyRequests,
 
 	// 500+ Server Errors
 	InternalError,
@@ -310,7 +311,7 @@ impl ErrorCode {
 			Self::NotFound | Self::UserNotFound | Self::ResourceNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
 			Self::Conflict | Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::OAuthEmailConflict | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate => StatusCode::CONFLICT,
 			Self::UnprocessableEntity => StatusCode::UNPROCESSABLE_ENTITY,
-			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+			Self::RateLimited | Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
 		}
@@ -381,6 +382,7 @@ impl ErrorCode {
 			Self::UnprocessableEntity => "errors.unprocessable_entity",
 
 			Self::RateLimited => "errors.rate_limited",
+			Self::TooManyRequests => "errors.too_many_requests",
 
 			Self::InternalError | Self::DatabaseError => "auth.errors.internal_error",
 			Self::ServiceUnavailable => "errors.service_unavailable",
@@ -452,6 +454,7 @@ impl ErrorCode {
 			Self::UnprocessableEntity => "unprocessable_entity",
 
 			Self::RateLimited => "rate_limited",
+			Self::TooManyRequests => "too_many_requests",
 
 			Self::InternalError => "internal_error",
 			Self::DatabaseError => "database_error",

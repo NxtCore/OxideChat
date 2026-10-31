@@ -10,7 +10,7 @@
 				<div
 					v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.type === 'svg'"
 					class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-					v-html="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.icon"
+					v-html="providerIconHtml(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)"
 				/>
 				<div
 					v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.type === 'png'"
@@ -63,7 +63,7 @@
 									<div
 										v-else-if="iconStore.getProviderIcon(model.provider.name, model?.model_id)?.type === 'svg'"
 										class="h-5 w-5 mt-0.5 flex items-center justify-center text-muted-foreground [&>svg]:h-full [&>svg]:w-full"
-										v-html="iconStore.getProviderIcon(model.provider.name, model?.model_id)?.icon"
+										v-html="providerIconHtml(model.provider.name, model?.model_id)"
 									/>
 									<div
 										v-else-if="iconStore.getProviderIcon(model.provider.name, model?.model_id)?.type === 'png'"
@@ -184,7 +184,7 @@
 							<div
 								v-if="iconStore.getProviderIcon(provider.name)?.type === 'svg'"
 								class="h-5 w-5 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full"
-								v-html="iconStore.getProviderIcon(provider.name)?.icon"
+								v-html="providerIconHtml(provider.name)"
 							/>
 							<div v-else-if="iconStore.getProviderIcon(provider.name)?.type === 'png'" class="h-5 w-5 flex items-center justify-center">
 								<img :src="iconStore.getProviderIcon(provider.name)?.icon" alt="Provider icon" />
@@ -204,6 +204,7 @@ import type {ModelList, UpdatePreferencesRequest} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
 import {useModelPicker} from '~/composables/useModelPicker';
+import {sanitizeSvg} from '~/composables/useMarkdown';
 import {cn} from '~/lib/utils';
 import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import {Tooltip, TooltipContent, TooltipTrigger} from '~/components/ui/tooltip';
@@ -215,6 +216,11 @@ const props = defineProps<{
 const chatStore = useChatStore();
 const iconStore = useIconsStore();
 const store = useMainStore();
+
+function providerIconHtml(providerName: string | undefined, modelId?: string): string {
+	const icon = iconStore.getProviderIcon(providerName, modelId);
+	return icon?.type === 'svg' ? sanitizeSvg(icon.icon) : '';
+}
 const isOpen = ref(false);
 const {
 	models: pickerModels,

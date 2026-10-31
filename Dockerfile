@@ -1,4 +1,4 @@
-FROM oven/bun:1-debian AS frontend-builder
+FROM oven/bun:1-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS frontend-builder
 
 WORKDIR /frontend
 
@@ -11,7 +11,7 @@ RUN bun run build
 
 # -----------------------------------------------------------------------------
 
-FROM rust:1.96-slim-bookworm AS chef
+FROM rust:1.96-slim-bookworm@sha256:e18a79fc84dfcfc3ab5ba72290398a644c135c97eaa881447fddc354ee4701a3 AS chef
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev \
@@ -62,7 +62,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends binutils \
 
 # -----------------------------------------------------------------------------
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \

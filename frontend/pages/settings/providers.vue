@@ -31,7 +31,7 @@
 							<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/60">
 								<div
 									v-if="item.template?.icon && item.template.icon.type === 'svg'"
-									v-html="item.template.icon.icon"
+									v-html="sanitizeSvg(item.template.icon.icon)"
 									class="h-4 w-4 [&>svg]:h-full [&>svg]:w-full"
 									:style="{color: item.template.brandColor}"
 								></div>
@@ -89,7 +89,7 @@
 						<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
 							<div
 								v-if="item.template?.icon && item.template.icon.type === 'svg'"
-								v-html="item.template.icon.icon"
+								v-html="sanitizeSvg(item.template.icon.icon)"
 								class="h-5 w-5 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
 								:style="{color: item.template.brandColor}"
 							></div>
@@ -133,7 +133,7 @@
 						>
 							<div
 								v-if="selectedProvider.icon?.type === 'svg'"
-								v-html="selectedProvider.icon.icon"
+								v-html="sanitizeSvg(selectedProvider.icon.icon)"
 								class="h-5 w-5"
 								:style="{color: selectedProvider.brandColor}"
 							></div>
@@ -266,6 +266,7 @@ import {ref, reactive, onMounted, computed, watch} from 'vue';
 import {Sparkles, Cpu, Zap, Server, Plus, Settings2, Loader2, BrainCircuit, Globe, AudioWaveform, Trash2, RotateCw} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
+import {sanitizeSvg} from '@/composables/useMarkdown';
 import {useProviderBillingStore} from '@/stores/providerBillingStore';
 import type {ProviderBillingOverview} from '@/types/providers';
 import {Button} from '@/components/ui/button';

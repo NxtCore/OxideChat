@@ -15,6 +15,40 @@ pub const MIN_PASSWORD_LENGTH: usize = 8;
 pub const MAX_PASSWORD_LENGTH: usize = 128;
 pub const MAX_USERNAME_LENGTH: usize = 32;
 pub const MIN_USERNAME_LENGTH: usize = 3;
+const SETUP_ADVISORY_LOCK_ID: i64 = 0x6F78_6373_6574_7570;
+
+/// Creates the first admin user inside a transaction guarded by an advisory lock.
+///
+/// Returns `Ok(None)` when a user already exists, so concurrent first-time setup
+/// requests cannot create two admins.
+///
+/// # Errors
+///
+/// Returns a database error when the lock, the existence check, or any write fails.
+async fn create_first_admin(db: &PgPool, email: &str, username: &str, password_hash: &str) -> Result<Option<User>, sqlx::Error> {
+	let mut tx = db.begin().await?;
+	sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(SETUP_ADVISORY_LOCK_ID).execute(&mut *tx).await?;
+	let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users)").fetch_one(&mut *tx).await?;
+	if exists {
+		return Ok(None);
+	}
+	let user: User = sqlx::query_as(
+		"INSERT INTO users (email, username, password_hash, auth_method)
+		 VALUES ($1, $2, $3, 'local')
+		 RETURNING *",
+	)
+	.bind(email)
+	.bind(username)
+	.bind(password_hash)
+	.fetch_one(&mut *tx)
+	.await?;
+	sqlx::query("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name = 'admin'")
+		.bind(user.id)
+		.execute(&mut *tx)
+		.await?;
+	tx.commit().await?;
+	Ok(Some(user))
+}
 
 /// POST /api/v1/auth/setup
 pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<SetupRequest>) -> impl IntoResponse {
@@ -45,18 +79,14 @@ pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 		}
 	};
 
-	let user = match User::create(&state.db, &payload.email, &payload.username, &password_hash).await {
-		Ok(u) => u,
+	let user = match create_first_admin(&state.db, &payload.email, &payload.username, &password_hash).await {
+		Ok(Some(user)) => user,
+		Ok(None) => return ErrorBuilder::new(ErrorCode::SetupCompleted).build(),
 		Err(e) => {
-			eprintln!("[AUTH] Failed to create user: {e}");
+			eprintln!("[AUTH] Failed to create admin user: {e}");
 			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
 		}
 	};
-
-	if let Err(e) = user.assign_role(&state.db, "admin").await {
-		eprintln!("[AUTH] Failed to assign admin role: {e}");
-		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-	}
 
 	if let Err(e) = user.initialize_defaults(&state.db).await {
 		eprintln!("[AUTH] Failed to initialize user defaults: {e}");

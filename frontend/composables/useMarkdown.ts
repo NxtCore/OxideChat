@@ -31,6 +31,18 @@ function sanitize(html: string): string {
 	return result;
 }
 
+/**
+ * Sanitize an SVG icon string for safe use with `v-html`.
+ *
+ * Restricts DOMPurify to the SVG profile, which strips event handler
+ * attributes, `script` elements, and dangerous URL schemes while keeping
+ * the SVG markup itself.
+ */
+export function sanitizeSvg(html: string): string {
+	if (!html || !DOMPurify.isSupported) return '';
+	return DOMPurify.sanitize(html, {USE_PROFILES: {svg: true, svgFilters: true}});
+}
+
 // Language aliases for normalization
 const LANG_ALIASES: Record<string, string> = {
 	js: 'javascript',

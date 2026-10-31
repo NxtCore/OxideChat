@@ -12,6 +12,17 @@ use axum::{
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 
+/// Builds the router for the pre-authentication routes that are rate limited per client IP.
+fn rate_limited_auth_router() -> Router<Arc<JobState>> {
+	Router::new()
+		.route("/api/v1/auth/setup", post(public::auth::setup))
+		.route("/api/v1/auth/register", post(public::auth::register))
+		.route("/api/v1/auth/login", post(public::auth::login))
+		.route("/api/v1/auth/oauth/{provider}", get(public::oauth::oauth_init))
+		.route("/api/v1/auth/oauth/{provider}/callback", get(public::oauth::oauth_callback))
+		.route_layer(from_fn(crate::middleware::rate_limit))
+}
+
 /// Builds the complete API router backed by shared [`Arc<JobState>`] state.
 ///
 /// The returned router includes public, administrative, and OpenAI-compatible
@@ -123,12 +134,8 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		// Public Config
 		.route("/api/v1/config", get(admin::config::get_global_config))
 		// Auth
-		.route("/api/v1/auth/setup", post(public::auth::setup))
-		.route("/api/v1/auth/register", post(public::auth::register))
-		.route("/api/v1/auth/login", post(public::auth::login))
 		.route("/api/v1/auth/logout", post(public::auth::logout))
-		.route("/api/v1/auth/oauth/{provider}", get(public::oauth::oauth_init))
-		.route("/api/v1/auth/oauth/{provider}/callback", get(public::oauth::oauth_callback))
+		.merge(rate_limited_auth_router())
 		// Users
 		.route("/api/v1/users/@me", get(public::users::get_me))
 		.route("/api/v1/me/budget", get(public::users::get_my_budget))
@@ -195,7 +202,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 			"/api/v1/developer/request-logs/retention",
 			get(public::developer::get_request_log_retention).put(public::developer::set_request_log_retention),
 		)
-		// Images CDN (public, no auth)
+		// Images (session-authenticated)
 		.route("/api/v1/images/{id}", get(public::images::serve_image))
 		.route("/api/v1/images", post(public::images::upload_image))
 		.layer(from_fn_with_state(state.clone(), crate::middleware::load_current_user))

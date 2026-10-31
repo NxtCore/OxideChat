@@ -155,6 +155,11 @@ pub async fn authenticate_write(State(state): State<Arc<JobState>>, request: Req
 }
 
 async fn authenticate_request(state: &JobState, mut request: Request, next: Next, scope: &str) -> Response {
+	let ip = crate::middleware::client_ip(&request);
+	let prefix = bearer_token_prefix(&request);
+	if let Some(response) = pre_auth_rate_limited(ip, prefix).await {
+		return response;
+	}
 	let context = match authenticate(&state.db, request.headers(), scope).await {
 		Ok(context) => context,
 		Err(response) => return response,
@@ -164,6 +169,43 @@ async fn authenticate_request(state: &JobState, mut request: Request, next: Next
 	let mut response = next.run(request).await;
 	response.headers_mut().extend(headers);
 	response
+}
+
+/// Rate limits authentication attempts before any Argon2 verification runs.
+///
+/// Limits apply per client IP and per bearer-token key prefix, so unauthenticated
+/// callers cannot force expensive password verifications at high rates.
+async fn pre_auth_rate_limited(ip: String, prefix: Option<String>) -> Option<Response> {
+	let limiter = crate::utils::rate_limit::global();
+	let window = crate::utils::rate_limit::RATE_LIMIT_WINDOW;
+	let ip_allowed = limiter.allow(&format!("gateway:ip:{ip}"), crate::utils::rate_limit::gateway_ip_limit(), window).await;
+	let key_allowed = match prefix {
+		Some(prefix) => limiter.allow(&format!("gateway:key:{prefix}"), crate::utils::rate_limit::gateway_key_limit(), window).await,
+		None => true,
+	};
+	if ip_allowed && key_allowed {
+		return None;
+	}
+	let mut response = error_response(
+		StatusCode::TOO_MANY_REQUESTS,
+		translation("gateway.errors.rate_limited"),
+		"rate_limit_error",
+		"rate_limit_exceeded",
+	);
+	if let Ok(value) = HeaderValue::from_str(&window.as_secs().to_string()) {
+		response.headers_mut().insert(header::RETRY_AFTER, value);
+	}
+	Some(response)
+}
+
+/// Extracts the `oxc_<key-id>` prefix of a bearer token, used as a rate-limit key.
+#[must_use]
+pub(crate) fn bearer_token_prefix(request: &Request) -> Option<String> {
+	let value = request.headers().get(header::AUTHORIZATION)?.to_str().ok()?;
+	let (_, token) = value.split_once(' ')?;
+	let remainder = token.strip_prefix("oxc_")?;
+	let key_id = remainder.split('_').next()?;
+	(!key_id.is_empty()).then(|| format!("oxc_{key_id}"))
 }
 
 /// Axum middleware assigning a unique request identifier response header.

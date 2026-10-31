@@ -206,7 +206,7 @@
 											<img v-if="model.icon" :src="model.icon" class="h-4 w-4 rounded object-cover" />
 											<div
 												v-else-if="iconStore.getProviderIcon(model.provider.name, model.model_id)?.type === 'svg'"
-												v-html="iconStore.getProviderIcon(model.provider.name, model.model_id)!.icon"
+												v-html="sanitizeSvg(iconStore.getProviderIcon(model.provider.name, model.model_id)?.icon ?? '')"
 												class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full text-muted-foreground"
 											/>
 											<Bot v-else class="h-4 w-4 text-muted-foreground" />
@@ -289,6 +289,7 @@ import {computed, onMounted, onUnmounted, reactive, ref, watch} from 'vue';
 import {Bot, Loader2, Network, Plus, Search, Trash2, Users} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
+import {sanitizeSvg} from '@/composables/useMarkdown';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
 import type {ModelListAdmin, PaginatedResponse, TeamDetailed, TeamList} from '~/types/chat';
 

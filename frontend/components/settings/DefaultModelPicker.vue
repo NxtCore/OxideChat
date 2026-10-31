@@ -10,7 +10,7 @@
 					<div
 						v-else-if="iconStore.getProviderIcon(selectedModel.provider?.name, selectedModel.model_id)?.type === 'svg'"
 						class="h-4 w-4 shrink-0 flex items-center justify-center text-muted-foreground [&>svg]:h-full [&>svg]:w-full"
-						v-html="iconStore.getProviderIcon(selectedModel.provider?.name, selectedModel.model_id)?.icon"
+						v-html="providerIconHtml(selectedModel.provider?.name, selectedModel.model_id)"
 					/>
 					<Bot v-else class="h-4 w-4 shrink-0 text-muted-foreground" />
 					<span class="flex-1 truncate text-left">{{ selectedModel.display_name }}</span>
@@ -67,7 +67,7 @@
 									<div
 										v-else-if="iconStore.getProviderIcon(model.provider?.name, model.model_id)?.type === 'svg'"
 										class="h-5 w-5 mt-0.5 shrink-0 flex items-center justify-center text-muted-foreground [&>svg]:h-full [&>svg]:w-full"
-										v-html="iconStore.getProviderIcon(model.provider?.name, model.model_id)?.icon"
+										v-html="providerIconHtml(model.provider?.name, model.model_id)"
 									/>
 									<Bot v-else class="h-5 w-5 mt-0.5 shrink-0 text-muted-foreground" />
 
@@ -111,7 +111,7 @@
 							<div
 								v-if="iconStore.getProviderIcon(provider.name)?.type === 'svg'"
 								class="h-5 w-5 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full"
-								v-html="iconStore.getProviderIcon(provider.name)?.icon"
+								v-html="providerIconHtml(provider.name)"
 							/>
 							<div v-else-if="iconStore.getProviderIcon(provider.name)?.type === 'png'" class="h-5 w-5 flex items-center justify-center">
 								<img :src="iconStore.getProviderIcon(provider.name)?.icon" alt="Provider icon" />
@@ -130,6 +130,7 @@ import {ref, computed, watch, onUnmounted} from 'vue';
 import {Bot, ChevronDown, Check, Loader2, Search, X} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import {useModelPicker} from '~/composables/useModelPicker';
+import {sanitizeSvg} from '~/composables/useMarkdown';
 import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import type {ModelList, PaginatedResponse} from '~/types/chat';
 
@@ -156,6 +157,11 @@ const emit = defineEmits<{
 
 const store = useMainStore();
 const iconStore = useIconsStore();
+
+function providerIconHtml(providerName: string | undefined, modelId?: string): string {
+	const icon = iconStore.getProviderIcon(providerName, modelId);
+	return icon?.type === 'svg' ? sanitizeSvg(icon.icon) : '';
+}
 const isOpen = ref(false);
 
 const effectivePlaceholder = computed(() => props.placeholder ?? store.getTranslation('settings.teams.use_global_default'));

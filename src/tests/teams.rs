@@ -120,4 +120,42 @@ mod tests {
 		assert!(!team.delete(&pool).await.unwrap());
 		assert!(Team::find_by_id(&pool, &default_id).await.unwrap().is_some());
 	}
+
+	async fn create_team(pool: &PgPool, name: &str) -> Team {
+		Team::create(
+			pool,
+			&CreateTeamRequest {
+				name: name.to_string(),
+				description: None,
+				allow_all_models: None,
+				member_ids: None,
+				provider_ids: None,
+				model_ids: None,
+			},
+		)
+		.await
+		.unwrap()
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn team_search_escapes_like_wildcards(pool: PgPool) {
+		create_team(&pool, "100% Real").await;
+		create_team(&pool, "1000 Real").await;
+		create_team(&pool, "under_score").await;
+		create_team(&pool, "underXscore").await;
+		create_team(&pool, r"slash\name").await;
+		create_team(&pool, "slash-name").await;
+
+		let percent = Team::list_paginated(&pool, 1, 10, Some("100%")).await.unwrap();
+		assert_eq!(percent.items.len(), 1);
+		assert_eq!(percent.items[0].name, "100% Real");
+
+		let underscore = Team::list_paginated(&pool, 1, 10, Some("under_")).await.unwrap();
+		assert_eq!(underscore.items.len(), 1);
+		assert_eq!(underscore.items[0].name, "under_score");
+
+		let slash = Team::list_paginated(&pool, 1, 10, Some(r"slash\")).await.unwrap();
+		assert_eq!(slash.items.len(), 1);
+		assert_eq!(slash.items[0].name, r"slash\name");
+	}
 }

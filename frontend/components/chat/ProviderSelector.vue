@@ -117,7 +117,7 @@
 										<div
 											v-if="getProviderIconData(opt.provider_name, opt.provider_slug)?.type === 'svg'"
 											class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full"
-											v-html="getProviderIconData(opt.provider_name, opt.provider_slug)?.icon"
+											v-html="providerIconHtml(opt.provider_name, opt.provider_slug)"
 										/>
 										<img
 											v-else-if="getProviderIconData(opt.provider_name, opt.provider_slug)?.type === 'png'"
@@ -206,7 +206,7 @@
 								<div
 									v-if="getProviderIconData(detailOpt.provider_name, detailOpt.provider_slug)?.type === 'svg'"
 									class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full"
-									v-html="getProviderIconData(detailOpt.provider_name, detailOpt.provider_slug)?.icon"
+									v-html="providerIconHtml(detailOpt.provider_name, detailOpt.provider_slug)"
 								/>
 								<img
 									v-else-if="getProviderIconData(detailOpt.provider_name, detailOpt.provider_slug)?.type === 'png'"
@@ -273,6 +273,7 @@ import {Bookmark, Server, ChevronDown, Check, Loader2, Sparkles, Search, Filter,
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
 import {useIconsStore} from '~/stores/icons';
+import {sanitizeSvg} from '~/composables/useMarkdown';
 import {cn} from '~/lib/utils';
 import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import {Tooltip, TooltipContent, TooltipTrigger} from '~/components/ui/tooltip';
@@ -385,7 +386,9 @@ const selectedLabel = computed(() => {
 const triggerIcon = computed(() => {
 	if (!chatStore.selectedProviderSlug) return null;
 	const match = options.value.find(o => (o.provider_slug || '') === chatStore.selectedProviderSlug);
-	return iconStore.getProviderIcon(match?.provider_name ?? chatStore.selectedProviderSlug, undefined);
+	const icon = iconStore.getProviderIcon(match?.provider_name ?? chatStore.selectedProviderSlug, undefined);
+	if (icon?.type === 'svg') return {...icon, icon: sanitizeSvg(icon.icon)};
+	return icon;
 });
 
 
@@ -412,6 +415,11 @@ function getStatusColor(opt: ProviderOption): string {
 
 function getProviderIconData(name: string | null, slug: string | null) {
 	return iconStore.getProviderIcon(name ?? slug ?? '', undefined);
+}
+
+function providerIconHtml(name: string | null, slug: string | null): string {
+	const icon = getProviderIconData(name, slug);
+	return icon?.type === 'svg' ? sanitizeSvg(icon.icon) : '';
 }
 
 function formatPrice(value: number | null): string {

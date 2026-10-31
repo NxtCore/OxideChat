@@ -1006,8 +1006,38 @@ mod skins {
 			}))?;
 			let ir = OpenAIResponsesSkin::external_to_ir(request, model_ref())?;
 			assert_eq!(ir.stream, stream);
-			assert_eq!(ir.messages.len(), 1);
-		}
-		Ok(())
-	}
-}
+			                        assert_eq!(ir.messages.len(), 1);
+			                }
+			                Ok(())
+			        }
+			}
+
+			#[cfg(test)]
+			mod pre_auth_limit {
+				use crate::utils::openai_gateway::bearer_token_prefix;
+				use axum::body::Body;
+				use axum::http::Request;
+
+				fn request_with_authorization(value: &str) -> Request<Body> {
+					Request::builder().header("authorization", value).body(Body::empty()).unwrap()
+				}
+
+				#[test]
+				fn extracts_key_prefix_from_oxc_bearer_token() {
+					let key_id = uuid::Uuid::new_v4().simple().to_string();
+					let request = request_with_authorization(&format!("Bearer oxc_{key_id}_abcdefghijklmnopqrstuvwxyz0123456789"));
+					assert_eq!(bearer_token_prefix(&request), Some(format!("oxc_{key_id}")));
+				}
+
+				#[test]
+				fn ignores_non_oxc_bearer_tokens() {
+					let request = request_with_authorization("Bearer sk-abcdefghijklmnopqrstuvwxyz0123456789");
+					assert_eq!(bearer_token_prefix(&request), None);
+				}
+
+				#[test]
+				fn ignores_missing_authorization_header() {
+					let request: Request<Body> = Request::builder().body(Body::empty()).unwrap();
+					assert_eq!(bearer_token_prefix(&request), None);
+				}
+			}

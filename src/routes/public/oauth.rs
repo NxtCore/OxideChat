@@ -156,6 +156,13 @@ pub async fn oauth_callback(Path(provider): Path<String>, Query(params): Query<O
 		return ErrorBuilder::new(ErrorCode::OAuthUserInfoError).build();
 	}
 
+	// Reject emails the provider reports as unverified
+	if user_info.email_verified == Some(false) {
+		eprintln!("[OAUTH] OAuth provider reports the email address as unverified");
+		AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
+		return ErrorBuilder::new(ErrorCode::OAuthUserInfoError).build();
+	}
+
 	// Find or create user
 	match find_or_create_user(&state.db, &user_info, &cookies).await {
 		Ok(user) => {

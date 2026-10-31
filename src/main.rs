@@ -14,6 +14,7 @@ mod utils;
 use crate::types::{BudgetLedger, GatewayLimiter, JobState};
 use axum::{Router, extract::DefaultBodyLimit};
 use sqlx::postgres::PgPoolOptions;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -95,7 +96,7 @@ async fn main() {
 
 	println!("[SERVER] Listening on http://{}", address);
 
-	let server = axum::serve(listener, app).with_graceful_shutdown(async {
+	let server = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(async {
 		shutdown_signal().await;
 		println!("[SERVER] Shutdown signal received");
 	});

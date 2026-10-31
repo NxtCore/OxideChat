@@ -9,8 +9,15 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 impl Team {
+	fn escape_like_pattern(s: &str) -> String {
+		s.replace('\\', r"\\").replace('%', r"\%").replace('_', r"\_")
+	}
+
 	fn search_pattern(search: Option<&str>) -> Option<String> {
-		search.map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{s}%"))
+		search
+			.map(str::trim)
+			.filter(|s| !s.is_empty())
+			.map(|s| format!("%{}%", Self::escape_like_pattern(s)))
 	}
 
 	pub async fn default_id(pool: &PgPool) -> Result<Uuid, sqlx::Error> {
@@ -64,7 +71,7 @@ impl Team {
 				t.updated_at
 			FROM teams t
 			LEFT JOIN team_members tm ON tm.team_id = t.id
-			WHERE ($1::text IS NULL OR t.name ILIKE $1)
+			WHERE ($1::text IS NULL OR t.name ILIKE $1 ESCAPE '\')
 			GROUP BY t.id
 			ORDER BY t.is_default DESC, t.name ASC
 			LIMIT $2 OFFSET $3
