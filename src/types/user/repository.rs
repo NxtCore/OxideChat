@@ -5,6 +5,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 impl User {
+	fn escape_like_pattern(s: &str) -> String {
+		s.replace('\\', r"\\").replace('%', r"\%").replace('_', r"\_")
+	}
+
 	pub async fn find_by_id(pool: &PgPool, id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
 		sqlx::query_as("SELECT * FROM users WHERE id = $1").bind(id).fetch_optional(pool).await
 	}
@@ -179,7 +183,7 @@ impl User {
 		team_id: Option<&Uuid>,
 	) -> Result<PaginatedUsersResponse, sqlx::Error> {
 		let offset = (page - 1) * per_page;
-		let search_pattern = search.map(|s| format!("%{s}%"));
+		let search_pattern = search.map(|s| format!("%{}%", Self::escape_like_pattern(s)));
 
 		let total: CountRow = sqlx::query_as(
 			r#"
@@ -190,7 +194,7 @@ impl User {
 			LEFT JOIN team_members tm ON tm.user_id = u.id
 			WHERE ($1::text IS NULL OR r.name = $1)
 			  AND ($2::uuid IS NULL OR tm.team_id = $2)
-			  AND ($3::text IS NULL OR u.email ILIKE $3 OR u.username ILIKE $3)
+			  AND ($3::text IS NULL OR u.email ILIKE $3 ESCAPE '\' OR u.username ILIKE $3 ESCAPE '\')
 			"#,
 		)
 		.bind(role)
@@ -208,7 +212,7 @@ impl User {
 			LEFT JOIN team_members tm ON tm.user_id = u.id
 			WHERE ($1::text IS NULL OR r.name = $1)
 			  AND ($2::uuid IS NULL OR tm.team_id = $2)
-			  AND ($3::text IS NULL OR u.email ILIKE $3 OR u.username ILIKE $3)
+			  AND ($3::text IS NULL OR u.email ILIKE $3 ESCAPE '\' OR u.username ILIKE $3 ESCAPE '\')
 			ORDER BY u.created_at DESC
 			LIMIT $4 OFFSET $5
 			"#,
@@ -243,7 +247,7 @@ impl User {
 		team_id: Option<&Uuid>,
 	) -> Result<PaginatedUsersListResponse, sqlx::Error> {
 		let offset = (page - 1) * per_page;
-		let search_pattern = search.map(|s| format!("%{s}%"));
+		let search_pattern = search.map(|s| format!("%{}%", Self::escape_like_pattern(s)));
 
 		let total: CountRow = sqlx::query_as(
 			r#"
@@ -254,7 +258,7 @@ impl User {
 			LEFT JOIN team_members tm ON tm.user_id = u.id
 			WHERE ($1::text IS NULL OR r.name = $1)
 			  AND ($2::uuid IS NULL OR tm.team_id = $2)
-			  AND ($3::text IS NULL OR u.email ILIKE $3 OR u.username ILIKE $3)
+			  AND ($3::text IS NULL OR u.email ILIKE $3 ESCAPE '\' OR u.username ILIKE $3 ESCAPE '\')
 			"#,
 		)
 		.bind(role)
@@ -272,7 +276,7 @@ impl User {
 			LEFT JOIN team_members tm ON tm.user_id = u.id
 			WHERE ($1::text IS NULL OR r.name = $1)
 			  AND ($2::uuid IS NULL OR tm.team_id = $2)
-			  AND ($3::text IS NULL OR u.email ILIKE $3 OR u.username ILIKE $3)
+			  AND ($3::text IS NULL OR u.email ILIKE $3 ESCAPE '\' OR u.username ILIKE $3 ESCAPE '\')
 			ORDER BY u.created_at DESC
 			LIMIT $4 OFFSET $5
 			"#,

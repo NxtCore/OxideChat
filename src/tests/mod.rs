@@ -18,4 +18,5 @@ pub mod request_logs;
 pub mod response;
 pub mod service_accounts;
 pub mod teams;
+pub mod tools;
 pub mod workspaces;

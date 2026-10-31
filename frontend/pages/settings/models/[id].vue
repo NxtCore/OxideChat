@@ -955,6 +955,7 @@
 import {ArrowLeft, Loader2, Bot, AlertCircle, Save, Check, ChevronRight, Copy, Upload, Trash2, Info, X, Plus, Minus, RotateCw} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
+import {sanitizeSvg} from '@/composables/useMarkdown';
 import {useNuxtApp} from '#app';
 
 const store = useMainStore();
@@ -1176,7 +1177,9 @@ const hasUnsavedChanges = computed(() => JSON.stringify(formData) !== originalDa
 
 const providerIcon = computed(() => {
 	if (!model.value) return null;
-	return iconStore.getProviderIcon(model.value.provider.name, model.value.model_id);
+	const icon = iconStore.getProviderIcon(model.value.provider.name, model.value.model_id);
+	if (icon?.type === 'svg') return {...icon, icon: sanitizeSvg(icon.icon)};
+	return icon;
 });
 
 const modelCapabilities = computed<string[]>(() => model.value?.capabilities ?? []);

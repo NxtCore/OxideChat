@@ -1,12 +1,12 @@
 //! Image CDN routes for serving and uploading images.
 //!
-//! Provides public endpoints for image storage:
+//! Both endpoints require an authenticated session:
 //! - GET /api/v1/images/:id - Serve an image by UUID
-//! - POST /api/v1/images - Upload a base64 image (internal use)
+//! - POST /api/v1/images - Upload a base64 image
 
 use crate::types::{JobState, RequestContext, UploadImageRequest, UploadImageResponse};
 use crate::utils::images::{get_image, image_url, safe_image_mime, store_from_data_uri};
-use crate::utils::response::{ErrorBuilder, ErrorCode};
+use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
 	extract::{Extension, Path, State},
@@ -18,26 +18,31 @@ use uuid::Uuid;
 
 /// Upload a base64 image and return its URL
 ///
-/// POST /api/images
+/// POST /api/v1/images
 pub async fn upload_image(
 	State(state): State<Arc<JobState>>,
 	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Json(req): Json<UploadImageRequest>,
-) -> Result<Json<UploadImageResponse>, (StatusCode, String)> {
+) -> Response {
 	let Some(user) = current_user else {
-		return Err((StatusCode::UNAUTHORIZED, "Not authenticated".to_string()));
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	};
 
-	let stored = store_from_data_uri(&state.db, &req.data_uri, Some(user.id), req.source.as_deref())
-		.await
-		.map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+	let stored = match store_from_data_uri(&state.db, &req.data_uri, Some(user.id), req.source.as_deref()).await {
+		Ok(stored) => stored,
+		Err(e) => {
+			eprintln!("[IMAGES] Failed to store uploaded image: {e}");
+			return ErrorBuilder::new(ErrorCode::BadRequest).build();
+		}
+	};
 
-	Ok(Json(UploadImageResponse {
+	ResponseBuilder::new(ResponseBody::Json(UploadImageResponse {
 		id: stored.id,
 		url: image_url(stored.id),
 		mime_type: stored.mime_type,
 		size_bytes: stored.size_bytes,
 	}))
+	.build()
 }
 
 /// Serve an image by ID
@@ -66,10 +71,10 @@ pub async fn serve_image(
 
 			(StatusCode::OK, headers, data).into_response()
 		}
-		Ok(None) => (StatusCode::NOT_FOUND, "Image not found").into_response(),
+		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
 		Err(e) => {
 			eprintln!("[IMAGES] Failed to retrieve image {id}: {e}");
-			(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
+			ErrorBuilder::new(ErrorCode::InternalError).build()
 		}
 	}
 }

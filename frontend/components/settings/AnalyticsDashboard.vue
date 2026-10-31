@@ -524,6 +524,7 @@ import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import {useMainStore} from '@/stores';
 import {useBudgetStore} from '@/stores/budgetStore';
 import {useIconsStore} from '@/stores/icons';
+import {sanitizeSvg} from '@/composables/useMarkdown';
 import type {AnalyticsDayModelRow, AnalyticsRow, ApiKeyAnalyticsRow} from '~/types/budgets';
 
 const props = defineProps<{
@@ -848,7 +849,9 @@ function trendLabel(value: number): string {
 }
 
 function getModelIcon(label: string, id: string | null) {
-	return iconStore.getProviderIcon(label, id ?? undefined);
+	const icon = iconStore.getProviderIcon(label, id ?? undefined);
+	if (icon?.type === 'svg') return {...icon, icon: sanitizeSvg(icon.icon)};
+	return icon;
 }
 
 function getExploreIcon(label: string) {

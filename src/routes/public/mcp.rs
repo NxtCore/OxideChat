@@ -258,9 +258,10 @@ pub(crate) async fn run_discovery(state: &Arc<JobState>, server: &McpServer, own
 	let discovered = match server.discover().await {
 		Ok(tools) => tools,
 		Err(e) => {
+			eprintln!("[MCP] Discovery failed for server {}: {e}", server.id);
 			let _ = McpServer::set_health(&state.db, &server.id, "unhealthy").await;
 			return ResponseBuilder::new(ResponseBody::Json(serde_json::json!({
-				"error": e.to_string(),
+				"error": ErrorCode::ServiceUnavailable.message(),
 				"server_name": server.name,
 			})))
 			.status(StatusCode::BAD_GATEWAY)

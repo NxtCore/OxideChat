@@ -34,7 +34,7 @@
 						<img v-if="model.icon" :src="model.icon" class="h-6 w-6 object-cover rounded" />
 						<div
 							v-else-if="iconStore.getProviderIcon(model.provider.name, model.model_id)?.type === 'svg'"
-							v-html="iconStore.getProviderIcon(model.provider.name, model.model_id)!.icon"
+							v-html="sanitizeSvg(iconStore.getProviderIcon(model.provider.name, model.model_id)?.icon ?? '')"
 							class="h-5 w-5 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full text-muted-foreground"
 						/>
 						<img
@@ -70,6 +70,7 @@
 import {Bot, Loader2, ChevronRight} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
+import {sanitizeSvg} from '@/composables/useMarkdown';
 import {useNuxtApp} from '#app';
 import type {ModelListAdmin, PaginatedResponse} from '~/types/chat';
 

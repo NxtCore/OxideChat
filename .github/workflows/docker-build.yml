@@ -159,6 +159,7 @@ jobs:
         permissions:
             contents: read
             packages: write
+            id-token: write
 
         steps:
             - name: Download digests
@@ -199,3 +200,15 @@ jobs:
                   TAG: ${{ needs.init.outputs.tag }}
               run: |
                   docker buildx imagetools inspect $IMAGE_NAME:$TAG
+
+            - name: Install cosign
+              uses: sigstore/cosign-installer@v3
+
+            - name: Sign image (keyless cosign via GitHub OIDC)
+              env:
+                  IMAGE_NAME: ${{ needs.init.outputs.image_name }}
+                  TAG: ${{ needs.init.outputs.tag }}
+              run: |
+                  DIGEST=$(docker buildx imagetools inspect "$IMAGE_NAME:$TAG" | sed -n 's/^Digest:[[:space:]]*//p' | head -1)
+                  echo "Signing $IMAGE_NAME@sha256:$DIGEST"
+                  cosign sign --yes "$IMAGE_NAME@sha256:$DIGEST"

@@ -3,8 +3,11 @@ mod tests {
 	use crate::types::ClientToolPending;
 	use crate::types::tools::McpServerResponse;
 	use crate::types::tools::{McpServer, Tool, ToolSourceKind};
-	use crate::utils::tools::mcp::{McpUrlPolicy, is_remote_mcp_url_syntax_allowed, validate_remote_mcp_url};
+	use crate::utils::tools::mcp::{
+		McpUrlPolicy, is_public_ip, is_public_ipv6, is_remote_mcp_url_syntax_allowed, validate_and_resolve_remote_mcp_url, validate_remote_mcp_url,
+	};
 	use sqlx::PgPool;
+	use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 	use uuid::Uuid;
 
 	async fn create_user(pool: &PgPool, suffix: &str) -> Uuid {
@@ -44,6 +47,67 @@ mod tests {
 		assert!(is_remote_mcp_url_syntax_allowed("http://127.0.0.1:8080/mcp", McpUrlPolicy::TrustedAdmin));
 		assert!(is_remote_mcp_url_syntax_allowed("https://mcp.example.test/rpc", McpUrlPolicy::TrustedAdmin));
 		assert!(!is_remote_mcp_url_syntax_allowed("file:///tmp/mcp", McpUrlPolicy::TrustedAdmin));
+	}
+
+	#[test]
+	fn ipv6_public_check_rejects_mapped_and_transition_prefixes() {
+		let rejected = [
+			"::ffff:127.0.0.1",
+			"::ffff:169.254.169.254",
+			"::ffff:10.0.0.5",
+			"64:ff9b::a9fe:a9fe",
+			"2002:7f00:1::",
+			"2001:0::1",
+			"::1",
+			"fe80::1",
+			"fc00::1",
+		];
+		for text in rejected {
+			let ip: Ipv6Addr = text.parse().unwrap();
+			assert!(!is_public_ipv6(ip), "{text} must not count as public");
+			assert!(!is_public_ip(IpAddr::V6(ip)), "{text} must not count as public");
+		}
+		let public: Ipv6Addr = "2606:4700::1111".parse().unwrap();
+		assert!(is_public_ipv6(public));
+		assert!(is_public_ip(IpAddr::V6(public)));
+	}
+
+	#[test]
+	fn ipv4_public_check_rejects_restricted_ranges() {
+		for text in ["127.0.0.1", "10.0.0.5", "169.254.169.254", "0.0.0.0", "100.64.0.1"] {
+			let ip: std::net::Ipv4Addr = text.parse().unwrap();
+			assert!(!is_public_ip(IpAddr::V4(ip)), "{text} must not count as public");
+		}
+		let public: std::net::Ipv4Addr = "8.8.8.8".parse().unwrap();
+		assert!(is_public_ip(IpAddr::V4(public)));
+	}
+
+	#[tokio::test]
+	async fn public_mcp_url_policy_rejects_ipv6_transition_and_cgnat_literals() {
+		assert!(validate_remote_mcp_url("http://[::ffff:7f00:1]:8080/", McpUrlPolicy::PublicOnly).await.is_err());
+		assert!(validate_remote_mcp_url("http://[64:ff9b::a9fe:a9fe]/", McpUrlPolicy::PublicOnly).await.is_err());
+		assert!(validate_remote_mcp_url("http://[2002:7f00:1::]/", McpUrlPolicy::PublicOnly).await.is_err());
+		assert!(validate_remote_mcp_url("http://100.64.0.1:8080/", McpUrlPolicy::PublicOnly).await.is_err());
+		assert!(validate_remote_mcp_url("http://0.0.0.0:8080/", McpUrlPolicy::PublicOnly).await.is_err());
+	}
+
+	#[tokio::test]
+	async fn resolve_returns_validated_addresses_for_pinned_client() {
+		let addrs = validate_and_resolve_remote_mcp_url("http://[2606:4700::1111]:8080/mcp", McpUrlPolicy::PublicOnly)
+			.await
+			.unwrap();
+		assert_eq!(addrs, vec!["[2606:4700::1111]:8080".parse::<SocketAddr>().unwrap()]);
+
+		let admin = validate_and_resolve_remote_mcp_url("http://127.0.0.1:8080/", McpUrlPolicy::TrustedAdmin)
+			.await
+			.unwrap();
+		assert_eq!(admin, vec!["127.0.0.1:8080".parse::<SocketAddr>().unwrap()]);
+
+		assert!(
+			validate_and_resolve_remote_mcp_url("http://[::ffff:7f00:1]:8080/", McpUrlPolicy::PublicOnly)
+				.await
+				.is_err()
+		);
 	}
 
 	async fn insert_tool(pool: &PgPool, owner_id: Option<&Uuid>, name: &str) -> Uuid {

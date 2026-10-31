@@ -8,5 +8,6 @@ pub mod omniference_cost;
 pub mod openai_gateway;
 pub mod provider_billing;
 pub mod providers;
+pub mod rate_limit;
 pub mod response;
 pub mod tools;

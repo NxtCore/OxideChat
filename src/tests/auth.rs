@@ -133,6 +133,111 @@ mod tests {
 		}
 	}
 
+	mod password_utils {
+		use crate::utils::auth::{hash_password, verify_password};
+
+		#[test]
+		fn hash_and_verify_roundtrip() {
+			let hash = hash_password("Sup3r$ecret-pass").unwrap();
+			assert!(verify_password("Sup3r$ecret-pass", &hash).unwrap());
+		}
+
+		#[test]
+		fn wrong_password_fails_verification() {
+			let hash = hash_password("Sup3r$ecret-pass").unwrap();
+			assert!(!verify_password("wrong-password", &hash).unwrap());
+		}
+
+		#[test]
+		fn hash_pins_explicit_argon2id_params() {
+			let hash = hash_password("Sup3r$ecret-pass").unwrap();
+			assert!(hash.starts_with("$argon2id$v=19$m=65536,t=3,p=1$"), "unexpected hash prefix: {hash}");
+		}
+	}
+
+	mod rate_limit {
+		use crate::utils::rate_limit::RateLimiter;
+		use std::time::Duration;
+
+		#[tokio::test]
+		async fn allows_up_to_limit_then_blocks() {
+			let limiter = RateLimiter::spawn();
+			for _ in 0..3 {
+				assert!(limiter.allow("key", 3, Duration::from_secs(60)).await);
+			}
+			assert!(!limiter.allow("key", 3, Duration::from_secs(60)).await);
+			assert!(!limiter.allow("key", 3, Duration::from_secs(60)).await);
+		}
+
+		#[tokio::test(start_paused = true)]
+		async fn resets_after_window() {
+			let limiter = RateLimiter::spawn();
+			assert!(limiter.allow("key", 1, Duration::from_secs(60)).await);
+			assert!(!limiter.allow("key", 1, Duration::from_secs(60)).await);
+			tokio::time::advance(Duration::from_secs(61)).await;
+			assert!(limiter.allow("key", 1, Duration::from_secs(60)).await);
+		}
+
+		#[tokio::test]
+		async fn keys_are_independent() {
+			let limiter = RateLimiter::spawn();
+			assert!(limiter.allow("a", 1, Duration::from_secs(60)).await);
+			assert!(!limiter.allow("a", 1, Duration::from_secs(60)).await);
+			assert!(limiter.allow("b", 1, Duration::from_secs(60)).await);
+		}
+
+		#[tokio::test]
+		async fn zero_limit_disables_limiting() {
+			let limiter = RateLimiter::spawn();
+			for _ in 0..10 {
+				assert!(limiter.allow("key", 0, Duration::from_secs(60)).await);
+			}
+		}
+	}
+
+	mod rate_limit_http {
+		use axum::body::{Body, to_bytes};
+		use axum::http::Request;
+		use sqlx::PgPool;
+		use tower::ServiceExt;
+
+		#[sqlx::test(migrations = "./migrations")]
+		async fn auth_route_returns_429_after_the_per_ip_limit(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
+			crate::config::Config::init(&pool).await;
+			crate::i18n::I18n::init(&pool).await;
+			let state = crate::tests::gateway::support::job_state(pool);
+			let router = crate::routes::build_router(state);
+			let invalid_setup_body = "{}";
+			let mut statuses = Vec::with_capacity(21);
+			for _ in 0..21 {
+				let request = Request::builder()
+					.method("POST")
+					.uri("/api/v1/auth/setup")
+					.header("content-type", "application/json")
+					.body(Body::from(invalid_setup_body))?;
+				let response = router.clone().oneshot(request).await?;
+				statuses.push(response.status().as_u16());
+			}
+			assert!(
+				statuses[..20].iter().all(|status| *status == 422),
+				"expected 422 for the first 20 invalid setup requests: {statuses:?}"
+			);
+			assert_eq!(statuses[20], 429);
+			let request = Request::builder()
+				.method("POST")
+				.uri("/api/v1/auth/setup")
+				.header("content-type", "application/json")
+				.body(Body::from(invalid_setup_body))?;
+			let response = router.oneshot(request).await?;
+			assert_eq!(response.status().as_u16(), 429);
+			let payload = to_bytes(response.into_body(), 4096).await?;
+			let text = String::from_utf8_lossy(&payload);
+			assert!(text.contains("too_many_requests"), "unexpected body: {text}");
+			assert!(text.contains("Too many requests"), "missing i18n message: {text}");
+			Ok(())
+		}
+	}
+
 	mod login_limit {
 		use crate::utils::login_limit::LoginRateLimiter;
 		use std::net::{IpAddr, Ipv4Addr};

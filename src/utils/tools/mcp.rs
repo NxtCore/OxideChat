@@ -15,8 +15,6 @@ use tokio::net::lookup_host;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-use reqwest::dns::{Addrs, Name, Resolve, Resolving};
-
 use super::executor::{ToolContext, ToolError, ToolExecutor};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -157,33 +155,47 @@ pub fn is_remote_mcp_url_syntax_allowed(url: &str, policy: McpUrlPolicy) -> bool
 }
 
 pub async fn validate_remote_mcp_url(url: &str, policy: McpUrlPolicy) -> Result<(), ToolError> {
-	let parsed = parse_remote_mcp_url(url, policy)?;
+	validate_and_resolve_remote_mcp_url(url, policy).await.map(|_| ())
+}
 
-	if policy == McpUrlPolicy::TrustedAdmin {
-		return Ok(());
-	}
+/// Parse, policy-check, and resolve `url` exactly once, returning every
+/// resolved socket address after validating each against `policy`.
+///
+/// The returned addresses are meant to be pinned into the HTTP client with
+/// `reqwest::ClientBuilder::resolve_to_addrs`, so the actual connection can
+/// only be established to the addresses validated here and DNS cannot rebind
+/// the host between validation and connect.
+pub async fn validate_and_resolve_remote_mcp_url(url: &str, policy: McpUrlPolicy) -> Result<Vec<SocketAddr>, ToolError> {
+	let parsed = parse_remote_mcp_url(url, policy)?;
 
 	let host = parsed.host_str().ok_or_else(|| ToolError::McpError("MCP URL must include a host".to_string()))?;
 	let port = parsed
 		.port_or_known_default()
 		.ok_or_else(|| ToolError::McpError("MCP URL must include a valid port".to_string()))?;
-	let addrs = lookup_host((host, port))
-		.await
-		.map_err(|e| ToolError::McpError(format!("Failed to resolve MCP URL host: {e}")))?;
+	let literal_ip = host.trim_start_matches('[').trim_end_matches(']').parse::<IpAddr>().ok();
+	let addrs: Vec<SocketAddr> = match literal_ip {
+		Some(ip) => vec![SocketAddr::new(ip, port)],
+		None => lookup_host((host, port))
+			.await
+			.map_err(|e| ToolError::McpError(format!("Failed to resolve MCP URL host: {e}")))?
+			.collect(),
+	};
 
-	let mut resolved_any = false;
-	for addr in addrs {
-		resolved_any = true;
+	if addrs.is_empty() {
+		return Err(ToolError::McpError("MCP URL host did not resolve".to_string()));
+	}
+
+	if policy == McpUrlPolicy::TrustedAdmin {
+		return Ok(addrs);
+	}
+
+	for addr in &addrs {
 		if !is_public_ip(addr.ip()) {
 			return Err(ToolError::McpError("MCP URL resolves to a restricted network address".to_string()));
 		}
 	}
 
-	if resolved_any {
-		Ok(())
-	} else {
-		Err(ToolError::McpError("MCP URL host did not resolve".to_string()))
-	}
+	Ok(addrs)
 }
 
 fn parse_remote_mcp_url(url: &str, policy: McpUrlPolicy) -> Result<reqwest::Url, ToolError> {
@@ -213,7 +225,8 @@ fn is_restricted_hostname(host: &str) -> bool {
 	lower == "localhost" || lower.ends_with(".localhost") || lower.ends_with(".local") || lower.ends_with(".internal")
 }
 
-fn is_public_ip(ip: IpAddr) -> bool {
+#[must_use]
+pub(crate) fn is_public_ip(ip: IpAddr) -> bool {
 	match ip {
 		IpAddr::V4(ip) => is_public_ipv4(ip),
 		IpAddr::V6(ip) => is_public_ipv6(ip),
@@ -232,45 +245,25 @@ fn is_public_ipv4(ip: Ipv4Addr) -> bool {
 		|| ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1]))
 }
 
-fn is_public_ipv6(ip: Ipv6Addr) -> bool {
-	if let Some(mapped) = ip.to_ipv4_mapped() {
-		return is_public_ipv4(mapped);
+#[must_use]
+pub(crate) fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+	if let Some(v4) = ip.to_ipv4_mapped() {
+		return is_public_ipv4(v4);
 	}
+	if let Some(v4) = ip.to_ipv4() {
+		return is_public_ipv4(v4);
+	}
+	let segs = ip.segments();
 	!(ip.is_loopback()
 		|| ip.is_unspecified()
 		|| ip.is_unique_local()
 		|| ip.is_unicast_link_local()
-		|| ip.segments()[0] & 0xffc0 == 0xfe80
-		|| ip.segments()[0] & 0xff00 == 0xff00
-		|| (ip.segments()[0] == 0x2001 && ip.segments()[1] == 0x0db8))
-}
-
-struct PublicIpOnlyResolver;
-
-impl Resolve for PublicIpOnlyResolver {
-	fn resolve(&self, name: Name) -> Resolving {
-		let host = name.as_str().to_string();
-		Box::pin(async move {
-			let addrs = tokio::net::lookup_host(host.as_str())
-				.await
-				.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
-			let filtered: Vec<SocketAddr> = addrs.filter(|addr| is_public_ip(addr.ip())).collect();
-			if filtered.is_empty() {
-				return Err(format!("host {host} resolved only to restricted network addresses").into());
-			}
-			let addrs: Addrs = Box::new(filtered.into_iter());
-			Ok(addrs)
-		})
-	}
-}
-
-fn public_only_http_client() -> Result<reqwest::Client, ToolError> {
-	reqwest::Client::builder()
-		.timeout(std::time::Duration::from_secs(30))
-		.redirect(reqwest::redirect::Policy::none())
-		.dns_resolver(Arc::new(PublicIpOnlyResolver))
-		.build()
-		.map_err(|e| ToolError::McpError(format!("Failed to create HTTP client: {e}")))
+		|| segs[0] & 0xffc0 == 0xfe80
+		|| segs[0] & 0xff00 == 0xff00
+		|| (segs[0] == 0x2001 && segs[1] == 0x0db8)
+		|| (segs[0] == 0x0064 && segs[1] == 0xff9b && segs[2] == 0 && segs[3] == 0)
+		|| segs[0] == 0x2002
+		|| (segs[0] == 0x2001 && segs[1] == 0x0000))
 }
 
 /// Streamable HTTP transport (MCP 2025-03-26+).
@@ -289,16 +282,15 @@ struct StreamableHttpTransport {
 }
 
 impl StreamableHttpTransport {
-	pub fn new(url: String, headers: HashMap<String, String>, url_policy: McpUrlPolicy) -> Result<Self, ToolError> {
-		parse_remote_mcp_url(&url, url_policy)?;
-		let client = match url_policy {
-			McpUrlPolicy::PublicOnly => public_only_http_client()?,
-			McpUrlPolicy::TrustedAdmin => reqwest::Client::builder()
-				.timeout(std::time::Duration::from_secs(30))
-				.redirect(reqwest::redirect::Policy::none())
-				.build()
-				.map_err(|e| ToolError::McpError(format!("Failed to create HTTP client: {e}")))?,
-		};
+	pub fn new(url: String, headers: HashMap<String, String>, url_policy: McpUrlPolicy, resolved_addrs: &[SocketAddr]) -> Result<Self, ToolError> {
+		let parsed = parse_remote_mcp_url(&url, url_policy)?;
+		let host = parsed.host_str().ok_or_else(|| ToolError::McpError("MCP URL must include a host".to_string()))?;
+		let client = reqwest::Client::builder()
+			.timeout(std::time::Duration::from_secs(30))
+			.redirect(reqwest::redirect::Policy::none())
+			.resolve_to_addrs(host, resolved_addrs)
+			.build()
+			.map_err(|e| ToolError::McpError(format!("Failed to create HTTP client: {e}")))?;
 
 		Ok(Self {
 			url,
@@ -360,7 +352,7 @@ fn parse_sse_response(body: &str, expected_id: u64) -> Result<JsonRpcResponse, T
 #[async_trait]
 impl McpTransport for StreamableHttpTransport {
 	async fn send(&self, mut request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError> {
-		validate_remote_mcp_url(&self.url, self.url_policy).await?;
+		parse_remote_mcp_url(&self.url, self.url_policy)?;
 
 		let expected_id = {
 			let mut id = self.request_id.lock().await;
@@ -423,7 +415,7 @@ impl McpTransport for StreamableHttpTransport {
 
 	async fn close(&self) -> Result<(), ToolError> {
 		if let Some(session_id) = self.session_id.lock().await.clone() {
-			validate_remote_mcp_url(&self.url, self.url_policy).await?;
+			parse_remote_mcp_url(&self.url, self.url_policy)?;
 			let _ = self.client.delete(&self.url).header("Mcp-Session-Id", session_id).send().await;
 		}
 		Ok(())
@@ -449,10 +441,13 @@ impl McpClient {
 
 	/// Create a new MCP client with the Streamable HTTP transport.
 	///
-	/// The connection is initialized before returning so the client is ready to use.
+	/// The host is resolved and validated once here and the HTTP client is
+	/// pinned to the validated addresses, so later requests cannot be rebound
+	/// to a different IP by DNS. The connection is initialized before returning
+	/// so the client is ready to use.
 	pub async fn new_http(server_name: String, url: String, headers: HashMap<String, String>, url_policy: McpUrlPolicy) -> Result<Self, ToolError> {
-		validate_remote_mcp_url(&url, url_policy).await?;
-		let transport = StreamableHttpTransport::new(url, headers, url_policy)?;
+		let resolved_addrs = validate_and_resolve_remote_mcp_url(&url, url_policy).await?;
+		let transport = StreamableHttpTransport::new(url, headers, url_policy, &resolved_addrs)?;
 		let client = Self {
 			transport: Box::new(transport),
 			server_name,

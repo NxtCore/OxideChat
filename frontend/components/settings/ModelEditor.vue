@@ -141,7 +141,7 @@ import {ref, watch, computed} from 'vue';
 import {Bot, Loader2, X, Upload, FileText} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
-import {useMarkdown} from '@/composables/useMarkdown';
+import {useMarkdown, sanitizeSvg} from '@/composables/useMarkdown';
 
 const props = defineProps({
 	modelValue: {
@@ -183,7 +183,9 @@ const samplingConfig = [
 
 const providerIcon = computed(() => {
 	if (!form.value.provider) return null;
-	return iconStore.getProviderIcon(form.value.provider.name, form.value.model_id);
+	const icon = iconStore.getProviderIcon(form.value.provider.name, form.value.model_id);
+	if (icon?.type === 'svg') return {...icon, icon: sanitizeSvg(icon.icon)};
+	return icon;
 });
 
 const isDirty = computed(() => JSON.stringify(form.value) !== originalSnapshot.value);

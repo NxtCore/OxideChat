@@ -433,4 +433,63 @@ mod tests {
 		assert_eq!(reloaded.id, model_id);
 		assert!(reloaded.is_enabled);
 	}
+
+	async fn patch_icon(state: &std::sync::Arc<crate::types::JobState>, user: &crate::types::User, model_id: Uuid, icon: &str) -> axum::response::Response {
+		use axum::extract::{Extension, Path, State};
+		use axum::response::IntoResponse;
+		let body: crate::types::models::AdminModelPatchBody = serde_json::from_value(json!({"icon": icon})).unwrap();
+		crate::routes::admin::models::patch_model(
+			State(std::sync::Arc::clone(state)),
+			Extension(crate::types::RequestContext { user: Some(user.clone()) }),
+			Path(model_id),
+			axum::Json(body),
+		)
+		.await
+		.into_response()
+	}
+
+	async fn stored_icon(pool: &PgPool, model_id: Uuid) -> Option<String> {
+		sqlx::query_scalar("SELECT icon FROM model_configs WHERE model_id = $1 AND owner_id IS NULL")
+			.bind(model_id)
+			.fetch_optional(pool)
+			.await
+			.unwrap()
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn patch_model_icon_validation_rejects_xss_and_accepts_benign_svg(pool: PgPool) {
+		use axum::http::StatusCode;
+		crate::config::Config::init(&pool).await;
+		crate::i18n::I18n::init(&pool).await;
+		let user_id = create_user(&pool, "icon-admin").await;
+		sqlx::query("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name = 'admin'")
+			.bind(user_id)
+			.execute(&pool)
+			.await
+			.unwrap();
+		let provider_id = create_provider(&pool, "Icon Provider", true).await;
+		let model_id = create_model(&pool, provider_id, "icon-model", "Icon Model", true).await;
+		let user = crate::types::User::find_by_id(&pool, &user_id).await.unwrap().unwrap();
+		let state = crate::tests::gateway::support::job_state(pool.clone());
+
+		for malicious in [
+			"<svg onload=alert(1)>",
+			"<svg><script>alert(1)</script></svg>",
+			"<svg><a href=\"javascript:alert(1)\">x</a></svg>",
+			"<img src=x onerror=alert(1)>",
+		] {
+			let response = patch_icon(&state, &user, model_id, malicious).await;
+			assert_eq!(response.status(), StatusCode::BAD_REQUEST, "expected rejection for {malicious}");
+			assert!(stored_icon(&pool, model_id).await.is_none(), "malicious icon must not be stored: {malicious}");
+		}
+
+		let benign = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path d=\"M20 6 9 17l-5-5\"/></svg>";
+		let response = patch_icon(&state, &user, model_id, benign).await;
+		assert_eq!(response.status(), StatusCode::OK);
+		assert_eq!(stored_icon(&pool, model_id).await.as_deref(), Some(benign));
+
+		let response = patch_icon(&state, &user, model_id, "").await;
+		assert_eq!(response.status(), StatusCode::OK);
+		assert_eq!(stored_icon(&pool, model_id).await.as_deref(), Some(""));
+	}
 }

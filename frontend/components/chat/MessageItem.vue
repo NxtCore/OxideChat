@@ -236,7 +236,7 @@ import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useIconsStore} from '~/stores/icons';
 import {useMainStore} from '~/stores';
-import {useMarkdown, extractCodeForPreview, ICON_COPY, ICON_CHECK} from '~/composables/useMarkdown';
+import {useMarkdown, extractCodeForPreview, sanitizeSvg, ICON_COPY, ICON_CHECK} from '~/composables/useMarkdown';
 
 const store = useMainStore();
 
@@ -301,7 +301,7 @@ const isLastAssistantMessage = computed(() => {
 const providerIcon = computed(() => {
 	if (!model.value) return null;
 	if (model.value.icon) {
-		return {type: 'svg' as const, icon: model.value.icon};
+		return {type: 'svg' as const, icon: sanitizeSvg(model.value.icon)};
 	}
 	return iconStore.getProviderIcon(model.value.provider.name, model.value.model_id);
 });

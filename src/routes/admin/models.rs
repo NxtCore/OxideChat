@@ -16,6 +16,38 @@ use uuid::Uuid;
 const ADMIN_MODELS_VIEW: &str = "admin.providers.view";
 const ADMIN_MODELS_EDIT: &str = "admin.providers.edit";
 
+/// Returns true when the string contains an HTML event-handler attribute like `onload=`.
+fn has_event_handler(value: &str) -> bool {
+	let lower = value.to_ascii_lowercase();
+	let bytes = lower.as_bytes();
+	for i in 0..bytes.len().saturating_sub(2) {
+		if bytes[i] == b'o' && bytes[i + 1] == b'n' && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric()) {
+			let mut j = i + 2;
+			while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+				j += 1;
+			}
+			if j > i + 2 && j < bytes.len() && bytes[j] == b'=' {
+				return true;
+			}
+		}
+	}
+	false
+}
+
+/// Validates a raw SVG icon string before it is stored and later rendered via `v-html`.
+///
+/// Data URIs are exempt (they are sniffed as raster images and replaced by an internal
+/// image URL). Raw strings must be benign SVG: start with `<svg` and contain no
+/// `<script`, `javascript:`, or event-handler attributes.
+fn validate_icon_svg(value: &str) -> bool {
+	let trimmed = value.trim();
+	if trimmed.is_empty() {
+		return true;
+	}
+	let lower = trimmed.to_ascii_lowercase();
+	lower.starts_with("<svg") && !lower.contains("<script") && !lower.contains("javascript:") && !has_event_handler(trimmed)
+}
+
 /// Merges `reasoning_effort` and `reasoning_budget_tokens` into the `extra_settings` JSON blob.
 ///
 /// Returns `None` if neither reasoning field was included in the request (meaning
@@ -240,7 +272,10 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, Extension(RequestCo
 				return ErrorBuilder::new(ErrorCode::InternalError).build();
 			}
 		},
-		Some(ref inner) => Some(inner.as_deref().map(str::to_owned)),
+		Some(ref inner) => match inner.as_deref() {
+			Some(s) if !validate_icon_svg(s) => return ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
+			other => Some(other.map(str::to_owned)),
+		},
 		None => None,
 	};
 

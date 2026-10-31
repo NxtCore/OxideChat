@@ -27,6 +27,7 @@ pub struct GoogleUserInfo {
 	#[serde(alias = "id")]
 	pub sub: String,
 	pub email: String,
+	#[serde(alias = "verified_email")]
 	pub email_verified: Option<bool>,
 	pub name: Option<String>,
 	pub picture: Option<String>,
