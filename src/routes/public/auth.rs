@@ -3,7 +3,8 @@ use crate::types::JobState;
 use crate::types::{AuthResponse, LoginRequest, RegisterRequest, SetupRequest, User};
 use crate::utils::auth::{create_session, hash_password, validate_email, validate_password, validate_username, verify_password};
 use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use axum::{Json, extract::State, response::IntoResponse};
+use axum::{Json, extract::{ConnectInfo, State}, response::IntoResponse};
+use std::net::SocketAddr;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tower_cookies::{Cookie, Cookies};
@@ -189,10 +190,22 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 }
 
 /// POST /api/v1/auth/login
-pub async fn login(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<LoginRequest>) -> impl IntoResponse {
+pub async fn login(
+	State(state): State<Arc<JobState>>,
+	ConnectInfo(addr): ConnectInfo<SocketAddr>,
+	cookies: Cookies,
+	Json(payload): Json<LoginRequest>,
+) -> impl IntoResponse {
+	let ip = addr.ip();
+	if !state.login_limiter.allow(ip, &payload.email).await {
+		AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
+		return ErrorBuilder::new(ErrorCode::RateLimited).build();
+	}
+
 	let user = match User::find_by_email(&state.db, &payload.email).await {
 		Ok(Some(user)) => user,
 		Ok(None) => {
+			state.login_limiter.record_failure(ip, &payload.email);
 			AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
 			return ErrorBuilder::new(ErrorCode::InvalidCredentials).build();
 		}
@@ -203,12 +216,14 @@ pub async fn login(State(state): State<Arc<JobState>>, cookies: Cookies, Json(pa
 	};
 
 	let Some(password_hash) = &user.password_hash else {
+		state.login_limiter.record_failure(ip, &payload.email);
 		return ErrorBuilder::new(ErrorCode::ExternalAuthRequired).build();
 	};
 
 	match verify_password(&payload.password, password_hash) {
 		Ok(true) => {}
 		Ok(false) => {
+			state.login_limiter.record_failure(ip, &payload.email);
 			AuditLog::log(&state.db, LogEvent::UserLoginFailed, Some(user.id), Some(EntityType::User), Some(user.id));
 			return ErrorBuilder::new(ErrorCode::InvalidCredentials).build();
 		}

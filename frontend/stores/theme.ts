@@ -2,6 +2,7 @@ import {defineStore} from 'pinia';
 import type {ThemeCssVars, FetchedTheme, GlobalConfig} from '~/types/chat';
 import {applyThemeToElement, applyAccentToElement, clearAccentFromElement, clearThemeFromElement, getSystemTheme, type ThemeMode, type ThemeState} from '~/lib/apply-theme';
 import {fetchThemeFromUrl, THEME_URLS} from '~/lib/theme-utils';
+import {isServerUnreachable} from '~/utils/error';
 
 const THEME_STORE_KEY = 'oxide-theme-store';
 
@@ -153,7 +154,9 @@ export const useThemeStore = defineStore('theme', {
 					}
 				}
 			} catch (e) {
-				console.error('Failed to load global config:', e);
+				if (!isServerUnreachable(e)) {
+					console.error('Failed to load global config:', e);
+				}
 			}
 		},
 

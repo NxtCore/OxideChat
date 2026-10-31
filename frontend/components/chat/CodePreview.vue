@@ -23,7 +23,7 @@
 
 			<div class="flex-1 min-h-0 overflow-hidden">
 				<div v-show="activeTab === 'preview'" class="h-full bg-white">
-					<iframe ref="previewFrame" :key="sandbox" class="w-full h-full border-0" :srcdoc="previewHtml" :sandbox="sandbox" />
+					<iframe ref="previewFrame" class="w-full h-full border-0" :srcdoc="previewHtml" sandbox="allow-scripts" />
 				</div>
 
 				<div v-show="activeTab === 'code'" class="h-full overflow-auto p-4 bg-muted/30">
@@ -33,7 +33,7 @@
 							<ShadButton variant="ghost" size="sm" class="h-7 text-xs" @click="copyCode">
 								<Check v-if="copied" class="size-3.5 mr-1" />
 								<Copy v-else class="size-3.5 mr-1" />
-								{{ copied ? 'Copied' : 'Copy' }}
+								{{ copied ? store.getTranslation('chat.code_preview.copied') : store.getTranslation('chat.code_preview.copy') }}
 							</ShadButton>
 						</div>
 						<pre class="p-4 overflow-auto"><code class="text-sm font-mono leading-relaxed">{{ code }}</code></pre>
@@ -44,16 +44,12 @@
 			<ShadDialogFooter class="px-4 py-3 border-t border-border">
 				<div class="flex items-center justify-between w-full">
 					<div class="flex items-center gap-4">
-						<span class="text-xs text-muted-foreground"> {{ code.split('\n').length }} lines </span>
-						<div class="flex items-center gap-2">
-							<ShadSwitch id="sandbox-toggle" v-model:modelValue="allowUnrestricted" />
-							<ShadLabel for="sandbox-toggle" class="text-[10px] uppercase font-bold text-muted-foreground cursor-pointer">Unrestricted</ShadLabel>
-						</div>
+						<span class="text-xs text-muted-foreground">{{ store.getTranslation('chat.code_preview.lines', {count: code.split('\n').length}) }}</span>
 					</div>
 					<div class="flex gap-2">
-						<ShadButton variant="outline" size="sm" @click="openInNewTab"> Open in Tab </ShadButton>
+						<ShadButton variant="outline" size="sm" @click="openInNewTab">{{ store.getTranslation('chat.code_preview.open_in_tab') }}</ShadButton>
 						<ShadDialogClose as-child>
-							<ShadButton size="sm">Close</ShadButton>
+							<ShadButton size="sm">{{ store.getTranslation('chat.code_preview.close') }}</ShadButton>
 						</ShadDialogClose>
 					</div>
 				</div>
@@ -81,14 +77,6 @@ const emit = defineEmits<{
 
 const activeTab = ref<'preview' | 'code'>('preview');
 const copied = ref(false);
-const allowUnrestricted = ref(false);
-
-const sandbox = computed(() => {
-	if (allowUnrestricted.value) {
-		return 'allow-scripts allow-forms allow-modals allow-popups allow-same-origin';
-	}
-	return 'allow-scripts';
-});
 
 const previewHtml = computed(() => {
 	return generatePreviewHtml(props.code, props.language);
@@ -109,10 +97,11 @@ function copyCode() {
 }
 
 function openInNewTab() {
-	const win = window.open('', '_blank');
-	if (win) {
-		win.document.write(previewHtml.value);
-		win.document.close();
+	const blob = new Blob([previewHtml.value], {type: 'text/html'});
+	const url = URL.createObjectURL(blob);
+	const win = window.open(url, '_blank', 'noopener');
+	if (!win) {
+		URL.revokeObjectURL(url);
 	}
 }
 </script>

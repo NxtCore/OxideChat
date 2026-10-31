@@ -16,6 +16,7 @@ pub struct TeamMemberResponse {
 	pub id: Uuid,
 	pub email: String,
 	pub username: String,
+	pub role: String,
 }
 
 #[derive(Debug, Serialize)]

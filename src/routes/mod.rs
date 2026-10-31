@@ -6,22 +6,12 @@ pub mod public;
 use crate::types::JobState;
 use axum::{
 	Router,
+	extract::DefaultBodyLimit,
 	middleware::{from_fn, from_fn_with_state},
 	routing::{delete, get, patch, post, put},
 };
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
-
-/// Builds the router for the pre-authentication routes that are rate limited per client IP.
-fn rate_limited_auth_router() -> Router<Arc<JobState>> {
-	Router::new()
-		.route("/api/v1/auth/setup", post(public::auth::setup))
-		.route("/api/v1/auth/register", post(public::auth::register))
-		.route("/api/v1/auth/login", post(public::auth::login))
-		.route("/api/v1/auth/oauth/{provider}", get(public::oauth::oauth_init))
-		.route("/api/v1/auth/oauth/{provider}/callback", get(public::oauth::oauth_callback))
-		.route_layer(from_fn(crate::middleware::rate_limit))
-}
 
 /// Builds the complete API router backed by shared [`Arc<JobState>`] state.
 ///
@@ -41,6 +31,15 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.method_not_allowed_fallback(public::openai::method_not_allowed)
 		.fallback(public::openai::not_found)
 		.layer(from_fn(crate::utils::openai_gateway::add_request_id));
+	let auth_router = Router::new()
+		.route("/setup", post(public::auth::setup))
+		.route("/register", post(public::auth::register))
+		.route("/login", post(public::auth::login))
+		.route("/oauth/{provider}", get(public::oauth::oauth_init))
+		.route("/oauth/{provider}/callback", get(public::oauth::oauth_callback))
+		.route_layer(from_fn(crate::middleware::rate_limit))
+		.route("/logout", post(public::auth::logout))
+		.layer(DefaultBodyLimit::max(64 * 1024));
 	Router::new()
 		.nest("/openai/v1", openai_router)
 		.route("/api/v1/health", get(public::base::health))
@@ -93,6 +92,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.route("/api/v1/admin/teams/{id}", patch(admin::teams::update_team))
 		.route("/api/v1/admin/teams/{id}", delete(admin::teams::delete_team))
 		.route("/api/v1/admin/teams/{id}/members", put(admin::teams::set_team_members))
+		.route("/api/v1/admin/teams/{id}/members/{user_id}/role", put(admin::teams::set_team_member_role))
 		.route("/api/v1/admin/teams/{id}/models", put(admin::teams::set_team_models))
 		.route("/api/v1/admin/teams/{id}/budget", patch(admin::teams::update_team_budget))
 		// Admin Budgets
@@ -109,6 +109,19 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		)
 		.route("/api/v1/admin/budgets/{id}/assignments/{assignment_id}", delete(admin::budgets::delete_assignment))
 		.route("/api/v1/admin/analytics", get(admin::analytics::get_analytics))
+		.route("/api/v1/admin/gateway/keys", get(admin::gateway::list_keys))
+		.route("/api/v1/admin/gateway/keys/{id}", get(admin::gateway::get_key))
+		.route("/api/v1/admin/gateway/keys/{id}/requests", get(admin::gateway::list_key_requests))
+		.route("/api/v1/admin/gateway/keys/{id}/revoke", post(admin::gateway::revoke_key))
+		.route("/api/v1/admin/gateway/keys/{id}/disable", post(admin::gateway::disable_key))
+		.route("/api/v1/admin/gateway/keys/{id}/enable", post(admin::gateway::enable_key))
+		.route("/api/v1/admin/gateway/requests", get(admin::gateway::list_requests))
+		.route("/api/v1/admin/gateway/teams", get(admin::gateway::list_teams))
+		.route("/api/v1/admin/gateway/teams/{id}", get(admin::gateway::get_team))
+		.route("/api/v1/admin/gateway/teams/{id}/limits", put(admin::gateway::set_team_limits))
+		.route("/api/v1/admin/gateway/teams/{id}/access", put(admin::gateway::set_team_access))
+		.route("/api/v1/admin/gateway/audit", get(admin::gateway::list_audit))
+		.route("/api/v1/admin/gateway/events", get(admin::gateway::list_events))
 		// Admin Users
 		.route("/api/v1/admin/users", get(admin::users::list_users))
 		.route("/api/v1/admin/users", post(admin::users::create_user))
@@ -134,8 +147,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		// Public Config
 		.route("/api/v1/config", get(admin::config::get_global_config))
 		// Auth
-		.route("/api/v1/auth/logout", post(public::auth::logout))
-		.merge(rate_limited_auth_router())
+		.nest("/api/v1/auth", auth_router)
 		// Users
 		.route("/api/v1/users/@me", get(public::users::get_me))
 		.route("/api/v1/me/budget", get(public::users::get_my_budget))
@@ -183,6 +195,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.route("/api/v1/mcp-servers/{id}/sync-tools", post(public::mcp::sync_tools_from_client))
 		// Developer Gateway Keys
 		.route("/api/v1/developer/teams", get(public::developer::list_teams))
+		.route("/api/v1/developer/team-keys", get(public::developer::list_team_keys))
 		.route("/api/v1/developer/keys", get(public::developer::list_keys).post(public::developer::create_key))
 		.route("/api/v1/developer/keys/{id}", patch(public::developer::update_key))
 		.route("/api/v1/developer/keys/{id}/revoke", post(public::developer::revoke_key))
@@ -207,5 +220,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.route("/api/v1/images", post(public::images::upload_image))
 		.layer(from_fn_with_state(state.clone(), crate::middleware::load_current_user))
 		.layer(CookieManagerLayer::new())
+		.layer(crate::middleware::cors_layer())
+		.layer(from_fn(crate::middleware::security_headers))
 		.with_state(state)
 }

@@ -124,7 +124,7 @@
 						<div class="border-b border-border px-4 py-3">
 							<h3 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.top_api_keys') }}</h3>
 						</div>
-						<div v-if="byApiKey.length">
+						<div v-if="byApiKey.length" class="overflow-x-auto"><div class="min-w-[24rem]">
 							<div class="grid grid-cols-[1.5rem_1fr_5rem_5rem_5rem] items-center gap-2 border-b border-border/50 px-4 py-2 text-xs font-medium text-muted-foreground">
 								<span>#</span>
 								<span></span>
@@ -148,7 +148,7 @@
 								<span class="text-right text-xs text-muted-foreground">{{ formatTokens(tokenTotal(row)) }}</span>
 								<span class="text-right font-medium text-foreground">{{ formatMoney(Number(row.cost_total)) }}</span>
 							</div>
-						</div>
+						</div></div>
 						<p v-else class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
 					</div>
 
@@ -157,7 +157,7 @@
 						<div class="border-b border-border px-4 py-3">
 							<h3 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.top_users') }}</h3>
 						</div>
-						<div v-if="byUser.length">
+						<div v-if="byUser.length" class="overflow-x-auto"><div class="min-w-[24rem]">
 							<div class="grid grid-cols-[1.5rem_1fr_5rem_5rem_5rem] items-center gap-2 border-b border-border/50 px-4 py-2 text-xs font-medium text-muted-foreground">
 								<span>#</span>
 								<span></span>
@@ -181,7 +181,7 @@
 								<span class="text-right text-xs text-muted-foreground">{{ formatTokens(tokenTotal(row)) }}</span>
 								<span class="text-right font-medium text-foreground">{{ formatMoney(Number(row.cost_total)) }}</span>
 							</div>
-						</div>
+						</div></div>
 						<p v-else class="py-8 text-center text-sm text-muted-foreground">{{ store.getTranslation('settings.analytics.no_data') }}</p>
 					</div>
 				</div>
@@ -488,6 +488,7 @@
 				<div class="border-b border-border px-4 py-3">
 					<h3 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.analytics.top_models') }}</h3>
 				</div>
+				<div class="overflow-x-auto"><div class="min-w-[32rem]">
 				<div class="grid grid-cols-[1.5rem_1fr_5rem_5rem_5rem_5rem_6rem] border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">
 					<span>#</span>
 					<span>{{ store.getTranslation('settings.analytics.label') }}</span>
@@ -510,6 +511,7 @@
 					<span class="text-right text-xs text-muted-foreground">{{ row.reasoning_tokens.toLocaleString() }}</span>
 					<span class="text-right font-medium text-foreground">{{ formatMoney(Number(row.cost_total)) }}</span>
 				</div>
+				</div></div>
 			</div>
 		</template>
 	</div>
@@ -633,7 +635,10 @@ const byDayModel = computed(() => {
 	if (props.isAdmin) return budgetStore.analytics.byDayModel;
 	return budgetStore.myAnalytics.byDayModel;
 });
-const byUser = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byUser : []);
+const byUser = computed(() => {
+	if (!props.isAdmin || selectedUserId.value) return [];
+	return budgetStore.analytics.byUser.map(row => (row.id === null ? {...row, label: store.getTranslation('settings.analytics.service_accounts')} : row));
+});
 const byTeam = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byTeam : []);
 const byApiKey = computed(() => (props.isAdmin && !selectedUserId.value) ? budgetStore.analytics.byApiKey : []);
 

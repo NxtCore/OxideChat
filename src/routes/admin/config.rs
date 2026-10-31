@@ -14,8 +14,12 @@ pub const ADMIN_CONFIG_EDIT: &str = "admin.config.edit";
 
 /// GET /api/v1/config
 ///
-/// Get global configuration (public endpoint).
-pub async fn get_global_config() -> impl IntoResponse {
+/// Get global configuration (requires an authenticated session).
+pub async fn get_global_config(Extension(RequestContext { user }): Extension<RequestContext>) -> impl IntoResponse {
+	if user.is_none() {
+		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
+	}
+
 	let config = Config::get();
 	let response = GlobalConfigResponse {
 		default_theme: config.default_theme(),

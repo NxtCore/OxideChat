@@ -24,9 +24,11 @@ pub struct OAuthUserInfo {
 
 #[derive(Debug, Deserialize)]
 pub struct GoogleUserInfo {
-	pub id: String,
+	#[serde(alias = "id")]
+	pub sub: String,
 	pub email: String,
-	pub verified_email: Option<bool>,
+	#[serde(alias = "verified_email")]
+	pub email_verified: Option<bool>,
 	pub name: Option<String>,
 	pub picture: Option<String>,
 }
@@ -35,12 +37,12 @@ impl From<GoogleUserInfo> for OAuthUserInfo {
 	fn from(g: GoogleUserInfo) -> Self {
 		Self {
 			provider: "google".to_string(),
-			provider_user_id: g.id.clone(),
+			provider_user_id: g.sub.clone(),
 			email: Some(g.email),
-			email_verified: g.verified_email,
+			email_verified: g.email_verified,
 			username: g.name,
 			avatar_url: g.picture,
-			raw_data: serde_json::json!({ "id": g.id }),
+			raw_data: serde_json::json!({ "sub": g.sub }),
 		}
 	}
 }

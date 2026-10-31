@@ -1,5 +1,5 @@
 <template>
-	<div class="flex gap-3">
+	<div class="flex gap-3" data-testid="streaming-message">
 		<!-- Avatar -->
 		<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
 			<Bot class="h-4 w-4" />

@@ -7,8 +7,26 @@ pub use responses::*;
 
 use crate::types::BaseType;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TeamRole {
+	Member,
+	Admin,
+}
+
+impl TeamRole {
+	#[must_use]
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Member => "member",
+			Self::Admin => "admin",
+		}
+	}
+}
 
 #[derive(Debug, FromRow)]
 pub struct Team {

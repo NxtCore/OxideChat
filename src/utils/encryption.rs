@@ -146,7 +146,7 @@ pub fn encrypt_api_key(plaintext: &str) -> Result<String, EncryptionError> {
 /// Decrypt a current or legacy credential.
 ///
 /// Plaintext values are returned unchanged to support existing installations until
-/// those records are saved again.
+/// those records are saved again; reading such a legacy value is logged as a warning.
 ///
 /// # Errors
 ///
@@ -159,6 +159,7 @@ pub fn decrypt_api_key(stored: &str) -> Result<String, EncryptionError> {
 	if let Some(value) = stored.strip_prefix(LEGACY_PREFIX) {
 		return decrypt_legacy(value, state);
 	}
+	tracing::warn!("legacy plaintext credential read; it will be re-encrypted on next save");
 	Ok(stored.to_owned())
 }
 

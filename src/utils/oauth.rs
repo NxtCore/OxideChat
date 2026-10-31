@@ -176,7 +176,7 @@ pub async fn fetch_user_info(provider: OAuthProvider, access_token: &str) -> Res
 	match provider {
 		OAuthProvider::Google => {
 			let response = client
-				.get("https://www.googleapis.com/oauth2/v2/userinfo")
+				.get("https://openidconnect.googleapis.com/v1/userinfo")
 				.bearer_auth(access_token)
 				.send()
 				.await

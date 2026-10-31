@@ -19,23 +19,37 @@ where
 	F: FnOnce(Uuid) -> Fut,
 	Fut: Future<Output = Response>,
 {
+	match admit(state, context, route, tokens).await {
+		Ok(admission) => {
+			let response = run(admission.reservation.id).await;
+			complete(state, admission, response)
+		}
+		Err(error) => limit_error_response(error),
+	}
+}
+
+/// Admits a request against the limiter, logging any rejection.
+///
+/// # Errors
+///
+/// Returns the failed token estimate or the limiter's rejection.
+pub async fn admit(state: &JobState, context: &GatewayAuthContext, route: GatewayRoute, tokens: Result<u64, GatewayLimitError>) -> Result<GatewayAdmission, GatewayLimitError> {
 	let admitted = match tokens {
 		Ok(tokens) => state.gateway_limiter.admit(context.admission_request(route, tokens)).await,
 		Err(error) => Err(error),
 	};
-	match admitted {
-		Ok(admission) => {
-			let response = run(admission.reservation.id).await;
-			if !response.status().is_success() {
-				state.gateway_limiter.reconcile(admission.reservation.id, 0);
-			}
-			finish(admission, response)
-		}
-		Err(error) => {
-			log_failure(&error, context, route);
-			limit_error_response(error)
-		}
+	if let Err(error) = &admitted {
+		log_failure(error, context, route);
 	}
+	admitted
+}
+
+/// Ties an admitted request's reservation to its response, refunding it when the response failed.
+pub fn complete(state: &JobState, admission: GatewayAdmission, response: Response) -> Response {
+	if !response.status().is_success() {
+		state.gateway_limiter.reconcile(admission.reservation.id, 0);
+	}
+	finish(admission, response)
 }
 
 fn log_failure(error: &GatewayLimitError, context: &GatewayAuthContext, route: GatewayRoute) {

@@ -18,8 +18,22 @@
 		</div>
 
 		<div class="space-y-3 rounded-lg border border-border bg-card p-4">
-			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-				<div class="space-y-1.5">
+			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+				<div v-if="developer.managedTeams.length" class="space-y-1.5">
+					<ShadLabel>{{ store.getTranslation('developer.logs.scope') }}</ShadLabel>
+					<ShadSelect v-model="scopeFilter" @update:model-value="changeScope">
+						<ShadSelectTrigger class="w-full">
+							<ShadSelectValue />
+						</ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem value="mine">{{ store.getTranslation('developer.logs.scope_mine') }}</ShadSelectItem>
+							<ShadSelectItem v-for="team in developer.managedTeams" :key="team.id" :value="team.id">
+								{{ store.getTranslation('developer.logs.scope_service', {team: team.name}) }}
+							</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+				</div>
+				<div v-if="!serviceScope" class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.logs.team') }}</ShadLabel>
 					<ShadSelect v-model="teamFilter" @update:model-value="reload">
 						<ShadSelectTrigger class="w-full">
@@ -39,7 +53,7 @@
 						</ShadSelectTrigger>
 						<ShadSelectContent>
 							<ShadSelectItem value="all">{{ store.getTranslation('developer.logs.all_keys') }}</ShadSelectItem>
-							<ShadSelectItem v-for="apiKey in developer.keys" :key="apiKey.id" :value="apiKey.id">{{ apiKey.name }}</ShadSelectItem>
+							<ShadSelectItem v-for="apiKey in keyOptions" :key="apiKey.id" :value="apiKey.id">{{ apiKey.name }}</ShadSelectItem>
 						</ShadSelectContent>
 					</ShadSelect>
 				</div>
@@ -55,6 +69,28 @@
 							<ShadSelectItem value="error">{{ store.getTranslation('developer.logs.status_error') }}</ShadSelectItem>
 						</ShadSelectContent>
 					</ShadSelect>
+				</div>
+				<div class="space-y-1.5">
+					<ShadLabel>{{ store.getTranslation('developer.logs.error_category') }}</ShadLabel>
+					<ShadSelect v-model="categoryFilter" @update:model-value="reload">
+						<ShadSelectTrigger class="w-full">
+							<ShadSelectValue :placeholder="store.getTranslation('developer.logs.all_categories')" />
+						</ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem value="all">{{ store.getTranslation('developer.logs.all_categories') }}</ShadSelectItem>
+							<ShadSelectItem v-for="category in REQUEST_LOG_ERROR_CATEGORIES" :key="category" :value="category">
+								{{ store.getTranslation(`developer.logs.category_${category}`) }}
+							</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+				</div>
+				<div class="space-y-1.5">
+					<ShadLabel>{{ store.getTranslation('developer.logs.model') }}</ShadLabel>
+					<ShadInput v-model="modelFilter" :placeholder="store.getTranslation('developer.logs.model_placeholder')" @change="reload" />
+				</div>
+				<div class="space-y-1.5">
+					<ShadLabel>{{ store.getTranslation('developer.logs.provider') }}</ShadLabel>
+					<ShadInput v-model="providerFilter" :placeholder="store.getTranslation('developer.logs.provider_placeholder')" @change="reload" />
 				</div>
 				<div class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.logs.from') }}</ShadLabel>
@@ -103,13 +139,17 @@
 		</div>
 
 		<div v-else class="overflow-x-auto rounded-lg border border-border bg-card">
-			<table class="w-full min-w-[720px] text-sm">
+			<table class="w-full min-w-[1250px] text-sm">
 				<thead>
 					<tr class="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
 						<th class="px-4 py-3 font-medium">{{ store.getTranslation('developer.logs.time') }}</th>
+						<th class="px-4 py-3 font-medium">{{ store.getTranslation('developer.logs.request_id') }}</th>
 						<th class="px-4 py-3 font-medium">{{ store.getTranslation('developer.logs.model') }}</th>
+						<th class="px-4 py-3 font-medium">{{ store.getTranslation('developer.logs.provider') }}</th>
 						<th class="px-4 py-3 font-medium">{{ store.getTranslation('developer.logs.api_key') }}</th>
 						<th class="px-4 py-3 font-medium">{{ store.getTranslation('developer.logs.status') }}</th>
+						<th class="px-4 py-3 text-right font-medium">{{ store.getTranslation('developer.logs.latency') }}</th>
+						<th class="px-4 py-3 text-right font-medium">{{ store.getTranslation('developer.logs.ttft') }}</th>
 						<th class="px-4 py-3 text-right font-medium">{{ store.getTranslation('developer.logs.tokens') }}</th>
 						<th class="px-4 py-3 text-right font-medium">{{ store.getTranslation('developer.logs.cost') }}</th>
 					</tr>
@@ -117,10 +157,26 @@
 				<tbody>
 					<tr v-for="log in logs" :key="log.id" class="border-b border-border/60 last:border-b-0">
 						<td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(log.created_at) }}</td>
-						<td class="max-w-[220px] px-4 py-3">
-							<p class="truncate font-mono text-foreground" :title="log.public_model_id">{{ log.public_model_id }}</p>
-							<p class="text-xs text-muted-foreground">{{ log.request_type }}</p>
+						<td class="whitespace-nowrap px-4 py-3">
+							<button
+								v-if="log.request_id"
+								type="button"
+								class="inline-flex items-center gap-1.5 font-mono text-xs text-muted-foreground hover:text-foreground"
+								:title="store.getTranslation('developer.logs.copy_request_id')"
+								@click="copyRequestId(log.request_id)"
+							>
+								{{ log.request_id.slice(0, 8) }}
+								<Copy class="h-3 w-3" />
+							</button>
+							<span v-else class="text-muted-foreground">–</span>
 						</td>
+						<td class="max-w-[220px] px-4 py-3">
+							<p class="truncate font-mono text-foreground" :title="log.public_model_id">{{ log.public_model_id || '–' }}</p>
+							<p class="text-xs text-muted-foreground">
+								{{ log.request_type }}<template v-if="log.streaming"> · {{ store.getTranslation('developer.logs.streaming') }}</template>
+							</p>
+						</td>
+						<td class="max-w-[140px] truncate px-4 py-3 text-muted-foreground" :title="log.provider ?? ''">{{ log.provider || '–' }}</td>
 						<td class="max-w-[140px] truncate px-4 py-3 text-muted-foreground" :title="keyName(log.api_key_id)">{{ keyName(log.api_key_id) }}</td>
 						<td class="px-4 py-3">
 							<span
@@ -130,7 +186,13 @@
 								<span class="h-1.5 w-1.5 rounded-full" :class="log.status === 'error' ? 'bg-destructive' : 'bg-primary'" />
 								{{ log.status_code ? log.status_code : store.getTranslation(`developer.logs.status_${log.status}`) }}
 							</span>
+							<p v-if="log.error_category" class="mt-1 text-xs text-muted-foreground">{{ store.getTranslation(`developer.logs.category_${log.error_category}`) }}</p>
+							<p v-else-if="log.finish_reason" class="mt-1 text-xs text-muted-foreground" :title="store.getTranslation('developer.logs.finish_reason')">
+								{{ store.getTranslation(`developer.logs.finish_${log.finish_reason}`) }}
+							</p>
 						</td>
+						<td class="whitespace-nowrap px-4 py-3 text-right tabular-nums text-muted-foreground">{{ formatLatency(log.latency_ms) }}</td>
+						<td class="whitespace-nowrap px-4 py-3 text-right tabular-nums text-muted-foreground">{{ formatLatency(log.time_to_first_token_ms) }}</td>
 						<td class="whitespace-nowrap px-4 py-3 text-right tabular-nums text-muted-foreground">
 							{{ log.input_tokens.toLocaleString() }} / {{ log.output_tokens.toLocaleString() }}
 						</td>
@@ -152,18 +214,23 @@
 </template>
 
 <script setup lang="ts">
-import {AlertTriangle, Download, FileJson, RefreshCw, ScrollText} from 'lucide-vue-next';
+import {AlertTriangle, Copy, Download, FileJson, RefreshCw, ScrollText} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useDeveloperStore} from '@/stores/developerStore';
-import {downloadFile, errorMessage, formatMoney, requestLogsCsv} from '~/utils/developer';
-import type {DeveloperRequestLog, RequestLogFilters, RequestLogStatus} from '~/types/developer';
+import {downloadFile, errorMessage, formatLatency, formatMoney, requestLogsCsv} from '~/utils/developer';
+import {REQUEST_LOG_ERROR_CATEGORIES} from '~/types/developer';
+import type {DeveloperRequestLog, RequestLogErrorCategory, RequestLogFilters, RequestLogStatus} from '~/types/developer';
 
 const store = useMainStore();
 const developer = useDeveloperStore();
 
+const scopeFilter = ref('mine');
 const teamFilter = ref('all');
 const keyFilter = ref('all');
 const statusFilter = ref('all');
+const categoryFilter = ref('all');
+const modelFilter = ref('');
+const providerFilter = ref('');
 const fromFilter = ref('');
 const toFilter = ref('');
 const logs = ref<DeveloperRequestLog[]>([]);
@@ -175,18 +242,43 @@ const exporting = ref(false);
 const retentionDays = ref('30');
 const retentionOptions = [7, 14, 30, 90, 365];
 
+const serviceScope = computed(() => scopeFilter.value !== 'mine');
+
+const keyOptions = computed(() =>
+	serviceScope.value ? developer.teamKeys.filter(key => key.team_id === scopeFilter.value && key.owner_username === null) : developer.keys,
+);
+
+function changeScope() {
+	keyFilter.value = 'all';
+	teamFilter.value = 'all';
+	reload();
+}
+
 function filters(): RequestLogFilters {
 	return {
-		team_id: teamFilter.value === 'all' ? null : teamFilter.value,
+		scope: serviceScope.value ? 'team_service' : null,
+		team_id: serviceScope.value ? scopeFilter.value : teamFilter.value === 'all' ? null : teamFilter.value,
 		api_key_id: keyFilter.value === 'all' ? null : keyFilter.value,
 		status: statusFilter.value === 'all' ? null : (statusFilter.value as RequestLogStatus),
+		error_category: categoryFilter.value === 'all' ? null : (categoryFilter.value as RequestLogErrorCategory),
+		model: modelFilter.value.trim() || null,
+		provider: providerFilter.value.trim() || null,
 		from: fromFilter.value || null,
 		to: toFilter.value || null,
 	};
 }
 
 function keyName(id: string | null): string {
-	return (id && developer.keys.find(key => key.id === id)?.name) || '–';
+	return (id && (developer.keys.find(key => key.id === id) ?? developer.teamKeys.find(key => key.id === id))?.name) || '–';
+}
+
+async function copyRequestId(id: string) {
+	try {
+		await navigator.clipboard.writeText(id);
+		store.toast(store.getTranslation('developer.logs.request_id_copied'), {type: 'success'});
+	} catch {
+		store.toast(store.getTranslation('developer.logs.request_id_copy_error'), {type: 'error'});
+	}
 }
 
 function formatDate(value: string) {

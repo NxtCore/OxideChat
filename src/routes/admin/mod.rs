@@ -2,6 +2,7 @@ pub mod analytics;
 pub mod budgets;
 pub mod catalog;
 pub mod config;
+pub mod gateway;
 pub mod i18n;
 pub mod mcp;
 pub mod models;

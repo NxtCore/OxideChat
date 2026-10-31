@@ -35,6 +35,30 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, argon2::passw
 	Ok(argon2().verify_password(password.as_bytes(), &parsed_hash).is_ok())
 }
 
+/// Determine whether cookies should be marked `Secure` based on `BASE_URL`.
+///
+/// Returns `true` when `BASE_URL` uses the `https` scheme, `false` when it uses
+/// `http`. If `BASE_URL` is unset or cannot be parsed, returns `true`, since
+/// that indicates production intent where `Secure` cookies are expected.
+#[must_use]
+pub fn cookie_secure_from_env() -> bool {
+	match std::env::var("BASE_URL") {
+		Ok(base_url) => cookie_secure_for_base_url(&base_url),
+		Err(_) => true,
+	}
+}
+
+/// Derive the cookie `Secure` flag from a base URL's scheme.
+///
+/// `http` yields `false`, any other scheme (or no scheme) yields `true`.
+#[must_use]
+pub fn cookie_secure_for_base_url(base_url: &str) -> bool {
+	match base_url.split_once("://") {
+		Some((scheme, _)) => !scheme.eq_ignore_ascii_case("http"),
+		None => true,
+	}
+}
+
 /// Create a session for a user and set the session cookie.
 ///
 /// Note: Multiple concurrent sessions per user are allowed by design.
@@ -52,12 +76,11 @@ pub async fn create_session(pool: &PgPool, cookies: &Cookies, user_id: &Uuid) ->
 		.execute(pool)
 		.await?;
 
-	let is_secure = std::env::var("COOKIE_SECURE").map(|v| v != "false").unwrap_or(true);
 	let mut cookie = Cookie::new(SESSION_COOKIE_NAME, session_id.to_string());
 	cookie.set_path("/");
 	cookie.set_http_only(true);
 	cookie.set_same_site(SameSite::Lax);
-	cookie.set_secure(is_secure);
+	cookie.set_secure(cookie_secure_from_env());
 	cookie.set_max_age(tower_cookies::cookie::time::Duration::days(SESSION_DURATION_DAYS));
 
 	cookies.add(cookie);

@@ -1,10 +1,10 @@
 use super::{
 	CreateTeamRequest, Team, TeamDetailedResponse, TeamMemberResponse, TeamModelAccessResponse, TeamResponse, TeamSummaryResponse, UpdateTeamBudgetRequest,
-	UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest,
+	TeamRole, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest,
 };
 use crate::types::axum::PaginatedResponse;
-use crate::types::{BaseType, Budget};
-use sqlx::{PgPool, Postgres, QueryBuilder};
+use crate::types::{AUDIT_TEAM_TARGET, BaseType, Budget, EVENT_TEAM_MEMBER_ROLE_UPDATED, EVENT_TEAM_MODELS_UPDATED};
+use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -196,22 +196,14 @@ impl Team {
 			.flatten()
 	}
 
-	pub async fn update_budget(&self, pool: &PgPool, req: &UpdateTeamBudgetRequest) -> Result<Self, sqlx::Error> {
-		let updated = sqlx::query_as::<_, Self>(
-			r#"
-			UPDATE teams
-			SET budget_id = $2,
-				updated_at = NOW()
-			WHERE id = $1
-			RETURNING *
-			"#,
-		)
-		.bind(self.id)
-		.bind(req.budget_id)
-		.fetch_one(pool)
-		.await?;
-		Budget::replace_team_budget_from_legacy(pool, &self.id, req.budget_id).await?;
-		Ok(updated)
+	/// Changes the team's budget and audits it in one transaction.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the budget cannot be stored; nothing is changed then.
+	pub async fn update_budget(&self, pool: &PgPool, actor_id: &Uuid, req: &UpdateTeamBudgetRequest) -> Result<Self, sqlx::Error> {
+		Budget::replace_team_budget_from_legacy(pool, actor_id, &self.id, req.budget_id).await?;
+		Self::find_by_id(pool, &self.id).await?.ok_or(sqlx::Error::RowNotFound)
 	}
 
 	pub async fn delete(&self, pool: &PgPool) -> Result<bool, sqlx::Error> {
@@ -227,7 +219,6 @@ impl Team {
 
 	pub async fn set_members(&self, pool: &PgPool, user_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
-		sqlx::query("DELETE FROM team_members WHERE team_id = $1").bind(self.id).execute(&mut *tx).await?;
 
 		if self.is_default {
 			sqlx::query(
@@ -240,24 +231,131 @@ impl Team {
 			.bind(self.id)
 			.execute(&mut *tx)
 			.await?;
-		} else if !user_ids.is_empty() {
-			let mut builder = QueryBuilder::<Postgres>::new("INSERT INTO team_members (team_id, user_id) ");
-			builder.push_values(user_ids, |mut row, user_id| {
-				row.push_bind(self.id).push_bind(user_id);
-			});
-			builder.push(" ON CONFLICT DO NOTHING");
-			builder.build().execute(&mut *tx).await?;
+		} else {
+			sqlx::query("DELETE FROM team_members WHERE team_id = $1 AND user_id <> ALL($2)")
+				.bind(self.id)
+				.bind(user_ids)
+				.execute(&mut *tx)
+				.await?;
+			if !user_ids.is_empty() {
+				let mut builder = QueryBuilder::<Postgres>::new("INSERT INTO team_members (team_id, user_id) ");
+				builder.push_values(user_ids, |mut row, user_id| {
+					row.push_bind(self.id).push_bind(user_id);
+				});
+				builder.push(" ON CONFLICT DO NOTHING");
+				builder.build().execute(&mut *tx).await?;
+			}
 		}
 
 		tx.commit().await?;
 		Ok(())
 	}
 
+	/// Tells whether the user is a member of the team.
+	///
+	/// # Errors
+	///
+	/// Returns an error when membership cannot be queried.
+	pub async fn is_member<'e, E: sqlx::PgExecutor<'e>>(executor: E, team_id: &Uuid, user_id: &Uuid) -> Result<bool, sqlx::Error> {
+		sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM team_members WHERE team_id = $1 AND user_id = $2)")
+			.bind(team_id)
+			.bind(user_id)
+			.fetch_one(executor)
+			.await
+	}
+
+	/// Tells whether the user holds the admin role in the team.
+	///
+	/// # Errors
+	///
+	/// Returns an error when membership cannot be queried.
+	pub async fn is_admin<'e, E: sqlx::PgExecutor<'e>>(executor: E, team_id: &Uuid, user_id: &Uuid) -> Result<bool, sqlx::Error> {
+		sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM team_members WHERE team_id = $1 AND user_id = $2 AND role = 'admin')")
+			.bind(team_id)
+			.bind(user_id)
+			.fetch_one(executor)
+			.await
+	}
+
+	/// Changes a member's team role and audits it in the same transaction.
+	///
+	/// Returns `false` when the user is not a member of the team.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the role cannot be stored; nothing is changed then.
+	pub async fn set_member_role(&self, pool: &PgPool, actor_id: &Uuid, user_id: &Uuid, role: TeamRole) -> Result<bool, sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let before: Option<String> = sqlx::query_scalar("SELECT role FROM team_members WHERE team_id = $1 AND user_id = $2 FOR UPDATE")
+			.bind(self.id)
+			.bind(user_id)
+			.fetch_optional(&mut *tx)
+			.await?;
+		let Some(before) = before else {
+			return Ok(false);
+		};
+		sqlx::query("UPDATE team_members SET role = $3 WHERE team_id = $1 AND user_id = $2")
+			.bind(self.id)
+			.bind(user_id)
+			.bind(role.as_str())
+			.execute(&mut *tx)
+			.await?;
+		let metadata = serde_json::json!({ "user_id": user_id, "before": before, "after": role.as_str() });
+		sqlx::query("INSERT INTO audit_logs (event, actor_id, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5)")
+			.bind(EVENT_TEAM_MEMBER_ROLE_UPDATED)
+			.bind(actor_id)
+			.bind(AUDIT_TEAM_TARGET)
+			.bind(self.id)
+			.bind(metadata)
+			.execute(&mut *tx)
+			.await?;
+		tx.commit().await?;
+		Ok(true)
+	}
+
 	pub async fn set_model_access(&self, pool: &PgPool, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
+		self.replace_model_access(&mut tx, provider_ids, model_ids).await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	/// Replaces the team's model access and audits the change in the same transaction.
+	///
+	/// # Errors
+	///
+	/// Returns an error when model access cannot be stored.
+	pub async fn update_model_access(&self, pool: &PgPool, actor_id: &Uuid, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let before_providers: Vec<Uuid> = sqlx::query_scalar("SELECT provider_id FROM team_model_access WHERE team_id = $1 AND provider_id IS NOT NULL ORDER BY provider_id")
+			.bind(self.id)
+			.fetch_all(&mut *tx)
+			.await?;
+		let before_models: Vec<Uuid> = sqlx::query_scalar("SELECT model_id FROM team_model_access WHERE team_id = $1 AND model_id IS NOT NULL ORDER BY model_id")
+			.bind(self.id)
+			.fetch_all(&mut *tx)
+			.await?;
+		self.replace_model_access(&mut tx, provider_ids, model_ids).await?;
+		let metadata = serde_json::json!({
+			"before": { "provider_ids": before_providers, "model_ids": before_models },
+			"after": { "provider_ids": provider_ids, "model_ids": model_ids },
+		});
+		sqlx::query("INSERT INTO audit_logs (event, actor_id, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5)")
+			.bind(EVENT_TEAM_MODELS_UPDATED)
+			.bind(actor_id)
+			.bind(AUDIT_TEAM_TARGET)
+			.bind(self.id)
+			.bind(metadata)
+			.execute(&mut *tx)
+			.await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	async fn replace_model_access(&self, tx: &mut Transaction<'_, Postgres>, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		sqlx::query("DELETE FROM team_model_access WHERE team_id = $1")
 			.bind(self.id)
-			.execute(&mut *tx)
+			.execute(&mut **tx)
 			.await?;
 
 		if !provider_ids.is_empty() {
@@ -266,7 +364,7 @@ impl Team {
 				row.push_bind(self.id).push_bind(provider_id);
 			});
 			builder.push(" ON CONFLICT DO NOTHING");
-			builder.build().execute(&mut *tx).await?;
+			builder.build().execute(&mut **tx).await?;
 		}
 
 		if !model_ids.is_empty() {
@@ -275,17 +373,16 @@ impl Team {
 				row.push_bind(self.id).push_bind(model_id);
 			});
 			builder.push(" ON CONFLICT DO NOTHING");
-			builder.build().execute(&mut *tx).await?;
+			builder.build().execute(&mut **tx).await?;
 		}
 
-		tx.commit().await?;
 		Ok(())
 	}
 
 	pub async fn members(&self, pool: &PgPool) -> Result<Vec<TeamMemberResponse>, sqlx::Error> {
-		sqlx::query_as::<_, (Uuid, String, String)>(
+		sqlx::query_as::<_, (Uuid, String, String, String)>(
 			r#"
-			SELECT u.id, u.email, u.username
+			SELECT u.id, u.email, u.username, tm.role
 			FROM users u
 			INNER JOIN team_members tm ON tm.user_id = u.id
 			WHERE tm.team_id = $1
@@ -295,7 +392,7 @@ impl Team {
 		.bind(self.id)
 		.fetch_all(pool)
 		.await
-		.map(|rows| rows.into_iter().map(|(id, email, username)| TeamMemberResponse { id, email, username }).collect())
+		.map(|rows| rows.into_iter().map(|(id, email, username, role)| TeamMemberResponse { id, email, username, role }).collect())
 	}
 
 	pub async fn model_access(&self, pool: &PgPool) -> Result<TeamModelAccessResponse, sqlx::Error> {
@@ -386,7 +483,11 @@ impl Team {
 		}
 
 		let mut tx = pool.begin().await?;
-		sqlx::query("DELETE FROM team_members WHERE user_id = $1").bind(user_id).execute(&mut *tx).await?;
+		sqlx::query("DELETE FROM team_members WHERE user_id = $1 AND team_id <> ALL($2)")
+			.bind(user_id)
+			.bind(&ids)
+			.execute(&mut *tx)
+			.await?;
 		let mut builder = QueryBuilder::<Postgres>::new("INSERT INTO team_members (team_id, user_id) ");
 		builder.push_values(&ids, |mut row, team_id| {
 			row.push_bind(team_id).push_bind(user_id);

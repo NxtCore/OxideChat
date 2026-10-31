@@ -12,7 +12,7 @@
 		</div>
 
 		<div v-else class="space-y-4 rounded-lg border border-border bg-card p-4">
-			<div class="grid gap-4 sm:grid-cols-2">
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<div class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.playground.key') }}</ShadLabel>
 					<ShadSelect v-model="keyId">
@@ -24,12 +24,7 @@
 				</div>
 				<div class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation('developer.playground.model') }}</ShadLabel>
-					<ShadSelect v-model="model" :disabled="!models.length">
-						<ShadSelectTrigger class="w-full"><ShadSelectValue :placeholder="store.getTranslation('developer.playground.pick_model')" /></ShadSelectTrigger>
-						<ShadSelectContent>
-							<ShadSelectItem v-for="entry in models" :key="entry" :value="entry">{{ entry }}</ShadSelectItem>
-						</ShadSelectContent>
-					</ShadSelect>
+					<DeveloperModelCombobox v-model="model" :models="models" :disabled="!models.length" />
 				</div>
 			</div>
 

@@ -3,7 +3,7 @@ import type {DeveloperKey, DeveloperRequestLog, KeyStatus} from '~/types/develop
 export function keyStatus(key: DeveloperKey): KeyStatus {
 	if (key.revoked_at) return 'revoked';
 	if (key.expires_at && new Date(key.expires_at).getTime() <= Date.now()) return 'expired';
-	if (!key.is_enabled) return 'disabled';
+	if (!key.is_enabled || key.admin_disabled) return 'disabled';
 	return 'active';
 }
 
@@ -25,6 +25,11 @@ export function formatMoney(value: string | number): string {
 	return `$${amount.toFixed(small ? 6 : 2)}`;
 }
 
+export function formatLatency(value: number | null): string {
+	if (value === null) return '–';
+	return value >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${value} ms`;
+}
+
 export function requestLogsCsv(logs: DeveloperRequestLog[]): string {
 	const headers = [
 		'created_at',
@@ -32,6 +37,13 @@ export function requestLogsCsv(logs: DeveloperRequestLog[]): string {
 		'request_type',
 		'status',
 		'status_code',
+		'error_category',
+		'request_id',
+		'provider',
+		'streaming',
+		'latency_ms',
+		'time_to_first_token_ms',
+		'finish_reason',
 		'input_tokens',
 		'output_tokens',
 		'reasoning_tokens',
@@ -48,6 +60,13 @@ export function requestLogsCsv(logs: DeveloperRequestLog[]): string {
 			log.request_type,
 			log.status,
 			log.status_code ?? '',
+			log.error_category ?? '',
+			log.request_id ?? '',
+			log.provider ?? '',
+			log.streaming,
+			log.latency_ms ?? '',
+			log.time_to_first_token_ms ?? '',
+			log.finish_reason ?? '',
 			log.input_tokens,
 			log.output_tokens,
 			log.reasoning_tokens,

@@ -2,7 +2,7 @@
 //!
 //! CRUD operations for system-wide AI providers.
 
-use crate::ai::parse_extra_headers;
+use crate::ai::{parse_extra_headers, reload_providers};
 use crate::types::{JobState, RequestContext};
 use crate::types::models::Model;
 use crate::types::providers::{
@@ -103,7 +103,10 @@ pub async fn create_provider(State(state): State<Arc<JobState>>, Extension(Reque
 
 	match provider {
 		Ok(provider) => {
-			if let Err(e) = sync_provider_models(&state.db, &provider).await {
+			reload_providers(&state.db).await;
+			if provider.is_enabled
+				&& let Err(e) = sync_provider_models(&state.db, &provider).await
+			{
 				eprintln!("[AI] Warning: Failed to sync models for new provider: {e}");
 			}
 			let response: ProviderResponse = provider.into();
@@ -153,7 +156,10 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, Extension(Reque
 
 	match provider {
 		Ok(Some(provider)) => {
-			if let Err(e) = sync_provider_models(&state.db, &provider).await {
+			reload_providers(&state.db).await;
+			if provider.is_enabled
+				&& let Err(e) = sync_provider_models(&state.db, &provider).await
+			{
 				eprintln!("[AI] Warning: Failed to sync models after provider update: {e}");
 			}
 			let response: ProviderResponse = provider.into();
@@ -181,7 +187,10 @@ pub async fn delete_provider(State(state): State<Arc<JobState>>, Extension(Reque
 	let result = Provider::delete_system(&state.db, &id).await;
 
 	match result {
-		Ok(true) => (StatusCode::NO_CONTENT, "").into_response(),
+		Ok(true) => {
+			reload_providers(&state.db).await;
+			(StatusCode::NO_CONTENT, "").into_response()
+		}
 		Ok(false) => ErrorBuilder::new(ErrorCode::NotFound).build(),
 		Err(e) => {
 			eprintln!("[AI] Failed to delete provider: {e}");

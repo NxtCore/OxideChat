@@ -50,17 +50,16 @@ pub async fn upload_image(
 /// GET /api/v1/images/:id
 pub async fn serve_image(
 	State(state): State<Arc<JobState>>,
-	Extension(RequestContext { user }): Extension<RequestContext>,
+	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
 	Path(id): Path<Uuid>,
 ) -> Response {
-	if user.is_none() {
+	if current_user.is_none() {
 		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
 	}
-
 	match get_image(&state.db, id).await {
 		Ok(Some((data, mime_type))) => {
 			let mut headers = HeaderMap::new();
-			headers.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=31536000, immutable"));
+			headers.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=3600"));
 			headers.insert(header::X_CONTENT_TYPE_OPTIONS, header::HeaderValue::from_static("nosniff"));
 
 			if let Some(safe_mime) = safe_image_mime(&data, &mime_type) {

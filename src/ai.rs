@@ -27,14 +27,20 @@ static OF_COST_QUEUE: std::sync::OnceLock<Arc<OxideCostQueue>> = std::sync::Once
 pub async fn init(state: &Arc<JobState>) {
 	let pool = &state.db;
 	let cost_sink = Arc::clone(OF_COST_QUEUE.get_or_init(|| OxideCostQueue::spawn(Arc::clone(state))));
-	let engine = Arc::new(RwLock::new(OmniferenceEngine::with_cost_sink(cost_sink)));
+	let (engine, provider_count) = build_engine(pool, cost_sink).await;
 
+	let _ = OF_ENGINE.set(Arc::new(RwLock::new(engine)));
+	sync_pricing_overrides(pool).await;
+	println!("[AI] Engine initialized with {} system providers", provider_count);
+}
+
+/// Builds an engine with every enabled system provider registered and returns it with the provider count.
+async fn build_engine(pool: &PgPool, cost_sink: Arc<OxideCostQueue>) -> (OmniferenceEngine, usize) {
+	let mut engine = OmniferenceEngine::with_cost_sink(cost_sink);
 	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
 
-	let provider_count = providers.len();
-	let mut engine_write = engine.write().await;
-	for provider in providers {
-		let config = match provider_to_config(&provider) {
+	for provider in &providers {
+		let config = match provider_to_config(provider) {
 			Ok(config) => config,
 			Err(error) => {
 				tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
@@ -42,18 +48,14 @@ pub async fn init(state: &Arc<JobState>) {
 			}
 		};
 
-		if let Err(e) = engine_write.register_provider(config).await {
+		if let Err(e) = engine.register_provider(config).await {
 			eprintln!("[AI] Failed to register provider '{}': {}", provider.name, e);
 		} else {
 			println!("[AI] Registered provider '{}'", provider.name);
 		}
 	}
 
-	drop(engine_write);
-
-	let _ = OF_ENGINE.set(engine);
-	sync_pricing_overrides(pool).await;
-	println!("[AI] Engine initialized with {} system providers", provider_count);
+	(engine, providers.len())
 }
 
 /// Get the global AI engine
@@ -80,36 +82,17 @@ pub async fn shutdown() {
 	}
 }
 
-/// Reload providers from the database
-pub async fn reload_providers(state: &Arc<JobState>) {
-	let pool = &state.db;
-	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
-
-	let provider_count = providers.len();
-
-	// Create a fresh engine with new providers
-	let Some(cost_sink) = OF_COST_QUEUE.get().map(Arc::clone) else {
+/// Rebuilds the engine from the providers in the database and swaps it in.
+///
+/// Call this after a provider is created, updated or deleted so the next request uses the
+/// stored configuration. Discovery runs before the swap, so in-flight requests are not blocked.
+pub async fn reload_providers(pool: &PgPool) {
+	let (Some(cost_sink), Some(engine_arc)) = (OF_COST_QUEUE.get().map(Arc::clone), OF_ENGINE.get()) else {
 		tracing::error!("cannot reload providers before the AI engine is initialized");
 		return;
 	};
-	let new_engine = OmniferenceEngine::with_cost_sink(cost_sink);
-	let engine_arc = get();
-	let mut engine_write = engine_arc.write().await;
-	*engine_write = new_engine;
-
-	for provider in providers {
-		let config = match provider_to_config(&provider) {
-			Ok(config) => config,
-			Err(error) => {
-				tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
-				continue;
-			}
-		};
-		if let Err(e) = engine_write.register_provider(config).await {
-			eprintln!("[AI] Failed to register provider '{}': {}", provider.name, e);
-		}
-	}
-	drop(engine_write);
+	let (new_engine, provider_count) = build_engine(pool, cost_sink).await;
+	*engine_arc.write().await = new_engine;
 	sync_pricing_overrides(pool).await;
 	println!("[AI] Reloaded {} providers", provider_count);
 }

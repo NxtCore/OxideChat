@@ -2,7 +2,7 @@
 mod credential_encryption {
 	use crate::utils::encryption::{
 		EncryptionError, SECRET_MASK, decrypt_api_key, decrypt_object_values, decrypt_schema_secrets, encrypt_api_key, encrypt_object_values, encrypt_schema_secrets,
-		init_for_test, mask_object_values, mask_schema_secrets,
+		encrypt_secret_value, init_for_test, mask_object_values, mask_schema_secrets,
 	};
 	use aes_gcm::{
 		Aes256Gcm, Nonce,
@@ -34,6 +34,16 @@ mod credential_encryption {
 		tampered[last] = if tampered[last] == b'A' { b'B' } else { b'A' };
 		let tampered = String::from_utf8(tampered).map_err(|_| EncryptionError::InvalidFormat)?;
 		assert!(decrypt_api_key(&tampered).is_err());
+		Ok(())
+	}
+
+	#[test]
+	fn legacy_plaintext_passthrough_is_preserved_and_reencrypted_on_save() -> Result<(), EncryptionError> {
+		init_for_test([0x42; 32])?;
+		assert_eq!(decrypt_api_key("existing-plaintext")?, "existing-plaintext");
+		let encrypted = encrypt_secret_value("existing-plaintext", None)?;
+		assert!(encrypted.starts_with("oxide:v1:"));
+		assert_eq!(decrypt_api_key(&encrypted)?, "existing-plaintext");
 		Ok(())
 	}
 

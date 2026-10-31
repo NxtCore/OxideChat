@@ -74,6 +74,30 @@ mod tests {
 		}
 	}
 
+	mod cookie_secure {
+		use crate::utils::auth::cookie_secure_for_base_url;
+
+		#[test]
+		fn https_base_url_is_secure() {
+			assert!(cookie_secure_for_base_url("https://chat.example.com"));
+		}
+
+		#[test]
+		fn http_base_url_is_not_secure() {
+			assert!(!cookie_secure_for_base_url("http://localhost:8080"));
+		}
+
+		#[test]
+		fn http_scheme_match_is_case_insensitive() {
+			assert!(!cookie_secure_for_base_url("HTTP://localhost:8080"));
+		}
+
+		#[test]
+		fn missing_scheme_defaults_to_secure() {
+			assert!(cookie_secure_for_base_url("example.com"));
+		}
+	}
+
 	mod password {
 		use argon2::{
 			Argon2,
@@ -178,32 +202,32 @@ mod tests {
 		use tower::ServiceExt;
 
 		#[sqlx::test(migrations = "./migrations")]
-		async fn login_route_returns_429_after_the_per_ip_limit(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
+		async fn auth_route_returns_429_after_the_per_ip_limit(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
 			crate::config::Config::init(&pool).await;
 			crate::i18n::I18n::init(&pool).await;
 			let state = crate::tests::gateway::support::job_state(pool);
 			let router = crate::routes::build_router(state);
-			let login_body = r#"{"email":"nobody@example.com","password":"pass123"}"#;
+			let invalid_setup_body = "{}";
 			let mut statuses = Vec::with_capacity(21);
 			for _ in 0..21 {
 				let request = Request::builder()
 					.method("POST")
-					.uri("/api/v1/auth/login")
+					.uri("/api/v1/auth/setup")
 					.header("content-type", "application/json")
-					.body(Body::from(login_body))?;
+					.body(Body::from(invalid_setup_body))?;
 				let response = router.clone().oneshot(request).await?;
 				statuses.push(response.status().as_u16());
 			}
 			assert!(
-				statuses[..20].iter().all(|status| *status == 401),
-				"expected 401 for the first 20 logins: {statuses:?}"
+				statuses[..20].iter().all(|status| *status == 422),
+				"expected 422 for the first 20 invalid setup requests: {statuses:?}"
 			);
 			assert_eq!(statuses[20], 429);
 			let request = Request::builder()
 				.method("POST")
-				.uri("/api/v1/auth/login")
+				.uri("/api/v1/auth/setup")
 				.header("content-type", "application/json")
-				.body(Body::from(login_body))?;
+				.body(Body::from(invalid_setup_body))?;
 			let response = router.oneshot(request).await?;
 			assert_eq!(response.status().as_u16(), 429);
 			let payload = to_bytes(response.into_body(), 4096).await?;
@@ -211,6 +235,67 @@ mod tests {
 			assert!(text.contains("too_many_requests"), "unexpected body: {text}");
 			assert!(text.contains("Too many requests"), "missing i18n message: {text}");
 			Ok(())
+		}
+	}
+
+	mod login_limit {
+		use crate::utils::login_limit::LoginRateLimiter;
+		use std::net::{IpAddr, Ipv4Addr};
+		use std::time::Duration;
+
+		const IP_A: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+		const IP_B: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+
+		#[tokio::test(start_paused = true)]
+		async fn failures_up_to_limit_are_allowed_then_rejected() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..10 {
+				assert!(limiter.allow(IP_A, "a@example.com").await);
+				limiter.record_failure(IP_A, "a@example.com");
+			}
+			assert!(!limiter.allow(IP_A, "a@example.com").await);
+			assert!(!limiter.allow(IP_A, "other@example.com").await);
+		}
+
+		#[tokio::test(start_paused = true)]
+		async fn ip_limit_blocks_all_emails_from_that_ip() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..10 {
+				limiter.record_failure(IP_A, "a@example.com");
+			}
+			assert!(!limiter.allow(IP_A, "b@example.com").await);
+			assert!(limiter.allow(IP_B, "b@example.com").await);
+		}
+
+		#[tokio::test(start_paused = true)]
+		async fn email_limit_is_scoped_to_its_own_ip() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..10 {
+				limiter.record_failure(IP_A, "a@example.com");
+			}
+			assert!(!limiter.allow(IP_A, "a@example.com").await);
+			assert!(limiter.allow(IP_B, "a@example.com").await);
+		}
+
+		#[tokio::test(start_paused = true)]
+		async fn failures_expire_after_the_window() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..10 {
+				limiter.record_failure(IP_A, "a@example.com");
+			}
+			assert!(!limiter.allow(IP_A, "a@example.com").await);
+			tokio::time::advance(Duration::from_secs(5 * 60)).await;
+			assert!(limiter.allow(IP_A, "a@example.com").await);
+		}
+
+		#[tokio::test(start_paused = true)]
+		async fn allowed_attempts_do_not_consume_failures() {
+			let limiter = LoginRateLimiter::spawn();
+			for _ in 0..20 {
+				assert!(limiter.allow(IP_A, "a@example.com").await);
+			}
+			limiter.record_failure(IP_A, "a@example.com");
+			assert!(limiter.allow(IP_A, "a@example.com").await);
 		}
 	}
 }

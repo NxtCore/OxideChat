@@ -1,6 +1,6 @@
-use super::{GatewayAuthContext, GatewayAuthError, GatewayCredential, GatewayInference, GatewayModel, GatewayModelAccessError, public_model_id};
+use super::{GatewayAuthContext, GatewayAuthError, GatewayAuthFailure, GatewayCredential, GatewayInference, GatewayModel, GatewayModelAccessError, public_model_id};
 use super::{GatewayRatePolicy, GatewayRateRule};
-use crate::types::{BudgetAdmission, BudgetLedger, TokenEstimate};
+use crate::types::{BudgetAdmission, BudgetLedger, RequestLogOwner, TokenEstimate};
 use crate::utils::auth::{hash_password, verify_password};
 use chrono::Utc;
 use omniference::types::providers::OpenAIModel;
@@ -24,6 +24,7 @@ impl From<ResolvedModel> for GatewayInference {
 			model_id: model.id,
 			engine_model_id: model.engine_model_id.clone(),
 			public_model_id: public_model_id(&model.provider_name, &model.engine_model_id),
+			provider_name: model.provider_name,
 			max_output_tokens: model.max_tokens.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
 			context_length: model.context_length.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
 			budget: BudgetAdmission::default(),
@@ -44,12 +45,25 @@ impl GatewayCredential {
 	///
 	/// Returns a gateway authentication error when the credential is invalid or
 	/// the authentication service is unavailable.
+	#[cfg(test)]
 	pub async fn authenticate(pool: &PgPool, token: &str) -> Result<GatewayAuthContext, GatewayAuthError> {
+		Self::authenticate_with_owner(pool, token).await.map_err(|failure| failure.error)
+	}
+
+	/// Authenticates a gateway token and names the key owner of a rejected credential.
+	///
+	/// The owner is only reported when the secret itself was verified, so
+	/// unknown or forged keys never identify an account.
+	///
+	/// # Errors
+	///
+	/// Returns the authentication error together with the verified key owner, if any.
+	pub async fn authenticate_with_owner(pool: &PgPool, token: &str) -> Result<GatewayAuthContext, GatewayAuthFailure> {
 		let parsed = parse_token(token);
 		let credential = match parsed.as_ref() {
 			Some(parsed) => Self::find(pool, &parsed.key_id).await.map_err(|error| {
 				tracing::error!(%error, key_id = %parsed.key_id, "gateway credential or policy could not be loaded");
-				GatewayAuthError::Unavailable
+				GatewayAuthFailure::from(GatewayAuthError::Unavailable)
 			})?,
 			None => None,
 		};
@@ -58,16 +72,25 @@ impl GatewayCredential {
 		let hash = hash.to_owned();
 		let verified = tokio::task::spawn_blocking(move || verify_password(&secret, &hash).unwrap_or(false))
 			.await
-			.map_err(|_| GatewayAuthError::Unavailable)?;
-		let Some(credential) = credential else {
-			return Err(GatewayAuthError::Invalid);
+			.map_err(|_| GatewayAuthFailure::from(GatewayAuthError::Unavailable))?;
+		let Some(credential) = credential.filter(|_| verified) else {
+			return Err(GatewayAuthError::Invalid.into());
 		};
-		if !verified
+		if !credential.is_member
+			|| !credential.team_enabled
+			|| credential.admin_disabled
 			|| !credential.key_enabled
 			|| credential.revoked_at.is_some()
 			|| credential.expires_at.is_some_and(|expires_at| expires_at <= Utc::now())
 		{
-			return Err(GatewayAuthError::Invalid);
+			return Err(GatewayAuthFailure {
+				error: GatewayAuthError::Invalid,
+				owner: Some(RequestLogOwner {
+					user_id: credential.user_id,
+					team_id: credential.team_id,
+					api_key_id: credential.key_id,
+				}),
+			});
 		}
 		if let Err(error) = sqlx::query!(
 			"UPDATE gateway_api_keys SET last_used_at = NOW() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '1 minute')",
@@ -86,7 +109,7 @@ impl GatewayCredential {
 		)
 		.map_err(|error| {
 			tracing::error!(%error, team_id = %credential.team_id, key_id = %credential.key_id, "invalid gateway rate policy");
-			GatewayAuthError::Unavailable
+			GatewayAuthFailure::from(GatewayAuthError::Unavailable)
 		})?;
 		Ok(GatewayAuthContext {
 			key_id: credential.key_id,
@@ -103,20 +126,23 @@ impl GatewayCredential {
 			r#"
 			SELECT
 				k.id AS "key_id!",
-				k.user_id AS "user_id!",
+				k.user_id,
 				k.team_id,
 				k.secret_hash,
 				k.scopes AS "scopes!: Json<Vec<String>>",
 				k.is_enabled AS "key_enabled!",
 				k.expires_at,
 				k.revoked_at,
+				(k.user_id IS NULL OR tm.user_id IS NOT NULL) AS "is_member!",
+				t.gateway_enabled AS "team_enabled!",
+				(k.admin_disabled_at IS NOT NULL) AS "admin_disabled!",
 				t.gateway_max_concurrent_requests AS team_concurrency,
 				k.max_concurrent_requests AS key_concurrency,
 				rules.team_rules AS "team_rules!: Json<Vec<GatewayRateRule>>",
 				rules.key_rules AS "key_rules!: Json<Vec<GatewayRateRule>>"
 			FROM gateway_api_keys k
 			JOIN teams t ON t.id = k.team_id
-			JOIN team_members tm ON tm.team_id = k.team_id AND tm.user_id = k.user_id
+			LEFT JOIN team_members tm ON tm.team_id = k.team_id AND tm.user_id = k.user_id
 			CROSS JOIN LATERAL (
 				SELECT
 					COALESCE(jsonb_agg(r.rule ORDER BY r.id) FILTER (WHERE r.team_id = t.id), '[]'::jsonb) AS team_rules,
@@ -158,13 +184,12 @@ impl GatewayModel {
 			  AND p.is_enabled = TRUE
 			  AND EXISTS (
 				SELECT 1
-				FROM team_members tm
-				JOIN teams t ON t.id = tm.team_id
+				FROM teams t
 				LEFT JOIN team_model_access model_access
 					ON model_access.team_id = t.id AND model_access.model_id = m.id
 				LEFT JOIN team_model_access provider_access
 					ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
-				WHERE tm.user_id = $1
+				WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = t.id AND tm.user_id = $1))
 				  AND t.id = $2
 				  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
 			  )
@@ -209,13 +234,12 @@ impl GatewayModel {
 			  AND p.is_enabled = TRUE
 			  AND EXISTS (
 				SELECT 1
-				FROM team_members tm
-				JOIN teams t ON t.id = tm.team_id
+				FROM teams t
 				LEFT JOIN team_model_access model_access
 					ON model_access.team_id = t.id AND model_access.model_id = m.id
 				LEFT JOIN team_model_access provider_access
 					ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
-				WHERE tm.user_id = $1
+				WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = t.id AND tm.user_id = $1))
 				  AND t.id = $2
 				  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
 			  )
@@ -259,8 +283,24 @@ impl GatewayModel {
 		mut inference: GatewayInference,
 		tokens: TokenEstimate,
 	) -> Result<GatewayInference, GatewayModelAccessError> {
-		inference.budget = ledger.reserve_for_model(pool, context.budget_subject(), &inference.model_id, tokens).await?;
+		Self::reserve_budget(pool, ledger, context, &mut inference, tokens).await?;
 		Ok(inference)
+	}
+
+	/// Reserves budget for an inference in place, keeping it available when the reservation fails.
+	///
+	/// # Errors
+	///
+	/// Fails like [`GatewayModel::authorize_inference`].
+	pub async fn reserve_budget(
+		pool: &PgPool,
+		ledger: &BudgetLedger,
+		context: &GatewayAuthContext,
+		inference: &mut GatewayInference,
+		tokens: TokenEstimate,
+	) -> Result<(), GatewayModelAccessError> {
+		inference.budget = ledger.reserve_for_model(pool, context.budget_subject(), &inference.model_id, tokens).await?;
+		Ok(())
 	}
 }
 

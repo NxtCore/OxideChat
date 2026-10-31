@@ -1,11 +1,12 @@
 use crate::types::models::{Model, ModelPricing};
 use crate::types::{
-	BUDGET_RESERVATION_METADATA_KEY, Budget, BudgetLedger, GatewayLimitBackend, GatewayLimiter, JobState, PUBLIC_MODEL_METADATA_KEY, RequestLog, RequestLogRecord, RequestLogStatus,
-	RESERVATION_METADATA_KEY, UsageEvent, UsageEventRecord,
+	BUDGET_RESERVATION_METADATA_KEY, Budget, BudgetLedger, GatewayLimitBackend, GatewayLimiter, JobState, PUBLIC_MODEL_METADATA_KEY, REQUEST_ID_METADATA_KEY, RESERVATION_METADATA_KEY,
+	RequestLog, RequestLogContext, RequestLogErrorCategory, RequestLogRecord, RequestLogStatus, STARTED_AT_METADATA_KEY, STREAMING_METADATA_KEY, UsageEvent, UsageEventRecord,
 };
+use chrono::{DateTime, Utc};
 use omniference::catalog::UsageBreakdown;
 use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
-use omniference::stream::CostDetails;
+use omniference::stream::{CostDetails, FinishReason};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use std::collections::BTreeMap;
@@ -28,19 +29,22 @@ impl OxideCostSink {
 		Self { state }
 	}
 
-	async fn persist(&self, record: &CostRecord) -> Result<(), sqlx::Error> {
+	async fn persist(&self, record: &CostRecord, finished_at: DateTime<Utc>) -> Result<(), sqlx::Error> {
 		let budget_id = metadata_uuid(record, BUDGET_RESERVATION_METADATA_KEY);
-		self.store(record, budget_id).await?;
+		self.store(record, budget_id, finished_at).await?;
 		if let Some(id) = budget_id {
 			self.state.budget_ledger.settle(id);
 		}
 		Ok(())
 	}
 
-	async fn store(&self, record: &CostRecord, budget_id: Option<Uuid>) -> Result<(), sqlx::Error> {
-		let Some(user_id) = metadata_uuid(record, "oxide_user_id") else {
+	async fn store(&self, record: &CostRecord, budget_id: Option<Uuid>, finished_at: DateTime<Utc>) -> Result<(), sqlx::Error> {
+		let user_id = metadata_uuid(record, "oxide_user_id");
+		let api_key_id = metadata_uuid(record, "oxide_api_key_id");
+		let metadata_team_id = metadata_uuid(record, "oxide_team_id");
+		if user_id.is_none() && (metadata_team_id.is_none() || api_key_id.is_none()) {
 			return Ok(());
-		};
+		}
 		let Some(model_id) = metadata_uuid(record, "oxide_model_id") else {
 			return Ok(());
 		};
@@ -53,17 +57,18 @@ impl OxideCostSink {
 		let cost_total = ModelPricing::usage_cost(&self.state.db, &model.id, input_tokens, output_tokens, reasoning_tokens)
 			.await?
 			.unwrap_or_else(|| Decimal::from_f64(record.cost.total).unwrap_or(Decimal::ZERO));
-		let team_id = match metadata_uuid(record, "oxide_team_id") {
-			Some(team_id) => Some(team_id),
-			None => Budget::primary_team_id(&self.state.db, &user_id).await?,
+		let team_id = match (metadata_team_id, user_id.as_ref()) {
+			(Some(team_id), _) => Some(team_id),
+			(None, Some(user_id)) => Budget::primary_team_id(&self.state.db, user_id).await?,
+			(None, None) => None,
 		};
 		if let Some(id) = budget_id {
 			self.state.budget_ledger.reconcile(id, cost_total);
 		}
 		let usage = UsageEventRecord {
-			user_id: &user_id,
+			user_id: user_id.as_ref(),
 			team_id,
-			api_key_id: metadata_uuid(record, "oxide_api_key_id"),
+			api_key_id,
 			model_id: &model.id,
 			provider_id: &model.provider_id,
 			request_type: record.metadata.get("oxide_request_type").map_or("gateway", String::as_str),
@@ -73,21 +78,33 @@ impl OxideCostSink {
 			cost_total,
 		};
 		UsageEvent::record(&self.state.db, usage).await?;
+		let (status, error_category) = request_outcome(record.finalization);
+		let streaming = record.metadata.get(STREAMING_METADATA_KEY).is_some_and(|value| value == "true");
 		RequestLog::record(
 			&self.state.db,
 			RequestLogRecord {
 				user_id,
 				team_id,
-				api_key_id: metadata_uuid(record, "oxide_api_key_id"),
+				api_key_id,
 				model_id: Some(model.id),
 				public_model_id: record.metadata.get(PUBLIC_MODEL_METADATA_KEY).map_or(model.model_id.as_str(), String::as_str),
 				request_type: record.metadata.get("oxide_request_type").map_or("gateway", String::as_str),
-				status: RequestLogStatus::Success,
+				status,
 				status_code: None,
 				input_tokens,
 				output_tokens,
 				reasoning_tokens,
 				cost_total,
+				request_id: metadata_uuid(record, REQUEST_ID_METADATA_KEY),
+				provider: Some(record.provider.as_str()),
+				error_category,
+				streaming,
+				latency_ms: latency_ms(record, finished_at),
+				finish_reason: record.finish_reason.map(FinishReason::as_str),
+				time_to_first_token_ms: record
+					.time_to_first_token
+					.filter(|_| streaming)
+					.map(|duration| i32::try_from(duration.as_millis()).unwrap_or(i32::MAX)),
 			},
 		)
 		.await?;
@@ -116,10 +133,10 @@ impl OxideCostQueue {
 		tokio::spawn(async move {
 			while let Some(message) = receiver.recv().await {
 				match message {
-					CostQueueMessage::Record(record) => {
+					CostQueueMessage::Record(record, finished_at) => {
 						let mut attempt = 0_u32;
 						loop {
-							match sink.persist(&record).await {
+							match sink.persist(&record, finished_at).await {
 								Ok(()) => break,
 								Err(error) if attempt < 2 => {
 									attempt += 1;
@@ -176,7 +193,7 @@ impl OxideCostQueue {
 	fn queue_record(&self, record: CostRecord) {
 		let provider = record.provider.clone();
 		let model = record.model.clone();
-		if self.sender.send(CostQueueMessage::Record(record)).is_err() {
+		if self.sender.send(CostQueueMessage::Record(record, Utc::now())).is_err() {
 			tracing::error!(provider, model, "asynchronous cost sink stopped before cost could be recorded");
 		}
 	}
@@ -194,47 +211,29 @@ impl CostSink for OxideCostQueue {
 	}
 
 	fn record(&self, provider: &str, model: &str, cost: &CostDetails, finalization: CostFinalization) {
-		self.record_with_context(provider, model, cost, finalization, &BTreeMap::new(), &UsageBreakdown::default());
-	}
-
-	fn record_with_context(
-		&self,
-		provider: &str,
-		model: &str,
-		cost: &CostDetails,
-		finalization: CostFinalization,
-		metadata: &BTreeMap<String, String>,
-		usage: &UsageBreakdown,
-	) {
 		self.queue_record(CostRecord {
 			provider: provider.to_string(),
 			model: model.to_string(),
 			cost: cost.clone(),
 			finalization,
-			metadata: metadata.clone(),
-			usage: usage.clone(),
+			metadata: BTreeMap::new(),
+			usage: UsageBreakdown::default(),
+			finish_reason: None,
+			time_to_first_token: None,
 		});
 	}
 
-	fn record_usage(&self, provider: &str, model: &str, finalization: CostFinalization, metadata: &BTreeMap<String, String>, usage: &UsageBreakdown) {
-		self.record_with_context(
-			provider,
-			model,
-			&CostDetails {
-				total: 0.0,
-				prompt: None,
-				completion: None,
-				reasoning: None,
-			},
-			finalization,
-			metadata,
-			usage,
-		);
+	fn record_with_context(&self, record: &CostRecord) {
+		self.queue_record(record.clone());
+	}
+
+	fn record_usage(&self, record: &CostRecord) {
+		self.queue_record(record.clone());
 	}
 }
 
 enum CostQueueMessage {
-	Record(CostRecord),
+	Record(CostRecord, DateTime<Utc>),
 	Shutdown(oneshot::Sender<()>),
 }
 
@@ -244,4 +243,17 @@ fn metadata_uuid(record: &CostRecord, key: &str) -> Option<Uuid> {
 
 fn token_count(tokens: u32) -> i32 {
 	tokens.min(i32::MAX as u32) as i32
+}
+
+fn request_outcome(finalization: CostFinalization) -> (RequestLogStatus, Option<RequestLogErrorCategory>) {
+	match finalization {
+		CostFinalization::ProviderReported | CostFinalization::Done => (RequestLogStatus::Success, None),
+		CostFinalization::Error => (RequestLogStatus::Error, Some(RequestLogErrorCategory::Upstream)),
+		CostFinalization::EndOfStream | CostFinalization::Dropped => (RequestLogStatus::Error, Some(RequestLogErrorCategory::Interrupted)),
+	}
+}
+
+fn latency_ms(record: &CostRecord, finished_at: DateTime<Utc>) -> Option<i32> {
+	let started_at = record.metadata.get(STARTED_AT_METADATA_KEY).and_then(|value| RequestLogContext::parse_started_at(value))?;
+	Some(RequestLogContext::latency_between(started_at, finished_at))
 }

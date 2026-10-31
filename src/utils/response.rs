@@ -129,19 +129,6 @@ impl<T: Serialize> ResponseBuilder<T> {
 		Ok(self)
 	}
 
-	/// Set permissive CORS headers (allow all origins, methods, headers).
-	#[must_use]
-	pub fn cors_permissive(mut self) -> Self {
-		self.headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
-		self.headers.insert(
-			header::ACCESS_CONTROL_ALLOW_METHODS,
-			HeaderValue::from_static("GET, POST, PUT, DELETE, PATCH, OPTIONS"),
-		);
-		self.headers
-			.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("Content-Type, Authorization"));
-		self
-	}
-
 	/// Add common security headers.
 	#[must_use]
 	pub fn security_headers(mut self) -> Self {
@@ -214,6 +201,7 @@ pub enum ErrorCode {
 	ApiKeyRuleInvalid,
 	ApiKeyBudgetInvalid,
 	RequestLogRetentionInvalid,
+	GatewayAdminReasonInvalid,
 
 	// 401 Unauthorized
 	Unauthorized,
@@ -232,6 +220,8 @@ pub enum ErrorCode {
 	InsufficientPermissions,
 	AccountDisabled,
 	ApiKeyTeamForbidden,
+	ApiKeyTeamAdminRequired,
+	ApiKeyServiceAccountForbidden,
 
 	// 404 Not Found
 	NotFound,
@@ -249,6 +239,7 @@ pub enum ErrorCode {
 	OAuthEmailConflict,
 	ApiKeyRevoked,
 	ApiKeyRuleDuplicate,
+	ApiKeyAdminDisabled,
 
 	// 422 Unprocessable Entity
 	UnprocessableEntity,
@@ -295,6 +286,7 @@ impl ErrorCode {
 			| Self::ApiKeyRuleInvalid
 			| Self::ApiKeyBudgetInvalid
 			| Self::RequestLogRetentionInvalid
+			| Self::GatewayAdminReasonInvalid
 			=> StatusCode::BAD_REQUEST,
 
 			Self::Unauthorized
@@ -307,9 +299,9 @@ impl ErrorCode {
 			| Self::OAuthStateMismatch
 			| Self::OAuthTokenError
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
-			Self::Forbidden | Self::InsufficientPermissions | Self::AccountDisabled | Self::ApiKeyTeamForbidden => StatusCode::FORBIDDEN,
+			Self::Forbidden | Self::InsufficientPermissions | Self::AccountDisabled | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden => StatusCode::FORBIDDEN,
 			Self::NotFound | Self::UserNotFound | Self::ResourceNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
-			Self::Conflict | Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::OAuthEmailConflict | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate => StatusCode::CONFLICT,
+			Self::Conflict | Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::OAuthEmailConflict | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled => StatusCode::CONFLICT,
 			Self::UnprocessableEntity => StatusCode::UNPROCESSABLE_ENTITY,
 			Self::RateLimited | Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
@@ -347,6 +339,7 @@ impl ErrorCode {
 			Self::ApiKeyRuleInvalid => "developer.errors.rule_invalid",
 			Self::ApiKeyBudgetInvalid => "developer.errors.budget_invalid",
 			Self::RequestLogRetentionInvalid => "developer.errors.retention_invalid",
+			Self::GatewayAdminReasonInvalid => "developer.admin.errors.reason_invalid",
 
 			Self::Unauthorized => "auth.errors.unauthorized",
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
@@ -363,6 +356,8 @@ impl ErrorCode {
 			Self::InsufficientPermissions => "errors.insufficient_permissions",
 			Self::AccountDisabled => "auth.errors.account_disabled",
 			Self::ApiKeyTeamForbidden => "developer.errors.team_forbidden",
+			Self::ApiKeyTeamAdminRequired => "developer.errors.team_admin_required",
+			Self::ApiKeyServiceAccountForbidden => "developer.errors.service_account_forbidden",
 
 			Self::NotFound => "errors.not_found",
 			Self::UserNotFound => "auth.errors.user_not_found",
@@ -378,6 +373,7 @@ impl ErrorCode {
 			Self::OAuthEmailConflict => "auth.errors.oauth_email_conflict",
 			Self::ApiKeyRevoked => "developer.errors.key_revoked",
 			Self::ApiKeyRuleDuplicate => "developer.errors.rule_duplicate",
+			Self::ApiKeyAdminDisabled => "developer.errors.key_admin_disabled",
 
 			Self::UnprocessableEntity => "errors.unprocessable_entity",
 
@@ -419,6 +415,7 @@ impl ErrorCode {
 			Self::ApiKeyRuleInvalid => "api_key_rule_invalid",
 			Self::ApiKeyBudgetInvalid => "api_key_budget_invalid",
 			Self::RequestLogRetentionInvalid => "request_log_retention_invalid",
+			Self::GatewayAdminReasonInvalid => "gateway_admin_reason_invalid",
 
 			Self::Unauthorized => "unauthorized",
 			Self::NotAuthenticated => "not_authenticated",
@@ -435,6 +432,8 @@ impl ErrorCode {
 			Self::InsufficientPermissions => "insufficient_permissions",
 			Self::AccountDisabled => "account_disabled",
 			Self::ApiKeyTeamForbidden => "api_key_team_forbidden",
+			Self::ApiKeyTeamAdminRequired => "api_key_team_admin_required",
+			Self::ApiKeyServiceAccountForbidden => "api_key_service_account_forbidden",
 
 			Self::NotFound => "not_found",
 			Self::UserNotFound => "user_not_found",
@@ -450,6 +449,7 @@ impl ErrorCode {
 			Self::OAuthEmailConflict => "oauth_email_conflict",
 			Self::ApiKeyRevoked => "api_key_revoked",
 			Self::ApiKeyRuleDuplicate => "api_key_rule_duplicate",
+			Self::ApiKeyAdminDisabled => "api_key_admin_disabled",
 
 			Self::UnprocessableEntity => "unprocessable_entity",
 

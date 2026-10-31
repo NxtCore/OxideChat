@@ -28,7 +28,7 @@ impl WasmExecutor {
 		let wasm = Wasm::data(wasm_bytes.to_vec());
 		let manifest = Manifest::new([wasm]);
 
-		let plugin = Plugin::new(&manifest, [], true).map_err(|e| ToolError::WasmError(format!("Failed to load WASM plugin: {e}")))?;
+		let plugin = Plugin::new(&manifest, [], false).map_err(|e| ToolError::WasmError(format!("Failed to load WASM plugin: {e}")))?;
 
 		Ok(Self {
 			name,
