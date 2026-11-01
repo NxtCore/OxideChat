@@ -1,6 +1,7 @@
 import type { ThemeCssVars } from '~/types/chat';
 
 export type ThemeMode = 'dark' | 'light';
+export type ThemePreference = ThemeMode | 'system';
 
 export interface ThemeState {
 	currentMode: ThemeMode;

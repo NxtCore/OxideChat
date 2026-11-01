@@ -13,6 +13,7 @@ pub use requests::*;
 pub use responses::*;
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Translation {
 	pub id: Uuid,
 	pub language: String,

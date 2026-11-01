@@ -4,6 +4,7 @@
 
 use crate::i18n::I18n;
 use crate::logging::{AuditLog, EntityType, LogEvent};
+use crate::types::consts::{ADMIN_I18N_EDIT, ADMIN_I18N_VIEW};
 use crate::types::{AppError, AuthUser, JobState, Translation, TranslationsResponse, UpsertTranslationRequest, json_ok};
 use crate::utils::response::ErrorCode;
 use axum::{
@@ -14,16 +15,13 @@ use axum::{
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub const ADMIN_I18N_VIEW: &str = "admin.i18n.view";
-pub const ADMIN_I18N_EDIT: &str = "admin.i18n.edit";
-
 /// GET /api/v1/admin/i18n
 ///
 /// List all translations.
 pub async fn list_translations(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_I18N_VIEW).await?;
 
-	let translations = Translation::list_all(&state.db).await.unwrap_or_default();
+	let translations = Translation::list_all(&state.db).await.map_err(AppError::database)?;
 	json_ok(TranslationsResponse { translations })
 }
 
@@ -37,7 +35,7 @@ pub async fn upsert_translation(State(state): State<Arc<JobState>>, auth: AuthUs
 		.await
 		.map_err(AppError::database)?;
 	I18n::get().reload(&state.db).await;
-	AuditLog::log(&state.db, LogEvent::TranslationUpdated, None, Some(EntityType::Translation), Some(id));
+	AuditLog::log(&state.db, LogEvent::TranslationUpdated, Some(auth.id), Some(EntityType::Translation), Some(id));
 	json_ok(serde_json::json!({ "id": id, "success": true }))
 }
 
@@ -54,6 +52,6 @@ pub async fn delete_translation(State(state): State<Arc<JobState>>, auth: AuthUs
 		return Err(ErrorCode::TranslationNotFound.into());
 	}
 	I18n::get().reload(&state.db).await;
-	AuditLog::log(&state.db, LogEvent::TranslationDeleted, None, Some(EntityType::Translation), Some(id));
+	AuditLog::log(&state.db, LogEvent::TranslationDeleted, Some(auth.id), Some(EntityType::Translation), Some(id));
 	json_ok(serde_json::json!({ "success": true }))
 }

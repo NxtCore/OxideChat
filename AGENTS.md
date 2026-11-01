@@ -52,6 +52,8 @@
 - `src/types/tools/` - One file per entity (`tool.rs`, `tool_function.rs`, `tool_execution.rs`, `wasm_blob.rs`, `mcp_server.rs`); `McpScope` (`mcp_scope.rs`) separates admin-wide and per-user MCP servers
 - `src/types/page.rs` - `PageQuery` (`page`, `size`) and `Page<T>` (`has_more`, `items`) for paginated endpoints
 - `src/types/usage/` - Usage events; `ChatUsageGuard` records a chat stream's usage once, even if the client disconnects
+- `src/types/user/sessions.rs` - A user's login sessions; the session ID is the login cookie's value, so clients only ever see `User::session_public_id` (its SHA-256 hash)
+- `src/config.rs` - `Config::apply_update` stores admin settings (flags, default model, language, default theme, OAuth credentials) in one transaction; `Config::oauth_settings` reports OAuth state without secrets, and saved OAuth values take priority over the `OAUTH_*` environment variables
 - `AuditLog::write` (`src/types/gateway/admin.rs`) writes an audit row in the caller's transaction and always redacts its metadata
 - `migrations/` - SQLx database migrations
 - `JobState` struct contains shared application state (database pool)
@@ -128,6 +130,7 @@
 - All ShadCN components are prefixed with `Shad`, e.g., `ShadButton` or `ShadSelect`, they are auto injected
 - Use the store.getTranslation() function for translations, always use them, no static strings
 - Use customizable Tailwind classes like bg-primary, text-primary, etc. and not use fixed colors
+- Themes live in `frontend/stores/theme.ts`: `modePreference` is what the user picked (`light`, `dark` or `system`) and `currentMode` what it resolves to; a user's own `cssVars` win over the installation's `defaultTheme`, which comes from `/api/v1/base`. Mode and selected theme URL stay in localStorage, the CSS variables and custom theme URLs are saved to `user_preferences` and the server's copy wins on load
 - Settings pages render inside `SettingsPage` (`frontend/components/settings/SettingsPage.vue`: title, description, `#leading` and `#actions` slots); `frontend/pages/settings.vue` owns the scrolling and the grouped navigation, so pages must not set their own height or overflow; section switches inside a page use `ShadTabs`
 - Fields edited directly on a settings page use `useSettingsForm` (`frontend/composables/useSettingsForm.ts`) and pass it to `SettingsPage` as `:form`, which shows the floating save bar and asks before unsaved changes are lost; a save must be atomic on the backend. Dialogs keep their own Cancel/Save footer, and quick actions on list rows apply instantly with a toast
 

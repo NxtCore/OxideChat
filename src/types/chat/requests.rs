@@ -2,6 +2,8 @@ use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
 
 use super::ThemeCssVars;
+use crate::config::OAuthProvider;
+use crate::i18n::Language;
 
 /// Distinguishes an absent field (`None`) from an explicit JSON `null` (`Some(None)`),
 /// so a PATCH can clear a nullable column instead of leaving it unchanged.
@@ -123,6 +125,19 @@ pub struct UpdateGlobalConfigRequest {
 	pub allow_server_stdio_mcp: Option<bool>,
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub default_model_id: Option<Option<Uuid>>,
+	pub language: Option<Language>,
+	#[serde(default)]
+	pub oauth: Vec<UpdateOAuthProviderRequest>,
+}
+
+/// Omitted fields stay unchanged; `null` removes the stored value.
+#[derive(Debug, Deserialize)]
+pub struct UpdateOAuthProviderRequest {
+	pub provider: OAuthProvider,
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub client_id: Option<Option<String>>,
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub client_secret: Option<Option<String>>,
 }
 
 #[derive(Debug, Deserialize)]

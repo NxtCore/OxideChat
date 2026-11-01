@@ -99,6 +99,6 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/models/{id}/provider-options", get(catalog::list_provider_options))
 		.route("/api/v1/admin/models/{id}/provider-options/refresh", post(catalog::refresh_provider_options))
 		// Admin Config
-		.route("/api/v1/admin/config", patch(config::update_global_config))
+		.route("/api/v1/admin/config", get(config::get_admin_config).patch(config::update_global_config))
 		.route("/api/v1/config", get(config::get_global_config))
 }

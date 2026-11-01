@@ -18,6 +18,18 @@ export const THEME_URLS = [
 	'https://tweakcn.com/editor/theme?theme=cyberpunk',
 ];
 
+export function hasThemeVars(cssVars: ThemeCssVars): boolean {
+	return Object.keys(cssVars.light).length > 0 || Object.keys(cssVars.dark).length > 0;
+}
+
+function sortedVars(vars: Record<string, string | undefined>): string {
+	return JSON.stringify(Object.entries(vars).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+export function isSameTheme(a: ThemeCssVars, b: ThemeCssVars): boolean {
+	return (['theme', 'light', 'dark'] as const).every(group => sortedVars(a[group]) === sortedVars(b[group]));
+}
+
 export function convertToThemeCssVars(externalTheme: any): ThemeCssVars {
 	if (externalTheme.cssVars) {
 		return {

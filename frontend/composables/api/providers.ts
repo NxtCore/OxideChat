@@ -9,3 +9,7 @@ export const saveProvider = (id: string | undefined, body: object) =>
 export const deleteProvider = (id: string) => useNuxtApp().$customFetch(`/api/v1/admin/providers/${id}`, {method: 'DELETE'});
 
 export const syncProvider = (id: string) => useNuxtApp().$customFetch(`/api/v1/admin/providers/${id}/sync`, {method: 'POST'});
+
+export const testSavedProvider = <T>(id: string) => useNuxtApp().$customFetch<T>(`/api/v1/admin/providers/${id}/test`, {method: 'POST'});
+
+export const testProviderConfig = <T>(body: object) => useNuxtApp().$customFetch<T>('/api/v1/admin/providers/test', {method: 'POST', body});

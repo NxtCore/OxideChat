@@ -19,7 +19,8 @@ static I18N: OnceLock<I18n> = OnceLock::new();
 
 /// Supported languages
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Language {
 	#[default]
  En,

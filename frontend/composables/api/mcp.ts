@@ -11,5 +11,7 @@ export const deleteMcpServer = (admin: boolean, id: string) => useNuxtApp().$cus
 
 export const discoverMcpServer = (admin: boolean, id: string) => useNuxtApp().$customFetch(mcpUrl(admin, id, '/discover'), {method: 'POST'});
 
-export const syncMcpTools = (admin: boolean, id: string, tools: unknown) =>
+export const checkMcpHealth = (id: string) => useNuxtApp().$customFetch(mcpUrl(true, id, '/health-check'), {method: 'POST'});
+
+export const syncMcpTools =(admin: boolean, id: string, tools: unknown) =>
 	useNuxtApp().$customFetch(mcpUrl(admin, id, '/sync-tools'), {method: 'POST', body: {tools}});

@@ -20,6 +20,7 @@ pub mod oauth;
 pub mod request_logs;
 pub mod response;
 pub mod service_accounts;
+pub mod sessions;
 pub mod support;
 pub mod teams;
 pub mod tools;

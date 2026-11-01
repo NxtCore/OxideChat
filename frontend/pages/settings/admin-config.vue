@@ -19,23 +19,72 @@
 					:placeholder="store.getTranslation('settings.teams.use_global_default')"
 				/>
 			</SettingsRow>
+
+			<SettingsRow :label="store.getTranslation('settings.appearance.language')" :hint="store.getTranslation('settings.admin_config.language_hint')" stacked>
+				<ShadSelect v-model="form.language" :disabled="!canEdit || settingsForm.saving">
+					<ShadSelectTrigger data-testid="config-language">
+						<ShadSelectValue />
+					</ShadSelectTrigger>
+					<ShadSelectContent>
+						<ShadSelectItem value="en">{{ store.getTranslation('settings.appearance.language_en') }}</ShadSelectItem>
+						<ShadSelectItem value="de">{{ store.getTranslation('settings.appearance.language_de') }}</ShadSelectItem>
+					</ShadSelectContent>
+				</ShadSelect>
+			</SettingsRow>
+
+			<SettingsRow :label="store.getTranslation('settings.admin_config.default_theme')" :hint="store.getTranslation('settings.admin_config.default_theme_hint')" stacked>
+				<ShadSelect v-model="selectedTheme" :disabled="!canEdit || settingsForm.saving">
+					<ShadSelectTrigger data-testid="config-default-theme">
+						<ShadSelectValue />
+					</ShadSelectTrigger>
+					<ShadSelectContent>
+						<ShadSelectItem :value="NO_THEME">{{ store.getTranslation('settings.admin_config.default_theme_none') }}</ShadSelectItem>
+						<ShadSelectItem v-if="selectedTheme === CUSTOM_THEME" :value="CUSTOM_THEME">{{ store.getTranslation('settings.admin_config.default_theme_custom') }}</ShadSelectItem>
+						<ShadSelectItem v-for="theme in availableThemes" :key="theme.url" :value="theme.url">{{ theme.name }}</ShadSelectItem>
+					</ShadSelectContent>
+				</ShadSelect>
+			</SettingsRow>
 		</div>
+
+		<SettingsOAuthProvidersCard />
 	</SettingsPage>
 </template>
 
 <script setup lang="ts">
 import {ADMIN_CONFIG_EDIT} from '~/types/generated/permissions';
-import {computed, reactive} from 'vue';
+import {computed, onMounted, reactive} from 'vue';
 import {useMainStore} from '@/stores';
+import {useThemeStore} from '~/stores/theme';
+import {hasThemeVars, isSameTheme} from '~/lib/theme-utils';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
 
+const NO_THEME = 'none';
+const CUSTOM_THEME = 'custom';
+
 const store = useMainStore();
+const themeStore = useThemeStore();
 const canEdit = computed(() => store.hasPermission(ADMIN_CONFIG_EDIT));
 
 const form = reactive({
 	enable_provider_selector: store.base?.enable_provider_selector ?? false,
 	allow_server_stdio_mcp: store.base?.allow_server_stdio_mcp ?? false,
 	default_model_id: store.base?.default_model_id ?? null,
+	language: store.base?.language ?? 'en',
+	default_theme: store.base?.default_theme ?? {theme: {}, light: {}, dark: {}},
+});
+
+const availableThemes = computed(() => themeStore.fetchedThemes.filter(theme => !theme.error));
+
+const selectedTheme = computed({
+	get() {
+		if (!hasThemeVars(form.default_theme)) return NO_THEME;
+		return availableThemes.value.find(theme => isSameTheme(theme.preset.cssVars, form.default_theme))?.url ?? CUSTOM_THEME;
+	},
+	set(value: string) {
+		if (value === NO_THEME) form.default_theme = {theme: {}, light: {}, dark: {}};
+		const theme = availableThemes.value.find(item => item.url === value);
+		if (theme) form.default_theme = theme.preset.cssVars;
+	},
 });
 
 const settingsForm = useSettingsForm({
@@ -47,6 +96,9 @@ const settingsForm = useSettingsForm({
 	save: async () => {
 		await patchAdminConfig(form);
 		if (store.base) Object.assign(store.base, form);
+		themeStore.setDefaultTheme(form.default_theme);
 	},
 });
+
+onMounted(() => themeStore.fetchAllThemes());
 </script>

@@ -18,6 +18,9 @@
 							<ShadBadge :variant="healthVariant(server.health_status)" class="text-xs">{{ healthLabel(server.health_status) }}</ShadBadge>
 							<span class="ml-auto text-xs text-muted-foreground">{{ server.discovered_tools.length }} {{ store.getTranslation('mcp.discovered_tools') }}</span>
 							<ShadSwitch :model-value="server.is_enabled" @update:model-value="toggleEnabled(server, $event)" />
+							<ShadButton v-if="admin" size="icon" variant="ghost" class="h-8 w-8" :title="store.getTranslation('mcp.health_check')" :disabled="busyId === server.id" :data-testid="`mcp-health-${server.id}`" @click="checkHealth(server)">
+								<Activity class="h-4 w-4" />
+							</ShadButton>
 							<ShadButton size="icon" variant="ghost" class="h-8 w-8" :title="store.getTranslation('mcp.discover')" :disabled="busyId === server.id" @click="discover(server)">
 								<RefreshCw class="h-4 w-4" :class="busyId === server.id ? 'animate-spin' : ''" />
 							</ShadButton>
@@ -78,7 +81,7 @@
 
 <script setup lang="ts">
 import {ref, reactive, computed, watch} from 'vue';
-import {Check, Pencil, Trash2, Plus, RefreshCw} from 'lucide-vue-next';
+import {Activity, Check, Pencil, Trash2, Plus, RefreshCw} from 'lucide-vue-next';
 import HeaderEditor from '@/components/settings/HeaderEditor.vue';
 import {useMainStore} from '@/stores';
 import type {McpServer} from '~/types/chat';
@@ -274,6 +277,18 @@ async function discover(server: McpServer) {
 		emit('changed');
 	} catch (e) {
 		notifyError(e, 'mcp.discover_failed');
+	} finally {
+		busyId.value = null;
+	}
+}
+
+async function checkHealth(server: McpServer) {
+	busyId.value = server.id;
+	try {
+		await checkMcpHealth(server.id);
+		await load();
+	} catch (e) {
+		notifyError(e, 'mcp.health_check_failed');
 	} finally {
 		busyId.value = null;
 	}

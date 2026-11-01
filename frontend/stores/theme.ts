@@ -1,13 +1,13 @@
 import {defineStore} from 'pinia';
-import type {ThemeCssVars, FetchedTheme, GlobalConfig} from '~/types/chat';
-import {applyThemeToElement, applyAccentToElement, clearAccentFromElement, clearThemeFromElement, getSystemTheme, type ThemeMode, type ThemeState} from '~/lib/apply-theme';
-import {fetchThemeFromUrl, THEME_URLS} from '~/lib/theme-utils';
-import {isServerUnreachable} from '~/utils/error';
+import type {ThemeCssVars, FetchedTheme} from '~/types/chat';
+import {applyThemeToElement, applyAccentToElement, clearAccentFromElement, clearThemeFromElement, getSystemTheme, type ThemeMode, type ThemePreference, type ThemeState} from '~/lib/apply-theme';
+import {fetchThemeFromUrl, hasThemeVars, isSameTheme, THEME_URLS} from '~/lib/theme-utils';
 
 const THEME_STORE_KEY = 'oxide-theme-store';
 
 interface PersistedThemeState {
 	currentMode: ThemeMode;
+	modePreference: ThemePreference;
 	cssVars: ThemeCssVars;
 	selectedThemeUrl: string | null;
 }
@@ -24,7 +24,7 @@ function getDefaultCssVars(): ThemeCssVars {
 	};
 }
 
-function loadPersistedState(): PersistedThemeState | null {
+function loadPersistedState(): Partial<PersistedThemeState> | null {
 	if (typeof window === 'undefined') return null;
 	try {
 		const stored = localStorage.getItem(THEME_STORE_KEY);
@@ -43,14 +43,20 @@ function persistState(state: PersistedThemeState) {
 	return;
 }
 
+function resolveMode(preference: ThemePreference): ThemeMode {
+	return preference === 'system' ? getSystemTheme() : preference;
+}
+
 export const useThemeStore = defineStore('theme', {
 	state: () => {
 		const persisted = loadPersistedState();
+		const modePreference: ThemePreference = persisted?.modePreference ?? persisted?.currentMode ?? 'system';
 		return {
-			currentMode: persisted?.currentMode ?? getSystemTheme(),
+			modePreference,
+			currentMode: resolveMode(modePreference),
 			cssVars: persisted?.cssVars ?? getDefaultCssVars(),
 			selectedThemeUrl: persisted?.selectedThemeUrl ?? null,
-			globalConfig: null as GlobalConfig | null,
+			defaultTheme: getDefaultCssVars(),
 			fetchedThemes: [] as FetchedTheme[],
 			customThemeUrls: [] as string[],
 			isLoadingThemes: false,
@@ -62,7 +68,7 @@ export const useThemeStore = defineStore('theme', {
 		themeState(): ThemeState {
 			return {
 				currentMode: this.currentMode,
-				cssVars: this.cssVars,
+				cssVars: this.hasCustomTheme ? this.cssVars : this.defaultTheme,
 			};
 		},
 		allThemeUrls(): string[] {
@@ -77,13 +83,14 @@ export const useThemeStore = defineStore('theme', {
 			return this.fetchedThemes.filter(t => t.type === 'custom');
 		},
 		hasCustomTheme(): boolean {
-			return Object.keys(this.cssVars.light).length > 0 || Object.keys(this.cssVars.dark).length > 0;
+			return hasThemeVars(this.cssVars);
 		},
 	},
 
 	actions: {
 		setThemeState(state: {currentMode?: ThemeMode; cssVars?: ThemeCssVars}) {
 			if (state.currentMode !== undefined) {
+				this.modePreference = state.currentMode;
 				this.currentMode = state.currentMode;
 			}
 			if (state.cssVars !== undefined) {
@@ -94,13 +101,19 @@ export const useThemeStore = defineStore('theme', {
 		},
 
 		toggleMode() {
-			this.currentMode = this.currentMode === 'dark' ? 'light' : 'dark';
+			this.setMode(this.currentMode === 'dark' ? 'light' : 'dark');
+		},
+
+		setMode(mode: ThemePreference) {
+			this.modePreference = mode;
+			this.currentMode = resolveMode(mode);
 			this.persist();
 			this.apply();
 		},
 
-		setMode(mode: ThemeMode) {
-			this.currentMode = mode;
+		followSystemMode() {
+			if (this.modePreference !== 'system') return;
+			this.currentMode = getSystemTheme();
 			this.persist();
 			this.apply();
 		},
@@ -139,29 +152,18 @@ export const useThemeStore = defineStore('theme', {
 		persist() {
 			persistState({
 				currentMode: this.currentMode,
+				modePreference: this.modePreference,
 				cssVars: this.cssVars,
 				selectedThemeUrl: this.selectedThemeUrl,
 			});
 		},
 
-		async loadGlobalConfig() {
-			try {
-				const {$customFetch} = useNuxtApp();
-				const config = (await $customFetch('/api/v1/config')) as GlobalConfig;
-				this.globalConfig = config;
-
-				if (!this.hasCustomTheme && config.default_theme) {
-					const hasVars = Object.keys(config.default_theme.light).length > 0 || Object.keys(config.default_theme.dark).length > 0;
-					if (hasVars) {
-						this.cssVars = config.default_theme;
-						this.apply();
-					}
-				}
-			} catch (e: any) {
-				if (!isServerUnreachable(e) && e?.status !== 401) {
-					console.error('Failed to load global config:', e);
-				}
+		setDefaultTheme(theme: ThemeCssVars) {
+			if (typeof document !== 'undefined') {
+				clearThemeFromElement(document.body);
 			}
+			this.defaultTheme = theme;
+			this.apply();
 		},
 
 		async fetchAllThemes() {
@@ -220,7 +222,8 @@ export const useThemeStore = defineStore('theme', {
 			if (typeof document !== 'undefined') {
 				clearThemeFromElement(document.body);
 			}
-			this.currentMode = snapshot.currentMode;
+			this.modePreference = snapshot.modePreference;
+			this.currentMode = resolveMode(snapshot.modePreference);
 			this.cssVars = snapshot.cssVars;
 			this.selectedThemeUrl = snapshot.selectedThemeUrl;
 			this.customThemeUrls = snapshot.customThemeUrls;
@@ -230,13 +233,15 @@ export const useThemeStore = defineStore('theme', {
 
 		initFromUserPreferences(customUrls: string[], themeCssVars: ThemeCssVars) {
 			this.customThemeUrls = customUrls;
+			if (isSameTheme(this.cssVars, themeCssVars)) return;
 
-			const hasVars = Object.keys(themeCssVars.light).length > 0 || Object.keys(themeCssVars.dark).length > 0;
-			if (hasVars) {
-				this.cssVars = themeCssVars;
-				this.persist();
-				this.apply();
+			if (typeof document !== 'undefined') {
+				clearThemeFromElement(document.body);
 			}
+			this.cssVars = themeCssVars;
+			this.selectedThemeUrl = null;
+			this.persist();
+			this.apply();
 		},
 	},
 });

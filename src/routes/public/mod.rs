@@ -27,6 +27,8 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/health", get(base::health))
 		.route("/api/v1/base", get(base::get_base))
 		.route("/api/v1/users/@me", get(users::get_me))
+		.route("/api/v1/users/@me/sessions", get(users::list_my_sessions))
+		.route("/api/v1/users/@me/sessions/{id}", delete(users::revoke_my_session))
 		.route("/api/v1/me/budget", get(users::get_my_budget))
 		.route("/api/v1/me/analytics", get(users::get_my_analytics))
 		.route("/api/v1/users/@me/preferences", get(preferences::get_preferences).patch(preferences::update_preferences))

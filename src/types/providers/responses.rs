@@ -37,6 +37,7 @@ pub struct ProviderModelResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct TestProviderResponse {
 	pub success: bool,
 	pub models_found: usize,

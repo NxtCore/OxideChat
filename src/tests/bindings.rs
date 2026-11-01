@@ -3,9 +3,9 @@ mod tests {
 	use crate::types::permissions::ALL;
 	use crate::types::models::{ModelListAdmin, ModelListPublic, ProviderTab};
 	use crate::types::catalog::ModelProviderOptions;
-	use crate::types::providers::{ProviderBillingOverviewResponse, ProviderResponse, UpdateProviderBillingRequest};
+	use crate::types::providers::{ProviderBillingOverviewResponse, ProviderResponse, TestProviderResponse, UpdateProviderBillingRequest};
 	use crate::types::teams::TeamRole;
-	use crate::types::user::UserListResponse;
+	use crate::types::user::{SessionResponse, UserListResponse};
 	use crate::types::*;
 	use std::error::Error;
 	use std::fmt::Write;
@@ -25,6 +25,10 @@ mod tests {
 			($($ty:ty),* $(,)?) => { $(<$ty as TS>::export_all(&cfg)?;)* };
 		}
 		export!(
+			AdminConfigResponse,
+			SessionResponse,
+			TestProviderResponse,
+			TranslationsResponse,
 			AnalyticsDayModelRow,
 			BaseResponse,
 			GlobalConfigResponse,

@@ -1,5 +1,5 @@
 use crate::config::OAuthProvider;
-use crate::types::Role;
+use crate::types::{Role, ThemeCssVars};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -20,4 +20,6 @@ pub struct BaseResponse {
 	pub allow_server_stdio_mcp: bool,
 	/// Instance-wide default model ID.
 	pub default_model_id: Option<Uuid>,
+	/// Theme for users who have not picked their own.
+	pub default_theme: ThemeCssVars,
 }

@@ -6,13 +6,20 @@ import {usePreferencesStore} from '~/stores/preferencesStore';
 
 import ThemeCard from '~/components/themes/ThemeCard.vue';
 import ImportThemeDialog from '~/components/themes/ImportThemeDialog.vue';
-import {Sun, Moon, Shuffle, Plus, RotateCcw, ExternalLink, Search, CheckCircle} from 'lucide-vue-next';
+import type {ThemePreference} from '~/lib/apply-theme';
+import {Sun, Moon, Monitor, Shuffle, Plus, RotateCcw, ExternalLink, Search, CheckCircle} from 'lucide-vue-next';
 
 const themeStore = useThemeStore();
 const mainStore = useMainStore();
 
 const searchQuery = ref('');
 const showImportDialog = ref(false);
+
+const modes: {value: ThemePreference; label: string; icon: typeof Sun}[] = [
+	{value: 'light', label: 'settings.appearance.theme_light', icon: Sun},
+	{value: 'dark', label: 'settings.appearance.theme_dark', icon: Moon},
+	{value: 'system', label: 'settings.appearance.theme_system', icon: Monitor},
+];
 
 const filteredBuiltInThemes = computed(() => {
 	if (!searchQuery.value) return themeStore.builtInThemes;
@@ -27,10 +34,12 @@ const filteredCustomThemes = computed(() => {
 const settingsForm = useSettingsForm<ThemeSnapshot>({
 	value: () => ({
 		currentMode: themeStore.currentMode,
+		modePreference: themeStore.modePreference,
 		cssVars: themeStore.cssVars,
 		selectedThemeUrl: themeStore.selectedThemeUrl,
 		customThemeUrls: themeStore.customThemeUrls,
 	}),
+	normalize: ({currentMode, ...rest}) => rest,
 	restore: saved => {
 		const customThemesChanged = JSON.stringify(saved.customThemeUrls) !== JSON.stringify(themeStore.customThemeUrls);
 		themeStore.restoreSnapshot(saved);
@@ -67,38 +76,23 @@ onMounted(() => {
 					<p class="mt-1 text-sm text-muted-foreground">{{ mainStore.getTranslation('settings.appearance.display_mode_description') }}</p>
 				</div>
 
-				<div class="grid max-w-xl grid-cols-2 gap-3">
+				<div class="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
 					<div
+						v-for="mode in modes"
+						:key="mode.value"
 						class="cursor-pointer rounded-lg border-0 bg-muted/20 p-4 transition-all duration-200 hover:bg-muted/40"
-						:class="themeStore.currentMode === 'light' ? 'bg-primary/5 ring-1 ring-primary/20' : 'hover:ring-1 hover:ring-border'"
-						@click="themeStore.setMode('light')"
+						:class="themeStore.modePreference === mode.value ? 'bg-primary/5 ring-1 ring-primary/20' : 'hover:ring-1 hover:ring-border'"
+						:data-testid="`appearance-mode-${mode.value}`"
+						@click="themeStore.setMode(mode.value)"
 					>
 						<div class="flex items-center gap-3">
 							<div class="flex h-8 w-8 items-center justify-center rounded-full bg-background">
-								<Sun class="h-4 w-4 text-foreground" />
+								<component :is="mode.icon" class="h-4 w-4 text-foreground" />
 							</div>
 							<div class="flex-1">
 								<div class="flex items-center gap-2">
-									<ShadLabel class="cursor-pointer font-medium text-foreground">{{ mainStore.getTranslation('settings.appearance.theme_light') }}</ShadLabel>
-									<CheckCircle v-if="themeStore.currentMode === 'light'" class="ml-auto h-4 w-4 text-primary" />
-								</div>
-							</div>
-						</div>
-					</div>
-
-					<div
-						class="cursor-pointer rounded-lg border-0 bg-muted/20 p-4 transition-all duration-200 hover:bg-muted/40"
-						:class="themeStore.currentMode === 'dark' ? 'bg-primary/5 ring-1 ring-primary/20' : 'hover:ring-1 hover:ring-border'"
-						@click="themeStore.setMode('dark')"
-					>
-						<div class="flex items-center gap-3">
-							<div class="flex h-8 w-8 items-center justify-center rounded-full bg-background">
-								<Moon class="h-4 w-4 text-foreground" />
-							</div>
-							<div class="flex-1">
-								<div class="flex items-center gap-2">
-									<ShadLabel class="cursor-pointer font-medium text-foreground">{{ mainStore.getTranslation('settings.appearance.theme_dark') }}</ShadLabel>
-									<CheckCircle v-if="themeStore.currentMode === 'dark'" class="ml-auto h-4 w-4 text-primary" />
+									<ShadLabel class="cursor-pointer font-medium text-foreground">{{ mainStore.getTranslation(mode.label) }}</ShadLabel>
+									<CheckCircle v-if="themeStore.modePreference === mode.value" class="ml-auto h-4 w-4 text-primary" />
 								</div>
 							</div>
 						</div>

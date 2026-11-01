@@ -6,7 +6,7 @@
 //! - Supports reloading configuration at runtime
 
 use crate::i18n::Language;
-use crate::types::{ThemeCssVars, UpdateGlobalConfigRequest};
+use crate::types::{OAuthSettingsResponse, ThemeCssVars, UpdateGlobalConfigRequest};
 use crate::utils::encryption::{decrypt_api_key, encrypt_secret_value};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
@@ -17,7 +17,7 @@ use uuid::Uuid;
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Supported OAuth providers
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub enum OAuthProvider {
@@ -212,32 +212,77 @@ impl Config {
 			.collect()
 	}
 
+	/// Describe each OAuth provider for the admin page. Secrets are only reported as present or not.
+	#[must_use]
+	pub fn oauth_settings(&self) -> Vec<OAuthSettingsResponse> {
+		let values = self.values.load();
+		OAuthProvider::all()
+			.iter()
+			.map(|&provider| {
+				let (client_id, client_secret, env_id, env_secret) = match provider {
+					OAuthProvider::Google => (&values.oauth_google_client_id, &values.oauth_google_client_secret, "OAUTH_GOOGLE_CLIENT_ID", "OAUTH_GOOGLE_CLIENT_SECRET"),
+					OAuthProvider::Discord => (&values.oauth_discord_client_id, &values.oauth_discord_client_secret, "OAUTH_DISCORD_CLIENT_ID", "OAUTH_DISCORD_CLIENT_SECRET"),
+				};
+				OAuthSettingsResponse {
+					provider,
+					client_id: client_id.clone(),
+					has_client_secret: client_secret.is_some(),
+					env_configured: Self::env_is_set(env_id) && Self::env_is_set(env_secret),
+					configured: self.is_oauth_provider_configured(provider),
+					callback_url: std::env::var("BASE_URL").ok().map(|base_url| format!("{base_url}/api/v1/auth/oauth/{}/callback", provider.as_str())),
+				}
+			})
+			.collect()
+	}
+
+	fn env_is_set(key: &str) -> bool {
+		std::env::var(key).is_ok_and(|value| !value.is_empty())
+	}
+
 	/// Store the given settings in one transaction and reload config.
 	///
 	/// # Errors
 	/// Returns an error if serialization or a database write fails; nothing is changed then.
 	pub async fn apply_update(&self, pool: &PgPool, req: &UpdateGlobalConfigRequest) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
-		if let Some(theme) = &req.default_theme {
-			let json = serde_json::to_string(theme).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
-			Self::upsert_config(&mut *tx, "default_theme", &json).await?;
-		}
-		if let Some(value) = req.enable_provider_selector {
-			Self::upsert_config(&mut *tx, "enable_provider_selector", if value { "true" } else { "false" }).await?;
-		}
-		if let Some(value) = req.allow_server_stdio_mcp {
-			Self::upsert_config(&mut *tx, "allow_server_stdio_mcp", if value { "true" } else { "false" }).await?;
-		}
-		match req.default_model_id {
-			Some(Some(id)) => Self::upsert_config(&mut *tx, "default_model_id", &id.to_string()).await?,
-			Some(None) => {
-				sqlx::query("DELETE FROM app_config WHERE key = 'default_model_id'").execute(&mut *tx).await?;
-			}
-			None => {}
+		Self::store_settings(&mut tx, req).await?;
+		for update in &req.oauth {
+			let prefix = format!("oauth_{}", update.provider.as_str().to_lowercase());
+			Self::set_or_clear(&mut tx, &format!("{prefix}_client_id"), update.client_id.as_ref()).await?;
+			Self::set_or_clear(&mut tx, &format!("{prefix}_client_secret"), update.client_secret.as_ref()).await?;
 		}
 		tx.commit().await?;
 		self.reload(pool).await;
 		Ok(())
+	}
+
+	async fn store_settings(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, req: &UpdateGlobalConfigRequest) -> Result<(), sqlx::Error> {
+		if let Some(theme) = &req.default_theme {
+			let json = serde_json::to_string(theme).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+			Self::upsert_config(&mut **tx, "default_theme", &json).await?;
+		}
+		if let Some(value) = req.enable_provider_selector {
+			Self::upsert_config(&mut **tx, "enable_provider_selector", if value { "true" } else { "false" }).await?;
+		}
+		if let Some(value) = req.allow_server_stdio_mcp {
+			Self::upsert_config(&mut **tx, "allow_server_stdio_mcp", if value { "true" } else { "false" }).await?;
+		}
+		if let Some(language) = req.language {
+			Self::upsert_config(&mut **tx, "language", language.as_str()).await?;
+		}
+		let default_model_id = req.default_model_id.map(|id| id.map(|id| id.to_string()));
+		Self::set_or_clear(tx, "default_model_id", default_model_id.as_ref()).await
+	}
+
+	async fn set_or_clear(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, key: &str, value: Option<&Option<String>>) -> Result<(), sqlx::Error> {
+		match value {
+			None => Ok(()),
+			Some(Some(value)) if !value.trim().is_empty() => Self::upsert_config(&mut **tx, key, value.trim()).await,
+			Some(_) => {
+				sqlx::query("DELETE FROM app_config WHERE key = $1").bind(key).execute(&mut **tx).await?;
+				Ok(())
+			}
+		}
 	}
 
 	async fn upsert_config<'e, E: sqlx::PgExecutor<'e>>(executor: E, key: &str, value: &str) -> Result<(), sqlx::Error> {

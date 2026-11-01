@@ -5,6 +5,15 @@ use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
+pub struct SessionResponse {
+	pub id: String,
+	pub created_at: chrono::DateTime<chrono::Utc>,
+	pub expires_at: chrono::DateTime<chrono::Utc>,
+	pub is_current: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct UserResponse {
 	pub id: Uuid,
 	pub email: String,

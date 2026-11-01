@@ -3,8 +3,9 @@
 //! Admin endpoints for managing instance-wide settings like default theme.
 
 use crate::config::Config;
-use crate::types::consts::ADMIN_CONFIG_EDIT;
-use crate::types::{AppError, AuthUser, GlobalConfigResponse, JobState, UpdateGlobalConfigRequest, json_ok};
+use crate::logging::{AuditLog, LogEvent};
+use crate::types::consts::{ADMIN_CONFIG_EDIT, ADMIN_CONFIG_VIEW};
+use crate::types::{AdminConfigResponse, AppError, AuthUser, GlobalConfigResponse, JobState, UpdateGlobalConfigRequest, json_ok};
 use axum::{Json, extract::State, response::Response};
 use std::sync::Arc;
 
@@ -21,6 +22,16 @@ pub async fn get_global_config(_: AuthUser) -> Result<Response, AppError> {
 	})
 }
 
+/// GET /api/v1/admin/config
+///
+/// Settings only admins may read. Secrets are never returned.
+pub async fn get_admin_config(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_CONFIG_VIEW).await?;
+	json_ok(AdminConfigResponse {
+		oauth: Config::get().oauth_settings(),
+	})
+}
+
 /// PATCH /api/v1/admin/config
 ///
 /// Update global configuration (admin only).
@@ -28,6 +39,7 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, auth: Auth
 	auth.require(&state.db, ADMIN_CONFIG_EDIT).await?;
 
 	Config::get().apply_update(&state.db, &req).await?;
+	AuditLog::log(&state.db, LogEvent::ConfigUpdated, Some(auth.id), None, None);
 
 	let config = Config::get();
 	json_ok(GlobalConfigResponse {

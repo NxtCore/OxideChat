@@ -106,6 +106,7 @@ export const useMainStore = defineStore('main', {
 				const base = await $customFetch<Base>('/api/v1/base');
 				if (base) {
 					this.base = base;
+					useThemeStore().setDefaultTheme(base.default_theme);
 				}
 				this.bootState = 'online';
 			} catch (e: any) {

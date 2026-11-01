@@ -4,6 +4,7 @@ mod repository;
 mod requests;
 mod responses;
 mod rows;
+mod sessions;
 
 pub use requests::*;
 pub use responses::*;

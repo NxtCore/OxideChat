@@ -44,5 +44,6 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 		enable_provider_selector: config.enable_provider_selector(),
 		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
 		default_model_id: config.default_model_id(),
+		default_theme: config.default_theme(),
 	})
 }

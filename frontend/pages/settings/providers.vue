@@ -109,7 +109,7 @@
 							<Settings2 class="h-4 w-4" />
 							<span v-if="!item.isConfigured">{{ store.getTranslation('settings.providers.configure') }}</span>
 						</ShadButton>
-						<ShadButton v-if="item.isConfigured" variant="outline" size="sm" class="gap-2" @click="syncProvider(item)">
+						<ShadButton v-if="item.isConfigured" variant="outline" size="sm" class="gap-2" @click="syncProviderModels(item)">
 							<RotateCw class="h-4 w-4" />
 						</ShadButton>
 						<ShadSwitch :modelValue="item.is_enabled || false" :disabled="!item.isConfigured" @update:modelValue="(val: boolean) => toggleProvider(item, val)" />
@@ -175,6 +175,12 @@
 								<ShadLabel for="base-url">{{ store.getTranslation('settings.providers.base_url') }}</ShadLabel>
 								<ShadInput id="base-url" v-model="configForm.baseUrl" type="text" :placeholder="selectedProvider?.defaultBaseUrl || 'https://api.example.com'" />
 							</div>
+
+							<ShadButton variant="outline" size="sm" class="gap-2" :disabled="!canTestConnection || testing" data-testid="provider-test" @click="testConnection">
+								<Loader2 v-if="testing" class="h-4 w-4 animate-spin" />
+								<PlugZap v-else class="h-4 w-4" />
+								{{ store.getTranslation('settings.providers.test') }}
+							</ShadButton>
 						</div>
 					</ShadTabsContent>
 
@@ -259,13 +265,14 @@
 
 <script setup lang="ts">
 import {ref, reactive, onMounted, computed, watch} from 'vue';
-import {Sparkles, Cpu, Zap, Server, Plus, Settings2, Loader2, BrainCircuit, Globe, AudioWaveform, Trash2, RotateCw} from 'lucide-vue-next';
+import {Sparkles, Cpu, Zap, Server, Plus, Settings2, Loader2, BrainCircuit, Globe, AudioWaveform, Trash2, RotateCw, PlugZap} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
 import {sanitizeSvg} from '@/composables/useMarkdown';
 import {useProviderBillingStore} from '@/stores/providerBillingStore';
 import type {ProviderBillingOverview} from '@/types/providers';
 import type {ProviderResponse as ConfiguredProvider} from '~/types/chat';
+import type {TestProviderResponse} from '~/types/generated/TestProviderResponse';
 
 interface ProviderConfig {
 	kind: string;
@@ -284,6 +291,7 @@ const billingStore = useProviderBillingStore();
 const dialogOpen = ref(false);
 const selectedProvider = ref<ProviderConfig | null>(null);
 const saving = ref(false);
+const testing = ref(false);
 const configuredProviders = ref<ConfiguredProvider[]>([]);
 
 // Provider modal catalog tab (OpenRouter only): browse the gateway catalog, including
@@ -491,13 +499,15 @@ function openConfigDialog(item: any) {
 }
 
 async function loadBillingForm(providerId: string) {
+	billingForm.credential = '';
+	billingForm.hasCredential = false;
+	billingForm.hasConnection = false;
 	try {
 		const billing = await billingStore.fetchProviderBilling(providerId);
-		billingForm.credential = '';
 		billingForm.hasCredential = billing.has_billing_credential;
 		billingForm.hasConnection = billing.has_billing_credential;
-	} catch (error) {
-		console.error('Failed to load billing configuration:', error);
+	} catch (error: any) {
+		if (error?.status !== 404) console.error('Failed to load billing configuration:', error);
 	}
 }
 
@@ -654,7 +664,7 @@ async function updateProvider(id: string, data: Object) {
 	await loadProviders();
 }
 
-async function syncProvider(provider: any) {
+async function syncProviderModels(provider: any) {
 	if (!provider || !provider.id) {
 		console.error('Invalid provider:', provider);
 		return;
@@ -664,10 +674,46 @@ async function syncProvider(provider: any) {
 		type: 'loading',
 		duration: Infinity,
 	});
-	await syncProvider(provider.id);
-	store.dismissToast(toast);
-	store.toast(store.getTranslation('settings.providers.syncing_provider_success'), {type: 'success'});
+	try {
+		const result = (await syncProvider(provider.id)) as {success: boolean; message: string};
+		if (!result.success) throw new Error(result.message);
+		store.toast(store.getTranslation('settings.providers.syncing_provider_success'), {type: 'success'});
+	} catch (e: any) {
+		store.toast(store.getTranslation('settings.providers.syncing_provider_failed'), {type: 'error', description: e?.message});
+	} finally {
+		store.dismissToast(toast);
+	}
 }
+
+const canTestConnection = computed(() => {
+	if (configForm.existingProvider) return true;
+	return configForm.apiKey.length > 0 && Boolean(configForm.baseUrl || selectedProvider.value?.defaultBaseUrl);
+});
+
+async function testConnection() {
+	if (!selectedProvider.value) return;
+	testing.value = true;
+	try {
+		const result =
+			configForm.existingProvider && !configForm.apiKey
+				? await testSavedProvider<TestProviderResponse>(configForm.existingProvider.id)
+				: await testProviderConfig<TestProviderResponse>({
+						kind: selectedProviderKind.value,
+						base_url: configForm.baseUrl || selectedProvider.value.defaultBaseUrl || '',
+						api_key: configForm.apiKey,
+					});
+		if (result.success) {
+			store.toast(store.getTranslation('settings.providers.test_success', {count: result.models_found}), {type: 'success'});
+		} else {
+			store.toast(store.getTranslation('settings.providers.test_failed'), {type: 'error', description: result.message});
+		}
+	} catch (e: any) {
+		store.toast(store.getTranslation('settings.providers.test_failed'), {type: 'error', description: e?.message});
+	} finally {
+		testing.value = false;
+	}
+}
+
 async function saveConfig() {
 	if (!selectedProvider.value) return;
 

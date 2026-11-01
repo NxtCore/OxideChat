@@ -53,9 +53,11 @@ pub enum LogEvent {
 	AdminSetup,
 	TranslationUpdated,
 	TranslationDeleted,
+	ConfigUpdated,
 
 	// Security
 	PasswordChanged,
+	SessionRevoked,
 
 	// OAuth
 	OAuthLoginSuccess,
@@ -78,7 +80,9 @@ impl LogEvent {
 			Self::AdminSetup => "admin_setup",
 			Self::TranslationUpdated => "translation_updated",
 			Self::TranslationDeleted => "translation_deleted",
+			Self::ConfigUpdated => "config_updated",
 			Self::PasswordChanged => "password_changed",
+			Self::SessionRevoked => "session_revoked",
 			Self::OAuthLoginSuccess => "oauth_login_success",
 			Self::OAuthLoginFailed => "oauth_login_failed",
 			Self::OAuthAccountCreated => "oauth_account_created",

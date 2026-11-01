@@ -154,7 +154,7 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, auth: AuthUser, P
 
 /// Test a provider with inline configuration (doesn't require existing provider)
 pub async fn test_provider_inline(State(state): State<Arc<JobState>>, auth: AuthUser, Json(req): Json<TestProviderRequest>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_PROVIDERS_VIEW).await?;
+	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
 
 	let extra_headers = parse_extra_headers(&req.extra_headers).map_err(|error| {
 		tracing::error!("Failed to read provider headers: {error}");
