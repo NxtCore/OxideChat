@@ -35,13 +35,13 @@
 					</div>
 				</div>
 
-				<div v-if="imageUrl" class="mb-3">
+				<div v-if="generatedImageUrl" class="mb-3">
 					<span class="text-xs font-medium text-muted-foreground mb-1 block">{{
 						store.getTranslation('chat.tool_execution.generated_image') || 'Generated Image'
 					}}</span>
 					<div class="relative group">
 						<img
-							:src="imageUrl"
+							:src="generatedImageUrl"
 							alt="Generated image"
 							class="rounded-lg max-w-full max-h-96 object-contain cursor-pointer hover:opacity-90 transition-opacity"
 							@click="openImageModal"
@@ -69,7 +69,7 @@
 
 		<ImagePreview
 			:is-open="showImageModal"
-			:image-url="imageUrl"
+			:image-url="generatedImageUrl"
 			alt-text="Generated image"
 			:filename="`generated-image-${props.id}.png`"
 			@close="showImageModal = false"
@@ -128,7 +128,7 @@ function isValidImageProtocol(url: string): boolean {
 	return false;
 }
 
-const imageUrl = computed(() => {
+const generatedImageUrl = computed(() => {
 	if (!props.output) return null;
 	const out = typeof props.output === 'string' ? tryParseJson(props.output) : props.output;
 	if (out?.image_id && typeof out.image_id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(out.image_id)) {

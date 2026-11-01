@@ -250,6 +250,9 @@ async function saveModel() {
 
 		await patchAdminModel(modelId, patch);
 
+		model.value = (await adminModel(modelId)) as Record<string, any>;
+		populateForm(model.value);
+
 		store.toast(store.getTranslation('settings.models.save_success'), {type: 'success'});
 	} catch (e) {
 		console.error(e);

@@ -115,6 +115,10 @@ watch(
 onMounted(async () => {
 	const authResult = await checkAuth();
 	if (!authResult?.authenticated) return;
+	if (chatStore.initialized) {
+		chatStore.refreshSharedData();
+		return;
+	}
 	await chatStore.init();
 });
 </script>

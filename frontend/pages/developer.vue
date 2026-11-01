@@ -3,7 +3,7 @@
 		<div class="container mx-auto">
 			<div class="mb-6 lg:mb-8">
 				<button
-					@click="router.push('/')"
+					@click="goBack"
 					class="group mb-4 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
 				>
 					<ArrowLeft class="h-4 w-4 transition-transform group-hover:-translate-x-1" />
@@ -79,6 +79,12 @@ const tabs = [
 ];
 
 const activeTab = computed(() => route.path.match(/\/developer\/([^/]+)/)?.[1] ?? 'overview');
+
+function goBack() {
+	const returnPath = store.settingsReturnPath;
+	store.settingsReturnPath = '/';
+	router.push(returnPath === '/' || returnPath.startsWith('/chats/') ? returnPath : '/');
+}
 
 onMounted(() => {
 	if (route.path === '/developer' || route.path === '/developer/') {

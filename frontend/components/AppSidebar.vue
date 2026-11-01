@@ -87,11 +87,11 @@
 					</template>
 
 					<ShadDropdownMenuSeparator class="bg-border" />
-					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="goToSettings">
+					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="openFromChat('/settings')">
 						<Settings class="mr-2 h-4 w-4" />
 						<span>{{ store.getTranslation('settings.title') }}</span>
 					</ShadDropdownMenuItem>
-					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="router.push('/developer')">
+					<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent focus:text-accent-foreground" @click="openFromChat('/developer')">
 						<Code2 class="mr-2 h-4 w-4" />
 						<span>{{ store.getTranslation('developer.title') }}</span>
 					</ShadDropdownMenuItem>
@@ -126,9 +126,9 @@ const userInitials = computed(() => {
 	return username.slice(0, 2).toUpperCase();
 });
 
-function goToSettings() {
+function openFromChat(path: string) {
 	store.settingsReturnPath = route.path.startsWith('/chats/') ? route.fullPath : '/';
-	router.push('/settings');
+	router.push(path);
 }
 
 async function handleLogout() {

@@ -280,5 +280,13 @@ export const useChatStore = defineStore('chat', {
 			if (!this.activeChat) await modelStore.resetComposerToDefaults();
 			this.initialized = true;
 		},
+
+		async refreshSharedData() {
+			const modelStore = useModelStore();
+			const preferencesStore = usePreferencesStore();
+			await Promise.all([preferencesStore.fetchPreferences(), preferencesStore.fetchUserMcpServers()]);
+			await modelStore.fetchModels();
+			if (!this.activeChat) await modelStore.resetComposerToDefaults();
+		},
 	},
 });

@@ -136,6 +136,7 @@
 <script setup lang="ts">
 import {Plus, X} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
+import ParamCard from './ParamCard.vue';
 
 type SliderParam = {key: string; def: number; min: number; max: number; step: number; show: (v: number) => string; labels: string[]};
 

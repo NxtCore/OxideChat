@@ -77,3 +77,55 @@ test.describe('web chat', () => {
 		await expect.poll(async () => JSON.stringify(await api.get('/api/v1/me/analytics')) !== before, {timeout: 15_000}).toBe(true);
 	});
 });
+
+test.describe('chat navigation', () => {
+	const activeRow = (page: Page) => page.locator('[data-active="true"]');
+
+	for (const [menuKey, backKey] of [['settings.title', 'settings.back'], ['developer.title', 'developer.back']]) {
+		test(`leaving ${menuKey} returns to the chat it was opened from`, async ({page, t, api}) => {
+			const chat = await api.post('/api/v1/chats');
+			try {
+				await page.goto(`/chats/${chat.id}`);
+				await expect(activeRow(page)).toHaveCount(1);
+				await page.locator('[data-slot="sidebar"] button[aria-haspopup="menu"]').click();
+				await page.getByRole('menuitem', {name: t(menuKey)}).click();
+				await page.getByRole('button', {name: t(backKey)}).click();
+				await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}$`));
+				await expect(activeRow(page)).toHaveCount(1);
+			} finally {
+				await api.delete(`/api/v1/chats/${chat.id}`);
+			}
+		});
+	}
+
+	test('reaching the start page with the browser back button clears the active chat', async ({page, api}) => {
+		const title = uniqueName('BackChat');
+		const chat = await api.post('/api/v1/chats');
+		await api.patch(`/api/v1/chats/${chat.id}`, {title});
+		try {
+			await page.goto('/');
+			await page.getByRole('button', {name: title}).click();
+			await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}$`));
+			await expect(activeRow(page)).toHaveCount(1);
+			await page.goBack();
+			await expect(page).toHaveURL(/\/$/);
+			await expect(activeRow(page)).toHaveCount(0);
+		} finally {
+			await api.delete(`/api/v1/chats/${chat.id}`);
+		}
+	});
+
+	test('the sidebar or its toggle is available at every width', async ({page, t}) => {
+		const newChat = page.getByRole('button', {name: t('chat.list.new_chat')}).first();
+		const toggle = page.locator('[data-sidebar="trigger"]');
+		await page.goto('/');
+		for (const width of [1280, 1000, 900, 768]) {
+			await page.setViewportSize({width, height: 800});
+			await expect(newChat).toBeVisible();
+		}
+		await page.setViewportSize({width: 767, height: 800});
+		await expect(newChat).toBeHidden();
+		await toggle.click();
+		await expect(newChat).toBeVisible();
+	});
+});
