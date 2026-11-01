@@ -1,7 +1,7 @@
 <template>
-	<div class="w-full lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
+	<SettingsPage>
 		<SettingsAnalyticsDashboard :is-admin="true" :user-id="userId" />
-	</div>
+	</SettingsPage>
 </template>
 
 <script setup lang="ts">

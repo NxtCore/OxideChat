@@ -12,6 +12,10 @@ interface PersistedThemeState {
 	selectedThemeUrl: string | null;
 }
 
+export interface ThemeSnapshot extends PersistedThemeState {
+	customThemeUrls: string[];
+}
+
 function getDefaultCssVars(): ThemeCssVars {
 	return {
 		theme: {},
@@ -210,6 +214,18 @@ export const useThemeStore = defineStore('theme', {
 				const random = available[Math.floor(Math.random() * available.length)];
 				this.selectTheme(random);
 			}
+		},
+
+		restoreSnapshot(snapshot: ThemeSnapshot) {
+			if (typeof document !== 'undefined') {
+				clearThemeFromElement(document.body);
+			}
+			this.currentMode = snapshot.currentMode;
+			this.cssVars = snapshot.cssVars;
+			this.selectedThemeUrl = snapshot.selectedThemeUrl;
+			this.customThemeUrls = snapshot.customThemeUrls;
+			this.persist();
+			this.apply();
 		},
 
 		initFromUserPreferences(customUrls: string[], themeCssVars: ThemeCssVars) {

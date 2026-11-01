@@ -26,7 +26,7 @@
 					<h4 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.models.editor.pricing') }}</h4>
 					<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.pricing_desc') }}</p>
 				</div>
-				<ShadButton v-if="pricing?.override_pricing != null" variant="outline" size="sm" @click="deletePricingOverride">
+				<ShadButton v-if="pricing?.override_pricing != null" variant="outline" size="sm" data-testid="pricing-remove-override" @click="emit('removeOverride')">
 					<Trash2 class="h-4 w-4" />
 				</ShadButton>
 			</div>
@@ -41,13 +41,10 @@
 				</div>
 				<div v-for="field in pricingFields" :key="field" class="space-y-1.5">
 					<ShadLabel>{{ store.getTranslation(`settings.models.editor.override_${field}`) }}</ShadLabel>
-					<ShadInput v-model="pricingForm[field]" type="number" min="0" step="0.000001" />
+					<ShadInput v-model="form.pricing[field]" type="number" min="0" step="0.000001" :data-testid="`pricing-${field}`" />
 				</div>
 			</div>
 			<p class="mt-2 text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.pricing_unit') }}</p>
-			<div class="mt-3 flex justify-end">
-				<ShadButton size="sm" @click="savePricingOverride">{{ store.getTranslation('common.save') }}</ShadButton>
-			</div>
 		</div>
 
 		<div v-if="!providerOptionsLoading && providerParentUnavailable" class="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
@@ -100,7 +97,11 @@ import {useMainStore} from '@/stores';
 const props = defineProps<{
 	modelId: string;
 	active: boolean;
+	form: Record<string, any>;
+	pricing: Record<string, any> | null;
 }>();
+
+const emit = defineEmits<{removeOverride: []}>();
 
 const store = useMainStore();
 
@@ -108,15 +109,7 @@ const providerOptions = ref<Record<string, any> | null>(null);
 const providerOptionsLoading = ref(false);
 const providerOptionsLoaded = ref(false);
 const providerParentUnavailable = computed(() => providerOptions.value?.availability_state === 'USER_UNAVAILABLE');
-const pricing = ref<Record<string, any> | null>(null);
 const pricingFields = ['input', 'output', 'reasoning', 'cache_read', 'cache_write'] as const;
-const pricingForm = reactive({
-	input: '0',
-	output: '0',
-	reasoning: '',
-	cache_read: '',
-	cache_write: '',
-});
 
 const columns = [
 	{key: 'provider'},
@@ -167,47 +160,6 @@ function formatPricingPair(input: string | number | null | undefined, output: st
 	return `${fmt(input)} / ${fmt(output)}`;
 }
 
-async function loadPricing() {
-	try {
-		pricing.value = await modelPricing(props.modelId);
-		const override = pricing.value?.override_pricing ?? null;
-		pricingForm.input = String(override?.input ?? pricing.value?.effective_input ?? 0);
-		pricingForm.output = String(override?.output ?? pricing.value?.effective_output ?? 0);
-		pricingForm.reasoning = override?.reasoning != null ? String(override.reasoning) : '';
-		pricingForm.cache_read = override?.cache_read != null ? String(override.cache_read) : '';
-		pricingForm.cache_write = override?.cache_write != null ? String(override.cache_write) : '';
-	} catch (e) {
-		console.error(e);
-	}
-}
-
-async function savePricingOverride() {
-	const optional = (value: string): number | undefined => {
-		const trimmed = value.trim();
-		return trimmed === '' ? undefined : Number(trimmed);
-	};
-	const isValidPrice = (v: number | undefined): boolean => v === undefined || (Number.isFinite(v) && v >= 0);
-	const input = Number(pricingForm.input || 0);
-	const output = Number(pricingForm.output || 0);
-	const reasoning = optional(pricingForm.reasoning);
-	const cacheRead = optional(pricingForm.cache_read);
-	const cacheWrite = optional(pricingForm.cache_write);
-	if (![input, output, reasoning, cacheRead, cacheWrite].every(isValidPrice)) {
-		store.toast(store.getTranslation('common.error'), {type: 'error'});
-		return;
-	}
-	pricing.value = await saveModelPricing(props.modelId, {
-		pricing: {input, output, reasoning, cache_read: cacheRead, cache_write: cacheWrite, tiers: []},
-	});
-	store.toast(store.getTranslation('settings.models.editor.pricing_saved'), {type: 'success'});
-}
-
-async function deletePricingOverride() {
-	await deleteModelPricing(props.modelId);
-	await loadPricing();
-	store.toast(store.getTranslation('settings.models.editor.pricing_deleted'), {type: 'success'});
-}
-
 async function loadProviderOptions(force: boolean) {
 	providerOptionsLoading.value = true;
 	try {
@@ -227,6 +179,4 @@ watch(
 		if (active && !providerOptionsLoaded.value) loadProviderOptions(false);
 	},
 );
-
-onMounted(loadPricing);
 </script>

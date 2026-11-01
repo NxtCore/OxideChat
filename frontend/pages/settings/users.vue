@@ -1,15 +1,11 @@
 <template>
-	<div class="w-full lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
-		<div class="flex flex-row items-center justify-between mb-6">
-			<div>
-				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.tabs.admin_users') }}</h2>
-				<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.admin_users.description') }}</p>
-			</div>
+	<SettingsPage :title="store.getTranslation('settings.tabs.admin_users')" :description="store.getTranslation('settings.admin_users.description')">
+		<template #actions>
 			<ShadButton v-if="store.hasPermission(ADMIN_USERS_EDIT)" variant="default" size="sm" class="gap-2" @click="openCreateDialog">
 				<Plus class="h-4 w-4" />
 				<span>{{ store.getTranslation('settings.admin_users.create_user') }}</span>
 			</ShadButton>
-		</div>
+		</template>
 
 		<div class="flex flex-row gap-2 mb-4">
 			<ShadInput v-model="searchRaw" type="text" :placeholder="store.getTranslation('settings.admin_users.search_placeholder')" class="flex-1" />
@@ -236,7 +232,7 @@
 				</ShadDialogFooter>
 			</ShadDialogContent>
 		</ShadDialog>
-	</div>
+	</SettingsPage>
 </template>
 
 <script setup lang="ts">

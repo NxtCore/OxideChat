@@ -4,6 +4,7 @@ import {AUTH_FILES, MEMBER} from './support/constants';
 const ADMIN_PAGES = [
 	'/',
 	'/settings/profile',
+	'/settings/usage',
 	'/settings/appearance',
 	'/settings/providers',
 	'/settings/tools',
@@ -23,7 +24,7 @@ const ADMIN_PAGES = [
 	'/developer/docs',
 ];
 
-const MEMBER_PAGES = ['/', '/settings/profile', '/settings/appearance', '/developer/overview', '/developer/keys', '/developer/logs', '/developer/usage', '/developer/models', '/developer/playground', '/developer/docs'];
+const MEMBER_PAGES = ['/', '/settings/profile', '/settings/usage', '/settings/appearance', '/developer/overview', '/developer/keys', '/developer/logs', '/developer/usage', '/developer/models', '/developer/playground', '/developer/docs'];
 
 async function visit(page: import('@playwright/test').Page, path: string) {
 	await page.goto(path);
@@ -64,6 +65,11 @@ test.describe('every page renders as member', () => {
 		await expect(page.getByRole('link', {name: t('settings.tabs.profile')})).toBeVisible();
 		for (const tab of ['providers', 'tools', 'models', 'teams', 'budgets', 'gateway_admin', 'analytics', 'admin_users', 'admin_config']) {
 			await expect(page.getByRole('link', {name: t(`settings.tabs.${tab}`), exact: true})).toHaveCount(0);
+		}
+		await expect(page.getByTestId('settings-nav-account')).toBeVisible();
+		await expect(page.getByRole('link', {name: t('settings.analytics.my_usage')})).toBeVisible();
+		for (const group of ['ai', 'access', 'operations']) {
+			await expect(page.getByTestId(`settings-nav-${group}`)).toHaveCount(0);
 		}
 	});
 

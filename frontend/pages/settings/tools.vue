@@ -1,21 +1,15 @@
 <template>
-	<div class="w-full lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
-		<div class="flex flex-row items-center justify-between">
-			<div class="mb-6">
-				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.tools.title') }}</h2>
-				<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.tools.description') }}</p>
-			</div>
-			<div class="flex items-center gap-2">
-				<ShadButton variant="outline" size="sm" class="gap-2" @click="mcpManagerOpen = true">
-					<Server class="h-4 w-4" />
-					<span>{{ store.getTranslation('sidebar.manage_mcp') }}</span>
-				</ShadButton>
-				<ShadButton variant="default" size="sm" class="gap-2" @click="openCreateDialog">
-					<Plus class="h-4 w-4" />
-					<span>{{ store.getTranslation('settings.tools.add') }}</span>
-				</ShadButton>
-			</div>
-		</div>
+	<SettingsPage :title="store.getTranslation('settings.tools.title')" :description="store.getTranslation('settings.tools.description')">
+		<template #actions>
+			<ShadButton variant="outline" size="sm" class="gap-2" @click="mcpManagerOpen = true">
+				<Server class="h-4 w-4" />
+				<span>{{ store.getTranslation('sidebar.manage_mcp') }}</span>
+			</ShadButton>
+			<ShadButton variant="default" size="sm" class="gap-2" @click="openCreateDialog">
+				<Plus class="h-4 w-4" />
+				<span>{{ store.getTranslation('settings.tools.add') }}</span>
+			</ShadButton>
+		</template>
 
 		<McpManagerDialog v-model:open="mcpManagerOpen" :admin="true" @changed="loadTools" />
 		<McpServerEditDialog v-model:open="mcpServerEditOpen" :server="editingMcpServer" :admin="true" @changed="loadTools" />
@@ -85,7 +79,7 @@
 								<ShadButton variant="outline" size="sm" class="gap-2" @click="testTool(tool)">
 									<Play class="h-4 w-4" />
 								</ShadButton>
-								<Switch :modelValue="tool.is_enabled" @update:modelValue="(val: boolean) => toggleTool(tool, val)" />
+								<ShadSwitch :modelValue="tool.is_enabled" @update:modelValue="(val: boolean) => toggleTool(tool, val)" />
 							</template>
 						</div>
 					</div>
@@ -96,7 +90,7 @@
 		<SettingsToolsEditDialog v-model:open="dialogOpen" :tool="editingTool" @saved="loadTools" />
 		<SettingsToolsSettingsDialog v-model:open="settingsDialogOpen" :tool="settingsTool" @saved="loadTools" />
 		<ToolTestDialog v-model:open="testDialogOpen" :tool="testingTool" />
-	</div>
+	</SettingsPage>
 </template>
 
 <script setup lang="ts">
@@ -106,7 +100,6 @@ import McpManagerDialog from '@/components/mcp/McpManagerDialog.vue';
 import McpServerEditDialog from '@/components/mcp/McpServerEditDialog.vue';
 import {useMainStore} from '@/stores';
 import type {Tool} from '~/types/tools';
-import {Switch} from '@/components/ui/switch';
 
 const store = useMainStore();
 const builtinToolTemplates = useBuiltinToolTemplates();

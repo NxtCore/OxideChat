@@ -54,7 +54,7 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/mcp-servers/{id}/health-check", post(mcp::health_check))
 		// Admin Teams
 		.route("/api/v1/admin/teams", get(teams::list_teams).post(teams::create_team))
-		.route("/api/v1/admin/teams/{id}", get(teams::get_team).patch(teams::update_team).delete(teams::delete_team))
+		.route("/api/v1/admin/teams/{id}", get(teams::get_team).put(teams::save_team).patch(teams::update_team).delete(teams::delete_team))
 		.route("/api/v1/admin/teams/{id}/members", put(teams::set_team_members))
 		.route("/api/v1/admin/teams/{id}/members/{user_id}/role", put(teams::set_team_member_role))
 		.route("/api/v1/admin/teams/{id}/models", put(teams::set_team_models))

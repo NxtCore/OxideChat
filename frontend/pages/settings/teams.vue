@@ -1,33 +1,21 @@
 <template>
-	<div class="w-full lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
-		<div class="flex flex-row items-center justify-between mb-6">
-			<div>
-				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.tabs.teams') }}</h2>
-				<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.teams.description') }}</p>
-			</div>
-			<div class="flex items-center gap-2">
-				<template v-if="canEdit && selectedTeam">
-					<ShadButton
-						v-if="!selectedTeam.is_default"
-						variant="outline"
-						size="sm"
-						class="gap-2 text-destructive hover:text-destructive"
-						:disabled="saving"
-						@click="deleteOpen = true"
-					>
-						<Trash2 class="h-4 w-4" />
-					</ShadButton>
-					<ShadButton variant="default" size="sm" :disabled="saving" @click="saveAll">
-						<Loader2 v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
-						{{ store.getTranslation('common.save') }}
-					</ShadButton>
-				</template>
-				<ShadButton v-if="canEdit" variant="default" size="sm" class="gap-2" @click="openCreate">
-					<Plus class="h-4 w-4" />
-					<span>{{ store.getTranslation('settings.teams.create') }}</span>
-				</ShadButton>
-			</div>
-		</div>
+	<SettingsPage :title="store.getTranslation('settings.tabs.teams')" :description="store.getTranslation('settings.teams.description')" :form="settingsForm">
+		<template #actions>
+			<ShadButton
+				v-if="canEdit && selectedTeam && !selectedTeam.is_default"
+				variant="outline"
+				size="sm"
+				class="gap-2 text-destructive hover:text-destructive"
+				:disabled="saving"
+				@click="deleteOpen = true"
+			>
+				<Trash2 class="h-4 w-4" />
+			</ShadButton>
+			<ShadButton v-if="canEdit" variant="default" size="sm" class="gap-2" @click="openCreate">
+				<Plus class="h-4 w-4" />
+				<span>{{ store.getTranslation('settings.teams.create') }}</span>
+			</ShadButton>
+		</template>
 
 		<div class="grid gap-4 lg:grid-cols-[19rem_1fr]">
 			<div class="space-y-3">
@@ -95,7 +83,7 @@
 								<Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
 								<ShadInput v-model="memberSearch" :placeholder="store.getTranslation('settings.teams.search_members')" class="pl-8 h-9" />
 							</div>
-							<span class="shrink-0 text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.selected_count', {count: selectedMemberIds.length}) }}</span>
+							<span class="shrink-0 text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.selected_count', {count: form.member_ids.length}) }}</span>
 						</div>
 						<div class="max-h-80 overflow-y-auto p-2">
 							<p v-if="filteredUsers.length === 0" class="py-8 text-center text-sm text-muted-foreground">
@@ -107,19 +95,19 @@
 								class="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/40"
 							>
 								<ShadCheckbox
-									:model-value="selectedMemberIds.includes(user.id)"
+									:model-value="form.member_ids.includes(user.id)"
 									:disabled="!canEdit || selectedTeam.is_default"
-									@update:model-value="checked => toggleId(selectedMemberIds, user.id, Boolean(checked))"
+									@update:model-value="checked => toggleMember(user.id, Boolean(checked))"
 								/>
 								<span class="min-w-0 flex-1">
 									<span class="block truncate text-sm text-foreground">{{ user.username }}</span>
 									<span class="block truncate text-xs text-muted-foreground">{{ user.email }}</span>
 								</span>
 								<ShadSelect
-									v-if="savedMemberRole(user.id)"
-									:model-value="savedMemberRole(user.id) ?? undefined"
-									:disabled="!canEdit || saving"
-									@update:model-value="role => setMemberRole(user.id, role as TeamRole)"
+									v-if="form.member_ids.includes(user.id)"
+									:model-value="form.member_roles[user.id] ?? 'member'"
+									:disabled="!canEdit || settingsForm.saving"
+									@update:model-value="role => (form.member_roles[user.id] = role as TeamRole)"
 								>
 									<ShadSelectTrigger class="h-8 w-32" :data-testid="`member-role-${user.username}`" @click.stop><ShadSelectValue /></ShadSelectTrigger>
 									<ShadSelectContent>
@@ -137,13 +125,12 @@
 							<ShadLabel>{{ store.getTranslation('settings.teams.default_model') }}</ShadLabel>
 							<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.default_model_hint') }}</p>
 							<DefaultModelPicker
-								v-model="teamDefaultModelId"
+								v-model="form.default_model_id"
 								:disabled="!canEdit"
 								:endpoint="adminModelsPath"
 								:selected-model-endpoint="adminModelsPath"
 								value-mode="uuid"
 								:placeholder="store.getTranslation('settings.teams.use_global_default')"
-								@update:model-value="v => (teamDefaultModelId = v)"
 							/>
 						</div>
 						<div class="flex items-center justify-between gap-3 border-b border-border p-3">
@@ -186,9 +173,9 @@
 										class="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-accent/40"
 									>
 										<ShadCheckbox
-											:model-value="selectedProviderIds.includes(provider.id)"
+											:model-value="form.provider_ids.includes(provider.id)"
 											:disabled="!canEdit"
-											@update:model-value="checked => toggleId(selectedProviderIds, provider.id, Boolean(checked))"
+											@update:model-value="checked => toggleId(form.provider_ids, provider.id, Boolean(checked))"
 										/>
 										<span class="truncate text-sm text-foreground">{{ provider.name }}</span>
 									</label>
@@ -210,9 +197,9 @@
 										:class="isProviderGranted(model.provider.id) ? 'opacity-50' : 'hover:bg-accent/40'"
 									>
 										<ShadCheckbox
-											:model-value="selectedModelIds.includes(model.id) || isProviderGranted(model.provider.id)"
+											:model-value="form.model_ids.includes(model.id) || isProviderGranted(model.provider.id)"
 											:disabled="!canEdit || isProviderGranted(model.provider.id)"
-											@update:model-value="checked => toggleId(selectedModelIds, model.id, Boolean(checked))"
+											@update:model-value="checked => toggleId(form.model_ids, model.id, Boolean(checked))"
 										/>
 										<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted overflow-hidden">
 											<img v-if="model.icon" :src="model.icon" class="h-4 w-4 rounded object-cover" />
@@ -293,7 +280,7 @@
 				</ShadDialogFooter>
 			</ShadDialogContent>
 		</ShadDialog>
-	</div>
+	</SettingsPage>
 </template>
 
 <script setup lang="ts">
@@ -321,14 +308,38 @@ const saving = ref(false);
 const createOpen = ref(false);
 const deleteOpen = ref(false);
 
-const form = reactive({name: '', description: '', allow_all_models: false});
-const teamDefaultModelId = ref<string | null>(null);
+const form = reactive({
+	name: '',
+	description: '',
+	allow_all_models: false,
+	default_model_id: null as string | null,
+	member_ids: [] as string[],
+	member_roles: {} as Record<string, TeamRole>,
+	provider_ids: [] as string[],
+	model_ids: [] as string[],
+});
 const createForm = reactive({name: '', description: '', allow_all_models: false});
-const selectedMemberIds = ref<string[]>([]);
-const selectedProviderIds = ref<string[]>([]);
-const selectedModelIds = ref<string[]>([]);
 
 const canEdit = computed(() => store.hasPermission(ADMIN_TEAMS_EDIT));
+
+const settingsForm = useSettingsForm({
+	value: () => form,
+	restore: saved => Object.assign(form, saved),
+	canEdit: () => canEdit.value && selectedTeam.value !== null,
+	normalize: value => ({
+		name: value.name,
+		description: value.description,
+		allow_all_models: value.allow_all_models,
+		default_model_id: value.default_model_id,
+		members: [...value.member_ids].sort().map(id => `${id}:${value.member_roles[id] ?? 'member'}`),
+		provider_ids: [...value.provider_ids].sort(),
+		model_ids: [...value.model_ids].sort(),
+	}),
+	savedKey: 'settings.teams.save_success',
+	errorKey: 'settings.teams.save_error',
+	save: saveTeam,
+});
+
 const filteredUsers = computed(() => {
 	const query = memberSearch.value.trim().toLowerCase();
 	if (!query) return users.value;
@@ -336,7 +347,7 @@ const filteredUsers = computed(() => {
 });
 
 function isProviderGranted(providerId: string) {
-	return selectedProviderIds.value.includes(providerId);
+	return form.provider_ids.includes(providerId);
 }
 
 // --- Lazy-loaded models (admin) ---
@@ -395,10 +406,11 @@ function applySelected(team: TeamDetailed) {
 	form.name = team.name;
 	form.description = team.description ?? '';
 	form.allow_all_models = team.allow_all_models;
-	teamDefaultModelId.value = team.default_model_id ?? null;
-	selectedMemberIds.value = team.members.map(member => member.id);
-	selectedProviderIds.value = [...team.model_access.provider_ids];
-	selectedModelIds.value = [...team.model_access.model_ids];
+	form.default_model_id = team.default_model_id ?? null;
+	form.member_ids = team.members.map(member => member.id);
+	form.member_roles = Object.fromEntries(team.members.map(member => [member.id, member.role]));
+	form.provider_ids = [...team.model_access.provider_ids];
+	form.model_ids = [...team.model_access.model_ids];
 }
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -413,7 +425,7 @@ async function loadTeams() {
 		const result = await adminTeams({size: 100, search: search.value});
 		teams.value = result.items ?? [];
 		if (!selectedTeam.value && teams.value.length > 0) {
-			await selectTeam(teams.value[0].id);
+			await loadTeam(teams.value[0].id);
 		}
 	} catch (e: any) {
 		store.toast(store.getTranslation('settings.teams.load_error'), {type: 'error', description: e?.message});
@@ -432,32 +444,20 @@ async function loadProviders() {
 	providers.value = (result ?? []).filter(p => p.is_enabled).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function selectTeam(id: string) {
+async function loadTeam(id: string) {
 	try {
 		const team = await adminTeam(id);
 		selectedTeam.value = team;
 		applySelected(team);
+		settingsForm.markSaved();
 	} catch (e: any) {
 		store.toast(store.getTranslation('settings.teams.load_error'), {type: 'error', description: e?.message});
 	}
 }
 
-function savedMemberRole(userId: string): TeamRole | null {
-	return selectedTeam.value?.members.find(member => member.id === userId)?.role ?? null;
-}
-
-async function setMemberRole(userId: string, role: TeamRole) {
-	if (!selectedTeam.value || !canEdit.value || savedMemberRole(userId) === role) return;
-	saving.value = true;
-	try {
-		const updated = await putAdminTeam(selectedTeam.value.id, `/members/${userId}/role`, {role});
-		selectedTeam.value = updated;
-		store.toast(store.getTranslation('settings.teams.role_saved'), {type: 'success'});
-	} catch (e: any) {
-		store.toast(store.getTranslation('settings.teams.role_error'), {type: 'error', description: e?.message});
-	} finally {
-		saving.value = false;
-	}
+async function selectTeam(id: string) {
+	if (id === selectedTeam.value?.id || !(await settingsForm.confirmDiscard())) return;
+	await loadTeam(id);
 }
 
 function toggleId(list: string[], id: string, checked: boolean) {
@@ -468,7 +468,12 @@ function toggleId(list: string[], id: string, checked: boolean) {
 	}
 }
 
-function openCreate() {
+function toggleMember(userId: string, checked: boolean) {
+	toggleId(form.member_ids, userId, checked);
+}
+
+async function openCreate() {
+	if (!(await settingsForm.confirmDiscard())) return;
 	createForm.name = '';
 	createForm.description = '';
 	createForm.allow_all_models = false;
@@ -482,7 +487,7 @@ async function createTeam() {
 		store.toast(store.getTranslation('settings.teams.create_success'), {type: 'success'});
 		createOpen.value = false;
 		await loadTeams();
-		await selectTeam(team.id);
+		await loadTeam(team.id);
 	} catch (e: any) {
 		store.toast(store.getTranslation('settings.teams.create_error'), {type: 'error', description: e?.message});
 	} finally {
@@ -490,31 +495,20 @@ async function createTeam() {
 	}
 }
 
-async function saveAll() {
-	if (!selectedTeam.value || !canEdit.value) return;
-	saving.value = true;
-	try {
-		const id = selectedTeam.value.id;
-
-		await patchAdminTeam(id, {name: form.name, description: form.description ? form.description : null, allow_all_models: form.allow_all_models, default_model_id: teamDefaultModelId.value});
-
-		await putAdminTeam(id, '/members', {user_ids: selectedMemberIds.value});
-
-		const providerIds = [...selectedProviderIds.value];
-		const modelIds = [...selectedModelIds.value];
-
-		const withModels = await putAdminTeam(id, '/models', {provider_ids: providerIds, model_ids: modelIds});
-
-		selectedTeam.value = withModels;
-		applySelected(withModels);
-
-		await loadTeams();
-		store.toast(store.getTranslation('settings.teams.save_success'), {type: 'success'});
-	} catch (e: any) {
-		store.toast(store.getTranslation('settings.teams.save_error'), {type: 'error', description: e?.message});
-	} finally {
-		saving.value = false;
-	}
+async function saveTeam() {
+	if (!selectedTeam.value) return;
+	const updated = await putAdminTeam(selectedTeam.value.id, '', {
+		name: form.name,
+		description: form.description || null,
+		allow_all_models: form.allow_all_models,
+		default_model_id: form.default_model_id,
+		members: form.member_ids.map(id => ({user_id: id, role: form.member_roles[id] ?? 'member'})),
+		provider_ids: form.provider_ids,
+		model_ids: form.model_ids,
+	});
+	selectedTeam.value = updated;
+	applySelected(updated);
+	await loadTeams();
 }
 
 async function deleteSelected() {
@@ -525,6 +519,7 @@ async function deleteSelected() {
 		store.toast(store.getTranslation('settings.teams.delete_success'), {type: 'success'});
 		deleteOpen.value = false;
 		selectedTeam.value = null;
+		settingsForm.markSaved();
 		await loadTeams();
 	} catch (e: any) {
 		store.toast(store.getTranslation('settings.teams.delete_error'), {type: 'error', description: e?.message});

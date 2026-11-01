@@ -3,6 +3,7 @@ import localizedFormat from 'dayjs/plugin/localizedFormat';
 import dayjs from 'dayjs';
 import 'dayjs/locale/de';
 import type {Base, Role, UserPreferences, UserResponse as User} from '~/types/chat';
+import {useThemeStore} from './theme';
 
 dayjs.extend(localizedFormat);
 
@@ -158,6 +159,7 @@ export const useMainStore = defineStore('main', {
 				if (user) {
 					this.auth.user = user;
 					this.preferences = user.preferences;
+					if (user.preferences) useThemeStore().initFromUserPreferences(user.preferences.custom_theme_urls, user.preferences.theme_css_vars);
 					this.auth.isAuthenticated = true;
 				}
 			} catch (e: any) {

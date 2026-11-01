@@ -1,103 +1,52 @@
 <template>
-	<div class="max-w-4xl">
+	<SettingsPage :title="store.getTranslation('settings.tabs.admin_config')" :description="store.getTranslation('settings.admin_config.description')" layout="form" :form="settingsForm">
 		<div class="rounded-lg border border-border bg-card p-6">
-			<div class="mb-6">
-				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.tabs.admin_config') }}</h2>
-				<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.admin_config.description') }}</p>
-			</div>
+			<SettingsRow :label="store.getTranslation('settings.admin_config.provider_selector.label')" :hint="store.getTranslation('settings.admin_config.provider_selector.hint')">
+				<ShadSwitch v-model="form.enable_provider_selector" :disabled="!canEdit || settingsForm.saving" data-testid="config-provider-selector" />
+			</SettingsRow>
 
-			<div class="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
-				<div class="min-w-0">
-					<p class="text-sm font-medium text-foreground">{{ store.getTranslation('settings.admin_config.provider_selector.label') }}</p>
-					<p class="text-xs text-muted-foreground mt-0.5">{{ store.getTranslation('settings.admin_config.provider_selector.hint') }}</p>
-				</div>
-				<Switch :modelValue="enableProviderSelector" :disabled="saving" @update:modelValue="toggleProviderSelector" />
-			</div>
+			<SettingsRow :label="store.getTranslation('admin.tools.mcp.allow_stdio')" :hint="store.getTranslation('admin.tools.mcp.allow_stdio_hint')" warning>
+				<ShadSwitch v-model="form.allow_server_stdio_mcp" :disabled="!canEdit || settingsForm.saving" data-testid="config-allow-stdio" />
+			</SettingsRow>
 
-			<div class="mt-4 flex items-start justify-between gap-4 rounded-lg border border-border p-4">
-				<div class="min-w-0">
-					<p class="text-sm font-medium text-foreground">{{ store.getTranslation('admin.tools.mcp.allow_stdio') }}</p>
-					<p class="text-xs text-amber-500 mt-0.5">{{ store.getTranslation('admin.tools.mcp.allow_stdio_hint') }}</p>
-				</div>
-				<Switch :modelValue="allowServerStdioMcp" :disabled="saving" @update:modelValue="toggleAllowStdioMcp" />
-			</div>
-
-			<div class="mt-4 rounded-lg border border-border p-4 space-y-2">
-				<div class="min-w-0">
-					<p class="text-sm font-medium text-foreground">{{ store.getTranslation('settings.admin.default_model') }}</p>
-					<p class="text-xs text-muted-foreground mt-0.5">{{ store.getTranslation('settings.admin.default_model_hint') }}</p>
-				</div>
+			<SettingsRow :label="store.getTranslation('settings.admin.default_model')" :hint="store.getTranslation('settings.admin.default_model_hint')" stacked>
 				<DefaultModelPicker
-					:model-value="defaultModelId"
-					:disabled="saving"
+					v-model="form.default_model_id"
+					:disabled="!canEdit || settingsForm.saving"
 					:endpoint="adminModelsPath"
 					:selected-model-endpoint="adminModelsPath"
 					value-mode="uuid"
 					:placeholder="store.getTranslation('settings.teams.use_global_default')"
-					@update:model-value="setDefaultModel"
 				/>
-			</div>
-
+			</SettingsRow>
 		</div>
-	</div>
+	</SettingsPage>
 </template>
 
 <script setup lang="ts">
-import {ref} from 'vue';
+import {ADMIN_CONFIG_EDIT} from '~/types/generated/permissions';
+import {computed, reactive} from 'vue';
 import {useMainStore} from '@/stores';
-import {Switch} from '@/components/ui/switch';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
 
 const store = useMainStore();
-const saving = ref(false);
-const enableProviderSelector = ref(store.base?.enable_provider_selector ?? false);
-const allowServerStdioMcp = ref(store.base?.allow_server_stdio_mcp ?? false);
-const defaultModelId = ref<string | null>(store.base?.default_model_id ?? null);
+const canEdit = computed(() => store.hasPermission(ADMIN_CONFIG_EDIT));
 
-async function toggleProviderSelector(val: boolean) {
-	const previous = enableProviderSelector.value;
-	enableProviderSelector.value = val;
-	saving.value = true;
-	try {
-		await patchAdminConfig({enable_provider_selector: val});
-		if (store.base) store.base.enable_provider_selector = val;
-	} catch (error) {
-		console.error('Failed to update provider selector setting:', error);
-		enableProviderSelector.value = previous;
-	} finally {
-		saving.value = false;
-	}
-}
+const form = reactive({
+	enable_provider_selector: store.base?.enable_provider_selector ?? false,
+	allow_server_stdio_mcp: store.base?.allow_server_stdio_mcp ?? false,
+	default_model_id: store.base?.default_model_id ?? null,
+});
 
-async function toggleAllowStdioMcp(val: boolean) {
-	const previous = allowServerStdioMcp.value;
-	allowServerStdioMcp.value = val;
-	saving.value = true;
-	try {
-		await patchAdminConfig({allow_server_stdio_mcp: val});
-		if (store.base) store.base.allow_server_stdio_mcp = val;
-	} catch (error) {
-		console.error('Failed to update stdio MCP setting:', error);
-		allowServerStdioMcp.value = previous;
-	} finally {
-		saving.value = false;
-	}
-}
-
-async function setDefaultModel(val: string | null) {
-	const previous = defaultModelId.value;
-	const newId = val;
-	defaultModelId.value = newId;
-	saving.value = true;
-	try {
-		await patchAdminConfig({default_model_id: newId});
-		if (store.base) store.base.default_model_id = newId;
-	} catch (error) {
-		console.error('Failed to update default model:', error);
-		defaultModelId.value = previous;
-	} finally {
-		saving.value = false;
-	}
-}
-
+const settingsForm = useSettingsForm({
+	value: () => form,
+	restore: saved => Object.assign(form, saved),
+	canEdit: () => canEdit.value,
+	savedKey: 'settings.admin_config.save_success',
+	errorKey: 'settings.admin_config.save_error',
+	save: async () => {
+		await patchAdminConfig(form);
+		if (store.base) Object.assign(store.base, form);
+	},
+});
 </script>

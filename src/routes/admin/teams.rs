@@ -1,5 +1,5 @@
 use crate::types::consts::{ADMIN_TEAMS_EDIT, ADMIN_TEAMS_VIEW};
-use crate::types::{AppError, AuthUser, CreateTeamRequest, JobState, ListTeamsQuery, PageQuery, Team, UpdateTeamBudgetRequest, UpdateTeamMemberRoleRequest, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest, json_ok};
+use crate::types::{AppError, AuthUser, CreateTeamRequest, JobState, ListTeamsQuery, PageQuery, SaveTeamRequest, Team, UpdateTeamBudgetRequest, UpdateTeamMemberRoleRequest, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest, json_ok};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -62,6 +62,28 @@ pub async fn update_team(State(state): State<Arc<JobState>>, auth: AuthUser, Pat
 		.await
 		.map_err(AppError::database)?;
 	let response = updated
+		.detailed_response(&state.db)
+		.await
+		.map_err(AppError::database)?;
+	json_ok(response)
+}
+
+pub async fn save_team(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<SaveTeamRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TEAMS_EDIT).await?;
+
+	if req.name.trim().is_empty() {
+		return Err(ErrorCode::ValidationFailed.into());
+	}
+
+	let team = Team::find_by_id(&state.db, &id)
+		.await
+		.map_err(AppError::database)?
+		.ok_or(ErrorCode::NotFound)?;
+	let saved = team
+		.save(&state.db, &auth.id, &req)
+		.await
+		.map_err(AppError::database)?;
+	let response = saved
 		.detailed_response(&state.db)
 		.await
 		.map_err(AppError::database)?;

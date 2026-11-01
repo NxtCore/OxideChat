@@ -1,23 +1,18 @@
 <template>
 	<div class="w-full">
-		<!-- Header + date filter -->
-		<div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-			<div>
-				<h2 class="text-lg font-semibold text-foreground">{{ title }}</h2>
-				<p class="text-sm text-muted-foreground">{{ description }}</p>
-			</div>
-			<div class="flex flex-col gap-2 sm:flex-row sm:items-start">
-				<Popover v-if="isAdmin" v-model:open="userPickerOpen">
-					<PopoverTrigger as-child>
+		<SettingsPageHeader :title="title" :description="description">
+			<template #actions>
+				<ShadPopover v-if="isAdmin" v-model:open="userPickerOpen">
+					<ShadPopoverTrigger as-child>
 						<ShadButton variant="outline" class="w-full justify-between font-normal sm:w-48" @click="userPickerOpen = true">
 							<span :class="selectedUserId ? 'text-foreground' : 'text-muted-foreground'">
-								{{ selectedUserId ? (userList.find(u => u.id === selectedUserId)?.label ?? selectedUserId) : translateOr('settings.analytics.all_users', 'All users') }}
+								{{ selectedUserId ? (userList.find(u => u.id === selectedUserId)?.label ?? selectedUserId) : store.getTranslation('settings.analytics.all_users') }}
 							</span>
 							<ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
 						</ShadButton>
-					</PopoverTrigger>
-					<PopoverContent class="w-56 p-2" align="start">
-						<ShadInput v-model="userSearch" :placeholder="translateOr('settings.admin_users.search', 'Search users...')" class="mb-2 h-8 text-sm" />
+					</ShadPopoverTrigger>
+					<ShadPopoverContent class="w-56 p-2" align="start">
+						<ShadInput v-model="userSearch" :placeholder="store.getTranslation('settings.admin_users.search')" class="mb-2 h-8 text-sm" />
 						<div class="max-h-52 overflow-y-auto space-y-0.5">
 							<button
 								type="button"
@@ -27,7 +22,7 @@
 							>
 								<Check v-if="!selectedUserId" class="h-3.5 w-3.5 shrink-0" />
 								<span v-else class="h-3.5 w-3.5 shrink-0" />
-								<span>{{ translateOr('settings.analytics.all_users', 'All users') }}</span>
+								<span>{{ store.getTranslation('settings.analytics.all_users') }}</span>
 							</button>
 							<button
 								v-for="u in filteredUserList"
@@ -41,33 +36,24 @@
 								<span v-else class="h-3.5 w-3.5 shrink-0" />
 								<span class="truncate">{{ u.label }}</span>
 							</button>
-							<p v-if="filteredUserList.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">{{ translateOr('settings.admin_users.no_users', 'No users found') }}</p>
+							<p v-if="filteredUserList.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">{{ store.getTranslation('settings.admin_users.no_users') }}</p>
 						</div>
-					</PopoverContent>
-				</Popover>
+					</ShadPopoverContent>
+				</ShadPopover>
 				<SettingsAnalyticsDateFilter @change="onDateChange" />
-			</div>
-		</div>
+			</template>
+		</SettingsPageHeader>
 
 		<div v-if="loading" class="flex items-center justify-center py-20 text-muted-foreground">
 			<Loader2 class="h-6 w-6 animate-spin" />
 		</div>
 
 		<template v-else>
-			<!-- Tab navigation -->
-			<div class="mb-6 flex items-center gap-1 border-b border-border">
-				<button
-					v-for="tab in tabs"
-					:key="tab.id"
-					class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px"
-					:class="activeTab === tab.id
-						? 'text-foreground border-primary'
-						: 'text-muted-foreground border-transparent hover:text-foreground hover:border-border'"
-					@click="activeTab = tab.id"
-				>
-					{{ store.getTranslation(tab.i18n) }}
-				</button>
-			</div>
+			<ShadTabs v-model="activeTab" class="mb-6">
+				<ShadTabsList>
+					<ShadTabsTrigger v-for="tab in tabs" :key="tab.id" :value="tab.id">{{ store.getTranslation(tab.i18n) }}</ShadTabsTrigger>
+				</ShadTabsList>
+			</ShadTabs>
 
 			<KeepAlive>
 				<SettingsAnalyticsOverviewTab
@@ -99,7 +85,6 @@
 
 <script setup lang="ts">
 import {Loader2, ChevronsUpDown, Check} from 'lucide-vue-next';
-import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import {useMainStore} from '@/stores';
 import {useBudgetStore} from '@/stores/budgetStore';
 

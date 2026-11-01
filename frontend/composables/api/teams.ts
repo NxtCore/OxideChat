@@ -8,8 +8,6 @@ export const adminTeam = (id: string) => useNuxtApp().$customFetch<TeamDetailed>
 
 export const createAdminTeam = (body: object) => useNuxtApp().$customFetch<TeamDetailed>('/api/v1/admin/teams', {method: 'POST', body});
 
-export const patchAdminTeam = (id: string, body: object) => useNuxtApp().$customFetch<TeamDetailed>(teamUrl(id), {method: 'PATCH', body});
-
 export const putAdminTeam = (id: string, part: string, body: object) => useNuxtApp().$customFetch<TeamDetailed>(teamUrl(id, part), {method: 'PUT', body});
 
 export const deleteAdminTeam = (id: string) => useNuxtApp().$customFetch(teamUrl(id), {method: 'DELETE'});

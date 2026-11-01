@@ -238,6 +238,14 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, auth: AuthUser, Pat
 		ModelConfig::patch_system_config(&mut tx, &id, &config_fields).await?;
 	}
 
+	if let Some(ref pricing) = req.pricing {
+		let pricing_json = serde_json::to_value(pricing).map_err(|error| {
+			tracing::error!("Failed to serialize pricing override: {error}");
+			ErrorCode::InternalError
+		})?;
+		ModelPricing::store_override(&mut *tx, &id, &pricing_json).await?;
+	}
+
 	tx.commit().await?;
 
 	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).build())

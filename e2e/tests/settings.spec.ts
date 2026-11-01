@@ -10,20 +10,26 @@ test.describe('user settings', () => {
 		await expect(page.getByText(MEMBER.email).first()).toBeVisible();
 	});
 
-	test('display mode is saved to preferences and survives a reload', async ({page, t}) => {
+	test('display mode previews live, can be reset and survives a reload once saved', async ({page, t}) => {
 		await page.goto('/settings/appearance');
+		const bar = page.getByTestId('settings-save-bar');
+		await page.getByText(t('settings.appearance.theme_light'), {exact: true}).click();
+		if (await bar.isVisible()) await page.getByTestId('settings-save-bar-save').click();
+		await expect(bar).toBeHidden();
+
 		await page.getByText(t('settings.appearance.theme_dark'), {exact: true}).click();
 		await expect(page.locator('body')).toHaveClass(/dark/);
-		await page.getByRole('button', {name: t('common.save'), exact: true}).click();
-		await expect(page.getByText(t('settings.theme_saved')).first()).toBeVisible();
+		await page.getByTestId('settings-save-bar-reset').click();
+		await expect(bar).toBeHidden();
+		await expect(page.locator('body')).not.toHaveClass(/dark/);
 
-		await page.context().clearCookies({name: 'theme'});
-		await page.evaluate(() => localStorage.clear());
+		await page.getByText(t('settings.appearance.theme_dark'), {exact: true}).click();
+		await page.getByTestId('settings-save-bar-save').click();
+		await expect(page.getByText(t('settings.theme_saved')).first()).toBeVisible();
+		await expect(bar).toBeHidden();
+
 		await page.reload();
 		await expect(page.locator('body')).toHaveClass(/dark/);
-
-		await page.getByText(t('settings.appearance.theme_light'), {exact: true}).click();
-		await page.getByRole('button', {name: t('common.save'), exact: true}).click();
-		await expect(page.locator('body')).not.toHaveClass(/dark/);
+		await expect(bar).toBeHidden();
 	});
 });

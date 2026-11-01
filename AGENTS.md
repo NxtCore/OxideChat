@@ -128,6 +128,8 @@
 - All ShadCN components are prefixed with `Shad`, e.g., `ShadButton` or `ShadSelect`, they are auto injected
 - Use the store.getTranslation() function for translations, always use them, no static strings
 - Use customizable Tailwind classes like bg-primary, text-primary, etc. and not use fixed colors
+- Settings pages render inside `SettingsPage` (`frontend/components/settings/SettingsPage.vue`: title, description, `#leading` and `#actions` slots); `frontend/pages/settings.vue` owns the scrolling and the grouped navigation, so pages must not set their own height or overflow; section switches inside a page use `ShadTabs`
+- Fields edited directly on a settings page use `useSettingsForm` (`frontend/composables/useSettingsForm.ts`) and pass it to `SettingsPage` as `:form`, which shows the floating save bar and asks before unsaved changes are lost; a save must be atomic on the backend. Dialogs keep their own Cancel/Save footer, and quick actions on list rows apply instantly with a toast
 
 ## Important Notes
 

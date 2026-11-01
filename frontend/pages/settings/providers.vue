@@ -1,15 +1,11 @@
 <template>
-	<div class="w-full lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
-		<div class="flex flex-row items-center justify-between">
-			<div class="mb-6">
-				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.providers.title') }}</h2>
-				<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.providers.description') }}</p>
-			</div>
+	<SettingsPage :title="store.getTranslation('settings.providers.title')" :description="store.getTranslation('settings.providers.description')">
+		<template #actions>
 			<ShadButton variant="default" size="sm" class="gap-2" @click="addCustomProvider">
 				<Plus class="h-4 w-4" />
 				<span>{{ store.getTranslation('settings.providers.add_custom') }}</span>
 			</ShadButton>
-		</div>
+		</template>
 
 		<section v-if="billingProviders.length > 0" class="mb-6 space-y-3">
 			<div class="flex flex-wrap items-center justify-between gap-3">
@@ -17,11 +13,11 @@
 					<h3 class="text-base font-semibold text-foreground">{{ store.getTranslation('settings.providers.billing.tab') }}</h3>
 					<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.providers.billing.local_tracked') }}</p>
 				</div>
-				<Button variant="outline" size="sm" :disabled="isRefreshingBilling" @click="refreshAllBilling">
+				<ShadButton variant="outline" size="sm" :disabled="isRefreshingBilling" @click="refreshAllBilling">
 					<Loader2 v-if="isRefreshingBilling" class="mr-2 h-4 w-4 animate-spin" />
 					<RotateCw v-else class="mr-2 h-4 w-4" />
 					{{ store.getTranslation('settings.providers.billing.refresh') }}
-				</Button>
+				</ShadButton>
 			</div>
 
 			<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -47,7 +43,7 @@
 							<span v-if="item.billing.is_stale" class="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
 								{{ store.getTranslation('settings.providers.billing.stale') }}
 							</span>
-							<Button
+							<ShadButton
 								v-if="item.billing.is_enabled"
 								variant="ghost"
 								size="icon"
@@ -58,7 +54,7 @@
 								<Loader2 v-if="billingStore.states[item.id]?.loading" class="h-3.5 w-3.5 animate-spin" />
 								<RotateCw v-else class="h-3.5 w-3.5" />
 								<span class="sr-only">{{ store.getTranslation('settings.providers.billing.refresh') }}</span>
-							</Button>
+							</ShadButton>
 						</div>
 					</div>
 
@@ -109,23 +105,23 @@
 						</div>
 					</div>
 					<div class="shrink-0 flex items-center gap-2">
-						<Button variant="outline" size="sm" class="gap-2" @click="openConfigDialog(item)">
+						<ShadButton variant="outline" size="sm" class="gap-2" @click="openConfigDialog(item)">
 							<Settings2 class="h-4 w-4" />
 							<span v-if="!item.isConfigured">{{ store.getTranslation('settings.providers.configure') }}</span>
-						</Button>
-						<Button v-if="item.isConfigured" variant="outline" size="sm" class="gap-2" @click="syncProvider(item)">
+						</ShadButton>
+						<ShadButton v-if="item.isConfigured" variant="outline" size="sm" class="gap-2" @click="syncProvider(item)">
 							<RotateCw class="h-4 w-4" />
-						</Button>
-						<Switch :modelValue="item.is_enabled || false" :disabled="!item.isConfigured" @update:modelValue="(val: boolean) => toggleProvider(item, val)" />
+						</ShadButton>
+						<ShadSwitch :modelValue="item.is_enabled || false" :disabled="!item.isConfigured" @update:modelValue="(val: boolean) => toggleProvider(item, val)" />
 					</div>
 				</div>
 			</div>
 		</div>
 
-		<Dialog v-model:open="dialogOpen">
-			<DialogContent class="sm:max-w-[500px]">
-				<DialogHeader>
-					<DialogTitle class="flex items-center gap-3">
+		<ShadDialog v-model:open="dialogOpen">
+			<ShadDialogContent class="sm:max-w-[500px]">
+				<ShadDialogHeader>
+					<ShadDialogTitle class="flex items-center gap-3">
 						<div
 							v-if="selectedProvider"
 							class="flex h-8 w-8 items-center justify-center rounded-lg"
@@ -142,29 +138,29 @@
 							</div>
 						</div>
 						<span>{{ store.getTranslation('settings.providers.configure') }} {{ selectedProvider?.name }}</span>
-					</DialogTitle>
-					<DialogDescription>
+					</ShadDialogTitle>
+					<ShadDialogDescription>
 						{{ store.getTranslation('settings.providers.configure_description') }}
-					</DialogDescription>
-				</DialogHeader>
+					</ShadDialogDescription>
+				</ShadDialogHeader>
 
-				<Tabs v-model="activeProviderTab" default-value="settings" class="w-full">
-					<TabsList v-if="configForm.existingProvider" class="grid w-full mt-2" :class="showCatalogTab ? 'grid-cols-3' : 'grid-cols-2'">
-						<TabsTrigger value="settings">{{ store.getTranslation('settings.providers.tab_settings') }}</TabsTrigger>
-						<TabsTrigger value="billing">{{ store.getTranslation('settings.providers.billing.tab') }}</TabsTrigger>
-						<TabsTrigger v-if="showCatalogTab" value="catalog">{{ store.getTranslation('settings.providers.tab_catalog') }}</TabsTrigger>
-					</TabsList>
+				<ShadTabs v-model="activeProviderTab" default-value="settings" class="w-full">
+					<ShadTabsList v-if="configForm.existingProvider" class="grid w-full mt-2" :class="showCatalogTab ? 'grid-cols-3' : 'grid-cols-2'">
+						<ShadTabsTrigger value="settings">{{ store.getTranslation('settings.providers.tab_settings') }}</ShadTabsTrigger>
+						<ShadTabsTrigger value="billing">{{ store.getTranslation('settings.providers.billing.tab') }}</ShadTabsTrigger>
+						<ShadTabsTrigger v-if="showCatalogTab" value="catalog">{{ store.getTranslation('settings.providers.tab_catalog') }}</ShadTabsTrigger>
+					</ShadTabsList>
 
-					<TabsContent value="settings">
+					<ShadTabsContent value="settings">
 						<div class="space-y-4 py-4">
 							<div v-if="!selectedProvider?.isPreConfigured" class="space-y-2">
-								<Label for="provider-name">{{ store.getTranslation('settings.providers.name') }}</Label>
-								<Input id="provider-name" v-model="configForm.name" type="text" :placeholder="selectedProvider?.name" />
+								<ShadLabel for="provider-name">{{ store.getTranslation('settings.providers.name') }}</ShadLabel>
+								<ShadInput id="provider-name" v-model="configForm.name" type="text" :placeholder="selectedProvider?.name" />
 							</div>
 
 							<div class="space-y-2">
-								<Label for="api-key">{{ store.getTranslation('settings.providers.api_key') }}</Label>
-								<Input
+								<ShadLabel for="api-key">{{ store.getTranslation('settings.providers.api_key') }}</ShadLabel>
+								<ShadInput
 									id="api-key"
 									v-model="configForm.apiKey"
 									type="password"
@@ -176,38 +172,38 @@
 							</div>
 
 							<div v-if="!selectedProvider?.isPreConfigured" class="space-y-2">
-								<Label for="base-url">{{ store.getTranslation('settings.providers.base_url') }}</Label>
-								<Input id="base-url" v-model="configForm.baseUrl" type="text" :placeholder="selectedProvider?.defaultBaseUrl || 'https://api.example.com'" />
+								<ShadLabel for="base-url">{{ store.getTranslation('settings.providers.base_url') }}</ShadLabel>
+								<ShadInput id="base-url" v-model="configForm.baseUrl" type="text" :placeholder="selectedProvider?.defaultBaseUrl || 'https://api.example.com'" />
 							</div>
 						</div>
-					</TabsContent>
+					</ShadTabsContent>
 
-					<TabsContent v-if="configForm.existingProvider" value="billing">
+					<ShadTabsContent v-if="configForm.existingProvider" value="billing">
 						<div class="space-y-4 py-4">
 							<div v-if="supportsUpstreamBilling" class="space-y-4">
 								<div class="space-y-2">
-									<Label for="billing-key">{{ store.getTranslation('settings.providers.billing.management_key') }}</Label>
-									<Input id="billing-key" v-model="billingForm.credential" type="password" :placeholder="billingForm.hasCredential ? '••••••••' : ''" />
+									<ShadLabel for="billing-key">{{ store.getTranslation('settings.providers.billing.management_key') }}</ShadLabel>
+									<ShadInput id="billing-key" v-model="billingForm.credential" type="password" :placeholder="billingForm.hasCredential ? '••••••••' : ''" />
 									<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.billing.management_key_hint') }}</p>
 								</div>
 								<div class="flex flex-wrap gap-2">
-									<Button variant="outline" :disabled="billingStore.states[configForm.existingProvider.id]?.loading" @click="testBillingAccess">
+									<ShadButton variant="outline" :disabled="billingStore.states[configForm.existingProvider.id]?.loading" @click="testBillingAccess">
 										<RotateCw class="mr-2 h-4 w-4" />{{ store.getTranslation('settings.providers.billing.refresh') }}
-									</Button>
-									<Button v-if="billingForm.hasConnection" variant="destructive" @click="removeBilling">
+									</ShadButton>
+									<ShadButton v-if="billingForm.hasConnection" variant="destructive" @click="removeBilling">
 										{{ store.getTranslation('settings.providers.billing.remove') }}
-									</Button>
+									</ShadButton>
 								</div>
 							</div>
 							<p v-else class="rounded-md bg-muted p-3 text-sm text-muted-foreground">
 								{{ store.getTranslation('settings.providers.billing.local_only') }}
 							</p>
 						</div>
-					</TabsContent>
+					</ShadTabsContent>
 
-					<TabsContent v-if="showCatalogTab" value="catalog">
+					<ShadTabsContent v-if="showCatalogTab" value="catalog">
 						<div class="space-y-3 py-3">
-							<Input v-model="catalogSearch" type="text" :placeholder="store.getTranslation('settings.providers.catalog_search')" />
+							<ShadInput v-model="catalogSearch" type="text" :placeholder="store.getTranslation('settings.providers.catalog_search')" />
 
 							<div v-if="catalogLoading" class="flex items-center justify-center py-8 text-muted-foreground">
 								<Loader2 class="h-5 w-5 animate-spin" />
@@ -238,27 +234,27 @@
 								</div>
 							</div>
 						</div>
-					</TabsContent>
-				</Tabs>
+					</ShadTabsContent>
+				</ShadTabs>
 
-				<DialogFooter class="gap-2 sm:gap-0">
-					<Button v-if="configForm.existingProvider && activeProviderTab === 'settings'" variant="destructive" @click="deleteConfig" :disabled="saving" class="mr-auto">
+				<ShadDialogFooter class="gap-2 sm:gap-0">
+					<ShadButton v-if="configForm.existingProvider && activeProviderTab === 'settings'" variant="destructive" @click="deleteConfig" :disabled="saving" class="mr-auto">
 						<Trash2 class="h-4 w-4 mr-2" />
 						{{ store.getTranslation('common.delete') }}
-					</Button>
+					</ShadButton>
 					<div class="flex flex-row gap-2">
-						<Button variant="outline" @click="dialogOpen = false">
+						<ShadButton variant="outline" @click="dialogOpen = false">
 							{{ store.getTranslation('common.cancel') }}
-						</Button>
-						<Button v-if="activeProviderTab !== 'catalog'" @click="saveActiveTab" :disabled="saving || (activeProviderTab === 'billing' && !supportsUpstreamBilling)">
+						</ShadButton>
+						<ShadButton v-if="activeProviderTab !== 'catalog'" @click="saveActiveTab" :disabled="saving || (activeProviderTab === 'billing' && !supportsUpstreamBilling)">
 							<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
 							{{ store.getTranslation('common.save') }}
-						</Button>
+						</ShadButton>
 					</div>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	</div>
+				</ShadDialogFooter>
+			</ShadDialogContent>
+		</ShadDialog>
+	</SettingsPage>
 </template>
 
 <script setup lang="ts">
@@ -269,12 +265,6 @@ import {useIconsStore} from '@/stores/icons';
 import {sanitizeSvg} from '@/composables/useMarkdown';
 import {useProviderBillingStore} from '@/stores/providerBillingStore';
 import type {ProviderBillingOverview} from '@/types/providers';
-import {Button} from '@/components/ui/button';
-import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from '@/components/ui/dialog';
-import {Input} from '@/components/ui/input';
-import {Label} from '@/components/ui/label';
-import {Switch} from '@/components/ui/switch';
-import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
 import type {ProviderResponse as ConfiguredProvider} from '~/types/chat';
 
 interface ProviderConfig {

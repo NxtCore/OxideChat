@@ -1,5 +1,5 @@
 use super::{
-	CreateTeamRequest, Team, TeamDetailedResponse, TeamMemberResponse, TeamModelAccessResponse, TeamResponse, TeamSummaryResponse, UpdateTeamBudgetRequest,
+	CreateTeamRequest, SaveTeamRequest, Team, TeamDetailedResponse, TeamMemberInput, TeamMemberResponse, TeamModelAccessResponse, TeamResponse, TeamSummaryResponse, UpdateTeamBudgetRequest,
 	TeamRole, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest,
 };
 use crate::types::{Page, PageQuery};
@@ -218,9 +218,48 @@ impl Team {
 		Ok(result.rows_affected() > 0)
 	}
 
+	/// Saves the team's fields, members, roles and model access in one transaction.
+	///
+	/// # Errors
+	///
+	/// Returns an error when any part cannot be stored; nothing is changed then.
+	pub async fn save(&self, pool: &PgPool, actor_id: &Uuid, req: &SaveTeamRequest) -> Result<Self, sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let updated = sqlx::query_as::<_, Self>(
+			r#"
+			UPDATE teams
+			SET name = $2, description = $3, allow_all_models = $4, default_model_id = $5, updated_at = NOW()
+			WHERE id = $1
+			RETURNING *
+			"#,
+		)
+		.bind(self.id)
+		.bind(req.name.trim())
+		.bind(req.description.as_deref().filter(|s| !s.trim().is_empty()))
+		.bind(req.allow_all_models)
+		.bind(req.default_model_id)
+		.fetch_one(&mut *tx)
+		.await?;
+
+		let user_ids: Vec<Uuid> = req.members.iter().map(|member| member.user_id).collect();
+		self.replace_members(&mut tx, &user_ids).await?;
+		self.apply_member_roles(&mut tx, actor_id, &req.members).await?;
+		let (before_providers, before_models) = self.stored_model_access(&mut tx).await?;
+		if sorted_unique(&req.provider_ids) != before_providers || sorted_unique(&req.model_ids) != before_models {
+			self.apply_model_access(&mut tx, actor_id, &req.provider_ids, &req.model_ids).await?;
+		}
+		tx.commit().await?;
+		Ok(updated)
+	}
+
 	pub async fn set_members(&self, pool: &PgPool, user_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
+		self.replace_members(&mut tx, user_ids).await?;
+		tx.commit().await?;
+		Ok(())
+	}
 
+	async fn replace_members(&self, tx: &mut Transaction<'_, Postgres>, user_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		if self.is_default {
 			sqlx::query(
 				r#"
@@ -230,13 +269,13 @@ impl Team {
 				"#,
 			)
 			.bind(self.id)
-			.execute(&mut *tx)
+			.execute(&mut **tx)
 			.await?;
 		} else {
 			sqlx::query("DELETE FROM team_members WHERE team_id = $1 AND user_id <> ALL($2)")
 				.bind(self.id)
 				.bind(user_ids)
-				.execute(&mut *tx)
+				.execute(&mut **tx)
 				.await?;
 			if !user_ids.is_empty() {
 				let mut builder = QueryBuilder::<Postgres>::new("INSERT INTO team_members (team_id, user_id) ");
@@ -244,12 +283,46 @@ impl Team {
 					row.push_bind(self.id).push_bind(user_id);
 				});
 				builder.push(" ON CONFLICT DO NOTHING");
-				builder.build().execute(&mut *tx).await?;
+				builder.build().execute(&mut **tx).await?;
 			}
 		}
 
-		tx.commit().await?;
 		Ok(())
+	}
+
+	async fn apply_member_roles(&self, tx: &mut Transaction<'_, Postgres>, actor_id: &Uuid, members: &[TeamMemberInput]) -> Result<(), sqlx::Error> {
+		let user_ids: Vec<Uuid> = members.iter().map(|member| member.user_id).collect();
+		let current: HashMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>("SELECT user_id, role FROM team_members WHERE team_id = $1 AND user_id = ANY($2) FOR UPDATE")
+			.bind(self.id)
+			.bind(&user_ids)
+			.fetch_all(&mut **tx)
+			.await?
+			.into_iter()
+			.collect();
+		for member in members {
+			if let Some(before) = current.get(&member.user_id).filter(|before| before.as_str() != member.role.as_str()) {
+				self.write_member_role(tx, actor_id, member, before).await?;
+			}
+		}
+		Ok(())
+	}
+
+	async fn write_member_role(&self, tx: &mut Transaction<'_, Postgres>, actor_id: &Uuid, member: &TeamMemberInput, before: &str) -> Result<(), sqlx::Error> {
+		sqlx::query("UPDATE team_members SET role = $3 WHERE team_id = $1 AND user_id = $2")
+			.bind(self.id)
+			.bind(member.user_id)
+			.bind(member.role.as_str())
+			.execute(&mut **tx)
+			.await?;
+		let metadata = serde_json::json!({ "user_id": member.user_id, "before": before, "after": member.role.as_str() });
+		let entry = AuditEntry {
+			event: EVENT_TEAM_MEMBER_ROLE_UPDATED,
+			actor_id,
+			target_type: AUDIT_TEAM_TARGET,
+			target_id: &self.id,
+			metadata,
+		};
+		AuditLog::write(tx, entry).await
 	}
 
 	/// Tells whether the user is a member of the team.
@@ -295,21 +368,7 @@ impl Team {
 		let Some(before) = before else {
 			return Ok(false);
 		};
-		sqlx::query("UPDATE team_members SET role = $3 WHERE team_id = $1 AND user_id = $2")
-			.bind(self.id)
-			.bind(user_id)
-			.bind(role.as_str())
-			.execute(&mut *tx)
-			.await?;
-		let metadata = serde_json::json!({ "user_id": user_id, "before": before, "after": role.as_str() });
-		let entry = AuditEntry {
-			event: EVENT_TEAM_MEMBER_ROLE_UPDATED,
-			actor_id,
-			target_type: AUDIT_TEAM_TARGET,
-			target_id: &self.id,
-			metadata,
-		};
-		AuditLog::write(&mut tx, entry).await?;
+		self.write_member_role(&mut tx, actor_id, &TeamMemberInput { user_id: *user_id, role }, &before).await?;
 		tx.commit().await?;
 		Ok(true)
 	}
@@ -328,15 +387,26 @@ impl Team {
 	/// Returns an error when model access cannot be stored.
 	pub async fn update_model_access(&self, pool: &PgPool, actor_id: &Uuid, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
-		let before_providers: Vec<Uuid> = sqlx::query_scalar("SELECT provider_id FROM team_model_access WHERE team_id = $1 AND provider_id IS NOT NULL ORDER BY provider_id")
+		self.apply_model_access(&mut tx, actor_id, provider_ids, model_ids).await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	async fn stored_model_access(&self, tx: &mut Transaction<'_, Postgres>) -> Result<(Vec<Uuid>, Vec<Uuid>), sqlx::Error> {
+		let provider_ids = sqlx::query_scalar("SELECT provider_id FROM team_model_access WHERE team_id = $1 AND provider_id IS NOT NULL ORDER BY provider_id")
 			.bind(self.id)
-			.fetch_all(&mut *tx)
+			.fetch_all(&mut **tx)
 			.await?;
-		let before_models: Vec<Uuid> = sqlx::query_scalar("SELECT model_id FROM team_model_access WHERE team_id = $1 AND model_id IS NOT NULL ORDER BY model_id")
+		let model_ids = sqlx::query_scalar("SELECT model_id FROM team_model_access WHERE team_id = $1 AND model_id IS NOT NULL ORDER BY model_id")
 			.bind(self.id)
-			.fetch_all(&mut *tx)
+			.fetch_all(&mut **tx)
 			.await?;
-		self.replace_model_access(&mut tx, provider_ids, model_ids).await?;
+		Ok((provider_ids, model_ids))
+	}
+
+	async fn apply_model_access(&self, tx: &mut Transaction<'_, Postgres>, actor_id: &Uuid, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
+		let (before_providers, before_models) = self.stored_model_access(tx).await?;
+		self.replace_model_access(tx, provider_ids, model_ids).await?;
 		let metadata = serde_json::json!({
 			"before": { "provider_ids": before_providers, "model_ids": before_models },
 			"after": { "provider_ids": provider_ids, "model_ids": model_ids },
@@ -348,9 +418,7 @@ impl Team {
 			target_id: &self.id,
 			metadata,
 		};
-		AuditLog::write(&mut tx, entry).await?;
-		tx.commit().await?;
-		Ok(())
+		AuditLog::write(tx, entry).await
 	}
 
 	async fn replace_model_access(&self, tx: &mut Transaction<'_, Postgres>, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
@@ -534,4 +602,11 @@ impl From<UpdateTeamModelsRequest> for (Vec<Uuid>, Vec<Uuid>) {
 	fn from(req: UpdateTeamModelsRequest) -> Self {
 		(req.provider_ids, req.model_ids)
 	}
+}
+
+fn sorted_unique(ids: &[Uuid]) -> Vec<Uuid> {
+	let mut sorted = ids.to_vec();
+	sorted.sort_unstable();
+	sorted.dedup();
+	sorted
 }

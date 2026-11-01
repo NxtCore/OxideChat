@@ -1,28 +1,16 @@
 <template>
-	<div class="space-y-6">
-		<div>
-			<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('developer.admin.title') }}</h2>
-			<p class="text-sm text-muted-foreground">{{ store.getTranslation('developer.admin.description') }}</p>
-		</div>
-
-		<div class="flex gap-1 overflow-x-auto border-b border-border">
-			<button
-				v-for="section in visibleSections"
-				:key="section.id"
-				type="button"
-				class="shrink-0 border-b-2 px-3 py-2 text-sm transition-colors"
-				:class="active === section.id ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
-				@click="active = section.id"
-			>
-				{{ store.getTranslation(section.label) }}
-			</button>
-		</div>
+	<SettingsPage :title="store.getTranslation('developer.admin.title')" :description="store.getTranslation('developer.admin.description')">
+		<ShadTabs v-model="active" class="mb-6">
+			<ShadTabsList>
+				<ShadTabsTrigger v-for="section in visibleSections" :key="section.id" :value="section.id">{{ store.getTranslation(section.label) }}</ShadTabsTrigger>
+			</ShadTabsList>
+		</ShadTabs>
 
 		<DeveloperAdminKeys v-if="active === 'keys'" />
 		<DeveloperAdminTeams v-else-if="active === 'teams'" />
 		<DeveloperAdminAudit v-else-if="active === 'audit'" />
 		<DeveloperAdminEvents v-else-if="active === 'events'" />
-	</div>
+	</SettingsPage>
 </template>
 
 <script setup lang="ts">

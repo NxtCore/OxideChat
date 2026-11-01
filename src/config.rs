@@ -6,7 +6,7 @@
 //! - Supports reloading configuration at runtime
 
 use crate::i18n::Language;
-use crate::types::ThemeCssVars;
+use crate::types::{ThemeCssVars, UpdateGlobalConfigRequest};
 use crate::utils::encryption::{decrypt_api_key, encrypt_secret_value};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
@@ -212,53 +212,35 @@ impl Config {
 			.collect()
 	}
 
-	/// Set the default theme in the database and reload config.
+	/// Store the given settings in one transaction and reload config.
 	///
 	/// # Errors
-	/// Returns an error if serialization or the database write fails.
-	pub async fn set_default_theme(&self, pool: &PgPool, theme: &ThemeCssVars) -> Result<(), String> {
-		let json = serde_json::to_string(theme).map_err(|e| e.to_string())?;
-		Self::upsert_config(pool, "default_theme", &json).await.map_err(|e| e.to_string())?;
-		self.reload(pool).await;
-		Ok(())
-	}
-
-	/// Set the `enable_provider_selector` flag in the database and reload config.
-	///
-	/// # Errors
-	/// Returns an error if the database write fails.
-	pub async fn set_enable_provider_selector(&self, pool: &PgPool, value: bool) -> Result<(), sqlx::Error> {
-		Self::upsert_config(pool, "enable_provider_selector", if value { "true" } else { "false" }).await?;
-		self.reload(pool).await;
-		Ok(())
-	}
-
-	/// Set the `allow_server_stdio_mcp` flag in the database and reload config.
-	///
-	/// # Errors
-	/// Returns an error if the database write fails.
-	pub async fn set_allow_server_stdio_mcp(&self, pool: &PgPool, value: bool) -> Result<(), sqlx::Error> {
-		Self::upsert_config(pool, "allow_server_stdio_mcp", if value { "true" } else { "false" }).await?;
-		self.reload(pool).await;
-		Ok(())
-	}
-
-	/// Set or clear the instance-wide default model ID in the database and reload config.
-	///
-	/// # Errors
-	/// Returns an error if the database write fails.
-	pub async fn set_default_model_id(&self, pool: &PgPool, id: Option<Uuid>) -> Result<(), sqlx::Error> {
-		match id {
-			Some(id) => Self::upsert_config(pool, "default_model_id", &id.to_string()).await?,
-			None => {
-				sqlx::query("DELETE FROM app_config WHERE key = 'default_model_id'").execute(pool).await?;
-			}
+	/// Returns an error if serialization or a database write fails; nothing is changed then.
+	pub async fn apply_update(&self, pool: &PgPool, req: &UpdateGlobalConfigRequest) -> Result<(), sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		if let Some(theme) = &req.default_theme {
+			let json = serde_json::to_string(theme).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+			Self::upsert_config(&mut *tx, "default_theme", &json).await?;
 		}
+		if let Some(value) = req.enable_provider_selector {
+			Self::upsert_config(&mut *tx, "enable_provider_selector", if value { "true" } else { "false" }).await?;
+		}
+		if let Some(value) = req.allow_server_stdio_mcp {
+			Self::upsert_config(&mut *tx, "allow_server_stdio_mcp", if value { "true" } else { "false" }).await?;
+		}
+		match req.default_model_id {
+			Some(Some(id)) => Self::upsert_config(&mut *tx, "default_model_id", &id.to_string()).await?,
+			Some(None) => {
+				sqlx::query("DELETE FROM app_config WHERE key = 'default_model_id'").execute(&mut *tx).await?;
+			}
+			None => {}
+		}
+		tx.commit().await?;
 		self.reload(pool).await;
 		Ok(())
 	}
 
-	async fn upsert_config(pool: &PgPool, key: &str, value: &str) -> Result<(), sqlx::Error> {
+	async fn upsert_config<'e, E: sqlx::PgExecutor<'e>>(executor: E, key: &str, value: &str) -> Result<(), sqlx::Error> {
 		let protected;
 		let value = if matches!(key, "oauth_google_client_secret" | "oauth_discord_client_secret") {
 			protected = encrypt_secret_value(value, None).map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
@@ -275,7 +257,7 @@ impl Config {
 		)
 		.bind(key)
 		.bind(value)
-		.execute(pool)
+		.execute(executor)
 		.await?;
 		Ok(())
 	}

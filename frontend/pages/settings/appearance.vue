@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import {ref, computed, onMounted} from 'vue';
-import {useThemeStore} from '~/stores/theme';
+import {ref, computed, onMounted, watch} from 'vue';
+import {useThemeStore, type ThemeSnapshot} from '~/stores/theme';
 import {useMainStore} from '~/stores';
 import {usePreferencesStore} from '~/stores/preferencesStore';
 
 import ThemeCard from '~/components/themes/ThemeCard.vue';
 import ImportThemeDialog from '~/components/themes/ImportThemeDialog.vue';
-import {Button} from '~/components/ui/button';
-import {Input} from '~/components/ui/input';
-import {Label} from '~/components/ui/label';
 import {Sun, Moon, Shuffle, Plus, RotateCcw, ExternalLink, Search, CheckCircle} from 'lucide-vue-next';
 
 const themeStore = useThemeStore();
@@ -27,20 +24,34 @@ const filteredCustomThemes = computed(() => {
 	return themeStore.customThemes.filter(t => t.name.toLowerCase().includes(searchQuery.value.toLowerCase()));
 });
 
-function handleThemeDelete(url: string) {
-	themeStore.removeCustomTheme(url);
-	mainStore.toast(mainStore.getTranslation('settings.theme_deleted'), {type: 'success'});
-}
-
-async function saveThemeToPreferences() {
-	try {
+const settingsForm = useSettingsForm<ThemeSnapshot>({
+	value: () => ({
+		currentMode: themeStore.currentMode,
+		cssVars: themeStore.cssVars,
+		selectedThemeUrl: themeStore.selectedThemeUrl,
+		customThemeUrls: themeStore.customThemeUrls,
+	}),
+	restore: saved => {
+		const customThemesChanged = JSON.stringify(saved.customThemeUrls) !== JSON.stringify(themeStore.customThemeUrls);
+		themeStore.restoreSnapshot(saved);
+		if (customThemesChanged) themeStore.fetchAllThemes();
+	},
+	savedKey: 'settings.theme_saved',
+	errorKey: 'common.error',
+	save: async () => {
 		const saved = await usePreferencesStore().updatePreferences({theme_css_vars: themeStore.cssVars, custom_theme_urls: themeStore.customThemeUrls});
-		if (!saved) throw new Error('save failed');
-		mainStore.toast(mainStore.getTranslation('settings.theme_saved'), {type: 'success'});
-	} catch (e) {
-		mainStore.toast(mainStore.getTranslation('common.error'), {type: 'error'});
+		if (!saved) throw new Error();
+	},
+});
+
+watch(
+	() => mainStore.preferences,
+	(_, previous) => {
+		if (previous) return;
+		settingsForm.markSaved();
+		themeStore.fetchAllThemes();
 	}
-}
+);
 
 onMounted(() => {
 	themeStore.fetchAllThemes();
@@ -48,17 +59,7 @@ onMounted(() => {
 </script>
 
 <template>
-	<div class="w-full lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
-		<div class="flex flex-row items-center justify-between mb-6">
-			<div>
-				<h2 class="text-lg font-semibold text-foreground">{{ mainStore.getTranslation('settings.appearance.title') }}</h2>
-				<p class="text-sm text-muted-foreground">{{ mainStore.getTranslation('settings.appearance.description') }}</p>
-			</div>
-			<Button @click="saveThemeToPreferences">
-				{{ mainStore.getTranslation('common.save') }}
-			</Button>
-		</div>
-
+	<SettingsPage :title="mainStore.getTranslation('settings.appearance.title')" :description="mainStore.getTranslation('settings.appearance.description')" :form="settingsForm">
 		<div class="space-y-8">
 			<div class="space-y-4">
 				<div>
@@ -78,7 +79,7 @@ onMounted(() => {
 							</div>
 							<div class="flex-1">
 								<div class="flex items-center gap-2">
-									<Label class="cursor-pointer font-medium text-foreground">{{ mainStore.getTranslation('settings.appearance.theme_light') }}</Label>
+									<ShadLabel class="cursor-pointer font-medium text-foreground">{{ mainStore.getTranslation('settings.appearance.theme_light') }}</ShadLabel>
 									<CheckCircle v-if="themeStore.currentMode === 'light'" class="ml-auto h-4 w-4 text-primary" />
 								</div>
 							</div>
@@ -96,7 +97,7 @@ onMounted(() => {
 							</div>
 							<div class="flex-1">
 								<div class="flex items-center gap-2">
-									<Label class="cursor-pointer font-medium text-foreground">{{ mainStore.getTranslation('settings.appearance.theme_dark') }}</Label>
+									<ShadLabel class="cursor-pointer font-medium text-foreground">{{ mainStore.getTranslation('settings.appearance.theme_dark') }}</ShadLabel>
 									<CheckCircle v-if="themeStore.currentMode === 'dark'" class="ml-auto h-4 w-4 text-primary" />
 								</div>
 							</div>
@@ -115,14 +116,14 @@ onMounted(() => {
 					<div class="flex-1">
 						<div class="relative">
 							<Search class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-							<Input
+							<ShadInput
 								v-model="searchQuery"
 								:placeholder="mainStore.getTranslation('settings.appearance.search_themes')"
 								class="bg-muted/20 pl-10 focus:bg-background"
 							/>
 						</div>
 					</div>
-					<Button
+					<ShadButton
 						variant="outline"
 						size="icon"
 						@click="themeStore.randomizeTheme"
@@ -130,14 +131,14 @@ onMounted(() => {
 						:title="mainStore.getTranslation('settings.appearance.random_theme')"
 					>
 						<Shuffle class="h-4 w-4" />
-					</Button>
-					<Button variant="outline" size="icon" @click="themeStore.resetTheme" :title="mainStore.getTranslation('settings.appearance.reset_theme')">
+					</ShadButton>
+					<ShadButton variant="outline" size="icon" @click="themeStore.resetTheme" :title="mainStore.getTranslation('settings.appearance.reset_theme')">
 						<RotateCcw class="h-4 w-4" />
-					</Button>
-					<Button variant="outline" @click="showImportDialog = true">
+					</ShadButton>
+					<ShadButton variant="outline" @click="showImportDialog = true">
 						<Plus class="h-4 w-4 mr-1" />
 						{{ mainStore.getTranslation('settings.appearance.import_theme') }}
-					</Button>
+					</ShadButton>
 				</div>
 
 				<div v-if="themeStore.isLoadingThemes" class="flex items-center justify-center gap-2 py-12 text-muted-foreground">
@@ -159,7 +160,7 @@ onMounted(() => {
 								:mode="themeStore.currentMode"
 								:can-delete="true"
 								@select="themeStore.selectTheme(theme)"
-								@delete="handleThemeDelete(theme.url)"
+								@delete="themeStore.removeCustomTheme(theme.url)"
 							/>
 						</div>
 					</div>
@@ -206,5 +207,5 @@ onMounted(() => {
 		</div>
 
 		<ImportThemeDialog v-model:open="showImportDialog" @imported="themeStore.fetchAllThemes" />
-	</div>
+	</SettingsPage>
 </template>

@@ -1,12 +1,5 @@
 <template>
-	<div class="w-full lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto px-3 py-2">
-		<div class="flex flex-row items-center justify-between mb-6">
-			<div>
-				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.tabs.models') }}</h2>
-				<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.models.description') }}</p>
-			</div>
-		</div>
-
+	<SettingsPage :title="store.getTranslation('settings.tabs.models')" :description="store.getTranslation('settings.models.description')">
 		<div class="flex flex-row gap-2 mb-4">
 			<ShadInput v-model="search" type="text" :placeholder="store.getTranslation('settings.models.search')" class="flex-1" />
 		</div>
@@ -63,7 +56,7 @@
 		</div>
 
 		<AppPagination v-model="page" :has-more="hasMore" />
-	</div>
+	</SettingsPage>
 </template>
 
 <script setup lang="ts">

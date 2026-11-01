@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
 	use crate::tests::support::paged;
-	use crate::types::teams::{CreateTeamRequest, Team};
+	use crate::types::teams::{CreateTeamRequest, SaveTeamRequest, Team, TeamMemberInput, TeamRole};
 	use crate::tests::support::insert_user;
 	use sqlx::PgPool;
 	use uuid::Uuid;
@@ -110,6 +110,65 @@ mod tests {
 		let team = Team::find_by_id(&pool, &default_id).await.unwrap().unwrap();
 		assert!(!team.delete(&pool).await.unwrap());
 		assert!(Team::find_by_id(&pool, &default_id).await.unwrap().is_some());
+	}
+
+	fn save_request(name: &str, members: Vec<TeamMemberInput>, model_ids: Vec<Uuid>) -> SaveTeamRequest {
+		SaveTeamRequest {
+			name: name.to_string(),
+			description: Some("Saved".to_string()),
+			allow_all_models: false,
+			default_model_id: None,
+			members,
+			provider_ids: Vec::new(),
+			model_ids,
+		}
+	}
+
+	async fn audit_events(pool: &PgPool, team_id: Uuid) -> Vec<String> {
+		sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_id = $1 ORDER BY event")
+			.bind(team_id)
+			.fetch_all(pool)
+			.await
+			.unwrap()
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn team_save_stores_all_parts_and_audits_real_changes(pool: PgPool) {
+		let actor = create_user(&pool, "save-actor").await;
+		let member = create_user(&pool, "save-member").await;
+		let provider = create_provider(&pool, "Save provider").await;
+		let model = create_model(&pool, provider, "save-model").await;
+		let team = create_team(&pool, "Before").await;
+
+		let members = vec![TeamMemberInput { user_id: member, role: TeamRole::Admin }];
+		let saved = team.save(&pool, &actor, &save_request("After", members, vec![model])).await.unwrap();
+
+		assert_eq!(saved.name, "After");
+		assert_eq!(saved.description.as_deref(), Some("Saved"));
+		let stored = team.members(&pool).await.unwrap();
+		assert_eq!(stored.len(), 1);
+		assert_eq!(stored[0].role, "admin");
+		assert_eq!(team.model_access(&pool).await.unwrap().model_ids, vec![model]);
+		assert_eq!(audit_events(&pool, team.id).await, vec!["team_member_role_updated", "team_models_updated"]);
+
+		let unchanged = vec![TeamMemberInput { user_id: member, role: TeamRole::Admin }];
+		team.save(&pool, &actor, &save_request("Renamed", unchanged, vec![model])).await.unwrap();
+		assert_eq!(audit_events(&pool, team.id).await.len(), 2);
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn team_save_changes_nothing_when_a_part_fails(pool: PgPool) {
+		let actor = create_user(&pool, "rollback-actor").await;
+		let member = create_user(&pool, "rollback-member").await;
+		let team = create_team(&pool, "Original").await;
+
+		let members = vec![TeamMemberInput { user_id: member, role: TeamRole::Member }];
+		let result = team.save(&pool, &actor, &save_request("Changed", members, vec![Uuid::new_v4()])).await;
+
+		assert!(result.is_err());
+		let stored = Team::find_by_id(&pool, &team.id).await.unwrap().unwrap();
+		assert_eq!(stored.name, "Original");
+		assert!(team.members(&pool).await.unwrap().is_empty());
 	}
 
 	async fn create_team(pool: &PgPool, name: &str) -> Team {

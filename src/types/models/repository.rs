@@ -591,6 +591,16 @@ impl ModelPricing {
 	}
 
 	pub async fn upsert_override(pool: &sqlx::PgPool, model_id: &Uuid, pricing: &Value) -> Result<Self, sqlx::Error> {
+		Self::store_override(pool, model_id, pricing).await?;
+		Self::effective(pool, model_id).await?.ok_or(sqlx::Error::RowNotFound)
+	}
+
+	/// Stores a pricing override, inside the caller's transaction when given one.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the override cannot be stored.
+	pub async fn store_override<'e, E: sqlx::PgExecutor<'e>>(executor: E, model_id: &Uuid, pricing: &Value) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
 			INSERT INTO model_pricing_overrides (model_id, pricing)
@@ -602,9 +612,9 @@ impl ModelPricing {
 		)
 		.bind(model_id)
 		.bind(pricing)
-		.execute(pool)
+		.execute(executor)
 		.await?;
-		Self::effective(pool, model_id).await?.ok_or(sqlx::Error::RowNotFound)
+		Ok(())
 	}
 
 	pub async fn delete_override(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<(), sqlx::Error> {

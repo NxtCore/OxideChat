@@ -46,6 +46,23 @@ pub struct UpdateTeamModelsRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct TeamMemberInput {
+	pub user_id: Uuid,
+	pub role: TeamRole,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveTeamRequest {
+	pub name: String,
+	pub description: Option<String>,
+	pub allow_all_models: bool,
+	pub default_model_id: Option<Uuid>,
+	pub members: Vec<TeamMemberInput>,
+	pub provider_ids: Vec<Uuid>,
+	pub model_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UpdateTeamBudgetRequest {
 	pub budget_id: Option<Uuid>,
 }
