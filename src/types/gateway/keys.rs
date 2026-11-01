@@ -196,6 +196,29 @@ pub struct GatewayTeamResponse {
 	pub models: Vec<String>,
 }
 
+#[derive(Debug, Serialize, FromRow)]
+/// A model the caller can reach through the gateway, and the teams that grant it.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperModel"))]
+pub struct GatewayModelResponse {
+	#[sqlx(skip)]
+	pub id: String,
+	pub model_id: String,
+	pub display_name: String,
+	pub provider: String,
+	#[cfg_attr(test, ts(type = "Array<string>"))]
+	pub capabilities: Json<Vec<String>>,
+	#[cfg_attr(test, ts(type = "Array<string>"))]
+	pub input_modalities: Json<Vec<String>>,
+	#[cfg_attr(test, ts(type = "Array<string>"))]
+	pub output_modalities: Json<Vec<String>>,
+	pub context_length: Option<i32>,
+	#[cfg_attr(test, ts(type = "string | null"))]
+	pub price_input: Option<Decimal>,
+	#[cfg_attr(test, ts(type = "string | null"))]
+	pub price_output: Option<Decimal>,
+	pub team_ids: Vec<Uuid>,
+}
+
 // Internal Types
 
 #[derive(Debug, Clone, FromRow)]

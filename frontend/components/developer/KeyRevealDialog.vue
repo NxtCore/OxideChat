@@ -16,6 +16,7 @@
 				<p v-if="previousExpiresAt" class="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
 					{{ store.getTranslation('developer.reveal.old_key_expires', {date: formatDateTime(previousExpiresAt)}) }}
 				</p>
+				<DeveloperEndpoints />
 				<div class="flex items-start gap-3">
 					<ShadCheckbox id="reveal-confirm" v-model="confirmed" class="mt-0.5" />
 					<ShadLabel for="reveal-confirm" class="cursor-pointer leading-snug">{{ store.getTranslation('developer.reveal.confirm') }}</ShadLabel>

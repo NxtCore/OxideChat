@@ -516,4 +516,45 @@ mod teams {
 		assert_eq!(closed.models, vec!["acme/fast"]);
 		Ok(())
 	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn lists_each_granted_model_once_with_its_teams_and_details(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let other = create_user(&pool).await?;
+		let open_team = create_team(&pool, user_id, true).await?;
+		let closed_team = create_team(&pool, user_id, false).await?;
+		let foreign_team = create_team(&pool, other, true).await?;
+		let provider_id: uuid::Uuid = sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, is_enabled) VALUES ('OPENAI', 'Acme', 'https://example.com', true) RETURNING id")
+			.fetch_one(&pool)
+			.await?;
+		let fast_id: uuid::Uuid = sqlx::query_scalar("INSERT INTO models (provider_id, model_id, display_name, capabilities, context_length, is_enabled) VALUES ($1, 'fast', 'Fast One', '[\"TOOLS\"]', 8000, true) RETURNING id")
+			.bind(provider_id)
+			.fetch_one(&pool)
+			.await?;
+		sqlx::query("INSERT INTO models (provider_id, model_id, display_name, is_enabled) VALUES ($1, 'plain', 'Plain', true), ($1, 'off', 'Off', false)")
+			.bind(provider_id)
+			.execute(&pool)
+			.await?;
+		sqlx::query("INSERT INTO team_model_access (team_id, model_id) VALUES ($1, $2)").bind(closed_team).bind(fast_id).execute(&pool).await?;
+		crate::types::models::ModelPricing::store_override(&pool, &fast_id, &serde_json::json!({"input": 2.5, "output": 10})).await?;
+
+		let models = GatewayModelResponse::list_for_user(&pool, &user_id).await?;
+		assert_eq!(models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(), vec!["acme/fast", "acme/plain"]);
+
+		let fast = &models[0];
+		assert_eq!(fast.display_name, "Fast One");
+		assert_eq!(fast.provider, "Acme");
+		assert_eq!(fast.capabilities.0, vec!["TOOLS"]);
+		assert_eq!(fast.context_length, Some(8000));
+		assert_eq!(fast.price_input, Some(rust_decimal::Decimal::new(25, 1)));
+		assert_eq!(fast.price_output, Some(rust_decimal::Decimal::new(10, 0)));
+		assert_eq!(fast.team_ids.len(), 2);
+		assert!(fast.team_ids.contains(&open_team) && fast.team_ids.contains(&closed_team));
+		assert!(!fast.team_ids.contains(&foreign_team));
+
+		let plain = &models[1];
+		assert_eq!(plain.team_ids, vec![open_team]);
+		assert_eq!(plain.price_input, None);
+		Ok(())
+	}
 }

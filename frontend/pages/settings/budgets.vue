@@ -82,7 +82,7 @@
 									<span>{{ formatMoney(budget.spent) }}</span>
 									<span>{{ formatMoney(budget.amount) }}</span>
 									<span>{{ formatMoney(budget.remaining) }}</span>
-									<span class="text-xs text-muted-foreground">{{ budget.resets_at ? formatDateTime(budget.resets_at) : store.getTranslation('settings.budgets.no_reset') }}</span>
+									<span class="text-xs text-muted-foreground">{{ resetText(budget) }}</span>
 									<ShadButton v-if="canEdit" variant="outline" size="sm" class="gap-2" @click="openReset({assignment_id: budget.assignment_id, user_id: row.user_id}, `${row.user_label} · ${budget.budget.name}`)">
 										<RotateCcw class="h-3.5 w-3.5" />
 									</ShadButton>
@@ -123,7 +123,7 @@
 								</div>
 								<span>{{ formatMoney(budget.spent) }}</span>
 								<span>{{ formatMoney(budget.remaining) }}</span>
-								<span class="text-xs text-muted-foreground">{{ budget.resets_at ? formatDateTime(budget.resets_at) : store.getTranslation('settings.budgets.no_reset') }}</span>
+								<span class="text-xs text-muted-foreground">{{ resetText(budget) }}</span>
 								<ShadButton v-if="canEdit" variant="ghost" size="sm" class="gap-2" @click="openReset({assignment_id: budget.assignment_id}, budget.budget.name)">
 									<RotateCcw class="h-3.5 w-3.5" />
 								</ShadButton>
@@ -549,6 +549,11 @@ function decisionClass(decision: string) {
 
 function sourceLabel(budget: EffectiveBudget) {
 	return budget.team_id ? store.getTranslation('settings.budgets.team_budget') : store.getTranslation('settings.budgets.user_budget');
+}
+
+function resetText(budget: {resets_at: string | null; budget: Budget}) {
+	if (budget.resets_at) return formatDateTime(budget.resets_at);
+	return store.getTranslation(budget.budget.reset_strategy === 'rolling' ? 'settings.budgets.rolling_window' : 'settings.budgets.no_reset');
 }
 
 function toggleUser(userId: string) {

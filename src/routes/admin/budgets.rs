@@ -32,7 +32,7 @@ pub async fn create_budget(State(state): State<Arc<JobState>>, auth: AuthUser, J
 		return Err(ErrorCode::ValidationFailed.into());
 	}
 
-	let budget = Budget::create(&state.db, &req)
+	let budget = Budget::create(&state.db, &auth.id, &req)
 		.await
 		.map_err(AppError::database)?;
 	Ok(ResponseBuilder::new(ResponseBody::Json(crate::types::BudgetResponse::from(budget))).status(StatusCode::CREATED).build())
@@ -53,7 +53,7 @@ pub async fn update_budget(State(state): State<Arc<JobState>>, auth: AuthUser, P
 		.map_err(AppError::database)?
 		.ok_or(ErrorCode::NotFound)?;
 	let updated = budget
-		.update(&state.db, &req)
+		.update(&state.db, &auth.id, &req)
 		.await
 		.map_err(AppError::database)?;
 	json_ok(crate::types::BudgetResponse::from(updated))
@@ -67,7 +67,7 @@ pub async fn delete_budget(State(state): State<Arc<JobState>>, auth: AuthUser, P
 		.map_err(AppError::database)?
 		.ok_or(ErrorCode::NotFound)?;
 	budget
-		.delete(&state.db)
+		.delete(&state.db, &auth.id)
 		.await
 		.map_err(AppError::database)?;
 	Ok((StatusCode::NO_CONTENT, "").into_response())

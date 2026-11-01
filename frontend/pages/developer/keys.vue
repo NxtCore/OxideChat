@@ -11,6 +11,16 @@
 			</ShadButton>
 		</div>
 
+		<div v-if="budgetBlocked" class="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-foreground" role="alert">
+			<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+			<div>
+				<p class="font-medium">{{ store.getTranslation('developer.keys.budget_exhausted') }}</p>
+				<p class="text-muted-foreground">{{ store.getTranslation('developer.keys.budget_exhausted_hint') }}</p>
+			</div>
+		</div>
+
+		<DeveloperEndpoints />
+
 		<div v-if="developer.loading && !developer.loaded" class="space-y-3">
 			<ShadSkeleton v-for="n in 3" :key="n" class="h-24 w-full" />
 		</div>
@@ -75,6 +85,11 @@
 								{{ store.getTranslation(apiKey.admin_disabled ? 'developer.keys.admin_disabled' : 'developer.keys.enabled') }}
 							</span>
 						</div>
+						<ShadButton v-if="keyStatus(apiKey) === 'active' && apiKey.scopes.includes('inference:write')" as-child variant="outline" size="sm">
+							<NuxtLink :to="`/developer/playground?key=${apiKey.id}`">
+								<FlaskConical class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.try') }}
+							</NuxtLink>
+						</ShadButton>
 						<ShadButton variant="outline" size="sm" @click="renameTarget = apiKey; renameValue = apiKey.name">
 							<Pencil class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rename') }}
 						</ShadButton>
@@ -140,15 +155,18 @@
 </template>
 
 <script setup lang="ts">
-import {AlertTriangle, Ban, Gauge, KeyRound, Pencil, Plus, RefreshCw, Wallet} from 'lucide-vue-next';
+import {AlertTriangle, Ban, FlaskConical, Gauge, KeyRound, Pencil, Plus, RefreshCw, Wallet} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
+import {useBudgetStore} from '@/stores/budgetStore';
 import {useDeveloperStore} from '@/stores/developerStore';
 import type {DeveloperKey, DeveloperKeyRotation, DeveloperKeyWithToken} from '~/types/developer';
 
 const store = useMainStore();
 const {run} = useAsyncAction();
 const developer = useDeveloperStore();
+const budgetStore = useBudgetStore();
 
+const budgetBlocked = computed(() => budgetStore.myStatus?.decision === 'block');
 const createOpen = ref(false);
 const renameTarget = ref<DeveloperKey | null>(null);
 const renameValue = ref('');
@@ -200,5 +218,8 @@ async function revoke() {
 	}
 }
 
-onMounted(reload);
+onMounted(() => {
+	reload();
+	budgetStore.fetchMyBudget().catch(() => {});
+});
 </script>

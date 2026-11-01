@@ -29,9 +29,7 @@
 								<span class="font-medium text-foreground">{{ team.name }}</span>
 								<span v-if="team.models" class="text-xs text-muted-foreground">{{ store.getTranslation('developer.models_count', {count: team.models.length}) }}</span>
 							</div>
-							<p v-if="team.models" class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">
-								{{ team.models.length ? team.models.join(', ') : store.getTranslation('developer.no_models') }}
-							</p>
+							<p v-if="team.models && !team.models.length" class="mt-1 text-xs text-muted-foreground">{{ store.getTranslation('developer.no_models') }}</p>
 						</button>
 					</div>
 				</div>

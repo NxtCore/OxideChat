@@ -39,6 +39,18 @@ pub const EVENT_TEAM_MODELS_UPDATED: &str = "team_models_updated";
 pub const EVENT_TEAM_BUDGET_UPDATED: &str = "team_budget_updated";
 /// Audit event written when a team member's role changes.
 pub const EVENT_TEAM_MEMBER_ROLE_UPDATED: &str = "team_member_role_updated";
+/// Audit target type of budget events.
+pub const AUDIT_BUDGET_TARGET: &str = "budget";
+/// Audit target type of user events.
+pub const AUDIT_USER_TARGET: &str = "user";
+/// Audit event written when a budget is created.
+pub const EVENT_BUDGET_CREATED: &str = "budget_created";
+/// Audit event written when a budget's settings change.
+pub const EVENT_BUDGET_UPDATED: &str = "budget_updated";
+/// Audit event written when a budget is deleted.
+pub const EVENT_BUDGET_DELETED: &str = "budget_deleted";
+/// Audit event written when a user's budget assignment changes.
+pub const EVENT_USER_BUDGET_UPDATED: &str = "user_budget_updated";
 
 const SENSITIVE_KEY_PARTS: [&str; 9] = ["secret", "password", "hash", "authorization", "credential", "prompt", "content", "bearer", "cookie"];
 

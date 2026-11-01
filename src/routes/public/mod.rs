@@ -63,6 +63,7 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/mcp-servers/{id}/sync-tools", post(mcp::sync_tools_from_client))
 		// Developer Gateway Keys
 		.route("/api/v1/developer/teams", get(developer::list_teams))
+		.route("/api/v1/developer/models", get(developer::list_models))
 		.route("/api/v1/developer/team-keys", get(developer::list_team_keys))
 		.route("/api/v1/developer/keys", get(developer::list_keys).post(developer::create_key))
 		.route("/api/v1/developer/keys/{id}", patch(developer::update_key))

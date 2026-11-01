@@ -1,7 +1,7 @@
 use super::keys::{GatewayKeyRuleRow, GatewayTeamKeyRow, GatewayTeamModelRow};
 use super::{
 	AuditEntry, CreateGatewayKeyRequest, DEFAULT_ROTATION_OVERLAP_SECONDS, GatewayApiKey, GatewayKeyBudgetResponse, GatewayKeyError, GatewayKeyRuleRequest, GatewayKeyRuleResponse, GatewayManagedTeamResponse,
-	GatewayRatePolicy, GatewayRouteClass, GatewayRuleMetric, GatewayTeamKeysResponse, GatewayTeamResponse, KEY_SCOPES, KeyActor, MAX_KEY_NAME_LENGTH, MAX_ROTATION_OVERLAP_SECONDS, SetGatewayKeyBudgetRequest,
+	GatewayModelResponse, GatewayRatePolicy, GatewayRouteClass, GatewayRuleMetric, GatewayTeamKeysResponse, GatewayTeamResponse, KEY_SCOPES, KeyActor, MAX_KEY_NAME_LENGTH, MAX_ROTATION_OVERLAP_SECONDS, SetGatewayKeyBudgetRequest,
 	UpdateGatewayKeyRequest, public_model_id,
 };
 use crate::logging::AuditLog;
@@ -619,6 +619,65 @@ impl GatewayTeamResponse {
 				is_default: team.is_default,
 			})
 			.collect())
+	}
+}
+
+impl GatewayModelResponse {
+	/// Lists every model the user's teams grant through the gateway, once per model.
+	///
+	/// Prices are per million tokens and null when the model has neither a reported price nor an override.
+	///
+	/// # Errors
+	///
+	/// Returns an error when team or model storage cannot be queried.
+	pub async fn list_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+		let teams = Team::summaries_for_user(pool, user_id).await?;
+		let team_ids = teams.iter().map(|team| team.id).collect::<Vec<_>>();
+		let mut models = sqlx::query_as::<_, Self>(
+			r"
+			WITH granted AS (
+				SELECT m.id AS model_id, ARRAY_AGG(t.id ORDER BY t.id) AS team_ids
+				FROM teams t
+				JOIN models m ON m.is_enabled
+				JOIN providers p ON p.id = m.provider_id AND p.is_enabled
+				WHERE t.id = ANY($1)
+				  AND (t.allow_all_models OR EXISTS (
+					SELECT 1 FROM team_model_access a WHERE a.team_id = t.id AND (a.model_id = m.id OR a.provider_id = p.id)
+				  ))
+				GROUP BY m.id
+			)
+			SELECT
+				m.model_id,
+				m.display_name,
+				p.name AS provider,
+				COALESCE(sys_mc.capabilities, m.capabilities, '[]'::jsonb) AS capabilities,
+				COALESCE(sys_mc.input_modalities, m.input_modalities, '[]'::jsonb) AS input_modalities,
+				COALESCE(sys_mc.output_modalities, m.output_modalities, '[]'::jsonb) AS output_modalities,
+				COALESCE(sys_mc.context_length, m.context_length) AS context_length,
+				COALESCE((mpo.pricing->>'input')::numeric, reported.price_input) AS price_input,
+				COALESCE((mpo.pricing->>'output')::numeric, reported.price_output) AS price_output,
+				g.team_ids
+			FROM granted g
+			JOIN models m ON m.id = g.model_id
+			JOIN providers p ON p.id = m.provider_id
+			LEFT JOIN model_configs sys_mc ON sys_mc.model_id = m.id AND sys_mc.owner_id IS NULL
+			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
+			LEFT JOIN LATERAL (
+				SELECT MIN(o.price_input)::numeric AS price_input, MIN(o.price_output)::numeric AS price_output
+				FROM gateway_catalog_models gcm
+				JOIN gateway_model_provider_options o ON o.catalog_model_id = gcm.id
+				WHERE gcm.local_model_id = m.id
+			) reported ON TRUE
+			ORDER BY m.display_name, p.name
+			",
+		)
+		.bind(&team_ids)
+		.fetch_all(pool)
+		.await?;
+		for model in &mut models {
+			model.id = public_model_id(&model.provider, &model.model_id);
+		}
+		Ok(models)
 	}
 }
 

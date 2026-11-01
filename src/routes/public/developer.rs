@@ -1,6 +1,6 @@
 use crate::types::consts::ADMIN_DEVELOPER_KEYS_EDIT;
 use crate::types::{
-	AppError, AuthUser, CreateGatewayKeyRequest, GatewayApiKey, GatewayAdminError, GatewayKeyRotationResponse, GatewayKeyTokenResponse, GatewayTeamKeysResponse, GatewayTeamResponse, JobState, KeyActor, PageQuery,
+	AppError, AuthUser, CreateGatewayKeyRequest, GatewayApiKey, GatewayAdminError, GatewayKeyRotationResponse, GatewayKeyTokenResponse, GatewayModelResponse, GatewayTeamKeysResponse, GatewayTeamResponse, JobState, KeyActor, PageQuery,
 	MAX_REQUEST_LOG_RETENTION_DAYS, RequestLog, RequestLogFilter, RequestLogQuery, RequestLogRetentionResponse, RotateGatewayKeyRequest, SetGatewayKeyBudgetRequest, SetGatewayKeyLimitsRequest,
 	SetRequestLogRetentionRequest, UpdateGatewayKeyRequest, json_ok,
 };
@@ -34,6 +34,11 @@ fn token_response<T: Serialize>(status: StatusCode, body: T) -> Result<Response,
 /// GET /api/v1/developer/teams
 pub async fn list_teams(State(state): State<Arc<JobState>>, user: AuthUser) -> Result<Response, AppError> {
 	json_ok(GatewayTeamResponse::list_for_user(&state.db, &user.id).await?)
+}
+
+/// GET /api/v1/developer/models
+pub async fn list_models(State(state): State<Arc<JobState>>, user: AuthUser) -> Result<Response, AppError> {
+	json_ok(GatewayModelResponse::list_for_user(&state.db, &user.id).await?)
 }
 
 /// GET /api/v1/developer/team-keys

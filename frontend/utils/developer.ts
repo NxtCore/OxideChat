@@ -11,8 +11,39 @@ export function maskedKey(key: DeveloperKey): string {
 	return `${key.key_prefix}…${key.last_four}`;
 }
 
+export const GATEWAY_ENDPOINTS = [{id: 'openai', label: 'developer.endpoints.openai', path: '/openai/v1'}];
+
 export function gatewayBaseUrl(): string {
 	return `${window.location.origin}/openai/v1`;
+}
+
+export function gatewaySnippets(baseUrl: string, body: Record<string, unknown>): Record<'curl' | 'python' | 'javascript', string> {
+	const json = JSON.stringify(body, null, 2);
+	const python = json.replaceAll(': true', ': True').replaceAll(': false', ': False');
+	return {
+		curl: `curl ${baseUrl}/chat/completions \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '${json.replaceAll("'", "'\\''")}'`,
+		python: `from openai import OpenAI
+
+client = OpenAI(
+    base_url="${baseUrl}",
+    api_key="YOUR_API_KEY",
+)
+
+response = client.chat.completions.create(**${python})
+print(response)`,
+		javascript: `import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "${baseUrl}",
+  apiKey: "YOUR_API_KEY",
+});
+
+const response = await client.chat.completions.create(${json});
+console.log(response);`,
+	};
 }
 
 export function formatLatency(value: number | null): string {

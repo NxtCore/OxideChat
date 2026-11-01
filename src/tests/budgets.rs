@@ -251,6 +251,14 @@ mod scope {
 		let context = context(&pool, &fixture.token).await?;
 		assert!(authorize(&pool, &ledger, &context, tokens(1)).await.is_ok());
 		spend(&pool, &fixture, None, 5).await?;
+		assert!(authorize(&pool, &ledger, &context, tokens(1)).await.is_ok());
+		sqlx::query("INSERT INTO usage_events (user_id, team_id, model_id, provider_id, request_type, cost_total) VALUES ($1, $2, $3, $4, 'chat', 5)")
+			.bind(fixture.user_id)
+			.bind(other_team)
+			.bind(fixture.model_id)
+			.bind(fixture.provider_id)
+			.execute(&pool)
+			.await?;
 		assert!(matches!(authorize(&pool, &ledger, &context, tokens(1)).await, Err(GatewayModelAccessError::BudgetExceeded)));
 		Ok(())
 	}
@@ -663,6 +671,182 @@ mod team_budget_audit {
 		let result = Budget::replace_team_budget_from_legacy(&pool, &admin, &missing, None).await;
 		assert!(matches!(result, Err(sqlx::Error::RowNotFound)));
 		assert!(team_events(&pool, missing).await?.is_empty());
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod pool_spend {
+	use super::support::*;
+	use crate::tests::support::insert_user;
+	use crate::types::*;
+	use rust_decimal::Decimal;
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	async fn spend_for(pool: &PgPool, fixture: &Fixture, user_id: Uuid, team_id: Uuid, cost: i64) -> TestResult {
+		sqlx::query("INSERT INTO usage_events (user_id, team_id, model_id, provider_id, request_type, cost_total) VALUES ($1, $2, $3, $4, 'chat', $5)")
+			.bind(user_id)
+			.bind(team_id)
+			.bind(fixture.model_id)
+			.bind(fixture.provider_id)
+			.bind(Decimal::from(cost))
+			.execute(pool)
+			.await?;
+		Ok(())
+	}
+
+	async fn spent(pool: &PgPool, user_id: Uuid, budget_id: Uuid) -> TestResult<Decimal> {
+		let status = Budget::status_for(pool, BudgetSubject::user(user_id)).await?;
+		Ok(status.budgets.iter().find(|budget| budget.budget.id == budget_id).ok_or("missing budget")?.spent)
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_team_pool_only_counts_usage_recorded_for_that_team(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool, 1_000_000.0).await?;
+		let other_team = create_team(&pool, fixture.user_id, "Other Team", true).await?;
+		let own_budget = create_budget(&pool, "100", "block").await?;
+		let other_budget = create_budget(&pool, "100", "block").await?;
+		assign(&pool, own_budget, None, Some(fixture.team_id), None).await?;
+		assign(&pool, other_budget, None, Some(other_team), None).await?;
+
+		spend_for(&pool, &fixture, fixture.user_id, fixture.team_id, 3).await?;
+		spend_for(&pool, &fixture, fixture.user_id, other_team, 4).await?;
+
+		assert_eq!(spent(&pool, fixture.user_id, own_budget).await?, Decimal::from(3));
+		assert_eq!(spent(&pool, fixture.user_id, other_budget).await?, Decimal::from(4));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn removing_a_member_keeps_their_spend_in_the_pool(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool, 1_000_000.0).await?;
+		let leaver = insert_user(&pool, "leaver").await?;
+		sqlx::query("INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)").bind(fixture.team_id).bind(leaver).execute(&pool).await?;
+		let budget = create_budget(&pool, "100", "block").await?;
+		assign(&pool, budget, None, Some(fixture.team_id), None).await?;
+		spend_for(&pool, &fixture, leaver, fixture.team_id, 5).await?;
+		assert_eq!(spent(&pool, fixture.user_id, budget).await?, Decimal::from(5));
+
+		sqlx::query("DELETE FROM team_members WHERE team_id = $1 AND user_id = $2").bind(fixture.team_id).bind(leaver).execute(&pool).await?;
+		assert_eq!(spent(&pool, fixture.user_id, budget).await?, Decimal::from(5));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn rolling_budgets_have_no_reset_date_and_calendar_budgets_do(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool, 1_000_000.0).await?;
+		for (name, strategy) in [("Rolling", "rolling"), ("Calendar", "calendar")] {
+			let budget: Uuid = sqlx::query_scalar("INSERT INTO budgets (name, amount, kind, interval, reset_strategy) VALUES ($1, 10, 'per_user', 'monthly', $2::budget_reset_strategy) RETURNING id")
+				.bind(name)
+				.bind(strategy)
+				.fetch_one(&pool)
+				.await?;
+			assign(&pool, budget, Some(fixture.user_id), None, None).await?;
+		}
+		let status = Budget::status_for(&pool, BudgetSubject::user(fixture.user_id)).await?;
+		let resets = |name: &str| status.budgets.iter().find(|budget| budget.budget.name == name).map(|budget| budget.resets_at.is_some());
+		assert_eq!(resets("Rolling"), Some(false));
+		assert_eq!(resets("Calendar"), Some(true));
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod budget_audit {
+	use super::support::*;
+	use crate::tests::gateway::support::{create_user, insert_user};
+	use crate::types::*;
+	use rust_decimal::Decimal;
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	fn create_request() -> CreateBudgetRequest {
+		CreateBudgetRequest {
+			name: "Audited".to_owned(),
+			description: None,
+			amount: Decimal::from(10),
+			kind: "pooled".to_owned(),
+			interval: "monthly".to_owned(),
+			reset_strategy: "calendar".to_owned(),
+			on_exceed: "block".to_owned(),
+			is_enabled: None,
+		}
+	}
+
+	fn raise_to(amount: i64) -> UpdateBudgetRequest {
+		UpdateBudgetRequest {
+			name: None,
+			description: None,
+			amount: Some(Decimal::from(amount)),
+			kind: None,
+			interval: None,
+			reset_strategy: None,
+			on_exceed: None,
+			is_enabled: None,
+		}
+	}
+
+	async fn events(pool: &PgPool, target_id: Uuid) -> TestResult<Vec<(String, Option<Uuid>, String, serde_json::Value)>> {
+		Ok(sqlx::query_as("SELECT event, actor_id, target_type, metadata FROM audit_logs WHERE target_id = $1 ORDER BY xmin::text::bigint, id")
+			.bind(target_id)
+			.fetch_all(pool)
+			.await?)
+	}
+
+	fn amount(value: &serde_json::Value) -> TestResult<Decimal> {
+		Ok(serde_json::from_value(value["amount"].clone())?)
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn creating_changing_and_deleting_a_budget_is_audited(pool: PgPool) -> TestResult {
+		let admin = create_user(&pool).await?;
+		let team = create_team(&pool, admin, "Audited Team", false).await?;
+		let budget = Budget::create(&pool, &admin, &create_request()).await?;
+		let updated = budget.update(&pool, &admin, &raise_to(25)).await?;
+		assign(&pool, updated.id, None, Some(team), None).await?;
+		updated.delete(&pool, &admin).await?;
+
+		let rows = events(&pool, budget.id).await?;
+		assert_eq!(rows.iter().map(|row| row.0.as_str()).collect::<Vec<_>>(), vec!["budget_created", "budget_updated", "budget_deleted"]);
+		assert!(rows.iter().all(|row| row.1 == Some(admin) && row.2 == "budget"));
+		assert_eq!(rows[0].3["after"]["name"], "Audited");
+		assert_eq!(amount(&rows[1].3["before"])?, Decimal::from(10));
+		assert_eq!(amount(&rows[1].3["after"])?, Decimal::from(25));
+		assert_eq!(rows[2].3["team_ids"], serde_json::json!([team]));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_failed_audit_write_rolls_back_the_budget_change(pool: PgPool) -> TestResult {
+		let admin = create_user(&pool).await?;
+		let budget = Budget::create(&pool, &admin, &create_request()).await?;
+		sqlx::query("ALTER TABLE audit_logs ADD CONSTRAINT audit_always_fails CHECK (event NOT LIKE 'budget_%') NOT VALID").execute(&pool).await?;
+		assert!(budget.update(&pool, &admin, &raise_to(25)).await.is_err());
+		assert!(budget.delete(&pool, &admin).await.is_err());
+		assert!(Budget::create(&pool, &admin, &create_request()).await.is_err());
+		let stored = Budget::find_by_id(&pool, &budget.id).await?.ok_or("budget")?;
+		assert_eq!(stored.amount, Decimal::from(10));
+		let budgets: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM budgets").fetch_one(&pool).await?;
+		assert_eq!(budgets, 1);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn assigning_and_removing_a_user_budget_is_audited(pool: PgPool) -> TestResult {
+		let admin = create_user(&pool).await?;
+		let user = insert_user(&pool, "budget-user").await?;
+		let budget = Budget::create(&pool, &admin, &create_request()).await?;
+		budget.assign(&pool, &admin, &BudgetAssignmentRequest { team_id: None, user_id: Some(user) }).await?;
+		let assignment = Budget::list_assignments(&pool, &budget.id).await?.first().map(|row| row.id).ok_or("assignment")?;
+		Budget::delete_assignment(&pool, &admin, &budget.id, &assignment).await?;
+
+		let rows = events(&pool, user).await?;
+		assert_eq!(rows.len(), 2);
+		assert!(rows.iter().all(|row| row.0 == "user_budget_updated" && row.1 == Some(admin) && row.2 == "user"));
+		assert_eq!(rows[0].3["after"]["budget_ids"], serde_json::json!([budget.id]));
+		assert_eq!(rows[1].3["before"]["budget_ids"], serde_json::json!([budget.id]));
+		assert_eq!(rows[1].3["after"]["budget_ids"], serde_json::json!([]));
 		Ok(())
 	}
 }

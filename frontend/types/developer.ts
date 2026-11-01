@@ -2,6 +2,7 @@ import type {CreateKeyPayload as GeneratedCreateKeyPayload} from './generated/Cr
 import type {DeveloperKeyRule as GeneratedDeveloperKeyRule} from './generated/DeveloperKeyRule';
 import type {SetKeyBudgetPayload as GeneratedSetKeyBudgetPayload} from './generated/SetKeyBudgetPayload';
 
+export type {DeveloperModel} from './generated/DeveloperModel';
 export type {DeveloperTeam} from './generated/DeveloperTeam';
 export type {DeveloperKey} from './generated/DeveloperKey';
 export type {DeveloperManagedTeam} from './generated/DeveloperManagedTeam';

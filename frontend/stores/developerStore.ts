@@ -7,6 +7,7 @@ import type {
 	DeveloperKeyRule,
 	DeveloperKeyWithToken,
 	DeveloperManagedTeam,
+	DeveloperModel,
 	DeveloperRequestLog,
 	DeveloperTeam,
 	DeveloperTeamKey,
@@ -19,6 +20,8 @@ import type {PaginatedResponse} from '~/types/chat';
 export const useDeveloperStore = defineStore('developer', {
 	state: () => ({
 		teams: [] as DeveloperTeam[],
+		models: [] as DeveloperModel[],
+		modelsLoaded: false,
 		keys: [] as DeveloperKey[],
 		managedTeams: [] as DeveloperManagedTeam[],
 		teamKeys: [] as DeveloperTeamKey[],
@@ -54,6 +57,17 @@ export const useDeveloperStore = defineStore('developer', {
 				throw e;
 			} finally {
 				this.loading = false;
+			}
+		},
+		async loadModels() {
+			const {$customFetch} = useNuxtApp();
+			this.error = null;
+			try {
+				this.models = (await $customFetch<DeveloperModel[]>('/api/v1/developer/models')) ?? [];
+				this.modelsLoaded = true;
+			} catch (e: any) {
+				this.error = errorMessage(e, '');
+				throw e;
 			}
 		},
 		replaceKey(key: DeveloperKey) {

@@ -2,7 +2,7 @@
 	<ShadPopover v-model:open="open">
 		<ShadPopoverTrigger as-child>
 			<ShadButton variant="outline" role="combobox" :aria-expanded="open" :disabled="disabled" class="w-full justify-between font-normal">
-				<span class="truncate" :class="modelValue ? 'text-foreground' : 'text-muted-foreground'">{{ modelValue || store.getTranslation('developer.playground.pick_model') }}</span>
+				<span class="truncate" :class="modelValue ? 'text-foreground' : 'text-muted-foreground'">{{ modelValue ? displayName(modelValue) : store.getTranslation('developer.playground.pick_model') }}</span>
 				<ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
 			</ShadButton>
 		</ShadPopoverTrigger>
@@ -31,7 +31,10 @@
 					@click="pick(entry)"
 				>
 					<Check class="h-4 w-4 shrink-0" :class="entry === modelValue ? 'opacity-100' : 'opacity-0'" />
-					<span class="break-all">{{ entry }}</span>
+					<span class="min-w-0">
+						<span class="block break-words">{{ displayName(entry) }}</span>
+						<span class="block break-all font-mono text-xs text-muted-foreground">{{ entry }}</span>
+					</span>
 				</li>
 				<li v-if="!filtered.length" class="px-2 py-6 text-center text-sm text-muted-foreground">{{ store.getTranslation('developer.model_search.empty') }}</li>
 			</ul>
@@ -42,10 +45,13 @@
 <script setup lang="ts">
 import {Check, ChevronsUpDown} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
+import {useDeveloperStore} from '@/stores/developerStore';
 
 const props = defineProps<{models: string[]; modelValue: string; disabled?: boolean}>();
 const emit = defineEmits<{'update:modelValue': [value: string]}>();
 const store = useMainStore();
+const developer = useDeveloperStore();
+const names = computed(() => new Map(developer.models.map(model => [model.id, model.display_name])));
 
 const open = ref(false);
 const query = ref('');
@@ -54,8 +60,12 @@ const list = ref<HTMLElement | null>(null);
 
 const filtered = computed(() => {
 	const needle = query.value.trim().toLowerCase();
-	return needle ? props.models.filter(entry => entry.toLowerCase().includes(needle)) : props.models;
+	return needle ? props.models.filter(entry => `${displayName(entry)} ${entry}`.toLowerCase().includes(needle)) : props.models;
 });
+
+function displayName(entry: string) {
+	return names.value.get(entry) ?? entry;
+}
 
 function scrollToActive() {
 	nextTick(() => list.value?.querySelector(`[data-index="${activeIndex.value}"]`)?.scrollIntoView({block: 'nearest'}));

@@ -41,7 +41,7 @@
 - `src/types/request_logs/` - `gateway_request_logs` rows: one row per gateway inference request, keyed by the `x-request-id` the client received (`add_request_id` stores a `RequestLogContext` in request extensions); successes come from `OxideCostSink`, rejections and upstream failures from `RequestLog::record_failure`, and a repeated `request_id` merges into one row
     - `finish_reason` and `time_to_first_token_ms` come from Omniference's `CostRecord` (null on failure rows; a merged row keeps non-null values)
     - Streams dropped before their body ends are logged as `interrupted` by `ReservedBody` (via `RequestLogAbort`); `/models` is not an inference request and is deliberately not logged; `internal` covers database and limiter-unavailable failures
-- Service-account keys have no user: `GatewayAuthContext.user_id` is `None`, they authenticate while the team exists and has the gateway enabled, their budget subject is `BudgetSubject::service_key` (own key budgets plus the team's pooled budgets only), and `usage_events.user_id` / `gateway_request_logs.user_id` are nullable (`ON DELETE SET NULL`) so usage is attributed through `team_id` and `api_key_id`; pooled team spend counts events of members and user-less events of the team
+- Service-account keys have no user: `GatewayAuthContext.user_id` is `None`, they authenticate while the team exists and has the gateway enabled, their budget subject is `BudgetSubject::service_key` (own key budgets plus the team's pooled budgets only), and `usage_events.user_id` / `gateway_request_logs.user_id` are nullable (`ON DELETE SET NULL`) so usage is attributed through `team_id` and `api_key_id`; pooled team spend counts usage events recorded for that team (gateway requests use the key's team, web chat uses the user's primary team)
 - `src/utils/gateway_limits.rs` - HTTP glue only: admission for a route and Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter
 - `src/routes/` - HTTP route handlers (handlers only, no type definitions)
     - Handlers take `auth: AuthUser` (`src/types/auth_user.rs`, reads the session user from `RequestContext`; missing user is 401), call `auth.require(&state.db, PERMISSION).await?` (a database failure is a 500, never a 403) and return `Result<Response, AppError>`
@@ -132,6 +132,7 @@
 - Use customizable Tailwind classes like bg-primary, text-primary, etc. and not use fixed colors
 - Themes live in `frontend/stores/theme.ts`: `modePreference` is what the user picked (`light`, `dark` or `system`) and `currentMode` what it resolves to; a user's own `cssVars` win over the installation's `defaultTheme`, which comes from `/api/v1/base`. Mode and selected theme URL stay in localStorage, the CSS variables and custom theme URLs are saved to `user_preferences` and the server's copy wins on load
 - Settings pages render inside `SettingsPage` (`frontend/components/settings/SettingsPage.vue`: title, description, `#leading` and `#actions` slots); `frontend/pages/settings.vue` owns the scrolling and the grouped navigation, so pages must not set their own height or overflow; section switches inside a page use `ShadTabs`
+- The Developer area (`frontend/pages/developer.vue`) lands on API keys and owns its scrolling like settings; gateway base URLs are listed once in `GATEWAY_ENDPOINTS` (`frontend/utils/developer.ts`), the playground's request logic lives in `usePlaygroundChat`, the Models page is a flat table filtered by provider, team and capabilities from `/api/v1/developer/models` (never grouped by parsing model IDs, whose naming has no standard), and product documentation is hosted externally rather than in the app
 - Fields edited directly on a settings page use `useSettingsForm` (`frontend/composables/useSettingsForm.ts`) and pass it to `SettingsPage` as `:form`, which shows the floating save bar and asks before unsaved changes are lost; a save must be atomic on the backend. Dialogs keep their own Cancel/Save footer, and quick actions on list rows apply instantly with a toast
 
 ## Important Notes
@@ -149,6 +150,7 @@
 ## Local Development
 
 - Omniference is a major part of the application; developers may point Cargo at a local checkout with a patch override in `.cargo/config.toml`
+- A local reverse proxy must forward both `/api` and `/openai` to the backend, as `nginx.conf` does; otherwise the Playground gets a 404 from Nuxt
 
 ## Updating This Document
 

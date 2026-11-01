@@ -57,6 +57,7 @@ mod tests {
 			GatewayKeyRotationResponse,
 			GatewayKeyRuleResponse,
 			GatewayManagedTeamResponse,
+			GatewayModelResponse,
 			GatewayTeamKeysResponse,
 			GatewayTeamResponse,
 			McpDiscoveryResponse,
