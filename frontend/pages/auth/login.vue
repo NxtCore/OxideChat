@@ -100,6 +100,6 @@ async function handleLogin() {
 
 function handleOauthLogin(provider: string) {
 	// Redirect to backend OAuth init endpoint which returns a redirect to the provider
-	window.location.href = `/api/v1/auth/oauth/${provider}`;
+	window.location.href = oauthUrl(provider);
 }
 </script>

@@ -1,192 +1,90 @@
 use crate::logging::{AuditLog, EntityType, LogEvent};
-use crate::types::JobState;
-use crate::types::{AuthResponse, LoginRequest, RegisterRequest, SetupRequest, User};
-use crate::utils::auth::{create_session, hash_password, validate_email, validate_password, validate_username, verify_password};
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use axum::{Json, extract::{ConnectInfo, State}, response::IntoResponse};
+use crate::types::{AppError, AuthResponse, JobState, LoginRequest, RegisterRequest, SetupRequest, User, is_unique_violation};
+use crate::utils::auth::{SESSION_COOKIE_NAME, create_session, hash_password, validate_email, validate_password, validate_username, verify_password};
+use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
+use axum::{
+	Json,
+	extract::{ConnectInfo, State},
+	http::StatusCode,
+	response::Response,
+};
 use std::net::SocketAddr;
-use sqlx::PgPool;
 use std::sync::Arc;
 use tower_cookies::{Cookie, Cookies};
 use uuid::Uuid;
 
-pub const SESSION_COOKIE_NAME: &str = "oxidechat_session";
-pub const SESSION_DURATION_DAYS: i64 = 7;
-pub const MIN_PASSWORD_LENGTH: usize = 8;
-pub const MAX_PASSWORD_LENGTH: usize = 128;
-pub const MAX_USERNAME_LENGTH: usize = 32;
-pub const MIN_USERNAME_LENGTH: usize = 3;
-const SETUP_ADVISORY_LOCK_ID: i64 = 0x6F78_6373_6574_7570;
-
-/// Creates the first admin user inside a transaction guarded by an advisory lock.
-///
-/// Returns `Ok(None)` when a user already exists, so concurrent first-time setup
-/// requests cannot create two admins.
-///
-/// # Errors
-///
-/// Returns a database error when the lock, the existence check, or any write fails.
-async fn create_first_admin(db: &PgPool, email: &str, username: &str, password_hash: &str) -> Result<Option<User>, sqlx::Error> {
-	let mut tx = db.begin().await?;
-	sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(SETUP_ADVISORY_LOCK_ID).execute(&mut *tx).await?;
-	let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users)").fetch_one(&mut *tx).await?;
-	if exists {
-		return Ok(None);
+fn registration_error(error: sqlx::Error) -> AppError {
+	if !is_unique_violation(&error) {
+		return AppError::database(error);
 	}
-	let user: User = sqlx::query_as(
-		"INSERT INTO users (email, username, password_hash, auth_method)
-		 VALUES ($1, $2, $3, 'local')
-		 RETURNING *",
-	)
-	.bind(email)
-	.bind(username)
-	.bind(password_hash)
-	.fetch_one(&mut *tx)
-	.await?;
-	sqlx::query("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name = 'admin'")
-		.bind(user.id)
-		.execute(&mut *tx)
-		.await?;
-	tx.commit().await?;
-	Ok(Some(user))
+	match error.as_database_error().and_then(|database_error| database_error.constraint()) {
+		Some("users_email_key") => ErrorCode::EmailTaken.into(),
+		Some("users_username_key") => ErrorCode::UsernameTaken.into(),
+		_ => ErrorCode::EmailOrUsernameTaken.into(),
+	}
+}
+
+fn validate_credentials(email: &str, username: &str, password: &str) -> Result<(), ErrorCode> {
+	if !validate_email(email) {
+		return Err(ErrorCode::InvalidEmail);
+	}
+	validate_username(username)?;
+	validate_password(password)
+}
+
+fn hash_new_password(password: &str) -> Result<String, ErrorCode> {
+	hash_password(password).map_err(|_| ErrorCode::InternalError)
+}
+
+async fn finish_signup(state: &JobState, cookies: &Cookies, user: &User) -> Result<(), AppError> {
+	user.initialize_defaults(&state.db).await.map_err(AppError::database)?;
+	create_session(&state.db, cookies, &user.id).await.map_err(AppError::database)
+}
+
+fn created(user_response: crate::types::UserResponse) -> Response {
+	ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).status(StatusCode::CREATED).build()
 }
 
 /// POST /api/v1/auth/setup
-pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<SetupRequest>) -> impl IntoResponse {
-	match User::any_exist(&state.db).await {
-		Ok(true) => return ErrorBuilder::new(ErrorCode::SetupCompleted).build(),
-		Err(e) => {
-			eprintln!("[AUTH] Database error checking users: {e}");
-			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-		}
-		_ => {}
+pub async fn setup(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<SetupRequest>) -> Result<Response, AppError> {
+	if User::any_exist(&state.db).await.map_err(AppError::database)? {
+		return Err(ErrorCode::SetupCompleted.into());
 	}
 
-	if !validate_email(&payload.email) {
-		return ErrorBuilder::new(ErrorCode::InvalidEmail).build();
-	}
-	if let Err(code) = validate_username(&payload.username) {
-		return ErrorBuilder::new(code).build();
-	}
-	if let Err(code) = validate_password(&payload.password) {
-		return ErrorBuilder::new(code).build();
-	}
+	validate_credentials(&payload.email, &payload.username, &payload.password)?;
+	let password_hash = hash_new_password(&payload.password)?;
 
-	let password_hash = match hash_password(&payload.password) {
-		Ok(hash) => hash,
-		Err(e) => {
-			eprintln!("[AUTH] Password hashing error: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	let user = User::create_first_admin(&state.db, &payload.email, &payload.username, &password_hash)
+		.await
+		.map_err(AppError::database)?
+		.ok_or(ErrorCode::SetupCompleted)?;
 
-	let user = match create_first_admin(&state.db, &payload.email, &payload.username, &password_hash).await {
-		Ok(Some(user)) => user,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::SetupCompleted).build(),
-		Err(e) => {
-			eprintln!("[AUTH] Failed to create admin user: {e}");
-			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-		}
-	};
-
-	if let Err(e) = user.initialize_defaults(&state.db).await {
-		eprintln!("[AUTH] Failed to initialize user defaults: {e}");
-		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-	}
-
-	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
-		eprintln!("[AUTH] Failed to create session: {e}");
-		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-	}
+	finish_signup(&state, &cookies, &user).await?;
 
 	AuditLog::log(&state.db, LogEvent::AdminSetup, Some(user.id), Some(EntityType::User), Some(user.id));
 
-	match user.to_response(&state.db).await {
-		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response }))
-			.status(axum::http::StatusCode::CREATED)
-			.build(),
-		Err(e) => {
-			eprintln!("[AUTH] Failed to fetch user roles: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	Ok(created(user.to_response(&state.db).await?))
 }
 
 /// POST /api/v1/auth/register
-pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<RegisterRequest>) -> impl IntoResponse {
-	match User::any_exist(&state.db).await {
-		Ok(false) => return ErrorBuilder::new(ErrorCode::SetupRequired).build(),
-		Err(e) => {
-			eprintln!("[AUTH] Database error checking users: {e}");
-			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-		}
-		_ => {}
+pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json(payload): Json<RegisterRequest>) -> Result<Response, AppError> {
+	if !User::any_exist(&state.db).await.map_err(AppError::database)? {
+		return Err(ErrorCode::SetupRequired.into());
 	}
 
-	if !validate_email(&payload.email) {
-		return ErrorBuilder::new(ErrorCode::InvalidEmail).build();
-	}
-	if let Err(code) = validate_username(&payload.username) {
-		return ErrorBuilder::new(code).build();
-	}
-	if let Err(code) = validate_password(&payload.password) {
-		return ErrorBuilder::new(code).build();
-	}
+	validate_credentials(&payload.email, &payload.username, &payload.password)?;
+	let password_hash = hash_new_password(&payload.password)?;
 
-	let password_hash = match hash_password(&payload.password) {
-		Ok(hash) => hash,
-		Err(e) => {
-			eprintln!("[AUTH] Password hashing error: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	let user = User::create(&state.db, &payload.email, &payload.username, &password_hash)
+		.await
+		.map_err(registration_error)?;
 
-	let user = match User::create(&state.db, &payload.email, &payload.username, &password_hash).await {
-		Ok(u) => u,
-		Err(e) => {
-			let error_string = e.to_string();
-			let code = if error_string.contains("duplicate key") {
-				if error_string.contains("users_email_key") {
-					ErrorCode::EmailTaken
-				} else if error_string.contains("users_username_key") {
-					ErrorCode::UsernameTaken
-				} else {
-					ErrorCode::EmailOrUsernameTaken
-				}
-			} else {
-				eprintln!("[AUTH] Database error during registration: {e}");
-				ErrorCode::DatabaseError
-			};
-			return ErrorBuilder::new(code).build();
-		}
-	};
-
-	if let Err(e) = user.assign_role(&state.db, "user").await {
-		eprintln!("[AUTH] Failed to assign user role: {e}");
-		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-	}
-
-	if let Err(e) = user.initialize_defaults(&state.db).await {
-		eprintln!("[AUTH] Failed to initialize user defaults: {e}");
-		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-	}
-
-	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
-		eprintln!("[AUTH] Failed to create session: {e}");
-		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-	}
+	user.assign_role(&state.db, "user").await.map_err(AppError::database)?;
+	finish_signup(&state, &cookies, &user).await?;
 
 	AuditLog::log(&state.db, LogEvent::UserRegistered, Some(user.id), Some(EntityType::User), Some(user.id));
 
-	match user.to_response(&state.db).await {
-		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response }))
-			.status(axum::http::StatusCode::CREATED)
-			.build(),
-		Err(e) => {
-			eprintln!("[AUTH] Failed to fetch user roles: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	Ok(created(user.to_response(&state.db).await?))
 }
 
 /// POST /api/v1/auth/login
@@ -195,102 +93,56 @@ pub async fn login(
 	ConnectInfo(addr): ConnectInfo<SocketAddr>,
 	cookies: Cookies,
 	Json(payload): Json<LoginRequest>,
-) -> impl IntoResponse {
+) -> Result<Response, AppError> {
 	let ip = addr.ip();
 	if !state.login_limiter.allow(ip, &payload.email).await {
 		AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
-		return ErrorBuilder::new(ErrorCode::RateLimited).build();
+		return Err(ErrorCode::RateLimited.into());
 	}
 
-	let user = match User::find_by_email(&state.db, &payload.email).await {
-		Ok(Some(user)) => user,
-		Ok(None) => {
-			state.login_limiter.record_failure(ip, &payload.email);
-			AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
-			return ErrorBuilder::new(ErrorCode::InvalidCredentials).build();
-		}
-		Err(e) => {
-			eprintln!("[AUTH] Database error during login: {e}");
-			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-		}
+	let Some(user) = User::find_by_email(&state.db, &payload.email).await.map_err(AppError::database)? else {
+		state.login_limiter.record_failure(ip, &payload.email);
+		AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
+		return Err(ErrorCode::InvalidCredentials.into());
 	};
 
 	let Some(password_hash) = &user.password_hash else {
 		state.login_limiter.record_failure(ip, &payload.email);
-		return ErrorBuilder::new(ErrorCode::ExternalAuthRequired).build();
+		return Err(ErrorCode::ExternalAuthRequired.into());
 	};
 
-	match verify_password(&payload.password, password_hash) {
-		Ok(true) => {}
-		Ok(false) => {
-			state.login_limiter.record_failure(ip, &payload.email);
-			AuditLog::log(&state.db, LogEvent::UserLoginFailed, Some(user.id), Some(EntityType::User), Some(user.id));
-			return ErrorBuilder::new(ErrorCode::InvalidCredentials).build();
-		}
-		Err(e) => {
-			eprintln!("[AUTH] Password verification error: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
+	if !verify_password(&payload.password, password_hash).map_err(|_| ErrorCode::InternalError)? {
+		state.login_limiter.record_failure(ip, &payload.email);
+		AuditLog::log(&state.db, LogEvent::UserLoginFailed, Some(user.id), Some(EntityType::User), Some(user.id));
+		return Err(ErrorCode::InvalidCredentials.into());
 	}
 
-	if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
-		eprintln!("[AUTH] Failed to create session: {e}");
-		return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-	}
+	create_session(&state.db, &cookies, &user.id).await.map_err(AppError::database)?;
 
 	AuditLog::log(&state.db, LogEvent::UserLogin, Some(user.id), Some(EntityType::Session), None);
 
-	match user.to_response(&state.db).await {
-		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user_response })).build(),
-		Err(e) => {
-			eprintln!("[AUTH] Failed to fetch user roles: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	Ok(ResponseBuilder::new(ResponseBody::Json(AuthResponse { user: user.to_response(&state.db).await? })).build())
 }
 
 /// POST /api/v1/auth/logout
-pub async fn logout(State(state): State<Arc<JobState>>, cookies: Cookies) -> impl IntoResponse {
+pub async fn logout(State(state): State<Arc<JobState>>, cookies: Cookies) -> Result<Response, AppError> {
 	let mut user_id: Option<Uuid> = None;
 	let mut session_id_to_log: Option<Uuid> = None;
 
-	if let Some(session_cookie) = cookies.get(SESSION_COOKIE_NAME) {
-		if let Ok(session_id) = Uuid::parse_str(session_cookie.value()) {
-			session_id_to_log = Some(session_id);
-
-			match sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM sessions WHERE id = $1")
-				.bind(session_id)
-				.fetch_optional(&state.db)
-				.await
-			{
-				Ok(Some(uid)) => user_id = Some(uid),
-				Ok(None) => {}
-				Err(e) => {
-					eprintln!("[AUTH] Database error during logout session lookup: {e}");
-					return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-				}
-			}
-
-			if let Err(e) = sqlx::query("DELETE FROM sessions WHERE id = $1").bind(session_id).execute(&state.db).await {
-				eprintln!("[AUTH] Database error deleting session: {e}");
-				return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-			}
-		}
+	if let Some(session_cookie) = cookies.get(SESSION_COOKIE_NAME)
+		&& let Ok(session_id) = Uuid::parse_str(session_cookie.value())
+	{
+		session_id_to_log = Some(session_id);
+		user_id = User::session_owner(&state.db, &session_id).await.map_err(AppError::database)?;
+		User::delete_session(&state.db, &session_id).await.map_err(AppError::database)?;
 	}
 
 	cookies.remove(Cookie::from(SESSION_COOKIE_NAME));
 
 	AuditLog::log(&state.db, LogEvent::UserLogout, user_id, Some(EntityType::Session), session_id_to_log);
 
-	ResponseBuilder::new(ResponseBody::Json(serde_json::json!({
+	Ok(ResponseBuilder::new(ResponseBody::Json(serde_json::json!({
 		"message": crate::i18n::I18n::get().translate("auth.messages.logout_success", &None)
 	})))
-	.build()
-}
-
-/// Get the current user from the session cookie.
-pub async fn get_current_user(pool: &PgPool, cookies: &Cookies) -> Option<User> {
-	let session_cookie = cookies.get(SESSION_COOKIE_NAME)?;
-	let session_id = Uuid::parse_str(session_cookie.value()).ok()?;
-	User::find_by_session(pool, &session_id).await.ok()?
+	.build())
 }

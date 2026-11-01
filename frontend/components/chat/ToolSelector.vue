@@ -6,13 +6,13 @@
 				:class="
 					cn(
 						'inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors hover:bg-muted',
-						chatStore.enabledTools.length > 0 ? 'text-primary' : 'text-muted-foreground',
+						modelStore.enabledTools.length > 0 ? 'text-primary' : 'text-muted-foreground',
 						props.class
 					)
 				"
 			>
 				<Wrench class="h-4 w-4" />
-				<span v-if="chatStore.enabledTools.length > 0">{{ chatStore.enabledTools.length }}</span>
+				<span v-if="modelStore.enabledTools.length > 0">{{ modelStore.enabledTools.length }}</span>
 			</button>
 		</ShadPopoverTrigger>
 		<ShadPopoverContent align="start" class="w-80 p-0">
@@ -20,8 +20,8 @@
 				<div class="border-b border-border p-2">
 					<div class="flex items-center justify-between px-1 pb-2">
 						<span class="text-sm font-medium text-foreground">{{ store.getTranslation('chat.tool_selector.title') }}</span>
-						<span v-if="chatStore.enabledTools.length > 0" class="text-xs text-muted-foreground">
-							{{ store.getTranslation('chat.tool_selector.count', {count: chatStore.enabledTools.length}) }}
+						<span v-if="modelStore.enabledTools.length > 0" class="text-xs text-muted-foreground">
+							{{ store.getTranslation('chat.tool_selector.count', {count: modelStore.enabledTools.length}) }}
 						</span>
 					</div>
 					<div class="relative">
@@ -138,7 +138,7 @@
 						{{ store.getTranslation('chat.tool_selector.select_all') }}
 					</button>
 					<button
-						v-if="chatStore.enabledTools.length > 0"
+						v-if="modelStore.enabledTools.length > 0"
 						type="button"
 						class="flex-1 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						@click="clearAll"
@@ -174,9 +174,11 @@
 <script setup lang="ts">
 import {computed, onMounted, ref, watch} from 'vue';
 import {Bookmark, Check, ChevronRight, Minus, Search, Server, Wrench, Sparkles, Globe, Code} from 'lucide-vue-next';
-import {useChatStore} from '~/stores/chatStore';
+import {useModelStore} from '~/stores/modelStore';
+import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useMainStore} from '~/stores';
 import {cn} from '~/lib/utils';
+import type {Tool as ToolItem} from '~/types/tools';
 
 const store = useMainStore();
 
@@ -184,26 +186,10 @@ const props = defineProps<{
 	class?: string;
 }>();
 
-const chatStore = useChatStore();
+const modelStore = useModelStore();
+const preferencesStore = usePreferencesStore();
 const search = ref('');
 const open = ref(false);
-
-interface ToolFunction {
-	id?: string;
-	name: string;
-	description?: string;
-}
-
-interface ToolItem {
-	id: string;
-	name: string;
-	display_name?: string;
-	description?: string;
-	source_kind: string;
-	mcp_server_id?: string | null;
-	mcp_server_name?: string | null;
-	functions?: ToolFunction[];
-}
 
 interface SubItem {
 	id: string;
@@ -227,7 +213,7 @@ interface Head {
 const availableTools = ref<ToolItem[]>([]);
 const expandedState = ref<Record<string, boolean>>({});
 
-const hasToolSupport = computed(() => chatStore.selectedModel?.capabilities.includes('TOOLS'));
+const hasToolSupport = computed(() => modelStore.selectedModel?.capabilities.includes('TOOLS'));
 
 function isExpanded(headId: string): boolean {
 	if (search.value) return true;
@@ -263,11 +249,11 @@ const sourceMeta: Record<string, {label: string; icon: any}> = {
 function serverNameFor(tool: ToolItem): string | undefined {
 	if (tool.mcp_server_name) return tool.mcp_server_name;
 	if (!tool.mcp_server_id) return undefined;
-	return chatStore.userMcpServers.find(s => s.id === tool.mcp_server_id)?.name;
+	return preferencesStore.userMcpServers.find(s => s.id === tool.mcp_server_id)?.name;
 }
 
 function selectedCountFor(items: SubItem[]): number {
-	return items.filter(item => chatStore.enabledTools.includes(item.id)).length;
+	return items.filter(item => modelStore.enabledTools.includes(item.id)).length;
 }
 
 function buildHeads(tools: ToolItem[]): Head[] {
@@ -343,54 +329,53 @@ function headSelectionState(head: Head): SelectionState {
 }
 
 function isSelected(toolId: string): boolean {
-	return chatStore.enabledTools.includes(toolId);
+	return modelStore.enabledTools.includes(toolId);
 }
 
 function toggleTool(toolId: string) {
-	chatStore.toggleTool(toolId);
+	modelStore.toggleTool(toolId);
 }
 
 function toggleHead(head: Head) {
 	const allSelected = head.selectedCount === head.items.length;
 	for (const item of head.items) {
 		const selected = isSelected(item.id);
-		if (allSelected && selected) chatStore.toggleTool(item.id);
-		else if (!allSelected && !selected) chatStore.toggleTool(item.id);
+		if (allSelected && selected) modelStore.toggleTool(item.id);
+		else if (!allSelected && !selected) modelStore.toggleTool(item.id);
 	}
 }
 
 function selectAll() {
 	for (const id of allToolIds.value) {
-		if (!isSelected(id)) chatStore.toggleTool(id);
+		if (!isSelected(id)) modelStore.toggleTool(id);
 	}
 }
 
 function clearAll() {
 	for (const id of availableTools.value.map(t => t.id)) {
-		if (isSelected(id)) chatStore.toggleTool(id);
+		if (isSelected(id)) modelStore.toggleTool(id);
 	}
 }
 
 function openMcpManager() {
 	open.value = false;
-	chatStore.mcpManagerOpen = true;
+	preferencesStore.mcpManagerOpen = true;
 }
 
 const isCurrentSelectionDefault = computed(() => {
 	const defaults = store.preferences?.default_tools ?? [];
-	const current = chatStore.enabledTools;
+	const current = modelStore.enabledTools;
 	if (defaults.length !== current.length) return false;
 	return current.every(id => defaults.includes(id));
 });
 
 async function saveAsDefaults() {
-	await chatStore.updatePreferences({default_tools: [...chatStore.enabledTools]});
+	await preferencesStore.updatePreferences({default_tools: [...modelStore.enabledTools]});
 }
 
 async function loadTools() {
 	try {
-		const {$customFetch} = useNuxtApp();
-		const fetchedTools = await $customFetch('/api/v1/tools');
+		const fetchedTools = await userTools();
 		if (Array.isArray(fetchedTools)) {
 			availableTools.value = fetchedTools.map((tool: any) => ({
 				id: tool.id,
@@ -403,8 +388,8 @@ async function loadTools() {
 				functions: tool.functions,
 			}));
 		}
-		if (!chatStore.userMcpServers || chatStore.userMcpServers.length === 0) {
-			await chatStore.fetchUserMcpServers();
+		if (!preferencesStore.userMcpServers || preferencesStore.userMcpServers.length === 0) {
+			await preferencesStore.fetchUserMcpServers();
 		}
 	} catch (error) {
 		console.error('Failed to load tools:', error);
@@ -412,11 +397,11 @@ async function loadTools() {
 }
 
 watch(
-	() => chatStore.mcpManagerOpen,
+	() => preferencesStore.mcpManagerOpen,
 	(isOpen, wasOpen) => {
 		if (wasOpen && !isOpen) {
 			loadTools();
-			chatStore.fetchUserMcpServers();
+			preferencesStore.fetchUserMcpServers();
 		}
 	}
 );

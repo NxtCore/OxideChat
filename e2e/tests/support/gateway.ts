@@ -47,7 +47,7 @@ export async function waitForLog(api: Api, apiKeyId: string, requestId: string) 
 	await expect
 		.poll(
 			async () => {
-				const page = await api.get(`/api/v1/developer/request-logs?api_key_id=${apiKeyId}&per_page=100`);
+				const page = await api.get(`/api/v1/developer/request-logs?api_key_id=${apiKeyId}&size=100`);
 				found = page.items.find((item: any) => item.request_id === requestId);
 				return found ? 'logged' : 'missing';
 			},

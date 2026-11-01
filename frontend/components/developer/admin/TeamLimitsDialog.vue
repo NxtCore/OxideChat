@@ -71,7 +71,7 @@
 import {Loader2, Plus, Trash2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useGatewayAdminStore} from '@/stores/gatewayAdminStore';
-import {errorMessage} from '~/utils/developer';
+import {errorMessage} from '~/utils/format';
 import type {DeveloperKeyRule} from '~/types/developer';
 import type {AdminTeam} from '~/types/gatewayAdmin';
 

@@ -36,7 +36,7 @@ impl<'a> ModelConfigPatchField<'a> {
 			Self::Description(v) => ("description", ConfigValue::Text(*v)),
 			Self::Icon(v) => ("icon", ConfigValue::Text(*v)),
 			Self::SystemPrompt(v) => ("system_prompt", ConfigValue::Text(*v)),
-			Self::SamplingMerge(v) => ("sampling", ConfigValue::JsonMerge(*v)),
+			Self::SamplingMerge(v) => ("sampling", ConfigValue::JsonMerge(v)),
 			Self::InputModalities(v) => ("input_modalities", ConfigValue::Json(*v)),
 			Self::OutputModalities(v) => ("output_modalities", ConfigValue::Json(*v)),
 			Self::ContextLength(v) => ("context_length", ConfigValue::Int(*v)),

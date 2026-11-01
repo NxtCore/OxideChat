@@ -5,12 +5,12 @@
 				:class="
 					cn(
 						'flex items-center gap-2 px-2 py-1 rounded-md hover:bg-accent transition-colors text-xs',
-						chatStore.selectedProviderSlug ? 'text-primary' : 'text-muted-foreground',
+						modelStore.selectedProviderSlug ? 'text-primary' : 'text-muted-foreground',
 						props.class,
 					)
 				"
 			>
-				<template v-if="chatStore.selectedProviderSlug">
+				<template v-if="modelStore.selectedProviderSlug">
 					<div
 						v-if="triggerIcon?.type === 'svg'"
 						class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full"
@@ -72,7 +72,7 @@
 							<!-- Automatic -->
 							<button
 								class="w-full px-3 py-2.5 flex items-center gap-3 transition-colors text-left"
-								:class="!chatStore.selectedProviderSlug && hoveredOpt === null ? 'bg-accent/70' : 'hover:bg-accent/40'"
+								:class="!modelStore.selectedProviderSlug && hoveredOpt === null ? 'bg-accent/70' : 'hover:bg-accent/40'"
 								@mouseenter="hoveredOpt = null; isHoveringAuto = true"
 								@mouseleave="isHoveringAuto = false"
 								@click="selectAuto"
@@ -84,7 +84,7 @@
 									<div class="text-sm font-medium">{{ store.getTranslation('chat.provider_selector.automatic') }}</div>
 									<div class="text-xs text-muted-foreground truncate">{{ store.getTranslation('chat.provider_selector.automatic_hint') }}</div>
 								</div>
-								<Check v-if="!chatStore.selectedProviderSlug" class="h-4 w-4 text-primary shrink-0" />
+								<Check v-if="!modelStore.selectedProviderSlug" class="h-4 w-4 text-primary shrink-0" />
 								<Tooltip v-if="selectedModelIsDefault">
 									<TooltipTrigger as-child>
 										<span class="shrink-0 p-1 rounded hover:bg-accent" @click.stop="setDefaultProvider(null)">
@@ -270,41 +270,22 @@
 
 <script setup lang="ts">
 import {Bookmark, Server, ChevronDown, Check, Loader2, Sparkles, Search, Filter, Bot, Tag, Cpu, Clock, Gauge, Activity} from 'lucide-vue-next';
-import {useChatStore} from '~/stores/chatStore';
+import {useModelStore} from '~/stores/modelStore';
+import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useMainStore} from '~/stores';
 import {useIconsStore} from '~/stores/icons';
 import {sanitizeSvg} from '~/composables/useMarkdown';
 import {cn} from '~/lib/utils';
 import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import {Tooltip, TooltipContent, TooltipTrigger} from '~/components/ui/tooltip';
-
-interface ProviderOption {
-	id: string;
-	provider_slug: string | null;
-	provider_name: string | null;
-	endpoint_name: string | null;
-	status: number | null;
-	quantization: string | null;
-	context_length: number | null;
-	max_completion_tokens: number | null;
-	latency: number | null;
-	throughput: number | null;
-	uptime: number | null;
-	price_input: number | null;
-	price_output: number | null;
-}
-
-interface ProviderOptionsResponse {
-	gateway_model_id: string | null;
-	availability_state: 'AVAILABLE' | 'USER_UNAVAILABLE' | null;
-	options: ProviderOption[];
-}
+import type {ProviderOption, ProviderOptionsResponse} from '~/types/chat';
 
 
 
 const props = defineProps<{class?: string}>();
 
-const chatStore = useChatStore();
+const modelStore = useModelStore();
+const preferencesStore = usePreferencesStore();
 const store = useMainStore();
 const iconStore = useIconsStore();
 
@@ -365,8 +346,8 @@ const sortedOptions = computed(() => {
 const detailOpt = computed<ProviderOption | null>(() => {
 	if (hoveredOpt.value) return hoveredOpt.value;
 	if (isHoveringAuto.value) return null;
-	if (chatStore.selectedProviderSlug) {
-		return options.value.find(o => (o.provider_slug || '') === chatStore.selectedProviderSlug) ?? null;
+	if (modelStore.selectedProviderSlug) {
+		return options.value.find(o => (o.provider_slug || '') === modelStore.selectedProviderSlug) ?? null;
 	}
 	return null;
 });
@@ -374,19 +355,19 @@ const detailOpt = computed<ProviderOption | null>(() => {
 const autoDetails = computed(() => sortedOptions.value[0] ?? null);
 
 const isVisible = computed(() => {
-	return (store.base?.enable_provider_selector ?? false) && chatStore.selectedModel?.provider?.kind === 'OPENROUTER';
+	return (store.base?.enable_provider_selector ?? false) && modelStore.selectedModel?.provider?.kind === 'OPENROUTER';
 });
 
 const selectedLabel = computed(() => {
-	if (!chatStore.selectedProviderSlug) return store.getTranslation('chat.provider_selector.automatic');
-	const match = options.value.find(o => (o.provider_slug || '') === chatStore.selectedProviderSlug);
-	return match?.provider_name || chatStore.selectedProviderSlug;
+	if (!modelStore.selectedProviderSlug) return store.getTranslation('chat.provider_selector.automatic');
+	const match = options.value.find(o => (o.provider_slug || '') === modelStore.selectedProviderSlug);
+	return match?.provider_name || modelStore.selectedProviderSlug;
 });
 
 const triggerIcon = computed(() => {
-	if (!chatStore.selectedProviderSlug) return null;
-	const match = options.value.find(o => (o.provider_slug || '') === chatStore.selectedProviderSlug);
-	const icon = iconStore.getProviderIcon(match?.provider_name ?? chatStore.selectedProviderSlug, undefined);
+	if (!modelStore.selectedProviderSlug) return null;
+	const match = options.value.find(o => (o.provider_slug || '') === modelStore.selectedProviderSlug);
+	const icon = iconStore.getProviderIcon(match?.provider_name ?? modelStore.selectedProviderSlug, undefined);
 	if (icon?.type === 'svg') return {...icon, icon: sanitizeSvg(icon.icon)};
 	return icon;
 });
@@ -397,7 +378,7 @@ function rowDisabled(opt: ProviderOption): boolean {
 }
 
 function isSelected(opt: ProviderOption): boolean {
-	return !!chatStore.selectedProviderSlug && (opt.provider_slug || '') === chatStore.selectedProviderSlug;
+	return !!modelStore.selectedProviderSlug && (opt.provider_slug || '') === modelStore.selectedProviderSlug;
 }
 
 function isProviderHealthy(opt: ProviderOption): boolean {
@@ -450,7 +431,7 @@ function formatContextFull(value: number | null): string {
 }
 
 const selectedModelIsDefault = computed(() =>
-	!!chatStore.selectedModel && chatStore.selectedModel.model_id === store.preferences?.default_model_key,
+	!!modelStore.selectedModel && modelStore.selectedModel.model_id === store.preferences?.default_model_key,
 );
 
 function isDefaultProvider(slug: string | null): boolean {
@@ -460,30 +441,29 @@ function isDefaultProvider(slug: string | null): boolean {
 
 async function setDefaultProvider(slug: string | null) {
 	if (!selectedModelIsDefault.value) return;
-	await chatStore.updatePreferences({default_provider_slug: slug});
+	await preferencesStore.updatePreferences({default_provider_slug: slug});
 }
 
 function selectAuto() {
-	chatStore.setProviderSelection(null);
+	modelStore.setProviderSelection(null);
 	isOpen.value = false;
 }
 
 function selectOption(opt: ProviderOption) {
 	if (!opt.provider_slug) return;
-	chatStore.setProviderSelection(opt.provider_slug, chatStore.providerRoutingMode);
+	modelStore.setProviderSelection(opt.provider_slug, modelStore.providerRoutingMode);
 	isOpen.value = false;
 }
 
 async function loadOptions() {
-	const model = chatStore.selectedModel;
+	const model = modelStore.selectedModel;
 	if (!model) return;
 	if (loadedModelId.value === model.id && options.value.length > 0) return;
 
 	loading.value = true;
 	parentUnavailable.value = false;
 	try {
-		const {$customFetch} = useNuxtApp();
-		const res = await $customFetch<ProviderOptionsResponse>(`/api/v1/models/${model.id}/provider-options`);
+		const res = await modelProviderOptions<ProviderOptionsResponse>(model.id);
 		options.value = res.options ?? [];
 		parentUnavailable.value = res.availability_state === 'USER_UNAVAILABLE';
 		loadedModelId.value = model.id;

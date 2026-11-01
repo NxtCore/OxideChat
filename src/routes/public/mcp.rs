@@ -4,173 +4,50 @@
 //! (Streamable HTTP) MCP servers. Server-side `stdio` transports are rejected
 //! for user-owned servers — those are reserved for admins.
 
-use crate::types::{JobState, RequestContext};
 use crate::types::tools::*;
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use crate::utils::tools::mcp::{McpToolInfo, McpUrlPolicy, is_remote_mcp_url_syntax_allowed, validate_remote_mcp_url};
+use crate::types::{AppError, AuthUser, JobState, json_ok};
+use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
+use crate::utils::tools::mcp::McpToolInfo;
 use axum::{
 	Json,
-	extract::{Extension, Path, State},
+	extract::{Path, State},
 	http::StatusCode,
-	response::IntoResponse,
+	response::{IntoResponse, Response},
 };
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Normalize a user-supplied transport string, rejecting anything that is not the
-/// supported remote transport (Streamable HTTP).
-pub(crate) fn normalize_remote_transport(transport: &str) -> Option<&'static str> {
-	match transport.to_lowercase().as_str() {
-		"http" | "streamable-http" | "streamable_http" => Some("http"),
-		_ => None,
-	}
-}
-
-/// Validate that an admin remote transport's connection config contains a usable URL.
-pub(crate) fn validate_admin_remote_config(connection_config: &serde_json::Value) -> bool {
-	serde_json::from_value::<McpHttpConfig>(connection_config.clone())
-		.map(|c| is_remote_mcp_url_syntax_allowed(&c.url, McpUrlPolicy::TrustedAdmin))
-		.unwrap_or(false)
-}
-
-/// Validate that a user-owned remote transport points to a public HTTP(S) URL.
-pub(crate) async fn validate_remote_config(connection_config: &serde_json::Value) -> bool {
-	let Ok(config) = serde_json::from_value::<McpHttpConfig>(connection_config.clone()) else {
-		return false;
-	};
-	validate_remote_mcp_url(&config.url, McpUrlPolicy::PublicOnly).await.is_ok()
-}
-
 /// GET /api/v1/mcp-servers
-pub async fn list_servers(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	let servers = match McpServer::list_owned(&state.db, &user.id).await {
-		Ok(s) => s,
-		Err(e) => {
-			eprintln!("[MCP] Failed to list servers: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let mut responses = Vec::with_capacity(servers.len());
-	for server in servers {
-		responses.push(server.to_response_with_tools(&state.db, Some(&user.id)).await);
-	}
-	ResponseBuilder::new(ResponseBody::Json(responses)).build()
+pub async fn list_servers(State(state): State<Arc<JobState>>, user: AuthUser) -> Result<Response, AppError> {
+	json_ok(McpScope::User(user.id).list(&state.db).await?)
 }
 
 /// POST /api/v1/mcp-servers
-pub async fn create_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateMcpServerRequest>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	let Some(transport) = normalize_remote_transport(&req.transport) else {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
-	};
-	if req.name.trim().is_empty() || !validate_remote_config(&req.connection_config).await {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
-	}
-
-	match McpServer::create(&state.db, Some(&user.id), req.name.trim(), transport, &req.connection_config, req.is_enabled).await {
-		Ok(server) => {
-			let response = server.to_response_with_tools(&state.db, Some(&user.id)).await;
-			ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
-		}
-		Err(e) => {
-			if e.to_string().contains("duplicate") || e.to_string().contains("unique") {
-				ErrorBuilder::new(ErrorCode::AlreadyExists).build()
-			} else {
-				eprintln!("[MCP] Failed to create server: {e}");
-				ErrorBuilder::new(ErrorCode::InternalError).build()
-			}
-		}
-	}
+pub async fn create_server(State(state): State<Arc<JobState>>, user: AuthUser, Json(req): Json<CreateMcpServerRequest>) -> Result<Response, AppError> {
+	let response = McpScope::User(user.id).create(&state.db, &req).await?;
+	Ok(ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build())
 }
 
 /// GET /api/v1/mcp-servers/:id
-pub async fn get_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	match McpServer::find_scoped(&state.db, &id, Some(&user.id)).await {
-		Ok(Some(server)) => {
-			let response = server.to_response_with_tools(&state.db, Some(&user.id)).await;
-			ResponseBuilder::new(ResponseBody::Json(response)).build()
-		}
-		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MCP] Failed to get server: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+pub async fn get_server(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	let server = McpServer::find_scoped(&state.db, &id, Some(&user.id)).await?.ok_or(ErrorCode::NotFound)?;
+	json_ok(server.into_response_with_tools(&state.db, Some(&user.id)).await)
 }
 
 /// PUT /api/v1/mcp-servers/:id
-pub async fn update_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateMcpServerRequest>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	let transport = match req.transport.as_deref() {
-		Some(t) => match normalize_remote_transport(t) {
-			Some(norm) => Some(norm),
-			None => return ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
-		},
-		None => None,
-	};
-	if let Some(config) = &req.connection_config {
-		if !validate_remote_config(config).await {
-			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
-		}
-	}
-
-	let updated = McpServer::update_scoped(
-		&state.db,
-		&id,
-		Some(&user.id),
-		req.name.as_deref(),
-		transport,
-		req.connection_config.as_ref(),
-		req.is_enabled,
-	)
-	.await;
-
-	match updated {
-		Ok(Some(server)) => {
-			state.mcp_pool.evict(&id).await;
-			let response = server.to_response_with_tools(&state.db, Some(&user.id)).await;
-			ResponseBuilder::new(ResponseBody::Json(response)).build()
-		}
-		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MCP] Failed to update server: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+pub async fn update_server(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>, Json(req): Json<UpdateMcpServerRequest>) -> Result<Response, AppError> {
+	let response = McpScope::User(user.id).update(&state.db, &id, &req).await?;
+	state.mcp_pool.evict(&id).await;
+	json_ok(response)
 }
 
 /// DELETE /api/v1/mcp-servers/:id
-pub async fn delete_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	match McpServer::delete_scoped(&state.db, &id, Some(&user.id)).await {
-		Ok(true) => {
-			state.mcp_pool.evict(&id).await;
-			(StatusCode::NO_CONTENT, "").into_response()
-		}
-		Ok(false) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MCP] Failed to delete server: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
+pub async fn delete_server(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	if !McpServer::delete_scoped(&state.db, &id, Some(&user.id)).await? {
+		return Err(ErrorCode::NotFound.into());
 	}
+	state.mcp_pool.evict(&id).await;
+	Ok((StatusCode::NO_CONTENT, "").into_response())
 }
 
 /// POST /api/v1/mcp-servers/:id/sync-tools
@@ -181,22 +58,11 @@ pub async fn delete_server(State(state): State<Arc<JobState>>, Extension(Request
 /// machine (e.g. localhost).
 pub async fn sync_tools_from_client(
 	State(state): State<Arc<JobState>>,
-	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
+	user: AuthUser,
 	Path(id): Path<Uuid>,
 	Json(req): Json<SyncMcpToolsRequest>,
-) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	let server = match McpServer::find_scoped(&state.db, &id, Some(&user.id)).await {
-		Ok(Some(s)) => s,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MCP] Failed to load server for sync: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+) -> Result<Response, AppError> {
+	let server = McpServer::find_scoped(&state.db, &id, Some(&user.id)).await?.ok_or(ErrorCode::NotFound)?;
 
 	let discovered: Vec<McpToolInfo> = req
 		.tools
@@ -208,84 +74,19 @@ pub async fn sync_tools_from_client(
 		})
 		.collect();
 
-	if let Err(e) = server.sync_tools(&state.db, Some(&user.id), &discovered).await {
-		eprintln!("[MCP] Failed to sync client-discovered tools: {e}");
-		return ErrorBuilder::new(ErrorCode::InternalError).build();
-	}
+	server.sync_tools(&state.db, Some(&user.id), &discovered).await?;
 
 	let _ = McpServer::set_health(&state.db, &server.id, "healthy").await;
 	state.mcp_pool.evict(&server.id).await;
 
-	let response = McpDiscoveryResponse {
-		tools: discovered
-			.into_iter()
-			.map(|t| McpDiscoveredTool {
-				name: t.name,
-				description: t.description,
-				input_schema: t.input_schema,
-			})
-			.collect(),
-		server_name: server.name,
-		server_version: None,
-	};
-	ResponseBuilder::new(ResponseBody::Json(response)).build()
+	json_ok(McpDiscoveryResponse::new(server.name, discovered))
 }
 
 /// POST /api/v1/mcp-servers/:id/discover
 ///
 /// Connect to the server, list its tools, and (re)generate the user's `Tool`
 /// records for it so they become available in the chat tool selector.
-pub async fn discover_server(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	let server = match McpServer::find_scoped(&state.db, &id, Some(&user.id)).await {
-		Ok(Some(s)) => s,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MCP] Failed to load server for discovery: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	run_discovery(&state, &server, Some(&user.id)).await
-}
-
-/// Shared discovery logic used by both user and admin routes.
-pub(crate) async fn run_discovery(state: &Arc<JobState>, server: &McpServer, owner_id: Option<&Uuid>) -> axum::response::Response {
-	state.mcp_pool.evict(&server.id).await;
-	let discovered = match server.discover().await {
-		Ok(tools) => tools,
-		Err(e) => {
-			eprintln!("[MCP] Discovery failed for server {}: {e}", server.id);
-			let _ = McpServer::set_health(&state.db, &server.id, "unhealthy").await;
-			return ResponseBuilder::new(ResponseBody::Json(serde_json::json!({
-				"error": ErrorCode::ServiceUnavailable.message(),
-				"server_name": server.name,
-			})))
-			.status(StatusCode::BAD_GATEWAY)
-			.build();
-		}
-	};
-
-	if let Err(e) = server.sync_tools(&state.db, owner_id, &discovered).await {
-		eprintln!("[MCP] Failed to sync discovered tools: {e}");
-		return ErrorBuilder::new(ErrorCode::InternalError).build();
-	}
-	let _ = McpServer::set_health(&state.db, &server.id, "healthy").await;
-
-	let response = McpDiscoveryResponse {
-		tools: discovered
-			.into_iter()
-			.map(|t| McpDiscoveredTool {
-				name: t.name,
-				description: t.description,
-				input_schema: t.input_schema,
-			})
-			.collect(),
-		server_name: server.name.clone(),
-		server_version: None,
-	};
-	ResponseBuilder::new(ResponseBody::Json(response)).build()
+pub async fn discover_server(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	let server = McpServer::find_scoped(&state.db, &id, Some(&user.id)).await?.ok_or(ErrorCode::NotFound)?;
+	server.run_discovery(&state.db, &state.mcp_pool, Some(&user.id)).await
 }

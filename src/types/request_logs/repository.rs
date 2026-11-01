@@ -3,7 +3,7 @@ use super::{
 	DEFAULT_REQUEST_LOG_RETENTION_DAYS, REQUEST_LOG_EXPORT_LIMIT, RequestLog, RequestLogAbort, RequestLogErrorCategory, RequestLogFailure, RequestLogFilter, RequestLogRecord, RequestLogResponse, RequestLogStatus,
 	RequestLogSummary, RequestLogTrace,
 };
-use crate::types::{BaseType, Team, axum::PaginatedResponse};
+use crate::types::{BaseType, Page, PageQuery, Team};
 use chrono::Utc;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
@@ -109,13 +109,20 @@ impl RequestLog {
 		.await
 	}
 
+	/// Stores a failed request's log row; storage problems are logged and never fail the request.
+	pub async fn log_failure(pool: &PgPool, trace: &RequestLogTrace<'_>, failure: RequestLogFailure) {
+		if let Err(error) = Self::record_failure(pool, trace, failure).await {
+			tracing::warn!(%error, category = failure.category.as_str(), "failed to record gateway request failure");
+		}
+	}
+
 	/// Lists the caller's request logs, newest first, one page at a time.
 	///
 	/// # Errors
 	///
 	/// Returns an error when the rows cannot be read.
-	pub async fn list(pool: &PgPool, filter: RequestLogFilter, page: i64, size: i64) -> Result<PaginatedResponse<RequestLogResponse>, sqlx::Error> {
-		let pagination = Self::pagination(page, size);
+	pub async fn list(pool: &PgPool, filter: RequestLogFilter, page: &PageQuery) -> Result<Page<RequestLogResponse>, sqlx::Error> {
+		let pagination = Self::pagination(page);
 		let rows = Self::bind_filter(sqlx::query_as::<_, Self>(Self::SELECT), &filter)
 			.bind(pagination.limit)
 			.bind(pagination.offset)
@@ -123,7 +130,7 @@ impl RequestLog {
 			.await?;
 		let has_more = rows.len() > pagination.page_size;
 		let items = rows.into_iter().take(pagination.page_size).map(|row| row.to_response()).collect();
-		Ok(PaginatedResponse { has_more, items })
+		Ok(Page { has_more, items })
 	}
 
 	/// Lists every request log matching the filter, bounded by the export limit.

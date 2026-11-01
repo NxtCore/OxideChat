@@ -22,9 +22,9 @@ src/types/<domain>/
 
 Only add more files when the domain has a real boundary that this layout does not cover.
 
-## `providers_billing`
+## `mod.rs`
 
-`providers_billing` should contain the main database row struct and domain-local context structs.
+`mod.rs` should contain the main database row struct and domain-local context structs.
 
 Example shape:
 
@@ -45,7 +45,7 @@ pub struct DomainViewer<'a> {
 impl BaseType for Domain {}
 ```
 
-Keep call-site imports stable by re-exporting public request and response DTOs from `providers_billing`.
+Keep call-site imports stable by re-exporting public request and response DTOs from `mod.rs`.
 
 Do not re-export private SQL row structs.
 
@@ -57,7 +57,7 @@ Put all route output DTOs in `responses.rs`.
 
 Routes must import these DTOs from `crate::types::<domain>` or `crate::types::*`, not from route modules. Route files should contain handlers only.
 
-Keep generic HTTP wrapper types, such as `PaginatedResponse<T>`, in `src/types/axum.rs`.
+Paginated endpoints take `Query<PageQuery>` (`page`, `size`) next to their filter query and return `Page<T>` (`has_more`, `items`) from `src/types/page.rs`; `BaseType::pagination` applies the per-type default and maximum page size.
 
 ## SQL Rows And Mapping
 
@@ -196,7 +196,7 @@ When porting another type to this pattern:
 
 1. Move public request DTOs into `requests.rs`.
 2. Move public response DTOs into `responses.rs`.
-3. Keep the database row type in `providers_billing`.
+3. Keep the database row type in `mod.rs`.
 4. Add private checked row structs in `rows.rs`.
 5. Move SQL methods into `repository.rs` and `patch.rs`.
 6. Replace dynamic projections with static `query_as!` queries.

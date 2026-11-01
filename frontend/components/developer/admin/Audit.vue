@@ -44,7 +44,7 @@
 				</thead>
 				<tbody>
 					<tr v-for="entry in entries" :key="entry.id" class="border-b border-border/60 align-top last:border-b-0">
-						<td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(entry.created_at) }}</td>
+						<td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDateTime(entry.created_at) }}</td>
 						<td class="px-4 py-3 text-foreground">{{ entry.actor_username ?? '–' }}</td>
 						<td class="px-4 py-3">
 							<ShadBadge variant="secondary">{{ store.getTranslation(`developer.admin.audit.category_${entry.category}`) }}</ShadBadge>
@@ -72,7 +72,6 @@
 import {RefreshCw} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useGatewayAdminStore} from '@/stores/gatewayAdminStore';
-import {errorMessage} from '~/utils/developer';
 import {AUDIT_CATEGORIES} from '~/types/gatewayAdmin';
 import type {AuditCategory, AuditEntry} from '~/types/gatewayAdmin';
 
@@ -82,22 +81,17 @@ const admin = useGatewayAdminStore();
 const entries = ref<AuditEntry[]>([]);
 const hasMore = ref(false);
 const page = ref(1);
-const loading = ref(false);
+const {loading, run} = useAsyncAction();
 const categoryFilter = ref('all');
 const fromFilter = ref('');
 const toFilter = ref('');
-
-function formatDate(value: string): string {
-	return new Date(value).toLocaleString(store.base?.language ?? 'en');
-}
 
 function changes(entry: AuditEntry): string {
 	return JSON.stringify({before: entry.before, after: entry.after}, null, 1);
 }
 
 async function load() {
-	loading.value = true;
-	try {
+	await run(async () => {
 		const result = await admin.listAudit(
 			{
 				category: categoryFilter.value === 'all' ? null : (categoryFilter.value as AuditCategory),
@@ -108,11 +102,7 @@ async function load() {
 		);
 		entries.value = result.items;
 		hasMore.value = result.has_more;
-	} catch (e: any) {
-		store.toast(store.getTranslation('developer.admin.audit.load_error'), {type: 'error', description: errorMessage(e, '')});
-	} finally {
-		loading.value = false;
-	}
+	}, null, 'developer.admin.audit.load_error');
 }
 
 async function reload() {

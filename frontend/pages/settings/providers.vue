@@ -52,10 +52,10 @@
 								variant="ghost"
 								size="icon"
 								class="h-7 w-7"
-								:disabled="billingStore.loading[item.id]"
+								:disabled="billingStore.states[item.id]?.loading"
 								@click="refreshBilling(item.id)"
 							>
-								<Loader2 v-if="billingStore.loading[item.id]" class="h-3.5 w-3.5 animate-spin" />
+								<Loader2 v-if="billingStore.states[item.id]?.loading" class="h-3.5 w-3.5 animate-spin" />
 								<RotateCw v-else class="h-3.5 w-3.5" />
 								<span class="sr-only">{{ store.getTranslation('settings.providers.billing.refresh') }}</span>
 							</Button>
@@ -191,7 +191,7 @@
 									<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.billing.management_key_hint') }}</p>
 								</div>
 								<div class="flex flex-wrap gap-2">
-									<Button variant="outline" :disabled="billingStore.loading[configForm.existingProvider.id]" @click="testBillingAccess">
+									<Button variant="outline" :disabled="billingStore.states[configForm.existingProvider.id]?.loading" @click="testBillingAccess">
 										<RotateCw class="mr-2 h-4 w-4" />{{ store.getTranslation('settings.providers.billing.refresh') }}
 									</Button>
 									<Button v-if="billingForm.hasConnection" variant="destructive" @click="removeBilling">
@@ -275,7 +275,7 @@ import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
 import {Switch} from '@/components/ui/switch';
 import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
-const {$customFetch} = useNuxtApp();
+import type {ProviderResponse as ConfiguredProvider} from '~/types/chat';
 
 interface ProviderConfig {
 	kind: string;
@@ -286,15 +286,6 @@ interface ProviderConfig {
 	defaultBaseUrl?: string;
 	isPreConfigured: boolean;
 	keyFormat?: string;
-}
-
-interface ConfiguredProvider {
-	id: string;
-	kind: string;
-	name: string;
-	base_url: string;
-	has_api_key: boolean;
-	is_enabled: boolean;
 }
 
 const store = useMainStore();
@@ -328,8 +319,7 @@ async function loadCatalog() {
 	if (!configForm.existingProvider) return;
 	catalogLoading.value = true;
 	try {
-		const query = new URLSearchParams({page: '1', size: '50', query: catalogSearch.value});
-		const res = await $customFetch<{has_more: boolean; items: any[]}>(`/api/v1/admin/providers/${configForm.existingProvider.id}/catalog?` + query.toString());
+		const res = await providerCatalog(configForm.existingProvider.id, {page: '1', size: '50', query: catalogSearch.value});
 		catalogModels.value = res?.items || [];
 		catalogLoaded.value = true;
 	} catch (e) {
@@ -401,7 +391,7 @@ const displayProviders = computed(() => {
 });
 
 const billingProviders = computed(() => displayProviders.value.filter(provider => provider.isConfigured && provider.billing));
-const isRefreshingBilling = computed(() => billingProviders.value.some(provider => billingStore.loading[provider.id]));
+const isRefreshingBilling = computed(() => billingProviders.value.some(provider => billingStore.states[provider.id]?.loading));
 
 const configForm = reactive({
 	name: '',
@@ -456,7 +446,7 @@ const providers: ProviderConfig[] = [
 
 async function loadProviders() {
 	try {
-		const result = await $customFetch('/api/v1/admin/providers');
+		const result = await adminProviders();
 		if (Array.isArray(result)) {
 			configuredProviders.value = result;
 		}
@@ -534,17 +524,13 @@ function decimalValue(value: string | number | null | undefined) {
 	return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatMoney(value: string | number | null | undefined, currency: string) {
-	return new Intl.NumberFormat(undefined, {style: 'currency', currency: currency || 'USD'}).format(decimalValue(value));
-}
-
 function upstreamSummary(billing: ProviderBillingOverview) {
 	const metric = billing.upstream;
 	if (!metric) return '';
 	if (metric.metric_kind === 'CREDIT_BALANCE') {
-		return store.getTranslation('settings.providers.billing.credits_remaining', {amount: formatMoney(metric.remaining_amount, metric.currency)});
+		return store.getTranslation('settings.providers.billing.credits_remaining', {amount: formatCurrency(metric.remaining_amount, metric.currency)});
 	}
-	return store.getTranslation('settings.providers.billing.spent_month', {amount: formatMoney(metric.spent_amount, metric.currency)});
+	return store.getTranslation('settings.providers.billing.spent_month', {amount: formatCurrency(metric.spent_amount, metric.currency)});
 }
 
 function upstreamDetail(billing: ProviderBillingOverview) {
@@ -552,17 +538,17 @@ function upstreamDetail(billing: ProviderBillingOverview) {
 	if (!metric) return '';
 	if (metric.limit_amount == null) return '';
 	if (metric.metric_kind === 'KEY_LIMIT') {
-		return store.getTranslation('settings.providers.billing.key_limit', {amount: formatMoney(metric.limit_amount, metric.currency)});
+		return store.getTranslation('settings.providers.billing.key_limit', {amount: formatCurrency(metric.limit_amount, metric.currency)});
 	}
 	if (metric.metric_kind === 'SPEND_THRESHOLD' && decimalValue(metric.spent_amount) > decimalValue(metric.limit_amount)) {
 		return store.getTranslation('settings.providers.billing.over_threshold', {
-			amount: formatMoney(decimalValue(metric.spent_amount) - decimalValue(metric.limit_amount), metric.currency),
+			amount: formatCurrency(decimalValue(metric.spent_amount) - decimalValue(metric.limit_amount), metric.currency),
 		});
 	}
 	if (metric.metric_kind === 'SPEND_THRESHOLD') {
 		return store.getTranslation('settings.providers.billing.remaining_threshold', {
-			amount: formatMoney(metric.remaining_amount, metric.currency),
-			threshold: formatMoney(metric.limit_amount, metric.currency),
+			amount: formatCurrency(metric.remaining_amount, metric.currency),
+			threshold: formatCurrency(metric.limit_amount, metric.currency),
 		});
 	}
 	return '';
@@ -667,10 +653,7 @@ async function updateProvider(id: string, data: Object) {
 	if (!provider) return;
 
 	try {
-		await $customFetch(`/api/v1/admin/providers/${id}`, {
-			method: 'PUT',
-			body: data,
-		});
+		await saveProvider(id, data);
 	} catch (e: any) {
 		store.toast(store.getTranslation('settings.providers.save_error'), {
 			type: 'error',
@@ -691,9 +674,7 @@ async function syncProvider(provider: any) {
 		type: 'loading',
 		duration: Infinity,
 	});
-	await $customFetch(`/api/v1/admin/providers/${provider.id}/sync`, {
-		method: 'POST',
-	});
+	await syncProvider(provider.id);
 	store.dismissToast(toast);
 	store.toast(store.getTranslation('settings.providers.syncing_provider_success'), {type: 'success'});
 }
@@ -713,17 +694,7 @@ async function saveConfig() {
 			body.api_key = configForm.apiKey;
 		}
 
-		if (configForm.existingProvider) {
-			await $customFetch(`/api/v1/admin/providers/${configForm.existingProvider.id}`, {
-				method: 'PUT',
-				body,
-			});
-		} else {
-			await $customFetch('/api/v1/admin/providers', {
-				method: 'POST',
-				body,
-			});
-		}
+		await saveProvider(configForm.existingProvider?.id, body);
 
 		store.toast(store.getTranslation('settings.providers.save_success'), {type: 'success'});
 		dialogOpen.value = false;
@@ -743,9 +714,7 @@ async function deleteConfig() {
 
 	saving.value = true;
 	try {
-		await $customFetch(`/api/v1/admin/providers/${configForm.existingProvider.id}`, {
-			method: 'DELETE',
-		});
+		await deleteProvider(configForm.existingProvider.id);
 		store.toast(store.getTranslation('settings.providers.delete_success'), {type: 'success'});
 		dialogOpen.value = false;
 		await loadProviders();

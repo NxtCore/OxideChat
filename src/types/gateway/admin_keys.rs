@@ -4,7 +4,7 @@ use super::{
 	GatewayAdminKeyResponse, GatewayKeyAdminAction, GatewayKeyRuleResponse, normalize_reason,
 };
 use super::admin::{AdminAudit, write_admin_audit};
-use crate::types::axum::PaginatedResponse;
+use crate::types::{Page, PageQuery};
 use crate::types::{BaseType, Budget, BudgetSubject, RequestLog, RequestLogFilter};
 use serde_json::json;
 use std::collections::HashMap;
@@ -76,12 +76,12 @@ impl GatewayAdminKeyResponse {
 	/// # Errors
 	///
 	/// Returns [`GatewayAdminError::InvalidQuery`] for an unknown status or a storage error.
-	pub async fn list(pool: &PgPool, query: &GatewayAdminKeyQuery) -> Result<PaginatedResponse<Self>, GatewayAdminError> {
+	pub async fn list(pool: &PgPool, query: &GatewayAdminKeyQuery, page: &PageQuery) -> Result<Page<Self>, GatewayAdminError> {
 		let status = query.status.as_deref().filter(|status| !status.is_empty());
 		if status.is_some_and(|status| !KEY_STATUSES.contains(&status)) {
 			return Err(GatewayAdminError::InvalidQuery);
 		}
-		let pagination = Self::pagination(query.page.unwrap_or(1), query.size.unwrap_or(0));
+		let pagination = Self::pagination(page);
 		let rows = sqlx::query_as::<_, Self>(concat!(
 			select_keys!(),
 			"WHERE ($1::uuid IS NULL OR team_id = $1)
@@ -108,7 +108,7 @@ impl GatewayAdminKeyResponse {
 			.fetch_all(pool)
 			.await?;
 		let has_more = rows.len() > pagination.page_size;
-		Ok(PaginatedResponse {
+		Ok(Page {
 			has_more,
 			items: rows.into_iter().take(pagination.page_size).collect(),
 		})

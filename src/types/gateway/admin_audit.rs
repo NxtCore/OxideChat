@@ -3,7 +3,7 @@ use super::{
 	EVENT_TEAM_BUDGET_UPDATED, EVENT_TEAM_LIMITS_UPDATED, EVENT_TEAM_MODELS_UPDATED, GatewayAdminError, GatewayAuditEntryResponse, GatewayAuditQuery, GatewayEventQuery, GatewayEventResponse,
 	MAX_EVENT_BUDGET_KEYS, MAX_EVENT_WINDOW_DAYS, redact_metadata,
 };
-use crate::types::axum::PaginatedResponse;
+use crate::types::{Page, PageQuery};
 use crate::types::{BaseType, Budget, BudgetSubject};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -119,9 +119,9 @@ impl GatewayAuditEntryResponse {
 	/// # Errors
 	///
 	/// Returns [`GatewayAdminError::InvalidQuery`] for an unknown category or event, or a storage error.
-	pub async fn list(pool: &PgPool, query: &GatewayAuditQuery) -> Result<PaginatedResponse<Self>, GatewayAdminError> {
+	pub async fn list(pool: &PgPool, query: &GatewayAuditQuery, page: &PageQuery) -> Result<Page<Self>, GatewayAdminError> {
 		let events = audited_events(query)?;
-		let pagination = Self::pagination(query.page.unwrap_or(1), query.size.unwrap_or(0));
+		let pagination = Self::pagination(page);
 		let rows = sqlx::query_as::<_, AuditRow>(
 			r#"
 			SELECT a.id, a.event, a.actor_id, u.username AS actor_username, a.target_type, a.target_id,
@@ -149,7 +149,7 @@ impl GatewayAuditEntryResponse {
 		.fetch_all(pool)
 		.await?;
 		let has_more = rows.len() > pagination.page_size;
-		Ok(PaginatedResponse {
+		Ok(Page {
 			has_more,
 			items: rows.into_iter().take(pagination.page_size).map(Self::from).collect(),
 		})

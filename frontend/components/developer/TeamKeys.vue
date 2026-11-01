@@ -39,9 +39,9 @@
 							· {{ apiKey.scopes.join(', ') }}
 						</p>
 						<p class="text-xs text-muted-foreground">
-							{{ store.getTranslation('developer.keys.created', {date: formatDate(apiKey.created_at)}) }}
-							· {{ apiKey.last_used_at ? store.getTranslation('developer.keys.last_used', {date: formatDate(apiKey.last_used_at)}) : store.getTranslation('developer.keys.never_used') }}
-							<template v-if="apiKey.expires_at"> · {{ store.getTranslation('developer.keys.expires', {date: formatDate(apiKey.expires_at)}) }}</template>
+							{{ store.getTranslation('developer.keys.created', {date: formatDateTime(apiKey.created_at)}) }}
+							· {{ apiKey.last_used_at ? store.getTranslation('developer.keys.last_used', {date: formatDateTime(apiKey.last_used_at)}) : store.getTranslation('developer.keys.never_used') }}
+							<template v-if="apiKey.expires_at"> · {{ store.getTranslation('developer.keys.expires', {date: formatDateTime(apiKey.expires_at)}) }}</template>
 						</p>
 						<p v-if="apiKey.admin_disabled" class="text-xs text-destructive">{{ store.getTranslation('developer.keys.admin_disabled_hint') }}</p>
 					</div>
@@ -107,10 +107,6 @@ const revealTitle = ref('developer.reveal.title_created');
 const revealPreviousExpiry = ref<string | null>(null);
 
 const keys = computed<DeveloperTeamKey[]>(() => developer.teamKeys.filter(key => key.service_account || key.user_id !== store.auth.user?.id));
-
-function formatDate(value: string) {
-	return value ? new Date(value).toLocaleString(store.base?.language ?? 'en') : '';
-}
 
 function showToken(token: string, title: string, previousExpiry: string | null) {
 	revealToken.value = token;

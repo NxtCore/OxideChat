@@ -1,8 +1,8 @@
 use crate::ai;
 use crate::i18n::I18n;
-use crate::utils::gateway_limits::limit_error_response;
+use crate::utils::gateway_limits::{self, limit_error_response};
 use crate::types::{
-	API_KEY_ID_HEADER, BUDGET_RESERVATION_METADATA_KEY, GatewayAuthContext, GatewayInference, GatewayLimitError, GatewayModel, GatewayModelAccessError, GatewayRequestScope, GatewayRoute,
+	API_KEY_ID_HEADER, BUDGET_RESERVATION_METADATA_KEY, GatewayAdmission, GatewayAuthContext, GatewayEstimate, GatewayInference, GatewayLimitError, GatewayModel, GatewayModelAccessError, GatewayRequestScope, GatewayRoute,
 	GatewayRun, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState, PUBLIC_MODEL_METADATA_KEY, REQUEST_ID_METADATA_KEY, RESERVATION_METADATA_KEY, RequestLog, RequestLogContext,
 	RequestLogErrorCategory, RequestLogFailure, RequestLogOwner, RequestLogTrace, STARTED_AT_METADATA_KEY, STREAMING_METADATA_KEY, TEAM_ID_HEADER,
 };
@@ -14,12 +14,11 @@ use omniference::server::SkinAwareJson;
 use omniference::skins::{OpenAIChatSkin, OpenAIErrorHandler, OpenAIResponsesSkin, SkinContext, SkinErrorHandler, SkinRequestMetadata, openai_error_response};
 use omniference::types::providers::OpenAIModelsResponse;
 use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
-use sqlx::PgPool;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-async fn authenticate_owned(pool: &PgPool, headers: &HeaderMap, scope: &str) -> Result<GatewayAuthContext, (Response, Option<RequestLogOwner>)> {
+async fn authenticate_owned(state: &JobState, headers: &HeaderMap, scope: &str) -> Result<GatewayAuthContext, (Response, Option<RequestLogOwner>)> {
 	let Some(value) = headers.get(header::AUTHORIZATION).and_then(|value| value.to_str().ok()) else {
 		return Err((
 			error_response(
@@ -37,7 +36,7 @@ async fn authenticate_owned(pool: &PgPool, headers: &HeaderMap, scope: &str) -> 
 	if !scheme.eq_ignore_ascii_case("bearer") || token.is_empty() {
 		return Err((invalid_bearer_response(), None));
 	}
-	let context = crate::types::GatewayCredential::authenticate_with_owner(pool, token)
+	let context = crate::types::GatewayCredential::authenticate_with_owner(&state.db, token)
 		.await
 		.map_err(|failure| {
 			let response = match failure.error {
@@ -92,9 +91,7 @@ pub async fn run_models(state: &JobState, context: &GatewayAuthContext) -> Respo
 pub async fn run_chat(request: OpenAIChatRequest, inference: GatewayInference, run: GatewayRun<'_>) -> Response {
 	let metadata = request_metadata(&run, &inference);
 	let engine = ai::get();
-	let engine = engine.read().await;
 	let skin_context = SkinContext::with_service(engine.service().clone());
-	drop(engine);
 	let response = OpenAIChatSkin::handle_chat(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await;
 	log_upstream_failure(&run.scope, &inference, response.status()).await;
 	inference.finish(response, &run.scope)
@@ -117,14 +114,12 @@ pub async fn run_responses(request: OpenAIResponsesRequestPayload, inference: Ga
 				category: RequestLogErrorCategory::Internal,
 				status_code: Some(i32::from(response.status().as_u16())),
 			};
-			log_request_failure(run.scope.db, &run.scope.inference_trace(&inference), failure).await;
+			RequestLog::log_failure(run.scope.db, &run.scope.inference_trace(&inference), failure).await;
 			return response;
 		}
 	};
 	let engine = ai::get();
-	let engine = engine.read().await;
 	let skin_context = SkinContext::with_service(engine.service().clone());
-	drop(engine);
 	let response = OpenAIResponsesSkin::handle_responses(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(raw_request)).await;
 	log_upstream_failure(&run.scope, &inference, response.status()).await;
 	inference.finish(response, &run.scope)
@@ -141,14 +136,7 @@ async fn log_upstream_failure(scope: &GatewayRequestScope<'_>, inference: &Gatew
 		category: RequestLogErrorCategory::Upstream,
 		status_code: Some(i32::from(status.as_u16())),
 	};
-	log_request_failure(scope.db, &scope.inference_trace(inference), failure).await;
-}
-
-/// Stores a failed request's log row; storage problems are logged and never fail the request.
-pub async fn log_request_failure(db: &PgPool, trace: &RequestLogTrace<'_>, failure: RequestLogFailure) {
-	if let Err(error) = RequestLog::record_failure(db, trace, failure).await {
-		tracing::warn!(%error, category = failure.category.as_str(), "failed to record gateway request failure");
-	}
+	RequestLog::log_failure(scope.db, &scope.inference_trace(inference), failure).await;
 }
 
 /// Answers a model, budget or policy storage refusal and logs it for the key's owner.
@@ -164,7 +152,7 @@ pub async fn reject_model_access(scope: &GatewayRequestScope<'_>, inference: Opt
 		category,
 		status_code: Some(i32::from(response.status().as_u16())),
 	};
-	log_request_failure(scope.db, &trace, failure).await;
+	RequestLog::log_failure(scope.db, &trace, failure).await;
 	response
 }
 
@@ -179,8 +167,45 @@ pub async fn reject_limited(scope: &GatewayRequestScope<'_>, inference: &Gateway
 		category,
 		status_code: Some(i32::from(response.status().as_u16())),
 	};
-	log_request_failure(scope.db, &scope.inference_trace(inference), failure).await;
+	RequestLog::log_failure(scope.db, &scope.inference_trace(inference), failure).await;
 	response
+}
+
+/// A resolved, budgeted and admitted inference request, ready to run.
+pub struct AdmittedInference<'a> {
+	pub inference: GatewayInference,
+	pub run: GatewayRun<'a>,
+	pub admission: GatewayAdmission,
+}
+
+/// Resolves the model, reserves budget and passes the rate limiter, in that order.
+///
+/// `estimate` receives the resolved model and returns the request's token bounds.
+/// Every refusal is logged and returned as the response to send.
+pub async fn admit_inference<'a>(
+	state: &JobState,
+	scope: GatewayRequestScope<'a>,
+	route: GatewayRoute,
+	requested: &str,
+	estimate: impl FnOnce(&mut GatewayInference) -> GatewayEstimate,
+) -> Result<AdmittedInference<'a>, Response> {
+	let mut inference = match GatewayModel::resolve_inference(scope.db, scope.context, requested).await {
+		Ok(inference) => inference,
+		Err(error) => return Err(reject_model_access(&scope, None, error, requested).await),
+	};
+	let estimate = estimate(&mut inference);
+	if let Err(error) = GatewayModel::reserve_budget(scope.db, &state.budget_ledger, scope.context, &mut inference, estimate.tokens()).await {
+		return Err(reject_model_access(&scope, Some(&inference), error, requested).await);
+	}
+	let admission = match gateway_limits::admit(state, scope.context, route, estimate.limiter_tokens()).await {
+		Ok(admission) => admission,
+		Err(error) => return Err(reject_limited(&scope, &inference, error).await),
+	};
+	let run = GatewayRun {
+		scope,
+		reservation_id: admission.reservation.id,
+	};
+	Ok(AdmittedInference { inference, run, admission })
 }
 
 /// Axum middleware requiring gateway model-read permission.
@@ -199,7 +224,7 @@ async fn authenticate_request(state: &JobState, mut request: Request, next: Next
 	if let Some(response) = pre_auth_rate_limited(ip, prefix).await {
 		return response;
 	}
-	let context = match authenticate_owned(&state.db, request.headers(), scope).await {
+	let context = match authenticate_owned(state, request.headers(), scope).await {
 		Ok(context) => context,
 		Err((response, owner)) => {
 			let log = request.extensions().get::<RequestLogContext>().copied();
@@ -209,7 +234,7 @@ async fn authenticate_request(state: &JobState, mut request: Request, next: Next
 				} else {
 					GatewayRoute::CHAT
 				};
-				log_auth_rejection(&state.db, (log, route), owner, response.status()).await;
+				log_auth_rejection(state, (log, route), owner, response.status()).await;
 			}
 			return response;
 		}
@@ -258,7 +283,7 @@ pub(crate) fn bearer_token_prefix(request: &Request) -> Option<String> {
 	(!key_id.is_empty()).then(|| format!("oxc_{key_id}"))
 }
 
-async fn log_auth_rejection(db: &PgPool, (log, route): (RequestLogContext, GatewayRoute), owner: RequestLogOwner, status: StatusCode) {
+async fn log_auth_rejection(state: &JobState, (log, route): (RequestLogContext, GatewayRoute), owner: RequestLogOwner, status: StatusCode) {
 	let trace = RequestLogTrace {
 		context: log,
 		owner,
@@ -272,7 +297,7 @@ async fn log_auth_rejection(db: &PgPool, (log, route): (RequestLogContext, Gatew
 		category: RequestLogErrorCategory::Auth,
 		status_code: Some(i32::from(status.as_u16())),
 	};
-	log_request_failure(db, &trace, failure).await;
+	RequestLog::log_failure(&state.db, &trace, failure).await;
 }
 
 /// Axum middleware assigning a unique request identifier response header and log context.

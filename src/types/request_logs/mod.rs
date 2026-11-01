@@ -262,8 +262,6 @@ pub struct RequestLogQuery {
 	pub provider: Option<String>,
 	pub from: Option<DateTime<Utc>>,
 	pub to: Option<DateTime<Utc>>,
-	pub page: Option<i64>,
-	pub limit: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -294,6 +292,7 @@ impl RequestLogQuery {
 
 #[derive(Debug, Serialize)]
 /// A request log as shown to its owner; never includes request content.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperRequestLog"))]
 pub struct RequestLogResponse {
 	pub id: Uuid,
 	pub user_id: Option<Uuid>,
@@ -307,6 +306,7 @@ pub struct RequestLogResponse {
 	pub input_tokens: i32,
 	pub output_tokens: i32,
 	pub reasoning_tokens: i32,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub cost_total: Decimal,
 	pub created_at: DateTime<Utc>,
 	pub request_id: Option<Uuid>,
@@ -320,12 +320,14 @@ pub struct RequestLogResponse {
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 /// Request counts, tokens and spend over the logged requests matching a filter.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "AdminUsageSummary"))]
 pub struct RequestLogSummary {
 	pub total_requests: i64,
 	pub error_requests: i64,
 	pub requests_24h: i64,
 	pub input_tokens: i64,
 	pub output_tokens: i64,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub cost_total: Decimal,
 	pub last_request_at: Option<DateTime<Utc>>,
 }

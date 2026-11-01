@@ -1,9 +1,10 @@
 use super::keys::{GatewayKeyRuleRow, GatewayTeamKeyRow, GatewayTeamModelRow};
 use super::{
-	CreateGatewayKeyRequest, DEFAULT_ROTATION_OVERLAP_SECONDS, GatewayApiKey, GatewayKeyBudgetResponse, GatewayKeyError, GatewayKeyRuleRequest, GatewayKeyRuleResponse, GatewayManagedTeamResponse,
+	AuditEntry, CreateGatewayKeyRequest, DEFAULT_ROTATION_OVERLAP_SECONDS, GatewayApiKey, GatewayKeyBudgetResponse, GatewayKeyError, GatewayKeyRuleRequest, GatewayKeyRuleResponse, GatewayManagedTeamResponse,
 	GatewayRatePolicy, GatewayRouteClass, GatewayRuleMetric, GatewayTeamKeysResponse, GatewayTeamResponse, KEY_SCOPES, KeyActor, MAX_KEY_NAME_LENGTH, MAX_ROTATION_OVERLAP_SECONDS, SetGatewayKeyBudgetRequest,
 	UpdateGatewayKeyRequest, public_model_id,
 };
+use crate::logging::AuditLog;
 use crate::types::{Budget, BudgetSubject, Team};
 use crate::utils::auth::hash_password;
 use chrono::{DateTime, Duration, Utc};
@@ -180,15 +181,14 @@ fn key_snapshot(key: &GatewayApiKey) -> Value {
 }
 
 async fn write_audit(tx: &mut Transaction<'_, Postgres>, event: &str, actor_id: &Uuid, key_id: &Uuid, metadata: Value) -> Result<(), sqlx::Error> {
-	sqlx::query("INSERT INTO audit_logs (event, actor_id, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5)")
-		.bind(event)
-		.bind(actor_id)
-		.bind(AUDIT_TARGET)
-		.bind(key_id)
-		.bind(metadata)
-		.execute(&mut **tx)
-		.await?;
-	Ok(())
+	let entry = AuditEntry {
+		event,
+		actor_id,
+		target_type: AUDIT_TARGET,
+		target_id: key_id,
+		metadata,
+	};
+	AuditLog::write(tx, entry).await
 }
 
 async fn is_team_member(connection: &mut PgConnection, user_id: &Uuid, team_id: &Uuid) -> Result<bool, sqlx::Error> {

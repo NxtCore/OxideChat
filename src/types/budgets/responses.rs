@@ -3,13 +3,15 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::{Budget, EffectiveBudget};
+use super::Budget;
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Budget"))]
 pub struct BudgetResponse {
 	pub id: Uuid,
 	pub name: String,
 	pub description: Option<String>,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub amount: Decimal,
 	pub kind: String,
 	pub interval: String,
@@ -20,16 +22,8 @@ pub struct BudgetResponse {
 	pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct BudgetAssignmentResponse {
-	pub id: Uuid,
-	pub budget_id: Uuid,
-	pub team_id: Option<Uuid>,
-	pub user_id: Option<Uuid>,
-	pub assigned_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Serialize, sqlx::FromRow)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BudgetAssignmentInfo {
 	pub id: Uuid,
 	pub budget_id: Uuid,
@@ -41,14 +35,18 @@ pub struct BudgetAssignmentInfo {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "EffectiveBudget"))]
 pub struct EffectiveBudgetResponse {
 	pub budget: BudgetResponse,
 	pub assignment_id: Uuid,
 	pub team_id: Option<Uuid>,
 	pub user_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub amount: Decimal,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub spent: Decimal,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub remaining: Decimal,
 	pub window_start: DateTime<Utc>,
 	pub resets_at: Option<DateTime<Utc>>,
@@ -57,6 +55,7 @@ pub struct EffectiveBudgetResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct UserBudgetStatus {
 	pub budgets: Vec<EffectiveBudgetResponse>,
 	pub decision: String,
@@ -64,18 +63,22 @@ pub struct UserBudgetStatus {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "UserBudgetOverview"))]
 pub struct UserBudgetOverviewResponse {
 	pub user_id: Uuid,
 	pub user_label: String,
 	pub teams: Vec<BudgetTeamSummaryResponse>,
 	pub budgets: Vec<EffectiveBudgetResponse>,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub spent: Decimal,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub remaining: Decimal,
 	pub decision: String,
 	pub blocked_model_ids: Vec<Uuid>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "BudgetTeamSummary"))]
 pub struct BudgetTeamSummaryResponse {
 	pub id: Uuid,
 	pub name: String,
@@ -83,21 +86,27 @@ pub struct BudgetTeamSummaryResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TeamBudgetOverview"))]
 pub struct TeamBudgetOverviewResponse {
 	pub team_id: Uuid,
 	pub team_name: String,
 	pub member_count: i64,
 	pub budgets: Vec<TeamBudgetAssignmentOverviewResponse>,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub spent: Decimal,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub remaining: Decimal,
 	pub exhausted_count: i64,
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TeamBudgetAssignmentOverview"))]
 pub struct TeamBudgetAssignmentOverviewResponse {
 	pub assignment_id: Uuid,
 	pub budget: BudgetResponse,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub spent: Decimal,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub remaining: Decimal,
 	pub window_start: DateTime<Utc>,
 	pub resets_at: Option<DateTime<Utc>>,
@@ -106,6 +115,7 @@ pub struct TeamBudgetAssignmentOverviewResponse {
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "BudgetResetEvent"))]
 pub struct BudgetResetEventResponse {
 	pub id: Uuid,
 	pub assignment_id: Option<Uuid>,
@@ -136,18 +146,6 @@ impl From<Budget> for BudgetResponse {
 			is_enabled: budget.is_enabled,
 			created_at: budget.created_at,
 			updated_at: budget.updated_at,
-		}
-	}
-}
-
-impl From<&EffectiveBudget> for BudgetAssignmentResponse {
-	fn from(budget: &EffectiveBudget) -> Self {
-		Self {
-			id: budget.assignment_id,
-			budget_id: budget.budget.id,
-			team_id: budget.team_id,
-			user_id: budget.user_id,
-			assigned_at: budget.assigned_at,
 		}
 	}
 }

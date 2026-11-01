@@ -1,5 +1,5 @@
-use crate::routes::public::auth::get_current_user;
 use crate::types::{JobState, RequestContext};
+use crate::utils::auth::get_current_user;
 use crate::utils::rate_limit;
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use axum::{

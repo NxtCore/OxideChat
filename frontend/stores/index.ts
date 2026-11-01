@@ -2,9 +2,8 @@ import {defineStore} from 'pinia';
 import localizedFormat from 'dayjs/plugin/localizedFormat';
 import dayjs from 'dayjs';
 import 'dayjs/locale/de';
-import type {TeamSummary, UserPreferences} from '~/types/chat';
+import type {Base, Role, UserPreferences, UserResponse as User} from '~/types/chat';
 
-dayjs.locale('de');
 dayjs.extend(localizedFormat);
 
 // Module-level signal for the retry loop — set by retryBoot(), read by _pollUntilHealthy()
@@ -19,39 +18,10 @@ interface BreadcrumbType {
 	current?: boolean;
 }
 
-interface User {
-	id: string;
-	email: string;
-	username: string;
-	auth_method: string;
-	roles: string[];
-	teams: TeamSummary[];
-	permissions: string[];
-	preferences: UserPreferences;
-	created_at: string;
-}
-
 interface AuthState {
 	user: User | null;
 	isAuthenticated: boolean;
 	loading: boolean;
-}
-
-interface Role {
-	name: string;
-	id: string;
-	created_at: string;
-}
-
-interface Base {
-	i18n: any;
-	language: string;
-	needs_setup: boolean;
-	oauth_providers: string[];
-	roles: Role[];
-	enable_provider_selector: boolean;
-	allow_server_stdio_mcp: boolean;
-	default_model_id: string | null;
 }
 
 export const useMainStore = defineStore('main', {
@@ -126,7 +96,7 @@ export const useMainStore = defineStore('main', {
 		},
 		formatDate(timestamp: string, format = 'L') {
 			if (!timestamp) return '';
-			return dayjs(timestamp).format(format);
+			return dayjs(timestamp).locale(this.base?.language ?? 'en').format(format);
 		},
 		async getBaseData() {
 			this.bootState = 'booting';
@@ -167,7 +137,7 @@ export const useMainStore = defineStore('main', {
 				this.retryCount++;
 				try {
 					const {$customFetch} = useNuxtApp();
-					await $customFetch('/api/v1/health');
+					await checkHealth();
 					return; // Server is healthy
 				} catch {
 					delay = Math.min(delay * 2, maxDelay);

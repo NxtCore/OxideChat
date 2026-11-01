@@ -5,12 +5,14 @@ use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ProviderTab {
 	pub id: Uuid,
 	pub name: String,
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ModelList"))]
 pub struct ModelListPublic {
 	pub id: Uuid,
 	pub model_id: String,
@@ -55,6 +57,7 @@ pub struct ModelDetailed {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ModelListAdmin {
 	pub id: Uuid,
 	pub model_id: String,

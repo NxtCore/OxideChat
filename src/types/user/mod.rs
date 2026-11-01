@@ -1,3 +1,4 @@
+mod accounts;
 mod patch;
 mod repository;
 mod requests;
@@ -19,7 +20,8 @@ pub struct User {
 	pub password_hash: Option<String>,
 	pub auth_method: String,
 	pub created_at: chrono::DateTime<chrono::Utc>,
-	pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl BaseType for User {}
+impl BaseType for User {
+	const DEFAULT_PAGE_SIZE: i64 = 20;
+}

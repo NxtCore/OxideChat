@@ -9,7 +9,6 @@ use super::executor::{ToolContext, ToolError, ToolExecutor};
 
 /// Executor for WASM plugins using Extism
 pub struct WasmExecutor {
-	name: String,
 	plugin: Mutex<Plugin>,
 	entrypoint: String,
 }
@@ -18,20 +17,18 @@ impl WasmExecutor {
 	/// Create a new WASM executor from a WASM blob
 	///
 	/// # Arguments
-	/// * `name` - Tool name for logging
 	/// * `wasm_bytes` - The compiled WASM module bytes
 	/// * `entrypoint` - The function name to call in the WASM module
 	///
 	/// # Errors
 	/// Returns `ToolError::WasmError` if the plugin cannot be loaded
-	pub fn new(name: String, wasm_bytes: &[u8], entrypoint: String) -> Result<Self, ToolError> {
+	pub fn new(wasm_bytes: &[u8], entrypoint: String) -> Result<Self, ToolError> {
 		let wasm = Wasm::data(wasm_bytes.to_vec());
 		let manifest = Manifest::new([wasm]);
 
 		let plugin = Plugin::new(&manifest, [], false).map_err(|e| ToolError::WasmError(format!("Failed to load WASM plugin: {e}")))?;
 
 		Ok(Self {
-			name,
 			plugin: Mutex::new(plugin),
 			entrypoint,
 		})
@@ -52,9 +49,5 @@ impl ToolExecutor for WasmExecutor {
 		let result: Value = serde_json::from_slice(output).map_err(|e| ToolError::ExecutionFailed(format!("Failed to parse WASM output: {e}")))?;
 
 		Ok(result)
-	}
-
-	fn name(&self) -> &str {
-		&self.name
 	}
 }

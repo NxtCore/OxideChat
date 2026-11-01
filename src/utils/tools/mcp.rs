@@ -10,12 +10,13 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::lookup_host;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-use super::executor::{ToolContext, ToolError, ToolExecutor};
+use super::executor::ToolError;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct JsonRpcRequest {
@@ -79,7 +80,7 @@ trait McpTransport: Send + Sync {
 
 struct StdioTransport {
 	child: Arc<Mutex<Child>>,
-	request_id: Arc<Mutex<u64>>,
+	request_id: AtomicU64,
 }
 
 impl StdioTransport {
@@ -91,7 +92,7 @@ impl StdioTransport {
 
 		Ok(Self {
 			child: Arc::new(Mutex::new(child)),
-			request_id: Arc::new(Mutex::new(1)),
+			request_id: AtomicU64::new(1),
 		})
 	}
 }
@@ -101,10 +102,7 @@ impl McpTransport for StdioTransport {
 	async fn send(&self, mut request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError> {
 		let mut child = self.child.lock().await;
 
-		let mut id = self.request_id.lock().await;
-		request.id = *id;
-		*id += 1;
-		drop(id);
+		request.id = self.request_id.fetch_add(1, Ordering::Relaxed);
 
 		let stdin = child.stdin.as_mut().ok_or_else(|| ToolError::McpError("No stdin available".to_string()))?;
 
@@ -277,7 +275,7 @@ struct StreamableHttpTransport {
 	headers: HashMap<String, String>,
 	client: reqwest::Client,
 	url_policy: McpUrlPolicy,
-	request_id: Arc<Mutex<u64>>,
+	request_id: AtomicU64,
 	session_id: Arc<Mutex<Option<String>>>,
 }
 
@@ -297,7 +295,7 @@ impl StreamableHttpTransport {
 			headers,
 			client,
 			url_policy,
-			request_id: Arc::new(Mutex::new(1)),
+			request_id: AtomicU64::new(1),
 			session_id: Arc::new(Mutex::new(None)),
 		})
 	}
@@ -354,12 +352,8 @@ impl McpTransport for StreamableHttpTransport {
 	async fn send(&self, mut request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError> {
 		parse_remote_mcp_url(&self.url, self.url_policy)?;
 
-		let expected_id = {
-			let mut id = self.request_id.lock().await;
-			request.id = *id;
-			*id += 1;
-			*id - 1
-		};
+		let expected_id = self.request_id.fetch_add(1, Ordering::Relaxed);
+		request.id = expected_id;
 
 		let mut req = self.client.post(&self.url);
 		for (key, value) in &self.headers {
@@ -424,16 +418,14 @@ impl McpTransport for StreamableHttpTransport {
 
 pub struct McpClient {
 	transport: Box<dyn McpTransport>,
-	server_name: String,
 }
 
 impl McpClient {
 	/// Create a new MCP client with stdio transport
-	pub async fn new_stdio(server_name: String, command: &str, args: &[String], env: &HashMap<String, String>) -> Result<Self, ToolError> {
+	pub async fn new_stdio(command: &str, args: &[String], env: &HashMap<String, String>) -> Result<Self, ToolError> {
 		let transport = StdioTransport::new(command, args, env).await?;
 		let client = Self {
 			transport: Box::new(transport),
-			server_name,
 		};
 		client.initialize().await?;
 		Ok(client)
@@ -445,12 +437,11 @@ impl McpClient {
 	/// pinned to the validated addresses, so later requests cannot be rebound
 	/// to a different IP by DNS. The connection is initialized before returning
 	/// so the client is ready to use.
-	pub async fn new_http(server_name: String, url: String, headers: HashMap<String, String>, url_policy: McpUrlPolicy) -> Result<Self, ToolError> {
+	pub async fn new_http(url: String, headers: HashMap<String, String>, url_policy: McpUrlPolicy) -> Result<Self, ToolError> {
 		let resolved_addrs = validate_and_resolve_remote_mcp_url(&url, url_policy).await?;
 		let transport = StreamableHttpTransport::new(url, headers, url_policy, &resolved_addrs)?;
 		let client = Self {
 			transport: Box::new(transport),
-			server_name,
 		};
 		client.initialize().await?;
 		Ok(client)
@@ -541,28 +532,6 @@ impl McpClient {
 
 	pub async fn close(&self) -> Result<(), ToolError> {
 		self.transport.close().await
-	}
-}
-
-pub struct McpExecutor {
-	client: Arc<McpClient>,
-	tool_name: String,
-}
-
-impl McpExecutor {
-	pub fn new(client: Arc<McpClient>, tool_name: String) -> Self {
-		Self { client, tool_name }
-	}
-}
-
-#[async_trait]
-impl ToolExecutor for McpExecutor {
-	async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-		self.client.call_tool(&self.tool_name, input).await
-	}
-
-	fn name(&self) -> &str {
-		&self.tool_name
 	}
 }
 

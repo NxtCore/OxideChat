@@ -6,23 +6,13 @@ mod tests {
 	use crate::utils::tools::mcp::{
 		McpUrlPolicy, is_public_ip, is_public_ipv6, is_remote_mcp_url_syntax_allowed, validate_and_resolve_remote_mcp_url, validate_remote_mcp_url,
 	};
+	use crate::tests::support::insert_user;
 	use sqlx::PgPool;
 	use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 	use uuid::Uuid;
 
 	async fn create_user(pool: &PgPool, suffix: &str) -> Uuid {
-		sqlx::query_scalar::<_, Uuid>(
-			r#"
-			INSERT INTO users (email, username, password_hash)
-			VALUES ($1, $2, 'hash')
-			RETURNING id
-			"#,
-		)
-		.bind(format!("{suffix}@example.com"))
-		.bind(format!("user_{suffix}"))
-		.fetch_one(pool)
-		.await
-		.unwrap()
+		insert_user(pool, &format!("user_{suffix}")).await.unwrap()
 	}
 
 	fn http_config(url: &str) -> serde_json::Value {
@@ -265,12 +255,12 @@ mod tests {
 		let pending = ClientToolPending::new();
 		let owner = Uuid::new_v4();
 		let other = Uuid::new_v4();
-		let rx = pending.register("call-1".to_string(), owner).await;
+		let mut call = pending.register("call-1".to_string(), owner).await;
 
 		assert!(!pending.resolve("call-1", other, serde_json::json!({"value": "bad"})).await);
 		assert!(pending.resolve("call-1", owner, serde_json::json!({"value": "ok"})).await);
 
-		let result = rx.await.unwrap();
+		let result = call.wait(std::time::Duration::from_secs(1)).await.unwrap();
 		assert_eq!(result["value"], "ok");
 	}
 }

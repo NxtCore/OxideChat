@@ -1,8 +1,7 @@
-use crate::types::{AnalyticsQuery, Budget, BudgetSubject, JobState, RequestContext, UsageEvent, UsageFilter};
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use crate::types::{AnalyticsQuery, AppError, AuthUser, Budget, BudgetSubject, JobState, UsageEvent, UsageFilter, json_ok};
 use axum::{
-	extract::{Extension, Query, State},
-	response::IntoResponse,
+	extract::{Query, State},
+	response::Response,
 };
 use std::sync::Arc;
 
@@ -13,58 +12,24 @@ use std::sync::Arc;
 /// # Errors
 ///
 /// Returns 401 if not authenticated.
-pub async fn get_me(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
-
-	match user.to_response(&state.db).await {
-		Ok(user_response) => ResponseBuilder::new(ResponseBody::Json(user_response)).build(),
-		Err(e) => {
-			eprintln!("[USERS] Failed to fetch roles for user {}: {e}", user.id);
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+pub async fn get_me(State(state): State<Arc<JobState>>, user: AuthUser) -> Result<Response, AppError> {
+	json_ok(user.to_response(&state.db).await?)
 }
 
-pub async fn get_my_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	match Budget::status_for(&state.db, BudgetSubject::user(user.id)).await {
-		Ok(status) => ResponseBuilder::new(ResponseBody::Json(status)).build(),
-		Err(e) => {
-			eprintln!("[USERS] Failed to fetch budget status for user {}: {e}", user.id);
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+pub async fn get_my_budget(State(state): State<Arc<JobState>>, user: AuthUser) -> Result<Response, AppError> {
+	json_ok(Budget::status_for(&state.db, BudgetSubject::user(user.id)).await?)
 }
 
-pub async fn get_my_analytics(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<AnalyticsQuery>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
+pub async fn get_my_analytics(State(state): State<Arc<JobState>>, user: AuthUser, Query(params): Query<AnalyticsQuery>) -> Result<Response, AppError> {
 	let group_by = params.group_by.as_deref().unwrap_or("model");
 	let filter = UsageFilter {
 		user_id: Some(user.id),
 		..UsageFilter::default()
 	};
 	if group_by == "day_model" {
-		return match UsageEvent::day_model_analytics(&state.db, params.from, params.to, filter).await {
-			Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
-			Err(e) => {
-				eprintln!("[ANALYTICS] Failed to load user day_model analytics: {e}");
-				ErrorBuilder::new(ErrorCode::DatabaseError).build()
-			}
-		};
+		let rows = UsageEvent::day_model_analytics(&state.db, params.from, params.to, filter).await.map_err(AppError::database)?;
+		return json_ok(rows);
 	}
-	match UsageEvent::analytics(&state.db, params.from, params.to, group_by, filter).await {
-		Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
-		Err(e) => {
-			eprintln!("[ANALYTICS] Failed to load user analytics: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+	let rows = UsageEvent::analytics(&state.db, params.from, params.to, group_by, filter).await.map_err(AppError::database)?;
+	json_ok(rows)
 }

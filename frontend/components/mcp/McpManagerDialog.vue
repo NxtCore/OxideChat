@@ -88,7 +88,6 @@ const emit = defineEmits<{(e: 'update:open', value: boolean): void; (e: 'changed
 
 const store = useMainStore();
 
-const apiBase = computed(() => (props.admin ? '/api/v1/admin/mcp-servers' : '/api/v1/mcp-servers'));
 const stdioAllowed = computed(() => store.base?.allow_server_stdio_mcp ?? false);
 
 const servers = ref<McpServer[]>([]);
@@ -123,8 +122,7 @@ watch(
 
 async function load() {
 	try {
-		const {$customFetch} = useNuxtApp();
-		const result = await $customFetch(apiBase.value);
+		const result = await mcpServers(props.admin);
 		servers.value = (result as McpServer[]) ?? [];
 	} catch (e) {
 		console.error('Failed to load MCP servers:', e);
@@ -188,12 +186,7 @@ async function save() {
 	saving.value = true;
 	const body = {name: form.name.trim(), transport: form.transport, connection_config: buildConnectionConfig()};
 	try {
-		const {$customFetch} = useNuxtApp();
-		if (editingId.value) {
-			await $customFetch(`${apiBase.value}/${editingId.value}`, {method: 'PUT', body});
-		} else {
-			await $customFetch(apiBase.value, {method: 'POST', body});
-		}
+		await saveMcpServer(props.admin, editingId.value ?? undefined, body);
 		await load();
 		emit('changed');
 		resetForm();
@@ -206,8 +199,7 @@ async function save() {
 
 async function toggleEnabled(server: McpServer, value: boolean) {
 	try {
-		const {$customFetch} = useNuxtApp();
-		await $customFetch(`${apiBase.value}/${server.id}`, {method: 'PUT', body: {is_enabled: value}});
+		await saveMcpServer(props.admin, server.id, {is_enabled: value});
 		await load();
 		emit('changed');
 	} catch (e) {
@@ -272,13 +264,10 @@ async function discoverLocally(server: McpServer): Promise<{name: string; descri
 async function discover(server: McpServer) {
 	busyId.value = server.id;
 	try {
-		const {$customFetch} = useNuxtApp();
-
 		if (props.admin) {
-			await $customFetch(`${apiBase.value}/${server.id}/discover`, {method: 'POST'});
+			await discoverMcpServer(true, server.id);
 		} else {
-			const tools = await discoverLocally(server);
-			await $customFetch(`${apiBase.value}/${server.id}/sync-tools`, {method: 'POST', body: {tools}});
+			await syncMcpTools(false, server.id, await discoverLocally(server));
 		}
 
 		await load();
@@ -292,8 +281,7 @@ async function discover(server: McpServer) {
 
 async function remove(server: McpServer) {
 	try {
-		const {$customFetch} = useNuxtApp();
-		await $customFetch(`${apiBase.value}/${server.id}`, {method: 'DELETE'});
+		await deleteMcpServer(props.admin, server.id);
 		if (editingId.value === server.id) resetForm();
 		await load();
 		emit('changed');

@@ -433,12 +433,12 @@ mod scope {
 	async fn budget_errors_render_as_openai_errors(pool: PgPool) -> TestResult {
 		crate::config::Config::init(&pool).await;
 		crate::i18n::I18n::init(&pool).await;
-		let response = crate::utils::openai_gateway::model_access_error_response(GatewayModelAccessError::BudgetExceeded, "budget provider/paid");
+		let response = crate::routes::gateway::model_access_error_response(GatewayModelAccessError::BudgetExceeded, "budget provider/paid");
 		assert_eq!(response.status().as_u16(), 429);
 		let body: serde_json::Value = serde_json::from_slice(&::axum::body::to_bytes(response.into_body(), 10000).await?)?;
 		assert_eq!(body["error"]["type"], "insufficient_quota");
 		assert_eq!(body["error"]["code"], "budget_exceeded");
-		let response = crate::utils::openai_gateway::model_access_error_response(GatewayModelAccessError::BudgetUnavailable, "budget provider/paid");
+		let response = crate::routes::gateway::model_access_error_response(GatewayModelAccessError::BudgetUnavailable, "budget provider/paid");
 		assert_eq!(response.status().as_u16(), 503);
 		Ok(())
 	}
@@ -446,6 +446,7 @@ mod scope {
 
 #[cfg(test)]
 mod keys {
+	use crate::tests::support::paged;
 	use super::support::*;
 	use crate::types::*;
 	use rust_decimal::Decimal;
@@ -469,7 +470,7 @@ mod keys {
 		assert_eq!((replaced.amount, replaced.interval.as_str()), (Decimal::from(7), "daily"));
 		let budgets: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM budgets").fetch_one(&pool).await?;
 		assert_eq!(budgets, 1);
-		assert_eq!(Budget::list(&pool, 1, 50, None).await?.items.len(), 0);
+		assert_eq!(Budget::list(&pool, &paged(1, 50), None).await?.items.len(), 0);
 		GatewayApiKey::clear_budget(&pool, &fixture.user_id, &fixture.key_id).await?;
 		assert!(GatewayApiKey::budget(&pool, &fixture.user_id, &fixture.key_id).await?.is_none());
 		let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM budgets").fetch_one(&pool).await?;

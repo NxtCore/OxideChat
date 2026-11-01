@@ -14,11 +14,7 @@ import type {
 	RequestLogFilters,
 	SetKeyBudgetPayload,
 } from '~/types/developer';
-
-interface Paginated<T> {
-	has_more: boolean;
-	items: T[];
-}
+import type {PaginatedResponse} from '~/types/chat';
 
 export const useDeveloperStore = defineStore('developer', {
 	state: () => ({
@@ -126,10 +122,10 @@ export const useDeveloperStore = defineStore('developer', {
 			const {$customFetch} = useNuxtApp();
 			await $customFetch(`/api/v1/developer/keys/${id}/budget`, {method: 'DELETE'});
 		},
-		async loadRequestLogs(filters: RequestLogFilters, page = 1, limit = 50): Promise<Paginated<DeveloperRequestLog>> {
+		async loadRequestLogs(filters: RequestLogFilters, page = 1, size = 50): Promise<PaginatedResponse<DeveloperRequestLog>> {
 			const {$customFetch} = useNuxtApp();
-			const params = Object.fromEntries(Object.entries({...filters, page, limit}).filter(([, value]) => value !== null && value !== undefined && value !== ''));
-			return (await $customFetch<Paginated<DeveloperRequestLog>>('/api/v1/developer/request-logs', {params})) ?? {has_more: false, items: []};
+			const params = Object.fromEntries(Object.entries({...filters, page, size}).filter(([, value]) => value !== null && value !== undefined && value !== ''));
+			return (await $customFetch<PaginatedResponse<DeveloperRequestLog>>('/api/v1/developer/request-logs', {params})) ?? {has_more: false, items: []};
 		},
 		async exportRequestLogs(filters: RequestLogFilters): Promise<DeveloperRequestLog[]> {
 			const {$customFetch} = useNuxtApp();

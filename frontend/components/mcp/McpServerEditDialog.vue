@@ -55,11 +55,9 @@ const props = defineProps<{open: boolean; server: McpServer | null; admin?: bool
 const emit = defineEmits<{(e: 'update:open', value: boolean): void; (e: 'changed'): void}>();
 
 const store = useMainStore();
-const {$customFetch} = useNuxtApp();
 
 const saving = ref(false);
 const stdioAllowed = computed(() => store.base?.allow_server_stdio_mcp ?? false);
-const apiBase = computed(() => (props.admin ? '/api/v1/admin/mcp-servers' : '/api/v1/mcp-servers'));
 
 const form = reactive({
 	name: '',
@@ -130,10 +128,7 @@ async function save() {
 	if (!props.server || !canSave.value) return;
 	saving.value = true;
 	try {
-		await $customFetch(`${apiBase.value}/${props.server.id}`, {
-			method: 'PUT',
-			body: {name: form.name.trim(), transport: form.transport, connection_config: buildConnectionConfig()},
-		});
+		await saveMcpServer(props.admin, props.server.id, {name: form.name.trim(), transport: form.transport, connection_config: buildConnectionConfig()});
 		emit('changed');
 		emit('update:open', false);
 	} catch (e: any) {
@@ -148,7 +143,7 @@ async function remove() {
 	if (!props.server) return;
 	saving.value = true;
 	try {
-		await $customFetch(`${apiBase.value}/${props.server.id}`, {method: 'DELETE'});
+		await deleteMcpServer(props.admin, props.server.id);
 		emit('changed');
 		emit('update:open', false);
 	} catch (e: any) {

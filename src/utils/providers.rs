@@ -11,7 +11,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Source-gateway tag stored on catalog rows for OpenRouter providers.
+/// Source-gateway tag stored on catalog rows for `OpenRouter` providers.
 const OPENROUTER_GATEWAY: &str = "openrouter";
 
 pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<SyncProviderResponse, String> {
@@ -36,14 +36,12 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 		catalog_provider_slug: None,
 	};
 
-	let engine_arc = OF_ENGINE.get().ok_or_else(|| "AI engine not initialized".to_string())?;
-	let engine = engine_arc.read().await;
+	let engine = OF_ENGINE.get().ok_or_else(|| "AI engine not initialized".to_string())?.load();
 	let engine_service = engine.service();
-	if engine_service.provider_manager().read().await.get_provider(&config.name).is_none() {
-		if let Err(e) = engine_service.register_provider(config.clone()).await {
+	if engine_service.provider_manager().read().await.get_provider(&config.name).is_none()
+		&& let Err(e) = engine_service.register_provider(config.clone()).await {
 			return Err(format!("Connection failed: {e}"));
 		}
-	}
 
 	let all_discovered = match engine_service.discover_models().await {
 		Ok(models) => models,
@@ -78,11 +76,10 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 
 	// Piggyback the gateway catalog sync on the existing provider sync (OpenRouter only).
 	// Failures here are non-fatal: runnable model sync already succeeded.
-	if provider.kind == ProviderKind::Openrouter {
-		if let Err(e) = sync_gateway_catalog(pool, provider).await {
+	if provider.kind == ProviderKind::Openrouter
+		&& let Err(e) = sync_gateway_catalog(pool, provider).await {
 			eprintln!("[AI] Warning: gateway catalog sync failed for {}: {e}", provider.name);
 		}
-	}
 
 	Ok(SyncProviderResponse {
 		success: true,
@@ -93,7 +90,7 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 	})
 }
 
-/// Sync the OpenRouter gateway catalog: upsert the public catalog, flag models the configured
+/// Sync the `OpenRouter` gateway catalog: upsert the public catalog, flag models the configured
 /// key cannot run as `USER_UNAVAILABLE`, prune rows absent from the public catalog, and relink
 /// `local_model_id` to runnable `models`.
 pub async fn sync_gateway_catalog(pool: &PgPool, provider: &Provider) -> Result<(), String> {
@@ -190,11 +187,11 @@ pub async fn sync_endpoint_options(pool: &PgPool, model_id: &Uuid) -> Result<(),
 			let latency_median = endpoint
 				.latency_last_30m
 				.as_ref()
-				.and_then(|p| p.p50.or_else(|| p.p75.or_else(|| p.p90.or_else(|| p.p99))));
+				.and_then(|p| p.p50.or_else(|| p.p75.or_else(|| p.p90.or(p.p99))));
 			let throughput_median = endpoint
 				.throughput_last_30m
 				.as_ref()
-				.and_then(|p| p.p50.or_else(|| p.p75.or_else(|| p.p90.or_else(|| p.p99))));
+				.and_then(|p| p.p50.or_else(|| p.p75.or_else(|| p.p90.or(p.p99))));
 			GatewayProviderOptionSyncInput {
 				provider_slug: endpoint.tag.clone(),
 				provider_name: endpoint.provider_name.clone(),

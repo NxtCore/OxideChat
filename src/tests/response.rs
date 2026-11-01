@@ -7,10 +7,10 @@ mod tests {
 	#[test]
 	fn error_code_status_mapping() {
 		assert_eq!(ErrorCode::BadRequest.status(), StatusCode::BAD_REQUEST);
-		assert_eq!(ErrorCode::Unauthorized.status(), StatusCode::UNAUTHORIZED);
+		assert_eq!(ErrorCode::NotAuthenticated.status(), StatusCode::UNAUTHORIZED);
 		assert_eq!(ErrorCode::Forbidden.status(), StatusCode::FORBIDDEN);
 		assert_eq!(ErrorCode::NotFound.status(), StatusCode::NOT_FOUND);
-		assert_eq!(ErrorCode::Conflict.status(), StatusCode::CONFLICT);
+		assert_eq!(ErrorCode::EmailTaken.status(), StatusCode::CONFLICT);
 		assert_eq!(ErrorCode::RateLimited.status(), StatusCode::TOO_MANY_REQUESTS);
 		assert_eq!(ErrorCode::InternalError.status(), StatusCode::INTERNAL_SERVER_ERROR);
 	}
@@ -52,5 +52,37 @@ mod tests {
 		};
 		let json = serde_json::to_string(&detail).unwrap();
 		assert!(json.contains("\"field\":\"email\""));
+	}
+}
+
+#[cfg(test)]
+mod app_error {
+	use crate::types::{AppError, GatewayAdminError, GatewayKeyError};
+	use crate::utils::response::ErrorCode;
+	use axum::{http::StatusCode, response::IntoResponse};
+
+	#[test]
+	fn code_variant_keeps_its_status() {
+		assert_eq!(AppError::from(ErrorCode::NotFound).into_response().status(), StatusCode::NOT_FOUND);
+		assert_eq!(AppError::from(ErrorCode::InsufficientPermissions).into_response().status(), StatusCode::FORBIDDEN);
+		assert_eq!(AppError::from(ErrorCode::NotAuthenticated).into_response().status(), StatusCode::UNAUTHORIZED);
+	}
+
+	#[test]
+	fn database_failure_is_a_server_error() {
+		let response = AppError::from(sqlx::Error::PoolTimedOut).into_response();
+		assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+	}
+
+	#[test]
+	fn gateway_errors_map_to_their_codes() {
+		assert_eq!(AppError::from(GatewayKeyError::NotFound).code(), ErrorCode::ApiKeyNotFound);
+		assert_eq!(AppError::from(GatewayAdminError::InvalidQuery).code(), ErrorCode::ValidationFailed);
+		assert_eq!(AppError::from(GatewayAdminError::Database(sqlx::Error::PoolTimedOut)).code(), ErrorCode::DatabaseError);
+	}
+
+	#[test]
+	fn non_database_error_is_not_a_unique_violation() {
+		assert!(!crate::types::is_unique_violation(&sqlx::Error::RowNotFound));
 	}
 }

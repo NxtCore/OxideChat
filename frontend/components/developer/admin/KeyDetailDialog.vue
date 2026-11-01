@@ -26,11 +26,11 @@
 					</div>
 					<div>
 						<p class="text-xs text-muted-foreground">{{ store.getTranslation('developer.admin.keys.expires') }}</p>
-						<p class="text-foreground">{{ formatDate(detail.key.expires_at) }}</p>
+						<p class="text-foreground">{{ formatDateTime(detail.key.expires_at) }}</p>
 					</div>
 					<div>
 						<p class="text-xs text-muted-foreground">{{ store.getTranslation('developer.admin.keys.last_used') }}</p>
-						<p class="text-foreground">{{ formatDate(detail.key.last_used_at) }}</p>
+						<p class="text-foreground">{{ formatDateTime(detail.key.last_used_at) }}</p>
 					</div>
 				</section>
 
@@ -90,7 +90,7 @@
 						<span class="shrink-0 text-xs" :class="log.status === 'error' ? 'text-destructive' : 'text-muted-foreground'">
 							{{ log.status_code ?? store.getTranslation(`developer.logs.status_${log.status}`) }}
 						</span>
-						<span class="shrink-0 text-xs text-muted-foreground">{{ formatDate(log.created_at) }}</span>
+						<span class="shrink-0 text-xs text-muted-foreground">{{ formatDateTime(log.created_at) }}</span>
 					</div>
 				</section>
 			</div>
@@ -102,7 +102,7 @@
 import {Loader2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useGatewayAdminStore} from '@/stores/gatewayAdminStore';
-import {errorMessage, formatMoney} from '~/utils/developer';
+import {formatMoney} from '~/utils/format';
 import type {DeveloperKeyRule} from '~/types/developer';
 import type {AdminKeyDetail, AdminRequestLog} from '~/types/gatewayAdmin';
 
@@ -113,11 +113,7 @@ const store = useMainStore();
 const admin = useGatewayAdminStore();
 const detail = ref<AdminKeyDetail | null>(null);
 const requests = ref<AdminRequestLog[]>([]);
-const loading = ref(false);
-
-function formatDate(value: string | null): string {
-	return value ? new Date(value).toLocaleString(store.base?.language ?? 'en') : '–';
-}
+const {loading, run} = useAsyncAction();
 
 function concurrency(value: number | null): string {
 	return value === null ? store.getTranslation('developer.admin.detail.no_cap') : store.getTranslation('developer.admin.detail.cap', {count: value});
@@ -136,19 +132,14 @@ watch(
 	() => props.open,
 	async value => {
 		if (!value || !props.keyId) return;
-		loading.value = true;
 		detail.value = null;
 		requests.value = [];
-		try {
+		const loaded = await run(async () => {
 			const [loaded, logs] = await Promise.all([admin.getKey(props.keyId), admin.keyRequests(props.keyId)]);
 			detail.value = loaded;
 			requests.value = logs.items;
-		} catch (e: any) {
-			store.toast(store.getTranslation('developer.admin.detail.load_error'), {type: 'error', description: errorMessage(e, '')});
-			emit('update:open', false);
-		} finally {
-			loading.value = false;
-		}
+		}, null, 'developer.admin.detail.load_error');
+		if (!loaded) emit('update:open', false);
 	}
 );
 </script>

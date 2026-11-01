@@ -1,6 +1,6 @@
-//! AI Engine module for OxideChat.
+//! AI Engine module for `OxideChat`.
 //!
-//! Manages the shared OmniferenceEngine instance and provides utilities
+//! Manages the shared `OmniferenceEngine` instance and provides utilities
 //! for AI provider operations through the SDK.
 //!
 //! Note: The embedded HTTP API (`/ai/*`) requires omniference to be on the same
@@ -10,9 +10,9 @@ use omniference::{
 	OmniferenceEngine,
 	types::{ProviderConfig, ProviderEndpoint},
 };
+use arc_swap::ArcSwap;
 use sqlx::PgPool;
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::RwLock;
 
 use crate::types::JobState;
 use crate::types::providers::Provider;
@@ -20,7 +20,7 @@ use crate::utils::encryption::decrypt_api_key;
 use crate::utils::omniference_cost::OxideCostQueue;
 
 /// Someone kill me for this name please
-pub static OF_ENGINE: std::sync::OnceLock<Arc<RwLock<OmniferenceEngine>>> = std::sync::OnceLock::new();
+pub static OF_ENGINE: std::sync::OnceLock<ArcSwap<OmniferenceEngine>> = std::sync::OnceLock::new();
 static OF_COST_QUEUE: std::sync::OnceLock<Arc<OxideCostQueue>> = std::sync::OnceLock::new();
 
 /// Initialize the AI engine with providers from the database
@@ -29,8 +29,7 @@ pub async fn init(state: &Arc<JobState>) {
 	let cost_sink = Arc::clone(OF_COST_QUEUE.get_or_init(|| OxideCostQueue::spawn(Arc::clone(state))));
 	let (engine, provider_count) = build_engine(pool, cost_sink).await;
 
-	let _ = OF_ENGINE.set(Arc::new(RwLock::new(engine)));
-	sync_pricing_overrides(pool).await;
+	let _ = OF_ENGINE.set(ArcSwap::from_pointee(engine));
 	println!("[AI] Engine initialized with {} system providers", provider_count);
 }
 
@@ -60,20 +59,9 @@ async fn build_engine(pool: &PgPool, cost_sink: Arc<OxideCostQueue>) -> (Omnifer
 
 /// Get the global AI engine
 #[must_use]
-pub fn get() -> Arc<RwLock<OmniferenceEngine>> {
-	OF_ENGINE.get().expect("AI engine not initialized").clone()
+pub fn get() -> Arc<OmniferenceEngine> {
+	OF_ENGINE.get().expect("AI engine not initialized").load_full()
 }
-
-/// Get the shared omniference catalog, if the engine is initialized.
-pub async fn catalog() -> Option<Arc<omniference::catalog::Catalog>> {
-	let engine = OF_ENGINE.get()?;
-	let guard = engine.read().await;
-	Some(guard.service().catalog().clone())
-}
-
-/// Pricing overrides are stored in the database and applied at usage-event
-/// accounting time — no catalog integration needed.
-pub async fn sync_pricing_overrides(_pool: &PgPool) {}
 
 /// Drains pending inference usage before application state is closed.
 pub async fn shutdown() {
@@ -92,8 +80,7 @@ pub async fn reload_providers(pool: &PgPool) {
 		return;
 	};
 	let (new_engine, provider_count) = build_engine(pool, cost_sink).await;
-	*engine_arc.write().await = new_engine;
-	sync_pricing_overrides(pool).await;
+	engine_arc.store(Arc::new(new_engine));
 	println!("[AI] Reloaded {} providers", provider_count);
 }
 

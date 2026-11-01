@@ -4,8 +4,9 @@ use super::{
 	BudgetAction, BudgetCheck, BudgetScope, BudgetSubject, EffectiveBudget, EffectiveBudgetResponse, TeamBudgetAssignmentOverviewResponse, TeamBudgetOverviewResponse, UpdateBudgetRequest, UserBudgetOverviewResponse,
 	UserBudgetStatus,
 };
-use crate::types::{AUDIT_TEAM_TARGET, BaseType, EVENT_TEAM_BUDGET_UPDATED, redact_metadata};
-use crate::types::axum::PaginatedResponse;
+use crate::logging::AuditLog;
+use crate::types::{AUDIT_TEAM_TARGET, AuditEntry, BaseType, EVENT_TEAM_BUDGET_UPDATED};
+use crate::types::{Page, PageQuery};
 use crate::types::models::ModelPricing;
 use chrono::{DateTime, Datelike, Duration, NaiveTime, TimeZone, Utc};
 use rust_decimal::Decimal;
@@ -126,8 +127,8 @@ impl Budget {
 		}
 	}
 
-	pub async fn list(pool: &PgPool, page: i64, size: i64, search: Option<&str>) -> Result<PaginatedResponse<BudgetResponse>, sqlx::Error> {
-		let pagination = Self::pagination(page, size);
+	pub async fn list(pool: &PgPool, page: &PageQuery, search: Option<&str>) -> Result<Page<BudgetResponse>, sqlx::Error> {
+		let pagination = Self::pagination(page);
 		let search = Self::search_pattern(search);
 		let rows = sqlx::query_as::<_, Budget>(
 			r#"
@@ -147,7 +148,7 @@ impl Budget {
 		.await?;
 		let has_more = rows.len() > pagination.page_size;
 		let items = rows.into_iter().take(pagination.page_size).map(BudgetResponse::from).collect();
-		Ok(PaginatedResponse { has_more, items })
+		Ok(Page { has_more, items })
 	}
 
 	pub async fn find_by_id(pool: &PgPool, id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
@@ -221,12 +222,6 @@ impl Budget {
 		Ok(())
 	}
 
-	pub async fn assign_to_team(&self, pool: &PgPool, team_id: &Uuid) -> Result<(), sqlx::Error> {
-		let mut tx = pool.begin().await?;
-		Self::assign_to_team_in(&mut tx, self.id, self.kind.as_str(), team_id).await?;
-		tx.commit().await
-	}
-
 	async fn assign_to_team_in(tx: &mut Transaction<'_, Postgres>, budget_id: Uuid, kind: &str, team_id: &Uuid) -> Result<(), sqlx::Error> {
 		let lock_key = Self::advisory_lock_key(kind, Some(team_id), None);
 		sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(lock_key).execute(&mut **tx).await?;
@@ -260,16 +255,14 @@ impl Budget {
 
 	async fn audit_team_budget(tx: &mut Transaction<'_, Postgres>, actor_id: &Uuid, team_id: &Uuid, before: &[Uuid]) -> Result<(), sqlx::Error> {
 		let after = Self::team_budget_ids(tx, team_id).await?;
-		let metadata = redact_metadata(&json!({ "before": { "budget_ids": before }, "after": { "budget_ids": after } }));
-		sqlx::query("INSERT INTO audit_logs (event, actor_id, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5)")
-			.bind(EVENT_TEAM_BUDGET_UPDATED)
-			.bind(actor_id)
-			.bind(AUDIT_TEAM_TARGET)
-			.bind(team_id)
-			.bind(metadata)
-			.execute(&mut **tx)
-			.await?;
-		Ok(())
+		let entry = AuditEntry {
+			event: EVENT_TEAM_BUDGET_UPDATED,
+			actor_id,
+			target_type: AUDIT_TEAM_TARGET,
+			target_id: team_id,
+			metadata: json!({ "before": { "budget_ids": before }, "after": { "budget_ids": after } }),
+		};
+		AuditLog::write(tx, entry).await
 	}
 
 	pub async fn assign_to_user(&self, pool: &PgPool, user_id: &Uuid) -> Result<(), sqlx::Error> {
@@ -322,24 +315,6 @@ impl Budget {
 		} else {
 			Ok(())
 		}
-	}
-
-	pub async fn unassign(pool: &PgPool, req: &BudgetAssignmentRequest) -> Result<(), sqlx::Error> {
-		if req.team_id.is_none() && req.user_id.is_none() {
-			return Ok(());
-		}
-		sqlx::query(
-			r#"
-			DELETE FROM budget_assignments
-			WHERE (($1::uuid IS NOT NULL AND team_id = $1)
-			    OR ($2::uuid IS NOT NULL AND user_id = $2))
-			"#,
-		)
-		.bind(req.team_id)
-		.bind(req.user_id)
-		.execute(pool)
-		.await?;
-		Ok(())
 	}
 
 	/// Deletes an assignment and audits it in the same transaction when it belonged to a team.
@@ -673,24 +648,6 @@ impl Budget {
 		}
 	}
 
-	pub async fn assignments(pool: &PgPool, budget_id: &Uuid) -> Result<Vec<EffectiveBudget>, sqlx::Error> {
-		let rows = sqlx::query_as::<_, EffectiveBudgetRow>(
-			r#"
-			SELECT b.id, b.name, b.description, b.amount, b.kind::text AS kind, b.interval::text AS interval,
-			       b.reset_strategy::text AS reset_strategy, b.on_exceed::text AS on_exceed, b.is_enabled, b.created_at, b.updated_at,
-			       ba.id AS assignment_id, ba.team_id, ba.user_id, ba.api_key_id, ba.assigned_at
-			FROM budget_assignments ba
-			JOIN budgets b ON b.id = ba.budget_id
-			WHERE b.id = $1
-			ORDER BY ba.assigned_at DESC
-			"#,
-		)
-		.bind(budget_id)
-		.fetch_all(pool)
-		.await?;
-		Ok(rows.into_iter().map(Self::budget_from_row).collect())
-	}
-
 	pub async fn user_overview(pool: &PgPool) -> Result<Vec<UserBudgetOverviewResponse>, sqlx::Error> {
 		let users = sqlx::query_as::<_, BudgetUserRow>(
 			r#"
@@ -840,21 +797,7 @@ impl Budget {
 		Ok(map)
 	}
 
-	async fn teams_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<BudgetTeamSummaryResponse>, sqlx::Error> {
-		sqlx::query_as::<_, BudgetTeamSummaryResponse>(
-			r#"
-			SELECT t.id, t.name, t.is_default
-			FROM teams t
-			JOIN team_members tm ON tm.team_id = t.id
-			WHERE tm.user_id = $1
-			ORDER BY t.is_default DESC, t.name ASC
-			"#,
-		)
-		.bind(user_id)
-		.fetch_all(pool)
-		.await
-	}
-
+	#[allow(clippy::too_many_lines)]
 	pub async fn team_overview(pool: &PgPool) -> Result<Vec<TeamBudgetOverviewResponse>, sqlx::Error> {
 		let rows = sqlx::query_as::<_, TeamBudgetRow>(
 			r#"
@@ -914,7 +857,7 @@ impl Budget {
 		}
 		let member_spent = Self::batch_team_member_spent(pool, &effective_budgets, &window_starts).await?;
 		let mut overview = Vec::<TeamBudgetOverviewResponse>::new();
-		for (index, (row, effective)) in rows.into_iter().zip(effective_budgets.into_iter()).enumerate() {
+		for (index, (row, effective)) in rows.into_iter().zip(effective_budgets).enumerate() {
 			let window_start = window_starts[index];
 			let resets_at = resets_at_vec[index];
 			let per_member_spends: Vec<Decimal> = member_spent
@@ -1028,49 +971,6 @@ impl Budget {
 			map.entry(row.assignment_id).or_default().insert(row.member_user_id, row.spent);
 		}
 		Ok(map)
-	}
-
-	async fn team_window(pool: &PgPool, budget: &EffectiveBudget) -> Result<(DateTime<Utc>, Option<DateTime<Utc>>), sqlx::Error> {
-		let (window_start, resets_at) = Self::window(budget);
-		let reset_at = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
-			r#"
-			SELECT MAX(reset_at)
-			FROM budget_reset_events
-			WHERE (assignment_id = $1 AND user_id IS NULL)
-			   OR budget_id = $2
-			   OR (team_id = $3 AND (kind IS NULL OR kind::text = $4))
-			"#,
-		)
-		.bind(budget.assignment_id)
-		.bind(budget.budget.id)
-		.bind(budget.team_id)
-		.bind(budget.budget.kind.as_str())
-		.fetch_one(pool)
-		.await?;
-		let window_start = reset_at.filter(|reset| *reset > window_start).unwrap_or(window_start);
-		Ok((window_start, resets_at))
-	}
-
-	async fn team_assignment_spent(pool: &PgPool, team_id: Uuid, window_start: DateTime<Utc>) -> Result<Decimal, sqlx::Error> {
-		let spent = sqlx::query_scalar::<_, Decimal>(
-			r#"
-			SELECT COALESCE(SUM(ue.cost_total), 0)::numeric
-			FROM usage_events ue
-			WHERE ue.created_at >= $1
-			  AND (
-			      (ue.user_id IS NULL AND ue.team_id = $2)
-			      OR EXISTS (
-			          SELECT 1 FROM team_members tm
-			          WHERE tm.team_id = $2 AND tm.user_id = ue.user_id
-			      )
-			  )
-			"#,
-		)
-		.bind(window_start)
-		.bind(team_id)
-		.fetch_one(pool)
-		.await?;
-		Ok(spent)
 	}
 
 	pub async fn reset(pool: &PgPool, req: &BudgetResetRequest, created_by: &Uuid) -> Result<BudgetResetEventResponse, sqlx::Error> {

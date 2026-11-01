@@ -6,7 +6,6 @@ use uuid::Uuid;
 #[derive(Debug, Clone, FromRow)]
 pub(super) struct WorkspaceWithCount {
 	pub id: Uuid,
-	pub user_id: Uuid,
 	pub name: String,
 	pub icon: Option<String>,
 	pub color: Option<String>,

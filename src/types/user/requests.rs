@@ -3,8 +3,6 @@ use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct ListUsersQuery {
-	pub page: Option<i64>,
-	pub per_page: Option<i64>,
 	pub search: Option<String>,
 	pub role: Option<String>,
 	pub team_id: Option<Uuid>,

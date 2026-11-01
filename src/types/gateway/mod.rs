@@ -12,6 +12,7 @@ mod repository;
 
 pub(crate) use body::ReservedBody;
 pub use admin::*;
+pub use estimate::GatewayEstimate;
 pub use keys::*;
 pub use limiter::*;
 pub use policy::*;

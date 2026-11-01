@@ -124,6 +124,6 @@ async function handleRegister() {
 
 function handleOauthRegister(provider: string) {
 	// Redirect to backend OAuth init endpoint - OAuth handles both login and register
-	window.location.href = `/api/v1/auth/oauth/${provider}`;
+	window.location.href = oauthUrl(provider);
 }
 </script>

@@ -3,23 +3,23 @@
 		<PopoverTrigger as-child>
 			<button :class="cn('flex items-center gap-2 px-2 py-1 rounded-md hover:bg-accent transition-colors', props.class)">
 				<img
-					v-if="chatStore.selectedModel?.icon"
-					:src="chatStore.selectedModel?.icon"
+					v-if="modelStore.selectedModel?.icon"
+					:src="modelStore.selectedModel?.icon"
 					class="h-4 w-4 mt-0.5 flex items-center justify-center rounded-md bg-muted overflow-hidden"
 				/>
 				<div
-					v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.type === 'svg'"
+					v-else-if="iconStore.getProviderIcon(modelStore.selectedModel?.provider.name, modelStore.selectedModel?.model_id)?.type === 'svg'"
 					class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
-					v-html="providerIconHtml(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)"
+					v-html="providerIconHtml(modelStore.selectedModel?.provider.name, modelStore.selectedModel?.model_id)"
 				/>
 				<div
-					v-else-if="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.type === 'png'"
+					v-else-if="iconStore.getProviderIcon(modelStore.selectedModel?.provider.name, modelStore.selectedModel?.model_id)?.type === 'png'"
 					class="h-4 w-4 flex items-center justify-center"
 				>
-					<img :src="iconStore.getProviderIcon(chatStore.selectedModel?.provider.name, chatStore.selectedModel?.model_id)?.icon" alt="Provider icon" />
+					<img :src="iconStore.getProviderIcon(modelStore.selectedModel?.provider.name, modelStore.selectedModel?.model_id)?.icon" alt="Provider icon" />
 				</div>
 				<span class="max-w-37.5 truncate text-xs font-medium">
-					{{ chatStore.selectedModel?.display_name || store.getTranslation('chat.model_selector.select_model') }}
+					{{ modelStore.selectedModel?.display_name || store.getTranslation('chat.model_selector.select_model') }}
 				</span>
 				<ChevronDown class="h-3 w-3 text-muted-foreground" />
 			</button>
@@ -104,7 +104,7 @@
 													<p>{{ store.getTranslation('chat.model_selector.tool_calling') }}</p>
 												</TooltipContent>
 											</Tooltip>
-											<Tooltip v-if="chatStore.hasReasoningCapability(model)">
+											<Tooltip v-if="modelStore.hasReasoningCapability(model)">
 												<TooltipTrigger as-child>
 													<button class="p-1 text-muted-foreground">
 														<Sparkles class="h-4 w-4" />
@@ -114,7 +114,7 @@
 													<p>{{ store.getTranslation('chat.model_selector.reasoning_capable') }}</p>
 												</TooltipContent>
 											</Tooltip>
-											<Tooltip v-if="chatStore.hasVisionCapability(model)">
+											<Tooltip v-if="modelStore.hasVisionCapability(model)">
 												<TooltipTrigger as-child>
 													<button class="p-1 text-muted-foreground">
 														<Eye class="h-4 w-4" />
@@ -139,7 +139,7 @@
 										<Tooltip>
 											<TooltipTrigger as-child>
 												<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleFavorite(model)">
-													<Star v-if="chatStore.isFavoriteModel(model)" class="h-4 w-4 fill-primary stroke-primary" />
+													<Star v-if="modelStore.isFavoriteModel(model)" class="h-4 w-4 fill-primary stroke-primary" />
 													<Star v-else class="h-4 w-4" />
 												</button>
 											</TooltipTrigger>
@@ -202,6 +202,8 @@
 import {Bot, Star, Bookmark, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2} from 'lucide-vue-next';
 import type {ModelList, UpdatePreferencesRequest} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
+import {useModelStore} from '~/stores/modelStore';
+import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useMainStore} from '~/stores';
 import {useModelPicker} from '~/composables/useModelPicker';
 import {sanitizeSvg} from '~/composables/useMarkdown';
@@ -214,6 +216,8 @@ const props = defineProps<{
 }>();
 
 const chatStore = useChatStore();
+const modelStore = useModelStore();
+const preferencesStore = usePreferencesStore();
 const iconStore = useIconsStore();
 const store = useMainStore();
 
@@ -291,7 +295,7 @@ function selectModel(model: ModelList) {
 		store.toast(store.getTranslation('settings.budgets.reached'), {type: 'warning'});
 		return;
 	}
-	chatStore.setSelectedModel(model);
+	modelStore.setSelectedModel(model);
 	isOpen.value = false;
 }
 
@@ -299,7 +303,7 @@ function toggleFavorite(model: ModelList) {
 	const newVal = !model.is_favorite;
 	const idx = pickerModels.value.findIndex(m => m.id === model.id);
 	if (idx !== -1) pickerModels.value[idx] = {...pickerModels.value[idx], is_favorite: newVal};
-	chatStore.toggleFavoriteModel(model.id);
+	modelStore.toggleFavoriteModel(model.id);
 }
 
 function isDefaultModel(model: ModelList): boolean {
@@ -319,8 +323,7 @@ async function toggleDefault(model: ModelList) {
 			let available = false;
 			let checkedAvailability = false;
 			try {
-				const {$customFetch} = useNuxtApp();
-				const res = await $customFetch<{options?: {provider_slug: string | null}[]}>(`/api/v1/models/${model.id}/provider-options`);
+				const res = await modelProviderOptions<{options?: {provider_slug: string | null}[]}>(model.id);
 				available = (res.options ?? []).some(o => (o.provider_slug ?? '') === currentProviderSlug);
 				checkedAvailability = true;
 			} catch (e) {
@@ -332,7 +335,7 @@ async function toggleDefault(model: ModelList) {
 		}
 	}
 
-	await chatStore.updatePreferences(update);
+	await preferencesStore.updatePreferences(update);
 }
 
 </script>

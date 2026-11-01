@@ -9,7 +9,7 @@ pub mod support {
 	use std::sync::Arc;
 	use uuid::Uuid;
 
-	pub type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+	pub use crate::tests::support::{TestResult, insert_user};
 
 	pub fn request() -> GatewayAdmissionRequest {
 		GatewayAdmissionRequest {
@@ -61,11 +61,7 @@ pub mod support {
 	}
 
 	pub async fn create_user(pool: &PgPool) -> TestResult<Uuid> {
-		Ok(
-			sqlx::query_scalar("INSERT INTO users (email, username, password_hash) VALUES ('gateway@example.com', 'gateway', 'hash') RETURNING id")
-				.fetch_one(pool)
-				.await?,
-		)
+		Ok(insert_user(pool, "gateway").await?)
 	}
 
 	pub async fn create_key(pool: &PgPool, user_id: Uuid, team_id: Uuid, scopes: serde_json::Value) -> TestResult<(Uuid, String)> {
@@ -1019,7 +1015,7 @@ mod skins {
 
 			#[cfg(test)]
 			mod pre_auth_limit {
-				use crate::utils::openai_gateway::bearer_token_prefix;
+				use crate::routes::gateway::bearer_token_prefix;
 				use axum::body::Body;
 				use axum::http::Request;
 

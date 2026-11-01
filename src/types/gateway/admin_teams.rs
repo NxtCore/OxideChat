@@ -7,7 +7,7 @@ use super::{
 	SetGatewayTeamAccessRequest, SetGatewayTeamLimitsRequest, normalize_reason,
 };
 use crate::types::BaseType;
-use crate::types::axum::PaginatedResponse;
+use crate::types::{Page, PageQuery};
 use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -82,8 +82,8 @@ impl GatewayAdminTeamResponse {
 	/// # Errors
 	///
 	/// Returns an error when teams, rules or keys cannot be queried.
-	pub async fn list(pool: &PgPool, query: &GatewayAdminTeamQuery) -> Result<PaginatedResponse<Self>, sqlx::Error> {
-		let pagination = Self::pagination(query.page.unwrap_or(1), query.size.unwrap_or(0));
+	pub async fn list(pool: &PgPool, query: &GatewayAdminTeamQuery, page: &PageQuery) -> Result<Page<Self>, sqlx::Error> {
+		let pagination = Self::pagination(page);
 		let pattern = query
 			.search
 			.as_deref()
@@ -107,7 +107,7 @@ impl GatewayAdminTeamResponse {
 				assemble(row, team_rules)
 			})
 			.collect();
-		Ok(PaginatedResponse { has_more, items })
+		Ok(Page { has_more, items })
 	}
 
 	/// Finds one team with its gateway switches and limits.

@@ -17,6 +17,7 @@ pub struct GatewayCatalogModelResponse {
 
 /// A single provider endpoint option for a runnable model.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProviderOption"))]
 pub struct GatewayProviderOption {
 	pub id: Uuid,
 	pub provider_slug: Option<String>,
@@ -36,6 +37,7 @@ pub struct GatewayProviderOption {
 /// Provider options for a runnable model, plus the parent catalog availability that drives
 /// row render state. `availability_state` is `None` when the model has no linked catalog row.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProviderOptionsResponse"))]
 pub struct ModelProviderOptions {
 	pub gateway_model_id: Option<String>,
 	pub availability_state: Option<AvailabilityState>,

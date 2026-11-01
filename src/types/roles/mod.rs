@@ -8,6 +8,7 @@ mod repository;
 mod rows;
 
 #[derive(Debug, Serialize, FromRow)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Role {
 	pub id: Uuid,
 	pub name: String,

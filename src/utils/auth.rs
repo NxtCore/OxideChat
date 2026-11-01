@@ -7,10 +7,14 @@ use sqlx::postgres::PgPool;
 use tower_cookies::{Cookie, Cookies, cookie::SameSite};
 use uuid::Uuid;
 
-use crate::{
-	routes::public::auth::{MAX_PASSWORD_LENGTH, MAX_USERNAME_LENGTH, MIN_PASSWORD_LENGTH, MIN_USERNAME_LENGTH, SESSION_COOKIE_NAME, SESSION_DURATION_DAYS},
-	utils::response::ErrorCode,
-};
+use crate::{types::User, utils::response::ErrorCode};
+
+pub const SESSION_COOKIE_NAME: &str = "oxidechat_session";
+pub const SESSION_DURATION_DAYS: i64 = 7;
+pub const MIN_PASSWORD_LENGTH: usize = 8;
+pub const MAX_PASSWORD_LENGTH: usize = 128;
+pub const MAX_USERNAME_LENGTH: usize = 32;
+pub const MIN_USERNAME_LENGTH: usize = 3;
 
 const ARGON2_MEMORY_KIB: u32 = 65536;
 const ARGON2_ITERATIONS: u32 = 3;
@@ -69,12 +73,7 @@ pub async fn create_session(pool: &PgPool, cookies: &Cookies, user_id: &Uuid) ->
 	let session_id = Uuid::new_v4();
 	let expires_at = Utc::now() + Duration::days(SESSION_DURATION_DAYS);
 
-	sqlx::query("INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)")
-		.bind(session_id)
-		.bind(user_id)
-		.bind(expires_at)
-		.execute(pool)
-		.await?;
+	User::insert_session(pool, session_id, user_id, expires_at).await?;
 
 	let mut cookie = Cookie::new(SESSION_COOKIE_NAME, session_id.to_string());
 	cookie.set_path("/");
@@ -131,10 +130,10 @@ pub fn validate_password(password: &str) -> Result<(), ErrorCode> {
 	if password.len() > MAX_PASSWORD_LENGTH {
 		return Err(ErrorCode::PasswordTooLong);
 	}
-	if !password.chars().any(|c| c.is_uppercase()) {
+	if !password.chars().any(char::is_uppercase) {
 		return Err(ErrorCode::PasswordNoUppercase);
 	}
-	if !password.chars().any(|c| c.is_lowercase()) {
+	if !password.chars().any(char::is_lowercase) {
 		return Err(ErrorCode::PasswordNoLowercase);
 	}
 	if !password.chars().any(|c| c.is_ascii_digit()) {
@@ -144,4 +143,11 @@ pub fn validate_password(password: &str) -> Result<(), ErrorCode> {
 		return Err(ErrorCode::PasswordNoSpecial);
 	}
 	Ok(())
+}
+
+/// Get the current user from the session cookie.
+pub async fn get_current_user(pool: &PgPool, cookies: &Cookies) -> Option<User> {
+	let session_cookie = cookies.get(SESSION_COOKIE_NAME)?;
+	let session_id = Uuid::parse_str(session_cookie.value()).ok()?;
+	User::find_by_session(pool, &session_id).await.ok()?
 }

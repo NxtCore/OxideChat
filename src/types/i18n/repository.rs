@@ -32,11 +32,4 @@ impl Translation {
 		let result = sqlx::query("DELETE FROM i18n_translations WHERE id = $1").bind(id).execute(pool).await?;
 		Ok(result.rows_affected() > 0)
 	}
-
-	pub async fn find_by_language(pool: &sqlx::PgPool, language: &str) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, Translation>("SELECT * FROM i18n_translations WHERE language = $1 ORDER BY key_path")
-			.bind(language)
-			.fetch_all(pool)
-			.await
-	}
 }

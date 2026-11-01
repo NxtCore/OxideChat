@@ -156,7 +156,7 @@
 				</thead>
 				<tbody>
 					<tr v-for="log in logs" :key="log.id" class="border-b border-border/60 last:border-b-0">
-						<td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(log.created_at) }}</td>
+						<td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDateTime(log.created_at) }}</td>
 						<td class="whitespace-nowrap px-4 py-3">
 							<button
 								v-if="log.request_id"
@@ -217,7 +217,7 @@
 import {AlertTriangle, Copy, Download, FileJson, RefreshCw, ScrollText} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useDeveloperStore} from '@/stores/developerStore';
-import {downloadFile, errorMessage, formatLatency, formatMoney, requestLogsCsv} from '~/utils/developer';
+import {downloadFile, formatLatency, requestLogsCsv} from '~/utils/developer';
 import {REQUEST_LOG_ERROR_CATEGORIES} from '~/types/developer';
 import type {DeveloperRequestLog, RequestLogErrorCategory, RequestLogFilters, RequestLogStatus} from '~/types/developer';
 
@@ -279,10 +279,6 @@ async function copyRequestId(id: string) {
 	} catch {
 		store.toast(store.getTranslation('developer.logs.request_id_copy_error'), {type: 'error'});
 	}
-}
-
-function formatDate(value: string) {
-	return value ? new Date(value).toLocaleString(store.base?.language ?? 'en') : '';
 }
 
 async function load() {

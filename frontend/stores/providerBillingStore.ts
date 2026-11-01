@@ -1,11 +1,11 @@
 import {defineStore} from 'pinia';
+import type {AsyncState} from '~/composables/useAsyncAction';
 import type {ProviderBillingOverview, UpdateProviderBillingPayload} from '~/types/providers';
 
 export const useProviderBillingStore = defineStore('providerBilling', {
 	state: () => ({
 		overviews: {} as Record<string, ProviderBillingOverview>,
-		loading: {} as Record<string, boolean>,
-		errors: {} as Record<string, string | null>,
+		states: {} as Record<string, AsyncState>,
 		listLoading: false,
 	}),
 	actions: {
@@ -33,18 +33,10 @@ export const useProviderBillingStore = defineStore('providerBilling', {
 			return this.run(providerId, () => useNuxtApp().$customFetch<ProviderBillingOverview>(`/api/v1/admin/providers/${providerId}/billing/refresh`, {method: 'POST'}));
 		},
 		async run(providerId: string, action: () => Promise<any>, storeResult = true) {
-			this.loading[providerId] = true;
-			this.errors[providerId] = null;
-			try {
-				const result = await action();
-				if (storeResult && result) this.overviews[providerId] = result;
-				return result;
-			} catch (error: any) {
-				this.errors[providerId] = error?.message ?? String(error);
-				throw error;
-			} finally {
-				this.loading[providerId] = false;
-			}
+			this.states[providerId] ??= {loading: false, error: null};
+			const result = await trackAsync(this.states[providerId], action);
+			if (storeResult && result) this.overviews[providerId] = result;
+			return result;
 		},
 	},
 });

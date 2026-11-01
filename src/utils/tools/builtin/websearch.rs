@@ -318,7 +318,7 @@ impl WebsearchExecutor {
 impl ToolExecutor for WebsearchExecutor {
 	async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
 		let function = match ctx.function_name.as_deref() {
-			Some("search") | Some("websearch") | None => "search",
+			Some("search" | "websearch") | None => "search",
 			Some("crawl") => "crawl",
 			Some(other) => return Err(ToolError::ExecutionFailed(format!("Unknown function: {}", other))),
 		};
@@ -350,51 +350,4 @@ impl ToolExecutor for WebsearchExecutor {
 			}
 		}
 	}
-
-	fn name(&self) -> &str {
-		"websearch"
-	}
-}
-
-/// Get the websearch tool input schema
-#[must_use]
-pub fn input_schema() -> Value {
-	json!({
-		"type": "object",
-		"properties": {
-			"query": {
-				"type": "string",
-				"description": "The search query"
-			},
-			"num_results": {
-				"type": "integer",
-				"description": "Number of results to return (default: 10)",
-				"default": 10,
-				"minimum": 1,
-				"maximum": 20
-			}
-		},
-		"required": ["query"]
-	})
-}
-
-/// Get the websearch tool settings schema
-#[must_use]
-pub fn settings_schema() -> Value {
-	json!({
-		"type": "object",
-		"required": ["api_key", "provider"],
-		"properties": {
-			"api_key": {
-				"type": "string",
-				"secret": true,
-				"description": "Get your API key from the specified provider"
-			},
-			"provider": {
-				"type": "string",
-				"enum": ["exa", "tavily"],
-				"description": "Web search provider to use"
-			}
-		}
-	})
 }

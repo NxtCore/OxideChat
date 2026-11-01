@@ -4,16 +4,15 @@
 
 use crate::i18n::I18n;
 use crate::logging::{AuditLog, EntityType, LogEvent};
-use crate::types::JobState;
-use crate::types::{RequestContext, Translation, TranslationsResponse, UpsertTranslationRequest};
-
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use crate::types::{AppError, AuthUser, JobState, Translation, TranslationsResponse, UpsertTranslationRequest, json_ok};
+use crate::utils::response::ErrorCode;
 use axum::{
 	Json,
-	extract::{Extension, Path, State},
-	response::IntoResponse,
+	extract::{Path, State},
+	response::Response,
 };
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub const ADMIN_I18N_VIEW: &str = "admin.i18n.view";
 pub const ADMIN_I18N_EDIT: &str = "admin.i18n.edit";
@@ -21,74 +20,40 @@ pub const ADMIN_I18N_EDIT: &str = "admin.i18n.edit";
 /// GET /api/v1/admin/i18n
 ///
 /// List all translations.
-pub async fn list_translations(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
-
-	if !user.has_permission(&state.db, ADMIN_I18N_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+pub async fn list_translations(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_I18N_VIEW).await?;
 
 	let translations = Translation::list_all(&state.db).await.unwrap_or_default();
-
-	ResponseBuilder::new(ResponseBody::Json(TranslationsResponse { translations })).build()
+	json_ok(TranslationsResponse { translations })
 }
 
 /// PUT /api/v1/admin/i18n/translations
 ///
 /// Create or update a translation. Reloads translations after change.
-pub async fn upsert_translation(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(payload): Json<UpsertTranslationRequest>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn upsert_translation(State(state): State<Arc<JobState>>, auth: AuthUser, Json(payload): Json<UpsertTranslationRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_I18N_EDIT).await?;
 
-	if !user.has_permission(&state.db, ADMIN_I18N_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	let result = Translation::upsert(&state.db, &payload.language, &payload.key_path, &payload.value, payload.is_override).await;
-
-	match result {
-		Ok(id) => {
-			I18n::get().reload(&state.db).await;
-			AuditLog::log(&state.db, LogEvent::TranslationUpdated, None, Some(EntityType::Translation), Some(id));
-			ResponseBuilder::new(ResponseBody::Json(serde_json::json!({ "id": id, "success": true }))).build()
-		}
-		Err(e) => {
-			eprintln!("[I18N] Failed to upsert translation: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+	let id = Translation::upsert(&state.db, &payload.language, &payload.key_path, &payload.value, payload.is_override)
+		.await
+		.map_err(AppError::database)?;
+	I18n::get().reload(&state.db).await;
+	AuditLog::log(&state.db, LogEvent::TranslationUpdated, None, Some(EntityType::Translation), Some(id));
+	json_ok(serde_json::json!({ "id": id, "success": true }))
 }
 
 /// DELETE /api/v1/admin/i18n/translations/:id
 ///
 /// Delete a translation by ID. Reloads translations after change.
-pub async fn delete_translation(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<sqlx::types::Uuid>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn delete_translation(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_I18N_EDIT).await?;
 
-	if !user.has_permission(&state.db, ADMIN_I18N_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	let deleted = Translation::delete(&state.db, &id)
+		.await
+		.map_err(AppError::database)?;
+	if !deleted {
+		return Err(ErrorCode::TranslationNotFound.into());
 	}
-
-	let result = Translation::delete(&state.db, &id).await;
-
-	match result {
-		Ok(true) => {
-			I18n::get().reload(&state.db).await;
-			AuditLog::log(&state.db, LogEvent::TranslationDeleted, None, Some(EntityType::Translation), Some(id));
-			ResponseBuilder::new(ResponseBody::Json(serde_json::json!({ "success": true }))).build()
-		}
-		Ok(false) => ErrorBuilder::new(ErrorCode::TranslationNotFound).build(),
-		Err(e) => {
-			eprintln!("[I18N] Failed to delete translation: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+	I18n::get().reload(&state.db).await;
+	AuditLog::log(&state.db, LogEvent::TranslationDeleted, None, Some(EntityType::Translation), Some(id));
+	json_ok(serde_json::json!({ "success": true }))
 }

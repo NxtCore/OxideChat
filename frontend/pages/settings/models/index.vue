@@ -72,9 +72,8 @@ import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
 import {sanitizeSvg} from '@/composables/useMarkdown';
 import {useNuxtApp} from '#app';
-import type {ModelListAdmin, PaginatedResponse} from '~/types/chat';
+import type {ModelListAdmin} from '~/types/chat';
 
-const {$customFetch} = useNuxtApp();
 
 const store = useMainStore();
 const iconStore = useIconsStore();
@@ -106,12 +105,7 @@ watch(page, (newVal, oldVal) => {
 async function loadModels() {
 	loading.value = true;
 	try {
-		const query = new URLSearchParams({
-			page: page.value.toString(),
-			size: size.value.toString(),
-			query: search.value,
-		});
-		const res = await $customFetch<PaginatedResponse<ModelListAdmin>>('/api/v1/admin/models?' + query.toString());
+		const res = await adminModels({page: page.value.toString(), size: size.value.toString(), query: search.value});
 		if (res) {
 			hasMore.value = res.has_more;
 			models.value = res.items;

@@ -1,17 +1,17 @@
 <template>
 	<div v-if="!isTokenBudget" class="space-y-2">
-		<ShadSelect v-model="effortLevel" @update:modelValue="handleEffortChange" :disabled="chatStore.isReasoningRequired">
+		<ShadSelect v-model="effortLevel" @update:modelValue="handleEffortChange" :disabled="modelStore.isReasoningRequired">
 			<ShadSelectTrigger
 				:class="
 					cn(
 						'w-auto',
 						props.class,
-						chatStore.reasoningEffort && chatStore.reasoningEffort !== 'none' ? 'text-primary border-primary/50' : 'text-muted-foreground'
+						modelStore.reasoningEffort && modelStore.reasoningEffort !== 'none' ? 'text-primary border-primary/50' : 'text-muted-foreground'
 					)
 				"
 			>
 				<Brain class="h-4 w-4" />
-				<span v-if="chatStore.reasoningEffort && chatStore.reasoningEffort !== 'none'" class="text-xs font-medium">
+				<span v-if="modelStore.reasoningEffort && modelStore.reasoningEffort !== 'none'" class="text-xs font-medium">
 					{{ displayLabel }}
 				</span>
 			</ShadSelectTrigger>
@@ -88,7 +88,7 @@
 
 <script setup lang="ts">
 import {Brain} from 'lucide-vue-next';
-import {useChatStore} from '~/stores/chatStore';
+import {useModelStore} from '~/stores/modelStore';
 import {useMainStore} from '~/stores';
 import {cn} from '~/lib/utils';
 import {Popover, PopoverTrigger, PopoverContent} from '~/components/ui/popover';
@@ -100,7 +100,7 @@ const props = defineProps<{
 	class?: string;
 }>();
 
-const chatStore = useChatStore();
+const modelStore = useModelStore();
 
 const effortLevel = ref('');
 const tokenBudget = ref<number | undefined>(undefined);
@@ -114,12 +114,12 @@ const sliderValue = computed({
 });
 
 const isTokenBudget = computed(() => {
-	const capabilities = chatStore.selectedModel?.capabilities || [];
+	const capabilities = modelStore.selectedModel?.capabilities || [];
 	return capabilities.some(cap => cap.startsWith('REASONING_BUDGET_TOKENS_'));
 });
 
 const availableEffortLevels = computed(() => {
-	const capabilities = chatStore.selectedModel?.capabilities || [];
+	const capabilities = modelStore.selectedModel?.capabilities || [];
 	const efforts = ['NONE', 'MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH'];
 	return efforts.filter(effort => capabilities.includes(`REASONING_EFFORT_${effort}`));
 });
@@ -146,7 +146,7 @@ const effortLabels = computed(() => {
 });
 
 const tokenBudgetRange = computed(() => {
-	const capabilities = chatStore.selectedModel?.capabilities || [];
+	const capabilities = modelStore.selectedModel?.capabilities || [];
 
 	for (const cap of capabilities) {
 		const match = cap.match(/REASONING_BUDGET_TOKENS_(\d+)_(\d+)/);
@@ -188,7 +188,7 @@ onMounted(() => {
 });
 
 function syncFromStore() {
-	const currentEffort = chatStore.reasoningEffort;
+	const currentEffort = modelStore.reasoningEffort;
 	if (currentEffort) {
 		const upperEffort = currentEffort.toUpperCase().replace(/-/g, '_');
 		if (availableEffortLevels.value.includes(upperEffort)) {
@@ -198,9 +198,9 @@ function syncFromStore() {
 		effortLevel.value = '';
 	}
 
-	if (chatStore.reasoningBudget !== null) {
-		tokenBudget.value = chatStore.reasoningBudget;
-		tempTokenInput.value = chatStore.reasoningBudget;
+	if (modelStore.reasoningBudget !== null) {
+		tokenBudget.value = modelStore.reasoningBudget;
+		tempTokenInput.value = modelStore.reasoningBudget;
 	} else {
 		tokenBudget.value = undefined;
 		tempTokenInput.value = undefined;
@@ -209,7 +209,7 @@ function syncFromStore() {
 
 // Keep UI in sync when the store changes
 watch(
-	() => [chatStore.reasoningEffort, chatStore.reasoningBudget],
+	() => [modelStore.reasoningEffort, modelStore.reasoningBudget],
 	() => {
 		syncFromStore();
 	}
@@ -225,7 +225,7 @@ watch(availableEffortLevels, newV => {
 function handleEffortChange(value: any) {
 	const effortStr = value ? String(value) : '';
 	const effort = effortStr ? effortStr.toLowerCase().replace(/_/g, '-') : null;
-	chatStore.setReasoningEffort(effort);
+	modelStore.setReasoningEffort(effort);
 }
 
 function handleSliderChange(val: number[] | undefined) {
@@ -234,7 +234,7 @@ function handleSliderChange(val: number[] | undefined) {
 		if (newValue !== undefined) {
 			tokenBudget.value = newValue;
 			tempTokenInput.value = newValue;
-			chatStore.setReasoningEffort(newValue.toString(), true);
+			modelStore.setReasoningEffort(newValue.toString(), true);
 		}
 	}
 }
@@ -246,7 +246,7 @@ function handleInputChange() {
 		if (val > maxTokens.value) val = maxTokens.value;
 
 		tokenBudget.value = val;
-		chatStore.setReasoningEffort(val.toString(), true);
+		modelStore.setReasoningEffort(val.toString(), true);
 	} else {
 		resetToDisabled();
 	}
@@ -255,6 +255,6 @@ function handleInputChange() {
 function resetToDisabled() {
 	tokenBudget.value = undefined;
 	tempTokenInput.value = undefined;
-	chatStore.setReasoningEffort(null, true);
+	modelStore.setReasoningEffort(null, true);
 }
 </script>

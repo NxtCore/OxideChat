@@ -20,7 +20,7 @@ export const useGatewayAdminStore = defineStore('gatewayAdmin', {
 		},
 		async keyRequests(id: string): Promise<Page<AdminRequestLog>> {
 			const {$customFetch} = useNuxtApp();
-			return (await $customFetch<Page<AdminRequestLog>>(`${BASE}/keys/${id}/requests`, {params: {limit: 10}})) ?? {has_more: false, items: []};
+			return (await $customFetch<Page<AdminRequestLog>>(`${BASE}/keys/${id}/requests`, {params: {size: 10}})) ?? {has_more: false, items: []};
 		},
 		async keyAction(id: string, action: 'revoke' | 'disable' | 'enable', reason: string): Promise<AdminKey> {
 			const {$customFetch} = useNuxtApp();

@@ -1,22 +1,12 @@
 #[cfg(test)]
 mod tests {
 	use crate::types::{Chat, Workspace, WorkspaceDeleteAction};
+	use crate::tests::support::insert_user;
 	use sqlx::PgPool;
 	use uuid::Uuid;
 
 	async fn create_user(pool: &PgPool, suffix: &str) -> Uuid {
-		sqlx::query_scalar::<_, Uuid>(
-			r#"
-			INSERT INTO users (email, username, password_hash)
-			VALUES ($1, $2, 'hash')
-			RETURNING id
-			"#,
-		)
-		.bind(format!("{suffix}@example.com"))
-		.bind(format!("user_{suffix}"))
-		.fetch_one(pool)
-		.await
-		.unwrap()
+		insert_user(pool, &format!("user_{suffix}")).await.unwrap()
 	}
 
 	async fn insert_message(pool: &PgPool, chat_id: &Uuid) {

@@ -57,10 +57,11 @@
 </template>
 
 <script setup lang="ts">
+import {ADMIN_DEVELOPER_ACCESS_EDIT, ADMIN_DEVELOPER_LIMITS_EDIT} from '~/types/generated/permissions';
 import {SlidersHorizontal} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useGatewayAdminStore} from '@/stores/gatewayAdminStore';
-import {errorMessage} from '~/utils/developer';
+import {errorMessage} from '~/utils/format';
 import type {AdminTeam} from '~/types/gatewayAdmin';
 
 const store = useMainStore();
@@ -72,8 +73,8 @@ const limitsTarget = ref<AdminTeam | null>(null);
 const accessTarget = ref<{team: AdminTeam; enabled: boolean} | null>(null);
 const acting = ref(false);
 
-const canEditLimits = computed(() => store.hasPermission('admin.developer.limits.edit'));
-const canEditAccess = computed(() => store.hasPermission('admin.developer.access.edit'));
+const canEditLimits = computed(() => store.hasPermission(ADMIN_DEVELOPER_LIMITS_EDIT));
+const canEditAccess = computed(() => store.hasPermission(ADMIN_DEVELOPER_ACCESS_EDIT));
 
 function replaceTeam(updated: AdminTeam) {
 	teams.value = teams.value.map(team => (team.id === updated.id ? updated : team));

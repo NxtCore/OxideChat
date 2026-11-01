@@ -79,7 +79,6 @@ import type {AnalyticsRow} from '~/types/budgets';
 const store = useMainStore();
 const developer = useDeveloperStore();
 const budgetStore = useBudgetStore();
-const {$customFetch} = useNuxtApp();
 
 const baseUrl = ref('');
 const spend = ref<number | null>(null);
@@ -95,7 +94,7 @@ async function load() {
 async function loadSpend() {
 	const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 	try {
-		const rows = (await $customFetch<AnalyticsRow[]>('/api/v1/me/analytics', {params: {from, group_by: 'model'}})) ?? [];
+		const rows = (await meAnalytics<AnalyticsRow>({from, group_by: 'model'})) ?? [];
 		spend.value = rows.reduce((sum, row) => sum + Number(row.cost_total), 0);
 	} catch {
 		spendFailed.value = true;
@@ -104,7 +103,7 @@ async function loadSpend() {
 
 async function loadHealth() {
 	try {
-		await $customFetch('/api/v1/health');
+		await checkHealth();
 		health.value = 'ok';
 	} catch {
 		health.value = 'down';

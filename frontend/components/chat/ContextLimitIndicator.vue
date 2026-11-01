@@ -26,7 +26,7 @@
 		<ShadTooltipContent side="bottom">
 			<div class="space-y-1 text-xs">
 				<p class="font-medium">{{ store.getTranslation('chat.context_indicator.usage') }}</p>
-				<p class="text-muted-foreground">{{ formatTokens(chatStore.contextTokens) }} / {{ formatTokens(contextLimit) }} {{ store.getTranslation('chat.context_indicator.tokens') }}</p>
+				<p class="text-muted-foreground">{{ formatTokens(modelStore.contextTokens) }} / {{ formatTokens(contextLimit) }} {{ store.getTranslation('chat.context_indicator.tokens') }}</p>
 				<p v-if="isNearLimit" class="text-amber-500">{{ store.getTranslation('chat.context_indicator.approaching_limit') }}</p>
 			</div>
 		</ShadTooltipContent>
@@ -34,19 +34,19 @@
 </template>
 
 <script setup lang="ts">
-import {useChatStore} from '~/stores/chatStore';
+import {useModelStore} from '~/stores/modelStore';
 import {useMainStore} from '~/stores';
 
-const chatStore = useChatStore();
+const modelStore = useModelStore();
 const store = useMainStore();
 const circumference = 2 * Math.PI * 15.5; // ~97.4
 
 const contextLimit = computed(() => {
-	return chatStore.selectedModel?.context_length || 128000;
+	return modelStore.selectedModel?.context_length || 128000;
 });
 
 const percentage = computed(() => {
-	return chatStore.contextPercentage;
+	return modelStore.contextPercentage;
 });
 
 const displayPercentage = computed(() => {

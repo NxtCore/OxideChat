@@ -39,14 +39,14 @@
 import {Clock, Gauge, RefreshCw} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useGatewayAdminStore} from '@/stores/gatewayAdminStore';
-import {errorMessage, formatMoney} from '~/utils/developer';
+import {formatMoney} from '~/utils/format';
 import type {GatewayEvent} from '~/types/gatewayAdmin';
 
 const store = useMainStore();
 const admin = useGatewayAdminStore();
 
 const events = ref<GatewayEvent[]>([]);
-const loading = ref(false);
+const {loading, run} = useAsyncAction();
 const days = ref(7);
 const threshold = ref(80);
 
@@ -62,14 +62,9 @@ function detail(event: GatewayEvent): string {
 }
 
 async function load() {
-	loading.value = true;
-	try {
+	await run(async () => {
 		events.value = await admin.listEvents(days.value, threshold.value);
-	} catch (e: any) {
-		store.toast(store.getTranslation('developer.admin.events.load_error'), {type: 'error', description: errorMessage(e, '')});
-	} finally {
-		loading.value = false;
-	}
+	}, null, 'developer.admin.events.load_error');
 }
 
 onMounted(load);

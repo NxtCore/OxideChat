@@ -12,8 +12,6 @@ where
 
 #[derive(Debug, Deserialize)]
 pub struct ListTeamsQuery {
-	pub page: Option<i64>,
-	pub size: Option<i64>,
 	pub search: Option<String>,
 }
 

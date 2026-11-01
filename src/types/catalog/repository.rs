@@ -1,7 +1,7 @@
 use super::rows::{GatewayCatalogModelRow, GatewayProviderOptionRow};
 use super::{AvailabilityState, GatewayCatalogModel, GatewayCatalogModelResponse, GatewayCatalogSyncInput, GatewayProviderOptionSyncInput, ModelProviderOptions};
 use crate::types::BaseType;
-use crate::types::axum::PaginatedResponse;
+use crate::types::{Page, PageQuery};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -136,11 +136,10 @@ impl GatewayCatalogModel {
 		pool: &sqlx::PgPool,
 		provider_id: &Uuid,
 		source_gateway: &str,
-		page: i64,
-		size: i64,
+		page: &PageQuery,
 		search: Option<String>,
-	) -> Result<PaginatedResponse<GatewayCatalogModelResponse>, sqlx::Error> {
-		let pagination = Self::pagination(page, size);
+	) -> Result<Page<GatewayCatalogModelResponse>, sqlx::Error> {
+		let pagination = Self::pagination(page);
 		let pattern = search.filter(|s| !s.is_empty()).map(|s| format!("%{}%", escape_like(&s)));
 
 		let rows = sqlx::query_as::<_, GatewayCatalogModelRow>(
@@ -276,10 +275,10 @@ fn escape_like(input: &str) -> String {
 	input.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
-fn paginate<R, T: From<R>>(mut rows: Vec<R>, page_size: usize) -> PaginatedResponse<T> {
+fn paginate<R, T: From<R>>(mut rows: Vec<R>, page_size: usize) -> Page<T> {
 	let has_more = rows.len() > page_size;
 	rows.truncate(page_size);
-	PaginatedResponse {
+	Page {
 		has_more,
 		items: rows.into_iter().map(Into::into).collect(),
 	}

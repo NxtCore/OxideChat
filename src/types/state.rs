@@ -9,6 +9,8 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, oneshot};
 use uuid::Uuid;
 
+type PendingSenders = HashMap<(Uuid, String), oneshot::Sender<serde_json::Value>>;
+
 /// Per-request context populated by the request middleware.
 ///
 /// Additional request-derived values can be added here without changing every
@@ -18,15 +20,47 @@ pub struct RequestContext {
 	pub user: Option<crate::types::User>,
 }
 
+/// A registered client tool call; dropping it before the result arrives removes the registration.
+pub struct PendingCall {
+	rx: oneshot::Receiver<serde_json::Value>,
+	pending: ClientToolPending,
+	call_id: String,
+	user_id: Uuid,
+}
+
+impl PendingCall {
+	/// Waits for the client result, returning `None` when the timeout passes or the call is cancelled.
+	pub async fn wait(&mut self, timeout: std::time::Duration) -> Option<serde_json::Value> {
+		tokio::time::timeout(timeout, &mut self.rx).await.ok()?.ok()
+	}
+}
+
+impl Drop for PendingCall {
+	fn drop(&mut self) {
+		if !matches!(self.rx.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
+			return;
+		}
+		let key = (self.user_id, std::mem::take(&mut self.call_id));
+		if let Ok(mut map) = self.pending.0.try_write() {
+			map.remove(&key);
+		} else if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+			let pending = self.pending.clone();
+			runtime.spawn(async move {
+				pending.0.write().await.remove(&key);
+			});
+		}
+	}
+}
+
 /// Holds pending client-side tool calls keyed by call ID.
 ///
 /// When the streaming loop needs the user's browser to execute a local MCP
-/// tool call, it registers a oneshot channel here and then emits a
+/// tool call, it registers a oneshot channel here before it emits a
 /// `ClientToolCall` SSE event. The client executes the tool, POSTs the result
 /// to the submit endpoint, and `resolve` sends it through the channel so the
 /// loop can continue.
 #[derive(Clone, Default)]
-pub struct ClientToolPending(Arc<RwLock<HashMap<(Uuid, String), oneshot::Sender<serde_json::Value>>>>);
+pub struct ClientToolPending(Arc<RwLock<PendingSenders>>);
 
 impl std::fmt::Debug for ClientToolPending {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,11 +74,18 @@ impl ClientToolPending {
 		Self::default()
 	}
 
-	/// Register a pending call and return the receiver the streaming loop waits on.
-	pub async fn register(&self, call_id: String, user_id: Uuid) -> oneshot::Receiver<serde_json::Value> {
+	/// Register a pending call and return the handle the streaming loop waits on.
+	///
+	/// Dropping the handle before a result arrives removes the registration.
+	pub async fn register(&self, call_id: String, user_id: Uuid) -> PendingCall {
 		let (tx, rx) = oneshot::channel();
-		self.0.write().await.insert((user_id, call_id), tx);
-		rx
+		self.0.write().await.insert((user_id, call_id.clone()), tx);
+		PendingCall {
+			rx,
+			pending: self.clone(),
+			call_id,
+			user_id,
+		}
 	}
 
 	/// Deliver a result from the client. Returns `true` if the call was found and delivered.
@@ -54,11 +95,6 @@ impl ClientToolPending {
 		} else {
 			false
 		}
-	}
-
-	/// Remove a pending call without delivering a result (used on timeout).
-	pub async fn cancel(&self, call_id: &str, user_id: Uuid) {
-		self.0.write().await.remove(&(user_id, call_id.to_string()));
 	}
 }
 

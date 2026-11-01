@@ -145,25 +145,9 @@ import {
 	SelectValue as ShadSelectValue,
 } from '@/components/ui/select';
 import {useMainStore} from '~/stores';
+import type {Tool} from '~/types/tools';
 
-const {$customFetch} = useNuxtApp();
 const store = useMainStore();
-
-interface ToolFunction {
-	id: string;
-	name: string;
-	description?: string;
-	input_schema: any;
-	entrypoint?: string;
-}
-
-interface Tool {
-	id: string;
-	name: string;
-	display_name?: string;
-	input_schema: any;
-	functions?: ToolFunction[];
-}
 
 interface SchemaProperty {
 	name: string;
@@ -333,10 +317,7 @@ async function runTest() {
 			body.function_name = selectedFunction.value.name;
 		}
 
-		const result = await $customFetch<TestResult>(`/api/v1/admin/tools/${props.tool.id}/test`, {
-			method: 'POST',
-			body,
-		});
+		const result = await testTool<TestResult>(props.tool.id, body);
 
 		testResult.value = result;
 	} catch (e: any) {

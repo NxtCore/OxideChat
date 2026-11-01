@@ -51,15 +51,15 @@
 							· {{ apiKey.scopes.join(', ') }}
 						</p>
 						<p class="text-xs text-muted-foreground">
-							{{ store.getTranslation('developer.keys.created', {date: formatDate(apiKey.created_at)}) }}
-							· {{ apiKey.last_used_at ? store.getTranslation('developer.keys.last_used', {date: formatDate(apiKey.last_used_at)}) : store.getTranslation('developer.keys.never_used') }}
-							<template v-if="apiKey.expires_at"> · {{ store.getTranslation('developer.keys.expires', {date: formatDate(apiKey.expires_at)}) }}</template>
+							{{ store.getTranslation('developer.keys.created', {date: formatDateTime(apiKey.created_at)}) }}
+							· {{ apiKey.last_used_at ? store.getTranslation('developer.keys.last_used', {date: formatDateTime(apiKey.last_used_at)}) : store.getTranslation('developer.keys.never_used') }}
+							<template v-if="apiKey.expires_at"> · {{ store.getTranslation('developer.keys.expires', {date: formatDateTime(apiKey.expires_at)}) }}</template>
 							<template v-if="apiKey.max_concurrent_requests"> · {{ store.getTranslation('developer.keys.concurrency', {count: apiKey.max_concurrent_requests}) }}</template>
 						</p>
 						<p v-if="keyStatus(apiKey) === 'expired'" class="text-xs text-destructive">{{ store.getTranslation('developer.keys.expired_hint') }}</p>
 						<p v-if="apiKey.admin_disabled" class="text-xs text-destructive">{{ store.getTranslation('developer.keys.admin_disabled_hint') }}</p>
 						<p v-if="keyStatus(apiKey) === 'revoked'" class="text-xs text-destructive">
-							{{ store.getTranslation('developer.keys.revoked_hint', {date: formatDate(apiKey.revoked_at ?? '')}) }}
+							{{ store.getTranslation('developer.keys.revoked_hint', {date: formatDateTime(apiKey.revoked_at ?? '')}) }}
 						</p>
 					</div>
 
@@ -146,6 +146,7 @@ import {useDeveloperStore} from '@/stores/developerStore';
 import type {DeveloperKey, DeveloperKeyRotation, DeveloperKeyWithToken} from '~/types/developer';
 
 const store = useMainStore();
+const {run} = useAsyncAction();
 const developer = useDeveloperStore();
 
 const createOpen = ref(false);
@@ -159,10 +160,6 @@ const revealOpen = ref(false);
 const revealToken = ref('');
 const revealTitle = ref('developer.reveal.title_created');
 const revealPreviousExpiry = ref<string | null>(null);
-
-function formatDate(value: string) {
-	return value ? new Date(value).toLocaleString(store.base?.language ?? 'en') : '';
-}
 
 async function reload() {
 	await developer.load().catch(() => {});
@@ -181,17 +178,6 @@ function onCreated(key: DeveloperKeyWithToken) {
 
 function onRotated(rotation: DeveloperKeyRotation) {
 	showToken(rotation.key.token, 'developer.reveal.title_rotated', rotation.previous.expires_at);
-}
-
-async function run(action: () => Promise<unknown>, successKey: string | null, errorKey: string) {
-	try {
-		await action();
-		if (successKey) store.toast(store.getTranslation(successKey), {type: 'success'});
-		return true;
-	} catch (e: any) {
-		store.toast(store.getTranslation(errorKey), {type: 'error', description: errorMessage(e, '')});
-		return false;
-	}
 }
 
 function toggleEnabled(apiKey: DeveloperKey, enabled: boolean) {

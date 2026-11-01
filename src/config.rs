@@ -1,4 +1,4 @@
-//! Global application configuration for OxideChat.
+//! Global application configuration for `OxideChat`.
 //!
 //! Provides a global configuration store that:
 //! - Loads configuration from database once at startup
@@ -19,6 +19,7 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 /// Supported OAuth providers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub enum OAuthProvider {
 	Google,
 	Discord,
@@ -68,7 +69,7 @@ pub struct ConfigValues {
 	pub oauth_discord_client_id: Option<String>,
 	pub oauth_discord_client_secret: Option<String>,
 	/// When enabled, the chat UI exposes a per-message upstream-provider selector
-	/// (OpenRouter provider routing). Off by default.
+	/// (`OpenRouter` provider routing). Off by default.
 	pub enable_provider_selector: bool,
 	/// When enabled, admins may register global MCP servers that run over
 	/// server-side `stdio` (arbitrary commands on the host). Off by default.
@@ -280,6 +281,7 @@ impl Config {
 	}
 
 	/// Load configuration from database.
+	#[allow(clippy::cognitive_complexity)]
 	async fn load_from_db(pool: &PgPool) -> ConfigValues {
 		let rows: Vec<ConfigRow> = sqlx::query_as("SELECT key, value FROM app_config").fetch_all(pool).await.unwrap_or_default();
 

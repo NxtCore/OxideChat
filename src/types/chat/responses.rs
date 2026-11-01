@@ -1,10 +1,13 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::types::models::Model;
 use super::{CostDetails, Message, ReasoningDetails, RequestSettings, ThemeCssVars, ToolExecutionResponse, UsageDetails, UserPreferences};
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Workspace"))]
 pub struct WorkspaceResponse {
 	pub id: Uuid,
 	pub name: String,
@@ -50,6 +53,7 @@ impl From<super::rows::WorkspaceWithCount> for WorkspaceResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Chat"))]
 pub struct ChatResponse {
 	pub id: Uuid,
 	pub workspace_id: Option<Uuid>,
@@ -120,7 +124,38 @@ impl From<Message> for ChatMessageResponse {
 	}
 }
 
+impl ChatMessageResponse {
+	/// Builds responses for a chat's messages with model keys, sibling counts and tool calls; messages without tool calls omit the field.
+	///
+	/// # Errors
+	///
+	/// Returns an error if any of the lookups fail.
+	pub async fn list_for(pool: &PgPool, chat_id: &Uuid, messages: Vec<Message>) -> Result<Vec<Self>, sqlx::Error> {
+		let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+		let model_ids: Vec<Uuid> = messages.iter().filter_map(|m| m.model_id).collect();
+		let model_keys = Model::model_keys_by_ids(pool, &model_ids).await?;
+		let sibling_counts = Message::sibling_counts_for_chat(pool, chat_id).await?;
+		let mut tool_executions = Message::tool_executions_for_messages(pool, &message_ids).await?;
+
+		Ok(messages
+			.into_iter()
+			.map(|m| {
+				let msg_id = m.id;
+				let parent_id = m.parent_id;
+				let role = m.role.clone();
+				let mut response = Self::from(m);
+				if response.model_key.is_none() {
+					response.model_key = response.model_id.and_then(|model_id| model_keys.get(&model_id).cloned());
+				}
+				response.tool_calls = tool_executions.remove(&msg_id).filter(|tools| !tools.is_empty());
+				response.sibling_count = sibling_counts.get(&(parent_id, role)).copied().unwrap_or(1) as i32;
+				response
+			})
+			.collect())
+	}
+}
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "UserPreferences"))]
 pub struct PreferencesResponse {
 	pub default_model_key: Option<String>,
 	pub effective_default_model_key: Option<String>,
@@ -166,6 +201,8 @@ impl Default for PreferencesResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[derive(Default)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "GlobalConfig"))]
 pub struct GlobalConfigResponse {
 	pub default_theme: ThemeCssVars,
 	pub enable_provider_selector: bool,
@@ -173,16 +210,6 @@ pub struct GlobalConfigResponse {
 	pub default_model_id: Option<Uuid>,
 }
 
-impl Default for GlobalConfigResponse {
-	fn default() -> Self {
-		Self {
-			default_theme: ThemeCssVars::default(),
-			enable_provider_selector: false,
-			allow_server_stdio_mcp: false,
-			default_model_id: None,
-		}
-	}
-}
 
 #[derive(Debug, Serialize)]
 pub struct BranchResponse {

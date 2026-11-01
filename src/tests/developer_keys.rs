@@ -4,18 +4,7 @@ mod support {
 	use sqlx::PgPool;
 	use uuid::Uuid;
 
-	pub type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
-
-	pub async fn create_user(pool: &PgPool) -> TestResult<Uuid> {
-		let name = format!("user{}", Uuid::new_v4().simple());
-		Ok(
-			sqlx::query_scalar("INSERT INTO users (email, username, password_hash) VALUES ($1, $2, 'hash') RETURNING id")
-				.bind(format!("{name}@example.com"))
-				.bind(&name)
-				.fetch_one(pool)
-				.await?,
-		)
-	}
+	pub use crate::tests::support::{TestResult, create_user};
 
 	pub async fn create_team(pool: &PgPool, user_id: Uuid, allow_all_models: bool) -> TestResult<Uuid> {
 		let team_id: Uuid = sqlx::query_scalar("INSERT INTO teams (name, allow_all_models) VALUES ($1, $2) RETURNING id")

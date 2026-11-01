@@ -55,8 +55,6 @@ pub struct GatewayAdminKeyQuery {
 	pub last_used_before: Option<DateTime<Utc>>,
 	pub never_used: Option<bool>,
 	pub search: Option<String>,
-	pub page: Option<i64>,
-	pub size: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -84,8 +82,6 @@ pub struct SetGatewayTeamAccessRequest {
 /// Filters and paging of the team listing.
 pub struct GatewayAdminTeamQuery {
 	pub search: Option<String>,
-	pub page: Option<i64>,
-	pub size: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -100,8 +96,6 @@ pub struct GatewayAdminRequestQuery {
 	pub provider: Option<String>,
 	pub from: Option<DateTime<Utc>>,
 	pub to: Option<DateTime<Utc>>,
-	pub page: Option<i64>,
-	pub limit: Option<i64>,
 }
 
 impl GatewayAdminRequestQuery {
@@ -132,8 +126,6 @@ pub struct GatewayAuditQuery {
 	pub target_id: Option<Uuid>,
 	pub from: Option<DateTime<Utc>>,
 	pub to: Option<DateTime<Utc>>,
-	pub page: Option<i64>,
-	pub size: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -148,6 +140,7 @@ pub struct GatewayEventQuery {
 
 #[derive(Debug, Serialize, FromRow)]
 /// A key as shown to an administrator; never includes the secret or its hash.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "AdminKey"))]
 pub struct GatewayAdminKeyResponse {
 	pub id: Uuid,
 	pub name: String,
@@ -158,6 +151,7 @@ pub struct GatewayAdminKeyResponse {
 	pub service_account: bool,
 	pub key_prefix: String,
 	pub last_four: String,
+	#[cfg_attr(test, ts(type = "Array<string>"))]
 	pub scopes: Json<Vec<String>>,
 	pub status: String,
 	pub is_enabled: bool,
@@ -171,6 +165,7 @@ pub struct GatewayAdminKeyResponse {
 
 #[derive(Debug, Serialize)]
 /// A key with its effective limits, budgets and usage.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "AdminKeyDetail"))]
 pub struct GatewayAdminKeyDetailResponse {
 	pub key: GatewayAdminKeyResponse,
 	pub team_gateway_enabled: bool,
@@ -183,6 +178,7 @@ pub struct GatewayAdminKeyDetailResponse {
 
 #[derive(Debug, Serialize)]
 /// A team's gateway switches and limits.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "AdminTeam"))]
 pub struct GatewayAdminTeamResponse {
 	pub id: Uuid,
 	pub name: String,
@@ -196,6 +192,7 @@ pub struct GatewayAdminTeamResponse {
 
 #[derive(Debug, Serialize)]
 /// One audit trail entry with redacted metadata.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "AuditEntry"))]
 pub struct GatewayAuditEntryResponse {
 	pub id: Uuid,
 	pub event: String,
@@ -214,6 +211,7 @@ pub struct GatewayAuditEntryResponse {
 
 #[derive(Debug, Serialize)]
 /// A query-able operational event, ready to forward to a webhook.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "GatewayEvent"))]
 pub struct GatewayEventResponse {
 	pub kind: String,
 	pub subject_type: String,
@@ -221,8 +219,11 @@ pub struct GatewayEventResponse {
 	pub subject_label: String,
 	pub team_id: Option<Uuid>,
 	pub expires_at: Option<DateTime<Utc>>,
+	#[cfg_attr(test, ts(type = "string | null"))]
 	pub amount: Option<Decimal>,
+	#[cfg_attr(test, ts(type = "string | null"))]
 	pub spent: Option<Decimal>,
+	#[cfg_attr(test, ts(type = "string | null"))]
 	pub percent_used: Option<Decimal>,
 }
 
@@ -332,22 +333,49 @@ pub fn redact_metadata(value: &Value) -> Value {
 	}
 }
 
+/// One audit row written inside a caller's transaction.
+pub struct AuditEntry<'a> {
+	pub event: &'a str,
+	pub actor_id: &'a Uuid,
+	pub target_type: &'a str,
+	pub target_id: &'a Uuid,
+	pub metadata: Value,
+}
+
+impl crate::logging::AuditLog {
+	/// Writes an audit row in the caller's transaction, redacting its metadata first.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the row cannot be stored.
+	pub async fn write(tx: &mut Transaction<'_, Postgres>, entry: AuditEntry<'_>) -> Result<(), sqlx::Error> {
+		sqlx::query("INSERT INTO audit_logs (event, actor_id, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5)")
+			.bind(entry.event)
+			.bind(entry.actor_id)
+			.bind(entry.target_type)
+			.bind(entry.target_id)
+			.bind(redact_metadata(&entry.metadata))
+			.execute(&mut **tx)
+			.await?;
+		Ok(())
+	}
+}
+
 pub(super) async fn write_admin_audit(tx: &mut Transaction<'_, Postgres>, entry: &AdminAudit<'_>, metadata: Value) -> Result<(), sqlx::Error> {
-	let mut metadata = match redact_metadata(&metadata) {
+	let mut metadata = match metadata {
 		Value::Object(map) => map,
 		other => Map::from_iter([("details".to_owned(), other)]),
 	};
 	if let Some(reason) = entry.reason {
-		metadata.insert("reason".to_owned(), redact_metadata(&Value::String(reason.to_owned())));
+		metadata.insert("reason".to_owned(), Value::String(reason.to_owned()));
 	}
 	metadata.insert("admin_action".to_owned(), Value::Bool(true));
-	sqlx::query("INSERT INTO audit_logs (event, actor_id, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5)")
-		.bind(entry.event)
-		.bind(entry.actor_id)
-		.bind(entry.target_type)
-		.bind(entry.target_id)
-		.bind(Value::Object(metadata))
-		.execute(&mut **tx)
-		.await?;
-	Ok(())
+	let audit = AuditEntry {
+		event: entry.event,
+		actor_id: entry.actor_id,
+		target_type: entry.target_type,
+		target_id: entry.target_id,
+		metadata: Value::Object(metadata),
+	};
+	crate::logging::AuditLog::write(tx, audit).await
 }

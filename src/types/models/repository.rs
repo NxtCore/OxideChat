@@ -2,10 +2,11 @@ use super::rows::{ModelDetailedRow, ModelListAdminRow, ModelListPublicRow};
 use super::{Model, ModelDetailed, ModelListAdmin, ModelListPublic, ModelPricing, ModelSyncInput, ModelSyncSummary, ModelViewer};
 use crate::types::BaseType;
 use crate::types::PolicyResolver;
-use crate::types::axum::PaginatedResponse;
+use crate::types::UsageEventRecord;
+use crate::types::{Page, PageQuery};
 use crate::types::models::ProviderTab;
 use crate::types::providers::{ProviderKind, ProviderModelResponse};
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde_json::Value;
 use sqlx::types::Json;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -35,12 +36,11 @@ impl Model {
 
 	pub async fn list_image_models_for_admin(
 		pool: &sqlx::PgPool,
-		page: i64,
-		size: i64,
+		page: &PageQuery,
 		search_query: Option<String>,
 		provider_id: Option<Uuid>,
-	) -> Result<PaginatedResponse<ModelListAdmin>, sqlx::Error> {
-		let pagination = Self::pagination(page, size);
+	) -> Result<Page<ModelListAdmin>, sqlx::Error> {
+		let pagination = Self::pagination(page);
 		let search = search_query
 			.as_deref()
 			.map(str::trim)
@@ -77,38 +77,10 @@ impl Model {
 		.await?;
 		let has_more = rows.len() > pagination.page_size;
 		let items = rows.into_iter().take(pagination.page_size).map(ModelListAdmin::from).collect();
-		Ok(PaginatedResponse { has_more, items })
+		Ok(Page { has_more, items })
 	}
 	fn escape_like_pattern(s: &str) -> String {
 		s.replace('\\', r"\\").replace('%', r"\%").replace('_', r"\_")
-	}
-
-	pub async fn create(pool: &sqlx::PgPool, provider_id: &Uuid, model_id: &str, display_name: &str) -> Result<Self, sqlx::Error> {
-		sqlx::query_as!(
-			Model,
-			r#"
-			INSERT INTO models (provider_id, model_id, display_name, capabilities, input_modalities, output_modalities)
-			VALUES ($1, $2, $3, '[]'::JSONB, '["text"]'::JSONB, '["text"]'::JSONB)
-			RETURNING
-				id,
-				provider_id,
-				model_id,
-				display_name,
-				COALESCE(capabilities, '[]'::jsonb) AS "capabilities!: Json<Vec<String>>",
-				COALESCE(input_modalities, '[]'::jsonb) AS "input_modalities!: Json<Vec<String>>",
-				COALESCE(output_modalities, '[]'::jsonb) AS "output_modalities!: Json<Vec<String>>",
-				context_length,
-				max_tokens,
-				COALESCE(is_enabled, false) AS "is_enabled!",
-				created_at,
-				updated_at
-			"#,
-			provider_id,
-			model_id,
-			display_name,
-		)
-		.fetch_one(pool)
-		.await
 	}
 
 	pub async fn model_keys_by_ids(pool: &sqlx::PgPool, model_ids: &[Uuid]) -> Result<HashMap<Uuid, String>, sqlx::Error> {
@@ -138,17 +110,17 @@ impl Model {
 		.await
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub async fn list_for_user(
 		pool: &sqlx::PgPool,
 		viewer: ModelViewer<'_>,
-		page: i64,
-		size: i64,
+		page: &PageQuery,
 		show_disabled: bool,
 		search_query: Option<&str>,
 		favorites_only: bool,
 		provider_id: Option<&Uuid>,
-	) -> Result<PaginatedResponse<ModelListPublic>, sqlx::Error> {
-		let pagination = Self::pagination(page, size);
+	) -> Result<Page<ModelListPublic>, sqlx::Error> {
+		let pagination = Self::pagination(page);
 		let search = search_query
 			.map(str::trim)
 			.filter(|s| !s.is_empty())
@@ -225,7 +197,7 @@ impl Model {
 		let has_more = rows.len() > pagination.page_size;
 		let items = rows.into_iter().take(pagination.page_size).map(ModelListPublic::from).collect();
 
-		Ok(PaginatedResponse { has_more, items })
+		Ok(Page { has_more, items })
 	}
 
 	pub async fn list_providers_for_user(pool: &sqlx::PgPool, viewer: ModelViewer<'_>) -> Result<Vec<ProviderTab>, sqlx::Error> {
@@ -261,8 +233,8 @@ impl Model {
 		PolicyResolver::can_use_model(pool, user_id, model_id).await
 	}
 
-	pub async fn list_for_admin(pool: &sqlx::PgPool, page: i64, size: i64, search_query: Option<String>) -> Result<PaginatedResponse<ModelListAdmin>, sqlx::Error> {
-		let pagination = Self::pagination(page, size);
+	pub async fn list_for_admin(pool: &sqlx::PgPool, page: &PageQuery, search_query: Option<String>) -> Result<Page<ModelListAdmin>, sqlx::Error> {
+		let pagination = Self::pagination(page);
 		let search = search_query
 			.as_deref()
 			.map(str::trim)
@@ -311,7 +283,7 @@ impl Model {
 		let has_more = rows.len() > pagination.page_size;
 		let items = rows.into_iter().take(pagination.page_size).map(ModelListAdmin::from).collect();
 
-		Ok(PaginatedResponse { has_more, items })
+		Ok(Page { has_more, items })
 	}
 
 	pub async fn find_for_admin(pool: &sqlx::PgPool, id: &Uuid) -> Result<Option<ModelDetailed>, sqlx::Error> {
@@ -429,7 +401,7 @@ impl Model {
 
 	pub async fn sync_provider_models(pool: &sqlx::PgPool, provider_id: &Uuid, discovered: &[ModelSyncInput]) -> Result<ModelSyncSummary, sqlx::Error> {
 		let mut transaction = pool.begin().await?;
-		let existing = Self::list_raw_by_provider(&mut *transaction, provider_id).await?;
+		let existing = Self::list_raw_by_provider(&mut transaction, provider_id).await?;
 		let existing_map: BTreeMap<_, _> = existing.iter().map(|model| (model.model_id.as_str(), model)).collect();
 		let discovered_ids: HashSet<_> = discovered.iter().map(|model| model.model_id.as_str()).collect();
 
@@ -451,9 +423,9 @@ impl Model {
 			}
 		}
 
-		let added = Self::bulk_insert_sync_models(&mut *transaction, &to_insert).await?;
-		let updated = Self::bulk_update_sync_models(&mut *transaction, &to_update).await?;
-		let removed = Self::bulk_disable_sync_models(&mut *transaction, &to_disable).await?;
+		let added = Self::bulk_insert_sync_models(&mut transaction, &to_insert).await?;
+		let updated = Self::bulk_update_sync_models(&mut transaction, &to_update).await?;
+		let removed = Self::bulk_disable_sync_models(&mut transaction, &to_disable).await?;
 		transaction.commit().await?;
 
 		Ok(ModelSyncSummary { added, updated, removed })
@@ -618,28 +590,6 @@ impl ModelPricing {
 		.await
 	}
 
-	pub async fn list_with_overrides(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, Self>(
-			r#"
-			SELECT
-				m.id AS model_id,
-				MIN(gmpo.price_input)::numeric AS reported_input,
-				MIN(gmpo.price_output)::numeric AS reported_output,
-				mpo.pricing AS override_pricing,
-				COALESCE((mpo.pricing->>'input')::numeric, MIN(gmpo.price_input)::numeric, 0) AS effective_input,
-				COALESCE((mpo.pricing->>'output')::numeric, MIN(gmpo.price_output)::numeric, 0) AS effective_output
-			FROM models m
-			LEFT JOIN gateway_catalog_models gcm ON gcm.local_model_id = m.id
-			LEFT JOIN gateway_model_provider_options gmpo ON gmpo.catalog_model_id = gcm.id
-			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
-			GROUP BY m.id, mpo.pricing
-			ORDER BY m.display_name ASC
-			"#,
-		)
-		.fetch_all(pool)
-		.await
-	}
-
 	pub async fn upsert_override(pool: &sqlx::PgPool, model_id: &Uuid, pricing: &Value) -> Result<Self, sqlx::Error> {
 		sqlx::query(
 			r#"
@@ -665,7 +615,21 @@ impl ModelPricing {
 		Ok(())
 	}
 
-	pub async fn usage_cost(pool: &sqlx::PgPool, model_id: &Uuid, input_tokens: i32, output_tokens: i32, reasoning_tokens: i32) -> Result<Option<Decimal>, sqlx::Error> {
+	/// Sets `record.cost_total`: the provider-reported cost when present, else local pricing, else `fallback_cost`.
+	///
+	/// # Errors
+	/// Returns an error when local pricing cannot be loaded.
+	pub async fn price(pool: &sqlx::PgPool, provider_cost: Option<f64>, fallback_cost: f64, record: &mut UsageEventRecord<'_>) -> Result<(), sqlx::Error> {
+		record.cost_total = match provider_cost.and_then(Decimal::from_f64) {
+			Some(cost) => cost,
+			None => Self::usage_cost(pool, record.model_id, record.input_tokens, record.output_tokens, record.reasoning_tokens)
+				.await?
+				.unwrap_or_else(|| Decimal::from_f64(fallback_cost).unwrap_or(Decimal::ZERO)),
+		};
+		Ok(())
+	}
+
+	async fn usage_cost(pool: &sqlx::PgPool, model_id: &Uuid, input_tokens: i32, output_tokens: i32, reasoning_tokens: i32) -> Result<Option<Decimal>, sqlx::Error> {
 		let Some(pricing) = Self::effective(pool, model_id).await? else {
 			return Ok(None);
 		};
@@ -693,26 +657,12 @@ impl ModelPricing {
 		Ok(Self::usage_cost(pool, model_id, clamp(tokens.input), clamp(tokens.output), 0).await?.unwrap_or(Decimal::ZERO))
 	}
 
-	/// All pricing overrides keyed by the model's string identifier, for pushing
-	/// into the omniference catalog as programmatic overrides.
-	pub async fn all_overrides(pool: &sqlx::PgPool) -> Result<Vec<(String, Value)>, sqlx::Error> {
-		sqlx::query_as::<_, (String, Value)>(
-			r#"
-			SELECT m.model_id, mpo.pricing
-			FROM model_pricing_overrides mpo
-			JOIN models m ON m.id = mpo.model_id
-			"#,
-		)
-		.fetch_all(pool)
-		.await
-	}
-
 	pub async fn is_free(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<bool, sqlx::Error> {
 		let Some(pricing) = Self::effective(pool, model_id).await? else {
 			return Ok(false);
 		};
 		let reasoning_rate = pricing.override_pricing.as_ref().and_then(|v| Self::decimal_from_json(v.get("reasoning")));
-		let reasoning_free = reasoning_rate.map_or(true, |r| r.is_zero());
+		let reasoning_free = reasoning_rate.is_none_or(|r| r.is_zero());
 		let override_free = pricing.override_pricing.is_some() && pricing.effective_input.is_zero() && pricing.effective_output.is_zero() && reasoning_free;
 		let reported_free = pricing.override_pricing.is_none()
 			&& pricing.reported_input.is_some()

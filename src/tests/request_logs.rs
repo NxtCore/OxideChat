@@ -3,18 +3,7 @@ mod support {
 	use sqlx::PgPool;
 	use uuid::Uuid;
 
-	pub type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
-
-	pub async fn create_user(pool: &PgPool) -> TestResult<Uuid> {
-		let name = format!("user{}", Uuid::new_v4().simple());
-		Ok(
-			sqlx::query_scalar("INSERT INTO users (email, username, password_hash) VALUES ($1, $2, 'hash') RETURNING id")
-				.bind(format!("{name}@example.com"))
-				.bind(&name)
-				.fetch_one(pool)
-				.await?,
-		)
-	}
+	pub use crate::tests::support::{TestResult, create_user};
 
 	pub async fn create_team(pool: &PgPool, user_id: Uuid) -> TestResult<Uuid> {
 		let team_id: Uuid = sqlx::query_scalar("INSERT INTO teams (name, allow_all_models) VALUES ($1, TRUE) RETURNING id")
@@ -48,9 +37,10 @@ mod support {
 
 #[cfg(test)]
 mod logs {
+	use crate::tests::support::paged;
 	use super::support::{TestResult, create_key, create_team, create_user};
 	use crate::types::{
-		DEFAULT_REQUEST_LOG_RETENTION_DAYS, RequestLog, RequestLogFilter, RequestLogRecord, RequestLogResponse, RequestLogStatus, axum::PaginatedResponse,
+		DEFAULT_REQUEST_LOG_RETENTION_DAYS, RequestLog, RequestLogFilter, RequestLogRecord, RequestLogResponse, RequestLogStatus, Page,
 	};
 	use chrono::{DateTime, Duration, Utc};
 	use rust_decimal::Decimal;
@@ -115,12 +105,12 @@ mod logs {
 			provider: Some("anthro".to_string()),
 			..filter(user_id)
 		};
-		let listed = RequestLog::list(&pool, by_model.clone(), 1, 50).await?.items;
+		let listed = RequestLog::list(&pool, by_model.clone(), &paged(1, 50)).await?.items;
 		assert_eq!(listed.len(), 1);
 		assert_eq!(listed[0].public_model_id, "OpenAI/GPT-4o-mini");
-		assert_eq!(RequestLog::list(&pool, by_provider.clone(), 1, 50).await?.items.len(), 1);
-		assert!(RequestLog::list(&pool, by_both.clone(), 1, 50).await?.items.is_empty());
-		assert!(RequestLog::list(&pool, by_partial_provider, 1, 50).await?.items.is_empty());
+		assert_eq!(RequestLog::list(&pool, by_provider.clone(), &paged(1, 50)).await?.items.len(), 1);
+		assert!(RequestLog::list(&pool, by_both.clone(), &paged(1, 50)).await?.items.is_empty());
+		assert!(RequestLog::list(&pool, by_partial_provider, &paged(1, 50)).await?.items.is_empty());
 		assert_eq!(RequestLog::summary(&pool, by_model.clone()).await?.total_requests, 1);
 		assert_eq!(RequestLog::summary(&pool, by_both).await?.total_requests, 0);
 		assert_eq!(RequestLog::summary(&pool, filter(user_id)).await?.total_requests, 3);
@@ -151,7 +141,7 @@ mod logs {
 		let other_id = create_user(&pool).await?;
 		RequestLog::record(&pool, success_record(user_id, None, None, "openai/gpt-4o-mini")).await?;
 		RequestLog::record(&pool, success_record(other_id, None, None, "openai/gpt-4o-mini")).await?;
-		let PaginatedResponse { has_more, items } = RequestLog::list(&pool, filter(user_id), 1, 50).await?;
+		let Page { has_more, items } = RequestLog::list(&pool, filter(user_id), &paged(1, 50)).await?;
 		assert!(!has_more);
 		assert_eq!(items.len(), 1);
 		assert_eq!(items[0].public_model_id, "openai/gpt-4o-mini");
@@ -183,13 +173,13 @@ mod logs {
 		from_future.from = Some(Utc::now() + Duration::hours(1));
 		let mut to_past = filter(user_id);
 		to_past.to = Some(Utc::now() - Duration::hours(1));
-		assert_eq!(RequestLog::list(&pool, filter(user_id), 1, 50).await?.items.len(), 2);
-		assert_eq!(RequestLog::list(&pool, by_team, 1, 50).await?.items.len(), 1);
-		assert_eq!(RequestLog::list(&pool, by_key, 1, 50).await?.items.len(), 1);
-		assert_eq!(RequestLog::list(&pool, by_status, 1, 50).await?.items.len(), 1);
-		assert_eq!(RequestLog::list(&pool, by_success, 1, 50).await?.items.len(), 1);
-		assert!(RequestLog::list(&pool, from_future, 1, 50).await?.items.is_empty());
-		assert!(RequestLog::list(&pool, to_past, 1, 50).await?.items.is_empty());
+		assert_eq!(RequestLog::list(&pool, filter(user_id), &paged(1, 50)).await?.items.len(), 2);
+		assert_eq!(RequestLog::list(&pool, by_team, &paged(1, 50)).await?.items.len(), 1);
+		assert_eq!(RequestLog::list(&pool, by_key, &paged(1, 50)).await?.items.len(), 1);
+		assert_eq!(RequestLog::list(&pool, by_status, &paged(1, 50)).await?.items.len(), 1);
+		assert_eq!(RequestLog::list(&pool, by_success, &paged(1, 50)).await?.items.len(), 1);
+		assert!(RequestLog::list(&pool, from_future, &paged(1, 50)).await?.items.is_empty());
+		assert!(RequestLog::list(&pool, to_past, &paged(1, 50)).await?.items.is_empty());
 		let _: DateTime<Utc> = Utc::now();
 		Ok(())
 	}
@@ -200,10 +190,10 @@ mod logs {
 		for _ in 0..3 {
 			RequestLog::record(&pool, success_record(user_id, None, None, "openai/gpt-4o-mini")).await?;
 		}
-		let first = RequestLog::list(&pool, filter(user_id), 1, 2).await?;
+		let first = RequestLog::list(&pool, filter(user_id), &paged(1, 2)).await?;
 		assert!(first.has_more);
 		assert_eq!(first.items.len(), 2);
-		let second = RequestLog::list(&pool, filter(user_id), 2, 2).await?;
+		let second = RequestLog::list(&pool, filter(user_id), &paged(2, 2)).await?;
 		assert!(!second.has_more);
 		assert_eq!(second.items.len(), 1);
 		Ok(())
@@ -232,7 +222,7 @@ mod logs {
 		let stored = RequestLog::record(&pool, record).await?;
 		assert_eq!(stored.finish_reason.as_deref(), Some("tool_calls"));
 		assert_eq!(stored.time_to_first_token_ms, Some(250));
-		let listed = RequestLog::list(&pool, filter(user_id), 1, 10).await?;
+		let listed = RequestLog::list(&pool, filter(user_id), &paged(1, 10)).await?;
 		assert_eq!(listed.items[0].finish_reason.as_deref(), Some("tool_calls"));
 		assert_eq!(listed.items[0].time_to_first_token_ms, Some(250));
 		let exported = RequestLog::list_for_export(&pool, filter(user_id)).await?;
@@ -282,13 +272,14 @@ mod logs {
 			.execute(&pool)
 			.await?;
 		assert_eq!(RequestLog::prune(&pool).await?, 2);
-		assert!(RequestLog::list(&pool, RequestLogFilter::default(), 1, 50).await?.items.is_empty());
+		assert!(RequestLog::list(&pool, RequestLogFilter::default(), &paged(1, 50)).await?.items.is_empty());
 		Ok(())
 	}
 }
 
 #[cfg(test)]
 mod categories {
+	use crate::tests::support::paged;
 	use super::support::{TestResult, create_key, create_team, create_user};
 	use crate::types::{RequestLog, RequestLogErrorCategory, RequestLogFailure, RequestLogFilter, RequestLogOwner, RequestLogRecord, RequestLogStatus, RequestLogTrace};
 	use crate::types::RequestLogContext;
@@ -363,9 +354,9 @@ mod categories {
 			..RequestLogFilter::default()
 		};
 		by_category.error_category = Some(RequestLogErrorCategory::RateLimit);
-		assert_eq!(RequestLog::list(&pool, by_category.clone(), 1, 50).await?.items.len(), 1);
+		assert_eq!(RequestLog::list(&pool, by_category.clone(), &paged(1, 50)).await?.items.len(), 1);
 		by_category.error_category = Some(RequestLogErrorCategory::Budget);
-		assert!(RequestLog::list(&pool, by_category, 1, 50).await?.items.is_empty());
+		assert!(RequestLog::list(&pool, by_category, &paged(1, 50)).await?.items.is_empty());
 		let exported = RequestLog::list_for_export(&pool, RequestLogFilter { user_id: Some(user_id), ..RequestLogFilter::default() }).await?;
 		assert_eq!(exported[0].request_id, Some(context.request_id));
 		assert_eq!(exported[0].error_category.as_deref(), Some("rate_limit"));
@@ -520,6 +511,7 @@ mod categories {
 
 #[cfg(test)]
 mod finalization {
+	use crate::tests::support::paged;
 	use crate::tests::gateway::support::{TestResult, create_provider_model, create_team, create_user, insert_key, job_state};
 	use crate::types::{REQUEST_ID_METADATA_KEY, RequestLog, RequestLogFilter, RequestLogResponse, STARTED_AT_METADATA_KEY, STREAMING_METADATA_KEY};
 	use crate::utils::omniference_cost::OxideCostQueue;
@@ -586,7 +578,7 @@ mod finalization {
 			user_id: Some(user_id),
 			..RequestLogFilter::default()
 		};
-		Ok(RequestLog::list(pool, filter, 1, 50).await?.items)
+		Ok(RequestLog::list(pool, filter, &paged(1, 50)).await?.items)
 	}
 
 	async fn finalize(pool: &PgPool, setup: &Setup, finalization: CostFinalization) -> TestResult<Uuid> {
@@ -710,6 +702,7 @@ mod finalization {
 
 #[cfg(test)]
 mod http {
+	use crate::tests::support::paged;
 	use crate::tests::gateway::support::{TestResult, create_key, create_provider_model, create_team, create_user, insert_key, job_state};
 	use crate::types::{JobState, RequestLog, RequestLogFilter, RequestLogResponse};
 	use ::axum::Router;
@@ -752,7 +745,7 @@ mod http {
 			user_id: Some(user_id),
 			..RequestLogFilter::default()
 		};
-		Ok(RequestLog::list(pool, filter, 1, 50).await?.items)
+		Ok(RequestLog::list(pool, filter, &paged(1, 50)).await?.items)
 	}
 
 	async fn total_rows(pool: &PgPool) -> TestResult<i64> {
@@ -941,6 +934,7 @@ mod http {
 
 #[cfg(test)]
 mod dropped_streams {
+	use crate::tests::support::paged;
 	use super::support::{TestResult, create_key, create_team, create_user};
 	use crate::types::{
 		RequestLog, RequestLogAbort, RequestLogContext, RequestLogErrorCategory, RequestLogFilter, RequestLogOwner, RequestLogRecord, RequestLogResponse, RequestLogStatus, RequestLogTrace,
@@ -1005,7 +999,7 @@ mod dropped_streams {
 			user_id: Some(user_id),
 			..RequestLogFilter::default()
 		};
-		Ok(RequestLog::list(pool, filter, 1, 50).await?.items)
+		Ok(RequestLog::list(pool, filter, &paged(1, 50)).await?.items)
 	}
 
 	async fn wait_for_rows(pool: &PgPool, user_id: Uuid) -> TestResult<Vec<RequestLogResponse>> {
@@ -1124,13 +1118,14 @@ mod dropped_streams {
 
 #[cfg(test)]
 mod unlogged_failures {
+	use crate::tests::support::paged;
 	use super::support::TestResult;
 	use crate::tests::gateway::support::{create_provider_model, create_team, create_user, insert_key};
 	use crate::types::{
 		BudgetAdmission, GatewayAuthContext, GatewayCredential, GatewayInference, GatewayLimitError, GatewayModelAccessError, GatewayRequestScope, RequestLog, RequestLogContext,
 		RequestLogFilter, RequestLogResponse,
 	};
-	use crate::utils::openai_gateway::{reject_limited, reject_model_access};
+	use crate::routes::gateway::{reject_limited, reject_model_access};
 	use serde_json::json;
 	use sqlx::PgPool;
 	use uuid::Uuid;
@@ -1162,7 +1157,7 @@ mod unlogged_failures {
 			user_id: Some(user_id),
 			..RequestLogFilter::default()
 		};
-		let mut rows = RequestLog::list(pool, filter, 1, 50).await?.items;
+		let mut rows = RequestLog::list(pool, filter, &paged(1, 50)).await?.items;
 		assert_eq!(rows.len(), 1);
 		Ok(rows.remove(0))
 	}
@@ -1229,19 +1224,20 @@ mod unlogged_failures {
 	async fn the_models_route_is_not_an_inference_request_and_stays_unlogged(pool: PgPool) -> TestResult {
 		let (user_id, context) = context(&pool).await?;
 		let state = crate::tests::gateway::support::job_state(pool.clone());
-		let response = crate::utils::openai_gateway::run_models(&state, &context).await;
+		let response = crate::routes::gateway::run_models(&state, &context).await;
 		assert_eq!(response.status().as_u16(), 200);
 		let filter = RequestLogFilter {
 			user_id: Some(user_id),
 			..RequestLogFilter::default()
 		};
-		assert!(RequestLog::list(&pool, filter, 1, 50).await?.items.is_empty());
+		assert!(RequestLog::list(&pool, filter, &paged(1, 50)).await?.items.is_empty());
 		Ok(())
 	}
 }
 
 #[cfg(test)]
 mod service_scope {
+	use crate::tests::support::paged;
 	use super::support::{TestResult, create_team, create_user};
 	use crate::types::{RequestLog, RequestLogQuery, RequestLogRecord, RequestLogScopeError, RequestLogStatus};
 	use rust_decimal::Decimal;
@@ -1283,8 +1279,6 @@ mod service_scope {
 			provider: None,
 			from: None,
 			to: None,
-			page: None,
-			limit: None,
 		}
 	}
 
@@ -1316,7 +1310,7 @@ mod service_scope {
 		RequestLog::record(&pool, record(None, other_team, "other/model")).await?;
 
 		let filter = query(Some("team_service"), Some(team_id)).scoped_filter(&pool, &admin_id, false).await?;
-		let items = RequestLog::list(&pool, filter.clone(), 1, 50).await?.items;
+		let items = RequestLog::list(&pool, filter.clone(), &paged(1, 50)).await?.items;
 		assert_eq!(items.len(), 1);
 		assert_eq!(items[0].public_model_id, "service/model");
 		assert_eq!(RequestLog::list_for_export(&pool, filter.clone()).await?.len(), 1);
@@ -1352,7 +1346,7 @@ mod service_scope {
 		RequestLog::record(&pool, record(Some(admin_id), team_id, "admin/model")).await?;
 		for scope in [None, Some("mine")] {
 			let filter = query(scope, None).scoped_filter(&pool, &admin_id, false).await?;
-			let items = RequestLog::list(&pool, filter, 1, 50).await?.items;
+			let items = RequestLog::list(&pool, filter, &paged(1, 50)).await?.items;
 			assert_eq!(items.len(), 1);
 			assert_eq!(items[0].public_model_id, "admin/model");
 		}

@@ -88,7 +88,7 @@
 									<span>{{ formatMoney(budget.spent) }}</span>
 									<span>{{ formatMoney(budget.amount) }}</span>
 									<span>{{ formatMoney(budget.remaining) }}</span>
-									<span class="text-xs text-muted-foreground">{{ budget.resets_at ? formatDate(budget.resets_at) : tx('settings.budgets.no_reset', 'No reset') }}</span>
+									<span class="text-xs text-muted-foreground">{{ budget.resets_at ? formatDateTime(budget.resets_at) : tx('settings.budgets.no_reset', 'No reset') }}</span>
 									<ShadButton v-if="canEdit" variant="outline" size="sm" class="gap-2" @click="openReset({assignment_id: budget.assignment_id, user_id: row.user_id}, `${row.user_label} · ${budget.budget.name}`)">
 										<RotateCcw class="h-3.5 w-3.5" />
 									</ShadButton>
@@ -129,7 +129,7 @@
 								</div>
 								<span>{{ formatMoney(budget.spent) }}</span>
 								<span>{{ formatMoney(budget.remaining) }}</span>
-								<span class="text-xs text-muted-foreground">{{ budget.resets_at ? formatDate(budget.resets_at) : tx('settings.budgets.no_reset', 'No reset') }}</span>
+								<span class="text-xs text-muted-foreground">{{ budget.resets_at ? formatDateTime(budget.resets_at) : tx('settings.budgets.no_reset', 'No reset') }}</span>
 								<ShadButton v-if="canEdit" variant="ghost" size="sm" class="gap-2" @click="openReset({assignment_id: budget.assignment_id}, budget.budget.name)">
 									<RotateCcw class="h-3.5 w-3.5" />
 								</ShadButton>
@@ -347,7 +347,7 @@
 						{{ tx('settings.budgets.no_reset_history', 'No reset history yet') }}
 					</div>
 					<div v-for="event in budgetStore.resetHistory" v-else :key="event.id" class="grid grid-cols-[10rem_1fr_1fr_1fr_8rem_10rem] gap-3 border-b border-border px-4 py-3 text-sm last:border-b-0">
-						<span class="text-xs text-muted-foreground">{{ formatDate(event.reset_at) }}</span>
+						<span class="text-xs text-muted-foreground">{{ formatDateTime(event.reset_at) }}</span>
 						<span class="truncate">{{ resetScopeLabel(event) }}</span>
 						<span class="truncate">{{ event.budget_name ?? '-' }}</span>
 						<span class="truncate text-muted-foreground">{{ event.reason ?? '-' }}</span>
@@ -395,6 +395,7 @@
 </template>
 
 <script setup lang="ts">
+import {ADMIN_BUDGETS_EDIT} from '~/types/generated/permissions';
 import {Building2, Check, ChevronDown, ChevronsUpDown, Loader2, Plus, RefreshCcw, RotateCcw, Trash2, User, X} from 'lucide-vue-next';
 import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import {useMainStore} from '@/stores';
@@ -409,7 +410,6 @@ interface UserEntry {
 
 const store = useMainStore();
 const budgetStore = useBudgetStore();
-const {$customFetch} = useNuxtApp();
 
 const loading = ref(false);
 const activeTab = ref('users');
@@ -443,7 +443,7 @@ const form = reactive<BudgetPayload & {description: string | null}>({
 	is_enabled: true,
 });
 
-const canEdit = computed(() => store.hasPermission('admin.budgets.edit'));
+const canEdit = computed(() => store.hasPermission(ADMIN_BUDGETS_EDIT));
 
 const filteredTeams = computed(() => {
 	const q = teamSearch.value.toLowerCase();
@@ -487,14 +487,6 @@ async function selectBudget(budget: Budget) {
 	selectedTeamId.value = null;
 	selectedUserId.value = null;
 	await budgetStore.fetchAssignments(budget.id);
-}
-
-function formatMoney(value: string | number) {
-	return `$${Number(value).toFixed(2)}`;
-}
-
-function formatDate(value: string) {
-	return new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(value));
 }
 
 function decisionClass(decision: string) {
@@ -626,11 +618,11 @@ async function removeAssignment(a: BudgetAssignmentInfo) {
 
 async function loadTeamsAndUsers() {
 	const [teamsRes, usersRes] = await Promise.all([
-		$customFetch<{items: TeamList[]; has_more: boolean}>('/api/v1/admin/teams', {params: {size: 200}}),
-		$customFetch<{users: {id: string; username: string; email: string}[]; total: number}>('/api/v1/admin/users', {params: {per_page: 200}}),
+		adminTeams({size: 200}),
+		adminUsers({size: 100}),
 	]);
 	teams.value = teamsRes?.items ?? [];
-	users.value = (usersRes?.users ?? []).map(u => ({id: u.id, label: u.username || u.email}));
+	users.value = (usersRes?.items ?? []).map(u => ({id: u.id, label: u.username || u.email}));
 }
 
 async function loadOperationalData() {

@@ -5,6 +5,7 @@ use uuid::Uuid;
 use super::Team;
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TeamSummary"))]
 pub struct TeamSummaryResponse {
 	pub id: Uuid,
 	pub name: String,
@@ -12,6 +13,7 @@ pub struct TeamSummaryResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TeamMember"))]
 pub struct TeamMemberResponse {
 	pub id: Uuid,
 	pub email: String,
@@ -20,12 +22,14 @@ pub struct TeamMemberResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct TeamModelAccessResponse {
 	pub provider_ids: Vec<Uuid>,
 	pub model_ids: Vec<Uuid>,
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TeamList"))]
 pub struct TeamResponse {
 	pub id: Uuid,
 	pub name: String,
@@ -39,6 +43,7 @@ pub struct TeamResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TeamDetailed"))]
 pub struct TeamDetailedResponse {
 	pub id: Uuid,
 	pub name: String,

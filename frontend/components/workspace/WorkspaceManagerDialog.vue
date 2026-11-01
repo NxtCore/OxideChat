@@ -7,11 +7,11 @@
 			</ShadDialogHeader>
 
 			<div class="space-y-4">
-				<div v-if="chatStore.workspaces.length === 0" class="py-6 text-center text-sm text-muted-foreground">
+				<div v-if="workspaceStore.workspaces.length === 0" class="py-6 text-center text-sm text-muted-foreground">
 					{{ store.getTranslation('workspace.empty') }}
 				</div>
 				<div v-else class="max-h-[40vh] space-y-2 overflow-y-auto pr-1">
-					<div v-for="ws in chatStore.workspaces" :key="ws.id" class="rounded-md border border-border p-2">
+					<div v-for="ws in workspaceStore.workspaces" :key="ws.id" class="rounded-md border border-border p-2">
 						<div class="flex items-center gap-2">
 							<span class="h-3 w-3 shrink-0 rounded-full border border-border" :style="{backgroundColor: ws.color || 'var(--muted)'}" />
 							<template v-if="editingId === ws.id">
@@ -99,7 +99,7 @@
 import {ref} from 'vue';
 import {Check, X, Star, Pencil, Trash2, Ban, Plus} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
-import {useChatStore} from '@/stores/chatStore';
+import {useWorkspaceStore} from '@/stores/workspaceStore';
 import DeleteWorkspaceDialog from './DeleteWorkspaceDialog.vue';
 import type {Workspace} from '~/types/chat';
 
@@ -107,7 +107,7 @@ defineProps<{open: boolean}>();
 const emit = defineEmits<{(e: 'update:open', value: boolean): void}>();
 
 const store = useMainStore();
-const chatStore = useChatStore();
+const workspaceStore = useWorkspaceStore();
 
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899'];
 
@@ -125,7 +125,7 @@ const deleteTarget = ref<Workspace | null>(null);
 async function create() {
 	if (!newName.value.trim()) return;
 	creating.value = true;
-	const created = await chatStore.createWorkspace({name: newName.value.trim(), color: newColor.value ?? undefined});
+	const created = await workspaceStore.createWorkspace({name: newName.value.trim(), color: newColor.value ?? undefined});
 	creating.value = false;
 	if (created) {
 		newName.value = '';
@@ -146,13 +146,13 @@ function cancelRename() {
 async function saveRename(ws: Workspace) {
 	const name = editingName.value.trim();
 	if (!name) return;
-	await chatStore.updateWorkspace(ws.id, {name, color: editingColor.value});
+	await workspaceStore.updateWorkspace(ws.id, {name, color: editingColor.value});
 	editingId.value = null;
 }
 
 async function setDefault(ws: Workspace) {
-	await chatStore.updateWorkspace(ws.id, {is_default: true});
-	await chatStore.fetchWorkspaces();
+	await workspaceStore.updateWorkspace(ws.id, {is_default: true});
+	await workspaceStore.fetchWorkspaces();
 }
 
 function requestDelete(ws: Workspace) {

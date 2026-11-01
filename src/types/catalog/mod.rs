@@ -15,6 +15,7 @@ pub use responses::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "gateway_availability", rename_all = "SCREAMING_SNAKE_CASE")]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub enum AvailabilityState {
 	Available,
 	UserUnavailable,

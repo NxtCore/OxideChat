@@ -1,26 +1,17 @@
 #[cfg(test)]
 mod tests {
+	use crate::tests::support::paged;
 	use crate::types::models::{Model, ModelSyncInput, ModelViewer};
 	use crate::types::models_configs::ModelConfig;
 	use crate::types::teams::Team;
 	use serde_json::json;
+	use crate::tests::support::insert_user;
 	use sqlx::PgPool;
 	use sqlx::types::Json;
 	use uuid::Uuid;
 
 	async fn create_user(pool: &PgPool, suffix: &str) -> Uuid {
-		let user_id = sqlx::query_scalar::<_, Uuid>(
-			r#"
-			INSERT INTO users (email, username, password_hash)
-			VALUES ($1, $2, 'hash')
-			RETURNING id
-			"#,
-		)
-		.bind(format!("{suffix}@example.com"))
-		.bind(format!("user_{suffix}"))
-		.fetch_one(pool)
-		.await
-		.unwrap();
+		let user_id = insert_user(pool, &format!("user_{suffix}")).await.unwrap();
 		Team::ensure_default_membership(pool, &user_id).await.unwrap();
 		user_id
 	}
@@ -70,6 +61,7 @@ mod tests {
 		.unwrap()
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn create_config(pool: &PgPool, owner_id: Option<Uuid>, model_id: Uuid, stable_key: &str, name: &str, capability: &str, icon: Option<&str>, is_favorite: bool) {
 		sqlx::query(
 			r#"
@@ -116,14 +108,14 @@ mod tests {
 		create_config(&pool, Some(user_id), model_id, "user:model-one", "User Model", "user", Some("user-icon"), true).await;
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let response = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
+		let response = Model::list_for_user(&pool, viewer, &paged(1, 10), false, None, false, None).await.unwrap();
 		assert_eq!(response.items.len(), 1);
 		assert_eq!(response.items[0].capabilities, vec!["user"]);
 		assert_eq!(response.items[0].icon.as_deref(), Some("user-icon"));
 		assert!(response.items[0].is_favorite);
 
 		let other_viewer = ModelViewer { user_id: &other_user_id };
-		let response = Model::list_for_user(&pool, other_viewer, 1, 10, false, None, false, None).await.unwrap();
+		let response = Model::list_for_user(&pool, other_viewer, &paged(1, 10), false, None, false, None).await.unwrap();
 		assert_eq!(response.items.len(), 1);
 		assert_eq!(response.items[0].capabilities, vec!["system"]);
 		assert_eq!(response.items[0].icon.as_deref(), Some("system-icon"));
@@ -139,11 +131,11 @@ mod tests {
 		create_model(&pool, disabled_provider_id, "provider-disabled-model", "Provider Disabled Model", true).await;
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let hidden = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
+		let hidden = Model::list_for_user(&pool, viewer, &paged(1, 10), false, None, false, None).await.unwrap();
 		assert!(hidden.items.is_empty());
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let visible = Model::list_for_user(&pool, viewer, 1, 10, true, None, false, None).await.unwrap();
+		let visible = Model::list_for_user(&pool, viewer, &paged(1, 10), true, None, false, None).await.unwrap();
 		assert_eq!(visible.items.len(), 2);
 	}
 
@@ -157,15 +149,15 @@ mod tests {
 		create_model(&pool, provider_id, "slash", r"slash\name", true).await;
 		create_model(&pool, provider_id, "slash-decoy", "slash-name", true).await;
 
-		let percent = Model::list_for_admin(&pool, 1, 10, Some("100%".to_string())).await.unwrap();
+		let percent = Model::list_for_admin(&pool, &paged(1, 10), Some("100%".to_string())).await.unwrap();
 		assert_eq!(percent.items.len(), 1);
 		assert_eq!(percent.items[0].display_name, "100% Real");
 
-		let underscore = Model::list_for_admin(&pool, 1, 10, Some("under_".to_string())).await.unwrap();
+		let underscore = Model::list_for_admin(&pool, &paged(1, 10), Some("under_".to_string())).await.unwrap();
 		assert_eq!(underscore.items.len(), 1);
 		assert_eq!(underscore.items[0].display_name, "under_score");
 
-		let slash = Model::list_for_admin(&pool, 1, 10, Some(r"slash\".to_string())).await.unwrap();
+		let slash = Model::list_for_admin(&pool, &paged(1, 10), Some(r"slash\".to_string())).await.unwrap();
 		assert_eq!(slash.items.len(), 1);
 		assert_eq!(slash.items[0].display_name, r"slash\name");
 	}
@@ -177,11 +169,11 @@ mod tests {
 		create_model(&pool, provider_id, "page-b", "Page B", true).await;
 		create_model(&pool, provider_id, "page-c", "Page C", true).await;
 
-		let first = Model::list_for_admin(&pool, 1, 2, None).await.unwrap();
+		let first = Model::list_for_admin(&pool, &paged(1, 2), None).await.unwrap();
 		assert_eq!(first.items.len(), 2);
 		assert!(first.has_more);
 
-		let second = Model::list_for_admin(&pool, 2, 2, None).await.unwrap();
+		let second = Model::list_for_admin(&pool, &paged(2, 2), None).await.unwrap();
 		assert_eq!(second.items.len(), 1);
 		assert!(!second.has_more);
 	}
@@ -192,9 +184,9 @@ mod tests {
 		let model_id = create_model(&pool, provider_id, "patch-model", "Old Name", true).await;
 		let mut tx = pool.begin().await.unwrap();
 
-		Model::patch(&mut *tx, &model_id, Some("New Name"), None).await.unwrap();
+		Model::patch(&mut tx, &model_id, Some("New Name"), None).await.unwrap();
 		let (display_name, stable_key) = Model::find_name_and_model_id(&mut *tx, &model_id).await.unwrap().unwrap();
-		ModelConfig::ensure_system_config(&mut *tx, &model_id, &stable_key, &display_name).await.unwrap();
+		ModelConfig::ensure_system_config(&mut tx, &model_id, &stable_key, &display_name).await.unwrap();
 		tx.commit().await.unwrap();
 
 		let config_name = sqlx::query_scalar::<_, String>("SELECT name FROM model_configs WHERE model_id = $1 AND owner_id IS NULL")
@@ -215,11 +207,11 @@ mod tests {
 
 		let viewer = ModelViewer { user_id: &user_id };
 
-		let by_display = Model::list_for_user(&pool, viewer, 1, 10, false, Some("GPT"), false, None).await.unwrap();
+		let by_display = Model::list_for_user(&pool, viewer, &paged(1, 10), false, Some("GPT"), false, None).await.unwrap();
 		assert_eq!(by_display.items.len(), 2);
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let by_model_id = Model::list_for_user(&pool, viewer, 1, 10, false, Some("claude"), false, None).await.unwrap();
+		let by_model_id = Model::list_for_user(&pool, viewer, &paged(1, 10), false, Some("claude"), false, None).await.unwrap();
 		assert_eq!(by_model_id.items.len(), 1);
 		assert_eq!(by_model_id.items[0].model_id, "claude-sonnet");
 	}
@@ -234,7 +226,7 @@ mod tests {
 		create_config(&pool, Some(user_id), fav_model, "user:fav-model", "User Favorite", "fav", None, true).await;
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let favorites = Model::list_for_user(&pool, viewer, 1, 10, false, None, true, None).await.unwrap();
+		let favorites = Model::list_for_user(&pool, viewer, &paged(1, 10), false, None, true, None).await.unwrap();
 		assert_eq!(favorites.items.len(), 1);
 		assert_eq!(favorites.items[0].model_id, "fav-model");
 		assert!(favorites.items[0].is_favorite);
@@ -250,7 +242,7 @@ mod tests {
 		create_model(&pool, provider_b, "model-b1", "Model B1", true).await;
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let filtered = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, Some(&provider_a)).await.unwrap();
+		let filtered = Model::list_for_user(&pool, viewer, &paged(1, 10), false, None, false, Some(&provider_a)).await.unwrap();
 		assert_eq!(filtered.items.len(), 2);
 		for item in &filtered.items {
 			assert_eq!(item.provider.name, "Provider A");
@@ -342,7 +334,7 @@ mod tests {
 		grant_model(&pool, team_b, claude_model).await;
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let response = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
+		let response = Model::list_for_user(&pool, viewer, &paged(1, 10), false, None, false, None).await.unwrap();
 		let ids: Vec<&str> = response.items.iter().map(|item| item.model_id.as_str()).collect();
 		assert_eq!(response.items.len(), 2);
 		assert!(ids.contains(&"gpt-team"));
@@ -364,7 +356,7 @@ mod tests {
 		grant_model(&pool, team_id, disabled_model).await;
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let response = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
+		let response = Model::list_for_user(&pool, viewer, &paged(1, 10), false, None, false, None).await.unwrap();
 		assert!(response.items.is_empty());
 		assert!(!Model::can_user_use_model(&pool, &user_id, &provider_disabled_model).await.unwrap());
 		assert!(!Model::can_user_use_model(&pool, &user_id, &disabled_model).await.unwrap());
@@ -384,7 +376,7 @@ mod tests {
 		grant_provider(&pool, team_id, provider_a).await;
 
 		let viewer = ModelViewer { user_id: &user_id };
-		let response = Model::list_for_user(&pool, viewer, 1, 10, false, None, false, None).await.unwrap();
+		let response = Model::list_for_user(&pool, viewer, &paged(1, 10), false, None, false, None).await.unwrap();
 		let ids: Vec<&str> = response.items.iter().map(|item| item.model_id.as_str()).collect();
 		assert_eq!(response.items.len(), 2);
 		assert!(ids.contains(&"provider-a-one"));
@@ -435,12 +427,12 @@ mod tests {
 	}
 
 	async fn patch_icon(state: &std::sync::Arc<crate::types::JobState>, user: &crate::types::User, model_id: Uuid, icon: &str) -> axum::response::Response {
-		use axum::extract::{Extension, Path, State};
+		use axum::extract::{Path, State};
 		use axum::response::IntoResponse;
 		let body: crate::types::models::AdminModelPatchBody = serde_json::from_value(json!({"icon": icon})).unwrap();
 		crate::routes::admin::models::patch_model(
 			State(std::sync::Arc::clone(state)),
-			Extension(crate::types::RequestContext { user: Some(user.clone()) }),
+			crate::types::AuthUser(user.clone()),
 			Path(model_id),
 			axum::Json(body),
 		)

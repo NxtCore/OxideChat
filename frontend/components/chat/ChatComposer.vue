@@ -38,10 +38,10 @@
 						<input ref="fileInputRef" type="file" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
 						<ModelSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
 						<ReasoningSelector
-							v-if="chatStore.hasConfigurableReasoningCapability(chatStore.selectedModel)"
+							v-if="modelStore.hasConfigurableReasoningCapability(modelStore.selectedModel)"
 							class="border-none! bg-transparent! shadow-none! hover:bg-muted/50"
 						/>
-						<ToolSelector v-if="chatStore.hasToolCapability(chatStore.selectedModel)" />
+						<ToolSelector v-if="modelStore.hasToolCapability(modelStore.selectedModel)" />
 						<ProviderSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
 					</div>
 
@@ -62,13 +62,15 @@
 			<p class="mt-2 text-center text-[10px] text-muted-foreground opacity-50">{{ store.getTranslation('chat.composer.hint') }}</p>
 		</div>
 
-		<McpManagerDialog v-model:open="chatStore.mcpManagerOpen" />
+		<McpManagerDialog v-model:open="preferencesStore.mcpManagerOpen" />
 	</div>
 </template>
 
 <script setup lang="ts">
 import {ArrowUp, Loader2, X, ImageIcon} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
+import {useModelStore} from '~/stores/modelStore';
+import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useMainStore} from '~/stores';
 import ModelSelector from './ModelSelector.vue';
 import ReasoningSelector from './ReasoningSelector.vue';
@@ -80,6 +82,8 @@ import McpManagerDialog from '../mcp/McpManagerDialog.vue';
 const emit = defineEmits<{send: (content: string, parts?: any[]) => void}>();
 
 const chatStore = useChatStore();
+const modelStore = useModelStore();
+const preferencesStore = usePreferencesStore();
 const store = useMainStore();
 const message = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -101,11 +105,9 @@ onMounted(() => {
 	if (chatStore.pendingBranchParts) {
 		for (const part of chatStore.pendingBranchParts) {
 			if (part.type === 'image' && part.image_id) {
-				const config = useRuntimeConfig();
-				const baseUrl = config.public.apiBase || '';
 				attachedImages.value.push({
 					id: part.image_id,
-					previewUrl: `${baseUrl}/api/v1/images/${part.image_id}`,
+					previewUrl: imageUrl(part.image_id, useRuntimeConfig().public.apiBase || ''),
 				});
 			}
 		}
@@ -114,18 +116,18 @@ onMounted(() => {
 });
 
 const supportsImages = computed(() => {
-	return chatStore.selectedModel?.input_modalities?.includes('IMAGE') ?? false;
+	return modelStore.selectedModel?.input_modalities?.includes('IMAGE') ?? false;
 });
 
 const placeholder = computed(() => {
-	if (chatStore.selectedModel) {
-		return store.getTranslation('chat.composer.placeholder_model', {model: chatStore.selectedModel.display_name});
+	if (modelStore.selectedModel) {
+		return store.getTranslation('chat.composer.placeholder_model', {model: modelStore.selectedModel.display_name});
 	}
 	return store.getTranslation('chat.composer.placeholder_default');
 });
 
 const canSend = computed(() => {
-	return (message.value.trim().length > 0 || attachedImages.value.length > 0) && chatStore.selectedModel && !chatStore.isStreaming;
+	return (message.value.trim().length > 0 || attachedImages.value.length > 0) && modelStore.selectedModel && !chatStore.isStreaming;
 });
 
 function handleEnter(e: KeyboardEvent) {
@@ -202,14 +204,7 @@ async function uploadImage(file: File) {
 			const previewUrl = URL.createObjectURL(file);
 
 			try {
-				const config = useRuntimeConfig();
-				const baseUrl = config.public.apiBase || '';
-				const response = await fetch(`${baseUrl}/api/v1/images`, {
-					method: 'POST',
-					headers: {'Content-Type': 'application/json'},
-					credentials: 'include',
-					body: JSON.stringify({data_uri: dataUri}),
-				});
+				const response = await postImage(dataUri);
 
 				if (!response.ok) {
 					URL.revokeObjectURL(previewUrl);

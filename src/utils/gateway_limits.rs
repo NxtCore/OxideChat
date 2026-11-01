@@ -2,7 +2,7 @@ use crate::types::{
 	CONCURRENT_LIMIT_HEADER, CONCURRENT_REMAINING_HEADER, GatewayAdmission, GatewayAuthContext, GatewayLimitBackend, GatewayLimitDimension, GatewayLimitError,
 	GatewayLimitSnapshot, GatewayMetricSnapshot, GatewayRoute, JobState,
 };
-use crate::utils::openai_gateway::{error_response, translation};
+use crate::routes::gateway::{error_response, translation};
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
 use omniference::skins::{RateLimitHeaders, RateLimitMetric, openai_rate_limit_headers};
@@ -52,6 +52,7 @@ pub fn complete(state: &JobState, admission: GatewayAdmission, response: Respons
 	finish(admission, response)
 }
 
+#[allow(clippy::cognitive_complexity)]
 fn log_failure(error: &GatewayLimitError, context: &GatewayAuthContext, route: GatewayRoute) {
 	let (team_id, key_id, path) = (context.team_id, context.key_id, route.path);
 	match error {

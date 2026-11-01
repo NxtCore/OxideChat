@@ -1,4 +1,4 @@
-//! Internationalization (i18n) module for OxideChat.
+//! Internationalization (i18n) module for `OxideChat`.
 //!
 //! Provides a global translation service that:
 //! - Loads translations from database once at startup
@@ -19,8 +19,10 @@ static I18N: OnceLock<I18n> = OnceLock::new();
 
 /// Supported languages
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum Language {
-	En,
+	#[default]
+ En,
 	De,
 }
 
@@ -42,21 +44,10 @@ impl Language {
 			Self::De => "de",
 		}
 	}
-
-	/// Get the language name as a string
-	#[must_use]
-	pub fn to_string(&self) -> String {
-		self.as_str().to_string()
-	}
 }
 
-impl Default for Language {
-	fn default() -> Self {
-		Self::En
-	}
-}
 
-/// Row from i18n_translations table
+/// Row from `i18n_translations` table
 #[derive(sqlx::FromRow)]
 struct TranslationRow {
 	language: String,
@@ -199,11 +190,10 @@ impl I18n {
 		let mut current = obj;
 		for part in &parts[..parts.len() - 1] {
 			// Ensure the intermediate object exists
-			if !current.get(*part).map_or(false, Value::is_object) {
-				if let Some(map) = current.as_object_mut() {
+			if !current.get(*part).is_some_and(Value::is_object)
+				&& let Some(map) = current.as_object_mut() {
 					map.insert((*part).to_string(), serde_json::json!({}));
 				}
-			}
 			if let Some(next) = current.get_mut(*part) {
 				current = next;
 			} else {

@@ -23,6 +23,7 @@ fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> 
 
 #[derive(Debug, Deserialize)]
 /// Body of a key creation request.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "CreateKeyPayload", optional_fields = nullable))]
 pub struct CreateGatewayKeyRequest {
 	pub name: String,
 	pub team_id: Uuid,
@@ -68,7 +69,9 @@ pub struct SetGatewayKeyLimitsRequest {
 
 #[derive(Debug, Deserialize)]
 /// Body replacing the key's spending budget.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "SetKeyBudgetPayload", optional_fields = nullable))]
 pub struct SetGatewayKeyBudgetRequest {
+	#[cfg_attr(test, ts(type = "string"))]
 	pub amount: Decimal,
 	pub interval: String,
 	pub on_exceed: String,
@@ -78,6 +81,7 @@ pub struct SetGatewayKeyBudgetRequest {
 
 #[derive(Debug, Serialize)]
 /// A key as shown to its owner; never includes the secret or its hash.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperKey"))]
 pub struct GatewayKeyResponse {
 	pub id: Uuid,
 	pub name: String,
@@ -98,6 +102,7 @@ pub struct GatewayKeyResponse {
 
 #[derive(Debug, Serialize)]
 /// A key of a team the caller administers, with its owner and team names.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperTeamKey"))]
 pub struct GatewayTeamKeyResponse {
 	#[serde(flatten)]
 	pub key: GatewayKeyResponse,
@@ -107,6 +112,7 @@ pub struct GatewayTeamKeyResponse {
 
 #[derive(Debug, Serialize)]
 /// A team the caller can issue service-account keys for.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperManagedTeam"))]
 pub struct GatewayManagedTeamResponse {
 	pub id: Uuid,
 	pub name: String,
@@ -114,6 +120,7 @@ pub struct GatewayManagedTeamResponse {
 
 #[derive(Debug, Serialize)]
 /// The teams the caller administers and every key pinned to them.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperTeamKeys"))]
 pub struct GatewayTeamKeysResponse {
 	pub teams: Vec<GatewayManagedTeamResponse>,
 	pub keys: Vec<GatewayTeamKeyResponse>,
@@ -121,6 +128,7 @@ pub struct GatewayTeamKeysResponse {
 
 #[derive(Debug, Serialize)]
 /// A newly issued key including its one-time token.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperKeyWithToken"))]
 pub struct GatewayKeyTokenResponse {
 	#[serde(flatten)]
 	pub key: GatewayKeyResponse,
@@ -129,6 +137,7 @@ pub struct GatewayKeyTokenResponse {
 
 #[derive(Debug, Serialize)]
 /// Result of a rotation: the new key and the old key with its overlap expiry.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperKeyRotation"))]
 pub struct GatewayKeyRotationResponse {
 	pub key: GatewayKeyTokenResponse,
 	pub previous: GatewayKeyResponse,
@@ -136,6 +145,7 @@ pub struct GatewayKeyRotationResponse {
 
 #[derive(Debug, Serialize)]
 /// One stored key-scoped rate rule.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperKeyRule"))]
 pub struct GatewayKeyRuleResponse {
 	pub id: Uuid,
 	pub route_class: String,
@@ -146,11 +156,15 @@ pub struct GatewayKeyRuleResponse {
 
 #[derive(Debug, Serialize)]
 /// A key's spending budget with its current spend.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperKeyBudget"))]
 pub struct GatewayKeyBudgetResponse {
+	#[cfg_attr(test, ts(type = "string"))]
 	pub amount: Decimal,
 	pub interval: String,
 	pub on_exceed: String,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub spent: Decimal,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub remaining: Decimal,
 	pub window_start: DateTime<Utc>,
 	pub resets_at: Option<DateTime<Utc>>,
@@ -174,6 +188,7 @@ impl From<EffectiveBudgetResponse> for GatewayKeyBudgetResponse {
 
 #[derive(Debug, Serialize)]
 /// A team the caller belongs to and the models it grants.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeveloperTeam"))]
 pub struct GatewayTeamResponse {
 	pub id: Uuid,
 	pub name: String,

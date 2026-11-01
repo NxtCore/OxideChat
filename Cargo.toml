@@ -79,6 +79,8 @@ dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
 multiple_crate_versions = "allow"
+too_many_lines = "warn"
+cognitive_complexity = "warn"
 
 [lints.rust]
 unsafe_code = "warn"
@@ -87,3 +89,4 @@ missing_docs = "allow"
 [dev-dependencies]
 tokio = { version = "1.48", features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
+ts-rs = { version = "12.0.1", features = ["uuid-impl", "chrono-impl", "serde-json-impl", "no-serde-warnings"] }

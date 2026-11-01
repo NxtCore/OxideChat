@@ -1,6 +1,6 @@
+use crate::types::tools::ToolDb;
 use async_trait::async_trait;
 use serde_json::Value;
-use sqlx::PgPool;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -12,9 +12,6 @@ pub enum ToolError {
 
 	#[error("Tool execution failed: {0}")]
 	ExecutionFailed(String),
-
-	#[error("Tool timeout after {0}ms")]
-	Timeout(u64),
 
 	#[error("Invalid input: {0}")]
 	InvalidInput(String),
@@ -31,9 +28,6 @@ pub enum ToolError {
 	#[error("MCP error: {0}")]
 	McpError(String),
 
-	#[error("Compilation error: {0}")]
-	CompilationError(String),
-
 	#[error("Internal error: {0}")]
 	Internal(String),
 }
@@ -45,7 +39,7 @@ pub struct ToolContext {
 	pub timeout_ms: Option<u64>,
 	pub function_name: Option<String>,
 	/// Database pool for tools that need storage access (e.g., imagegen)
-	pub db: Option<Arc<PgPool>>,
+	pub db: Option<Arc<ToolDb>>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -77,13 +71,10 @@ pub trait ToolExecutor: Send + Sync {
 	/// Execute the tool with the given input
 	///
 	/// # Arguments
-	/// * `input` - JSON input matching the tool's input_schema
+	/// * `input` - JSON input matching the tool's `input_schema`
 	/// * `ctx` - Execution context with user settings
 	///
 	/// # Returns
 	/// JSON output from the tool, or an error
 	async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError>;
-
-	/// Get the tool name for logging/debugging
-	fn name(&self) -> &str;
 }

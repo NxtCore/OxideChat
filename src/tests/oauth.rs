@@ -9,7 +9,7 @@ mod tests {
 
 		#[test]
 		fn oidc_userinfo_maps_fields_and_verified_email() {
-			let json = r#"{"sub":"123","email":"user@example.com","email_verified":true,"name":"User","picture":"https://pic"}"#;
+			let json = r#"{"sub":"123","email":"user@example.com","email_verified":true,"name":"User"}"#;
 			let info: GoogleUserInfo = serde_json::from_str(json).unwrap();
 			let user_info: OAuthUserInfo = info.into();
 
@@ -18,7 +18,6 @@ mod tests {
 			assert_eq!(user_info.email.as_deref(), Some("user@example.com"));
 			assert_eq!(user_info.email_verified, Some(true));
 			assert_eq!(user_info.username.as_deref(), Some("User"));
-			assert_eq!(user_info.avatar_url.as_deref(), Some("https://pic"));
 		}
 
 		#[test]
@@ -53,7 +52,7 @@ mod tests {
 
 		#[test]
 		fn userinfo_maps_fields_and_verified_flag() {
-			let json = r#"{"id":"42","email":"user@example.com","verified":true,"username":"user","avatar":null}"#;
+			let json = r#"{"id":"42","email":"user@example.com","verified":true,"username":"user"}"#;
 			let info: DiscordUserInfo = serde_json::from_str(json).unwrap();
 			let user_info: OAuthUserInfo = info.into();
 
@@ -62,7 +61,6 @@ mod tests {
 			assert_eq!(user_info.email.as_deref(), Some("user@example.com"));
 			assert_eq!(user_info.email_verified, Some(true));
 			assert_eq!(user_info.username.as_deref(), Some("user"));
-			assert_eq!(user_info.avatar_url, None);
 		}
 
 		#[test]
@@ -81,15 +79,6 @@ mod tests {
 			let user_info: OAuthUserInfo = info.into();
 
 			assert_eq!(user_info.email_verified, None);
-		}
-
-		#[test]
-		fn animated_avatar_uses_gif_extension() {
-			let json = r#"{"id":"42","email":"user@example.com","verified":true,"username":"user","avatar":"a_hash"}"#;
-			let info: DiscordUserInfo = serde_json::from_str(json).unwrap();
-			let user_info: OAuthUserInfo = info.into();
-
-			assert_eq!(user_info.avatar_url.as_deref(), Some("https://cdn.discordapp.com/avatars/42/a_hash.gif"));
 		}
 	}
 }

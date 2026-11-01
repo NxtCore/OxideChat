@@ -6,12 +6,12 @@ use crate::config::Config;
 use crate::types::catalog::{AvailabilityState, GatewayCatalogModel};
 use crate::types::models::{Model, ModelListParams, ModelViewer};
 use crate::types::models_configs::ModelConfig;
-use crate::types::{Budget, BudgetSubject, JobState, RequestContext};
+use crate::types::{AppError, AuthUser, Budget, BudgetSubject, JobState, PageQuery, json_ok};
 use crate::utils::providers::sync_endpoint_options;
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::Json;
-use axum::extract::{Path, Query};
-use axum::{extract::{Extension, State}, response::IntoResponse};
+use axum::extract::{Path, Query, State};
+use axum::response::Response;
 use serde::Deserialize;
 use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
@@ -24,36 +24,23 @@ pub struct SetFavoriteRequest {
 /// GET /api/v1/models
 ///
 /// List all available AI models from the database.
-pub async fn list_models(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<ModelListParams>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
-
+pub async fn list_models(State(state): State<Arc<JobState>>, user: AuthUser, Query(page): Query<PageQuery>, Query(params): Query<ModelListParams>) -> Result<Response, AppError> {
 	let viewer = ModelViewer { user_id: &user.id };
-	let mut models = match Model::list_for_user(
+	let mut models = Model::list_for_user(
 		&state.db,
 		viewer,
-		params.page.unwrap_or(1),
-		params.size.unwrap_or(0),
+		&page,
 		false,
 		params.query.as_deref(),
 		params.is_favorite.unwrap_or(false),
 		params.provider_id.as_ref(),
 	)
-	.await
-	{
-		Ok(m) => m,
-		Err(e) => {
-			eprintln!("[PUBLIC] Failed to list models: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	.await?;
 
 	let blocked_ids: HashSet<Uuid> = match Budget::status_for(&state.db, BudgetSubject::user(user.id)).await {
 		Ok(status) => status.blocked_model_ids.into_iter().collect(),
 		Err(e) => {
-			eprintln!("[PUBLIC] Failed to load budget status for model list: {e}");
+			tracing::warn!(error = %e, "failed to load budget status for model list");
 			HashSet::new()
 		}
 	};
@@ -61,7 +48,7 @@ pub async fn list_models(State(state): State<Arc<JobState>>, Extension(RequestCo
 		model.budget_blocked = blocked_ids.contains(&model.id);
 	}
 
-	ResponseBuilder::new(ResponseBody::Json(models)).build()
+	json_ok(models)
 }
 
 /// GET /api/v1/models/:id/provider-options
@@ -70,67 +57,39 @@ pub async fn list_models(State(state): State<Arc<JobState>>, Extension(RequestCo
 /// the instance-wide `enable_provider_selector` setting. Endpoints are fetched lazily on first
 /// open (when nothing is stored yet and the parent catalog model is available), mirroring the
 /// admin endpoint but available to any authenticated user.
-pub async fn get_provider_options(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	// Feature-gated: when disabled, behave as if there are no provider options.
+#[allow(clippy::cognitive_complexity)]
+pub async fn get_provider_options(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	if !Config::get().enable_provider_selector() {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+		return Err(ErrorCode::InsufficientPermissions.into());
 	}
 
-	match Model::can_user_use_model(&state.db, &user.id, &id).await {
-		Ok(true) => {}
-		Ok(false) => return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build(),
-		Err(e) => {
-			eprintln!("[PUBLIC] Failed to check provider option access: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
+	if !Model::can_user_use_model(&state.db, &user.id, &id).await? {
+		return Err(ErrorCode::InsufficientPermissions.into());
 	}
 
-	let mut options = match GatewayCatalogModel::provider_options_for_model(&state.db, &id).await {
-		Ok(options) => options,
-		Err(e) => {
-			eprintln!("[PUBLIC] Failed to load provider options: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	let mut options = GatewayCatalogModel::provider_options_for_model(&state.db, &id).await?;
 
 	let is_available = matches!(options.availability_state, Some(AvailabilityState::Available));
 	if options.options.is_empty() && is_available {
 		if let Err(e) = sync_endpoint_options(&state.db, &id).await {
-			eprintln!("[PUBLIC] Lazy endpoint fetch failed for {id}: {e}");
+			tracing::warn!(model_id = %id, error = %e, "lazy endpoint fetch failed");
 		} else if let Ok(refreshed) = GatewayCatalogModel::provider_options_for_model(&state.db, &id).await {
 			options = refreshed;
 		}
 	}
 
-	ResponseBuilder::new(ResponseBody::Json(options)).build()
+	json_ok(options)
 }
 
 /// POST /api/v1/models/:id/favorite
 ///
 /// Toggle or set the favorite status of a model for the current user.
-pub async fn set_model_favorite(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(body): Json<SetFavoriteRequest>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
-
-	match Model::can_user_use_model(&state.db, &user.id, &id).await {
-		Ok(true) => {}
-		Ok(false) => return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build(),
-		Err(e) => {
-			eprintln!("[PUBLIC] Failed to check favorite model access: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
+pub async fn set_model_favorite(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>, Json(body): Json<SetFavoriteRequest>) -> Result<Response, AppError> {
+	if !Model::can_user_use_model(&state.db, &user.id, &id).await? {
+		return Err(ErrorCode::InsufficientPermissions.into());
 	}
 
-	if let Err(e) = ModelConfig::set_user_favorite(&state.db, &user.id, &id, body.is_favorite).await {
-		eprintln!("[PUBLIC] Failed to set model favorite: {e}");
-		return ErrorBuilder::new(ErrorCode::InternalError).build();
-	}
+	ModelConfig::set_user_favorite(&state.db, &user.id, &id, body.is_favorite).await?;
 
-	ResponseBuilder::<()>::new(ResponseBody::Empty).build()
+	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).build())
 }

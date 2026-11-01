@@ -6,6 +6,7 @@ mod support {
 	use uuid::Uuid;
 
 	pub use crate::tests::gateway::support::TestResult;
+	use crate::tests::support::insert_user;
 
 	pub struct Setup {
 		pub admin_id: Uuid,
@@ -17,13 +18,7 @@ mod support {
 	}
 
 	pub async fn user(pool: &PgPool, name: &str) -> TestResult<Uuid> {
-		Ok(
-			sqlx::query_scalar("INSERT INTO users (email, username, password_hash) VALUES ($1, $2, 'hash') RETURNING id")
-				.bind(format!("{name}@example.com"))
-				.bind(name)
-				.fetch_one(pool)
-				.await?,
-		)
+		Ok(insert_user(pool, name).await?)
 	}
 
 	pub async fn setup(pool: &PgPool) -> TestResult<Setup> {

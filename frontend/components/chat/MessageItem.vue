@@ -234,6 +234,7 @@ import ImagePreview from '~/components/ImagePreview.vue';
 import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
+import {useModelStore} from '~/stores/modelStore';
 import {useIconsStore} from '~/stores/icons';
 import {useMainStore} from '~/stores';
 import {useMarkdown, extractCodeForPreview, sanitizeSvg, ICON_COPY, ICON_CHECK} from '~/composables/useMarkdown';
@@ -246,6 +247,8 @@ const props = defineProps<{
 }>();
 
 const chatStore = useChatStore();
+const modelStore = useModelStore();
+const {sendAndStream} = useChatStream();
 const iconStore = useIconsStore();
 const {renderStreaming, renderComplete} = useMarkdown();
 
@@ -273,13 +276,13 @@ const attachedImages = computed(() => {
 		.filter(part => part.type === 'image')
 		.map(part => ({
 			image_id: part.image_id,
-			url: `/api/v1/images/${part.image_id}`,
+			url: imageUrl(part.image_id),
 		}));
 });
 
 const model = computed(() => {
 	if (isUser.value) return null;
-	return chatStore.models.find(m => m.id === props.message.model_id);
+	return modelStore.models.find(m => m.id === props.message.model_id);
 });
 
 const modelDisplayName = computed(() => {
@@ -347,7 +350,7 @@ const orderedParts = computed(() => {
 			return {
 				type: 'image' as const,
 				imageId: part.image_id,
-				url: `/api/v1/images/${encodeURIComponent(part.image_id)}`,
+				url: imageUrl(part.image_id),
 			};
 		}
 		if (part.type === 'reasoning') {
@@ -493,7 +496,7 @@ async function saveEdit() {
 
 	// Trigger a new generation with the edited message
 	// Pass skipUserMessage=true since the edited message already exists in the database
-	await chatStore.sendAndStream(chatId, newContent, undefined, true);
+	await sendAndStream(chatId, newContent, undefined, true);
 }
 </script>
 

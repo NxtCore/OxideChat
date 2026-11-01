@@ -3,7 +3,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use futures_util::StreamExt;
 use omniference::types::{ImageInput, ImageOperation, ImageOptions, ImageRequestIR, ImageResponse, ModelRef};
 use reqwest::{Client, Url, header::CONTENT_TYPE, redirect::Policy};
-use rust_decimal::{Decimal, prelude::FromPrimitive};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{net::IpAddr, time::Duration};
@@ -139,37 +139,28 @@ impl ImageGenExecutor {
 		Ok(ImageInput { bytes, media_type: media_type.to_string() })
 	}
 
+	#[allow(clippy::cognitive_complexity)]
 	async fn record_usage(&self, ctx: &ToolContext, model: &Model, usage: &omniference::types::ImageUsage) {
 		let Some(db) = ctx.db.as_ref() else { return };
 		let Some(user_id) = ctx.user_id else { return };
 		let input_tokens = usage.input_tokens.min(i32::MAX as u64) as i32;
 		let output_tokens = usage.output_tokens.min(i32::MAX as u64) as i32;
-		let cost_total = if let Some(cost) = usage.provider_cost {
-			Decimal::from_f64(cost).unwrap_or(Decimal::ZERO)
-		} else {
-			match ModelPricing::usage_cost(db, &model.id, input_tokens, output_tokens, 0).await {
-				Ok(Some(cost)) => cost,
-				_ => Decimal::ZERO,
-			}
+		let mut record = UsageEventRecord {
+			user_id: Some(&user_id),
+			team_id: Budget::primary_team_id(db, &user_id).await.ok().flatten(),
+			api_key_id: None,
+			model_id: &model.id,
+			provider_id: &model.provider_id,
+			request_type: "image",
+			input_tokens,
+			output_tokens,
+			reasoning_tokens: 0,
+			cost_total: Decimal::ZERO,
 		};
-		let team_id = Budget::primary_team_id(db, &user_id).await.ok().flatten();
-		if let Err(error) = UsageEvent::record(
-			db,
-			UsageEventRecord {
-				user_id: Some(&user_id),
-				team_id,
-				api_key_id: None,
-				model_id: &model.id,
-				provider_id: &model.provider_id,
-				request_type: "image",
-				input_tokens,
-				output_tokens,
-				reasoning_tokens: 0,
-				cost_total,
-			},
-		)
-		.await
-		{
+		if let Err(error) = ModelPricing::price(db, usage.provider_cost, 0.0, &mut record).await {
+			tracing::error!(%error, "Failed to price image generation usage");
+		}
+		if let Err(error) = UsageEvent::record(db, record).await {
 			tracing::error!(%error, "Failed to record image generation usage event");
 		}
 	}
@@ -179,11 +170,10 @@ impl ImageGenExecutor {
 		let image = response.images.into_iter().next().ok_or_else(|| ToolError::ExecutionFailed("Image provider returned no images".to_string()))?;
 		let mime = safe_image_mime(&image.bytes, &image.media_type).ok_or_else(|| ToolError::ExecutionFailed("Image provider returned unsupported image content".to_string()))?;
 		let stored = store_image(db, &image.bytes, mime, ctx.user_id, Some("imagegen")).await.map_err(ToolError::Internal)?;
-		if !caption.is_empty() {
-			if let Err(error) = crate::utils::images::set_image_caption(db, stored.id, caption).await {
+		if !caption.is_empty()
+			&& let Err(error) = crate::utils::images::set_image_caption(db, stored.id, caption).await {
 				tracing::error!(image_id = %stored.id, %error, "Failed to store image caption");
 			}
-		}
 		Ok(json!({"success": true, "image_id": stored.id, "image_is_shown_to_user": true, "show_image_with_markdown_in_chat": false}))
 	}
 }
@@ -229,10 +219,8 @@ impl ToolExecutor for ImageGenExecutor {
 			options,
 		};
 		let engine = crate::ai::get();
-		let response = engine.read().await.image(request).await.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+		let response = engine.image(request).await.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
 		self.record_usage(ctx, &model, &response.usage).await;
 		self.store_response(response, ctx, &caption).await
 	}
-
-	fn name(&self) -> &str { "imagegen" }
 }

@@ -156,6 +156,7 @@ defineEmits<{
 }>();
 
 const chatStore = useChatStore();
+const {sendAndStream} = useChatStream();
 const copied = ref(false);
 
 async function copyContent() {
@@ -188,7 +189,7 @@ async function regenerate() {
 	const messageId = props.message.id;
 
 	chatStore.messages = chatStore.messages.slice(0, currentIndex);
-	await chatStore.sendAndStream(chatId, userMessage.content, userMessage.content_parts, true, messageId);
+	await sendAndStream(chatId, userMessage.content, userMessage.content_parts, true, messageId);
 	await chatStore.fetchChat(chatId, {silent: true});
 }
 

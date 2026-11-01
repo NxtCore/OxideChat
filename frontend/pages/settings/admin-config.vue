@@ -30,8 +30,8 @@
 				<DefaultModelPicker
 					:model-value="defaultModelId"
 					:disabled="saving"
-					endpoint="/api/v1/admin/models"
-					selected-model-endpoint="/api/v1/admin/models"
+					:endpoint="adminModelsPath"
+					:selected-model-endpoint="adminModelsPath"
 					value-mode="uuid"
 					:placeholder="store.getTranslation('settings.teams.use_global_default')"
 					@update:model-value="setDefaultModel"
@@ -49,7 +49,6 @@ import {Switch} from '@/components/ui/switch';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
 
 const store = useMainStore();
-const {$customFetch} = useNuxtApp();
 const saving = ref(false);
 const enableProviderSelector = ref(store.base?.enable_provider_selector ?? false);
 const allowServerStdioMcp = ref(store.base?.allow_server_stdio_mcp ?? false);
@@ -60,10 +59,7 @@ async function toggleProviderSelector(val: boolean) {
 	enableProviderSelector.value = val;
 	saving.value = true;
 	try {
-		await $customFetch('/api/v1/admin/config', {
-			method: 'PATCH',
-			body: {enable_provider_selector: val},
-		});
+		await patchAdminConfig({enable_provider_selector: val});
 		if (store.base) store.base.enable_provider_selector = val;
 	} catch (error) {
 		console.error('Failed to update provider selector setting:', error);
@@ -78,10 +74,7 @@ async function toggleAllowStdioMcp(val: boolean) {
 	allowServerStdioMcp.value = val;
 	saving.value = true;
 	try {
-		await $customFetch('/api/v1/admin/config', {
-			method: 'PATCH',
-			body: {allow_server_stdio_mcp: val},
-		});
+		await patchAdminConfig({allow_server_stdio_mcp: val});
 		if (store.base) store.base.allow_server_stdio_mcp = val;
 	} catch (error) {
 		console.error('Failed to update stdio MCP setting:', error);
@@ -97,10 +90,7 @@ async function setDefaultModel(val: string | null) {
 	defaultModelId.value = newId;
 	saving.value = true;
 	try {
-		await $customFetch('/api/v1/admin/config', {
-			method: 'PATCH',
-			body: {default_model_id: newId},
-		});
+		await patchAdminConfig({default_model_id: newId});
 		if (store.base) store.base.default_model_id = newId;
 	} catch (error) {
 		console.error('Failed to update default model:', error);

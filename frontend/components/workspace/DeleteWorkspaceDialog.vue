@@ -52,20 +52,20 @@
 import {ref, computed, watch} from 'vue';
 import {ArrowRightLeft, Archive, Trash2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
-import {useChatStore} from '@/stores/chatStore';
+import {useWorkspaceStore} from '@/stores/workspaceStore';
 import type {Workspace, WorkspaceDeleteAction} from '~/types/chat';
 
 const props = defineProps<{open: boolean; workspace: Workspace | null}>();
 const emit = defineEmits<{(e: 'update:open', value: boolean): void}>();
 
 const store = useMainStore();
-const chatStore = useChatStore();
+const workspaceStore = useWorkspaceStore();
 
 const action = ref<WorkspaceDeleteAction>('archive');
 const targetId = ref<string | undefined>(undefined);
 const submitting = ref(false);
 
-const moveTargets = computed(() => chatStore.workspaces.filter(w => w.id !== props.workspace?.id));
+const moveTargets = computed(() => workspaceStore.workspaces.filter(w => w.id !== props.workspace?.id));
 
 const options = computed(() => [
 	{value: 'move' as const, label: store.getTranslation('workspace.delete_action_move'), icon: ArrowRightLeft},
@@ -78,7 +78,7 @@ watch(
 	isOpen => {
 		if (isOpen) {
 			action.value = 'archive';
-			const preferred = chatStore.defaultWorkspace && chatStore.defaultWorkspace.id !== props.workspace?.id ? chatStore.defaultWorkspace : moveTargets.value[0];
+			const preferred = workspaceStore.defaultWorkspace && workspaceStore.defaultWorkspace.id !== props.workspace?.id ? workspaceStore.defaultWorkspace : moveTargets.value[0];
 			targetId.value = preferred?.id;
 		}
 	},
@@ -87,7 +87,7 @@ watch(
 async function confirm() {
 	if (!props.workspace) return;
 	submitting.value = true;
-	const ok = await chatStore.deleteWorkspace(props.workspace.id, {
+	const ok = await workspaceStore.deleteWorkspace(props.workspace.id, {
 		action: action.value,
 		target_workspace_id: action.value === 'move' ? targetId.value : undefined,
 	});

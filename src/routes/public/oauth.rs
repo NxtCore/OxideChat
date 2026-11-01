@@ -4,12 +4,11 @@
 
 use crate::config::OAuthProvider;
 use crate::logging::{AuditLog, EntityType, LogEvent};
-use crate::types::JobState;
-use crate::types::User;
+use crate::types::{AppError, JobState, User};
 use crate::types::oauth::{OAuthCallbackParams, OAuthState, OAuthUserInfo};
 use crate::utils::auth::{cookie_secure_from_env, create_session};
 use crate::utils::oauth::{self, OAuthError};
-use crate::utils::response::{ErrorBuilder, ErrorCode};
+use crate::utils::response::ErrorCode;
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use std::sync::Arc;
@@ -17,14 +16,10 @@ use tower_cookies::{Cookie, Cookies};
 
 const OAUTH_STATE_COOKIE: &str = "oxidechat_oauth_state";
 
-/// Error type for find_or_create_user function.
 #[derive(Debug)]
 enum FindOrCreateError {
-	/// An account with this email already exists (requires manual linking)
 	EmailConflict,
-	/// OAuth provider did not return an email
 	MissingEmail,
-	/// Database error during user lookup/creation
 	Database(sqlx::Error),
 }
 
@@ -42,35 +37,21 @@ impl From<sqlx::Error> for FindOrCreateError {
 /// # Errors
 ///
 /// Returns 400 if provider is invalid or not configured.
-pub async fn oauth_init(Path(provider): Path<String>, cookies: Cookies) -> Response {
-	// Parse provider
-	let oauth_provider = match OAuthProvider::from_str(&provider) {
-		Some(p) => p,
-		None => {
-			return ErrorBuilder::new(ErrorCode::InvalidProvider).build();
-		}
-	};
+pub async fn oauth_init(Path(provider): Path<String>, cookies: Cookies) -> Result<Response, AppError> {
+	let oauth_provider = OAuthProvider::from_str(&provider).ok_or(ErrorCode::InvalidProvider)?;
 
-	// Generate auth URL with PKCE
-	let (auth_url, state) = match oauth::generate_auth_url(oauth_provider) {
-		Ok(result) => result,
-		Err(OAuthError::ProviderNotConfigured) => {
-			return ErrorBuilder::new(ErrorCode::ProviderNotConfigured).build();
+	let (auth_url, state) = oauth::generate_auth_url(oauth_provider).map_err(|e| match e {
+		OAuthError::ProviderNotConfigured => ErrorCode::ProviderNotConfigured,
+		e => {
+			tracing::error!("[OAUTH] Failed to generate auth URL: {e}");
+			ErrorCode::InternalError
 		}
-		Err(e) => {
-			eprintln!("[OAUTH] Failed to generate auth URL: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	})?;
 
-	// Store state in secure cookie
-	let state_json = match serde_json::to_string(&state) {
-		Ok(json) => json,
-		Err(e) => {
-			eprintln!("[OAUTH] Failed to serialize state: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	let state_json = serde_json::to_string(&state).map_err(|e| {
+		tracing::error!("[OAUTH] Failed to serialize state: {e}");
+		ErrorCode::InternalError
+	})?;
 
 	let mut cookie = Cookie::new(OAUTH_STATE_COOKIE, state_json);
 	cookie.set_http_only(true);
@@ -80,8 +61,7 @@ pub async fn oauth_init(Path(provider): Path<String>, cookies: Cookies) -> Respo
 	cookie.set_max_age(tower_cookies::cookie::time::Duration::minutes(10));
 	cookies.add(cookie);
 
-	// Redirect to provider
-	Redirect::temporary(&auth_url).into_response()
+	Ok(Redirect::temporary(&auth_url).into_response())
 }
 
 /// GET /api/v1/auth/oauth/{provider}/callback
@@ -93,102 +73,77 @@ pub async fn oauth_init(Path(provider): Path<String>, cookies: Cookies) -> Respo
 /// 4. Finds or creates user account
 /// 5. Links OAuth identity if not already linked
 /// 6. Creates session and redirects to app
-pub async fn oauth_callback(Path(provider): Path<String>, Query(params): Query<OAuthCallbackParams>, State(state): State<Arc<JobState>>, cookies: Cookies) -> Response {
-	// Parse provider
-	let oauth_provider = match OAuthProvider::from_str(&provider) {
-		Some(p) => p,
-		None => {
-			return ErrorBuilder::new(ErrorCode::InvalidProvider).build();
-		}
-	};
+#[allow(clippy::cognitive_complexity)]
+pub async fn oauth_callback(
+	Path(provider): Path<String>,
+	Query(params): Query<OAuthCallbackParams>,
+	State(state): State<Arc<JobState>>,
+	cookies: Cookies,
+) -> Result<Response, AppError> {
+	let oauth_provider = OAuthProvider::from_str(&provider).ok_or(ErrorCode::InvalidProvider)?;
 
-	// Get state from cookie
-	let state_cookie = match cookies.get(OAUTH_STATE_COOKIE) {
-		Some(c) => c,
-		None => {
-			eprintln!("[OAUTH] Missing state cookie");
-			return ErrorBuilder::new(ErrorCode::OAuthStateMismatch).build();
-		}
-	};
+	let state_cookie = cookies.get(OAUTH_STATE_COOKIE).ok_or_else(|| {
+		tracing::warn!("[OAUTH] Missing state cookie");
+		ErrorCode::OAuthStateMismatch
+	})?;
 
-	let oauth_state: OAuthState = match serde_json::from_str(state_cookie.value()) {
-		Ok(s) => s,
-		Err(e) => {
-			eprintln!("[OAUTH] Failed to parse state cookie: {e}");
-			return ErrorBuilder::new(ErrorCode::OAuthStateMismatch).build();
-		}
-	};
+	let oauth_state: OAuthState = serde_json::from_str(state_cookie.value()).map_err(|e| {
+		tracing::warn!("[OAUTH] Failed to parse state cookie: {e}");
+		ErrorCode::OAuthStateMismatch
+	})?;
 
-	// Validate CSRF token
 	if params.state != oauth_state.csrf_token {
-		eprintln!("[OAUTH] CSRF state mismatch");
+		tracing::warn!("[OAUTH] CSRF state mismatch");
 		AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
-		return ErrorBuilder::new(ErrorCode::OAuthStateMismatch).build();
+		return Err(ErrorCode::OAuthStateMismatch.into());
 	}
 
-	// Clear the state cookie
 	cookies.remove(Cookie::from(OAUTH_STATE_COOKIE));
 
-	// Exchange code for access token
-	let access_token = match oauth::exchange_code(oauth_provider, &params.code, &oauth_state).await {
-		Ok(token) => token,
-		Err(e) => {
-			eprintln!("[OAUTH] Token exchange failed: {e}");
-			AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
-			return ErrorBuilder::new(ErrorCode::OAuthTokenError).build();
-		}
+	let oauth_failed = |code: ErrorCode| {
+		AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
+		code
 	};
 
-	// Fetch user info from provider
-	let user_info = match oauth::fetch_user_info(oauth_provider, &access_token).await {
-		Ok(info) => info,
-		Err(e) => {
-			eprintln!("[OAUTH] Failed to fetch user info: {e}");
-			AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
-			return ErrorBuilder::new(ErrorCode::OAuthUserInfoError).build();
-		}
-	};
+	let access_token = oauth::exchange_code(oauth_provider, &params.code, &oauth_state).await.map_err(|e| {
+		tracing::warn!("[OAUTH] Token exchange failed: {e}");
+		oauth_failed(ErrorCode::OAuthTokenError)
+	})?;
 
-	// Validate that email is provided by OAuth provider
-	if user_info.email.is_none() {
-		eprintln!("[OAUTH] OAuth provider did not return an email address");
-		AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
-		return ErrorBuilder::new(ErrorCode::OAuthUserInfoError).build();
+	let user_info = oauth::fetch_user_info(oauth_provider, &access_token).await.map_err(|e| {
+		tracing::warn!("[OAUTH] Failed to fetch user info: {e}");
+		oauth_failed(ErrorCode::OAuthUserInfoError)
+	})?;
+
+	if user_info.email.is_none() || user_info.email_verified == Some(false) {
+		tracing::warn!("[OAUTH] OAuth provider returned no usable email address");
+		return Err(oauth_failed(ErrorCode::OAuthUserInfoError).into());
 	}
 
-	if user_info.email_verified == Some(false) {
-		eprintln!("[OAUTH] OAuth provider returned an unverified email address");
-		AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
-		return ErrorBuilder::new(ErrorCode::OAuthUserInfoError).build();
-	}
-
-	// Find or create user
-	match find_or_create_user(&state.db, &user_info, &cookies).await {
+	match find_or_create_user(&state.db, &user_info).await {
 		Ok(user) => {
-			// Return success with redirect
 			let redirect_url = oauth_state.redirect_after.as_deref().unwrap_or("/");
 
 			if let Err(e) = create_session(&state.db, &cookies, &user.id).await {
-				eprintln!("[OAUTH] Failed to create session: {e}");
+				tracing::error!("[OAUTH] Failed to create session: {e}");
 				AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, Some(user.id), Some(EntityType::User), Some(user.id));
-				return ErrorBuilder::new(ErrorCode::DatabaseError).build();
+				return Err(ErrorCode::DatabaseError.into());
 			}
 
 			AuditLog::log(&state.db, LogEvent::OAuthLoginSuccess, Some(user.id), Some(EntityType::User), Some(user.id));
-			Redirect::temporary(redirect_url).into_response()
+			Ok(Redirect::temporary(redirect_url).into_response())
 		}
 		Err(FindOrCreateError::EmailConflict) => {
-			eprintln!("[OAUTH] OAuth email matches existing account - requires manual linking");
-			Redirect::temporary("/auth/error?code=oauth_email_conflict").into_response()
+			tracing::warn!("[OAUTH] OAuth email matches existing account - requires manual linking");
+			Ok(Redirect::temporary("/auth/error?code=oauth_email_conflict").into_response())
 		}
 		Err(FindOrCreateError::MissingEmail) => {
-			eprintln!("[OAUTH] OAuth provider did not return an email address");
-			Redirect::temporary("/auth/error?code=oauth_user_info_error").into_response()
+			tracing::warn!("[OAUTH] OAuth provider did not return an email address");
+			Ok(Redirect::temporary("/auth/error?code=oauth_user_info_error").into_response())
 		}
 		Err(FindOrCreateError::Database(e)) => {
-			eprintln!("[OAUTH] Failed to find/create user: {e}");
-			AuditLog::log(&state.db, LogEvent::OAuthLoginFailed, None, None, None);
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
+			tracing::error!("[OAUTH] Failed to find/create user: {e}");
+			Err(oauth_failed(ErrorCode::DatabaseError).into())
 		}
 	}
 }
@@ -197,30 +152,16 @@ pub async fn oauth_callback(Path(provider): Path<String>, Query(params): Query<O
 ///
 /// Returns an error if the email matches an existing account that doesn't have
 /// this OAuth identity linked - the user must manually link their accounts.
-async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _cookies: &Cookies) -> Result<User, FindOrCreateError> {
-	let existing_identity: Option<uuid::Uuid> = sqlx::query_scalar("SELECT user_id FROM user_identities WHERE provider = $1 AND provider_user_id = $2")
-		.bind(&user_info.provider)
-		.bind(&user_info.provider_user_id)
-		.fetch_optional(pool)
-		.await?;
-
-	if let Some(user_id) = existing_identity {
-		let user: User = sqlx::query_as("SELECT * FROM users WHERE id = $1").bind(user_id).fetch_one(pool).await?;
+async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo) -> Result<User, FindOrCreateError> {
+	if let Some(user) = User::find_by_identity(pool, &user_info.provider, &user_info.provider_user_id).await? {
 		return Ok(user);
 	}
 
-	let email = user_info.email.as_ref();
+	let email = user_info.email.as_deref().ok_or(FindOrCreateError::MissingEmail)?;
 
-	if let Some(email) = email {
-		let existing_user: Option<User> = sqlx::query_as("SELECT * FROM users WHERE email = $1").bind(email).fetch_optional(pool).await?;
-
-		if existing_user.is_some() {
-			// Email matches existing account - require manual linking
-			return Err(FindOrCreateError::EmailConflict);
-		}
+	if User::find_by_email(pool, email).await?.is_some() {
+		return Err(FindOrCreateError::EmailConflict);
 	}
-
-	let email = email.ok_or(FindOrCreateError::MissingEmail)?;
 
 	let username = user_info
 		.username
@@ -230,36 +171,7 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 
 	let unique_username = make_unique_username(pool, &username).await?;
 
-	let user: User = sqlx::query_as(
-		"INSERT INTO users (email, username, auth_method)
-		 VALUES ($1, $2, 'oauth')
-		 RETURNING *",
-	)
-	.bind(&email)
-	.bind(&unique_username)
-	.fetch_one(pool)
-	.await?;
-
-	sqlx::query(
-		"INSERT INTO user_roles (user_id, role_id)
-		 SELECT $1, id FROM roles WHERE name = 'user'",
-	)
-	.bind(user.id)
-	.execute(pool)
-	.await?;
-
-	sqlx::query(
-		"INSERT INTO user_identities (user_id, provider, provider_user_id, provider_data)
-		 VALUES ($1, $2, $3, $4)",
-	)
-	.bind(user.id)
-	.bind(&user_info.provider)
-	.bind(&user_info.provider_user_id)
-	.bind(&user_info.raw_data)
-	.execute(pool)
-	.await?;
-
-	// Initialize user defaults (preferences + workspace)
+	let user = User::create_from_oauth(pool, email, &unique_username, user_info).await?;
 	user.initialize_defaults(pool).await?;
 
 	AuditLog::log(pool, LogEvent::OAuthAccountCreated, Some(user.id), Some(EntityType::User), Some(user.id));
@@ -269,24 +181,14 @@ async fn find_or_create_user(pool: &sqlx::PgPool, user_info: &OAuthUserInfo, _co
 
 /// Generate a unique username by appending numbers if necessary.
 async fn make_unique_username(pool: &sqlx::PgPool, base_username: &str) -> Result<String, sqlx::Error> {
-	let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)")
-		.bind(base_username)
-		.fetch_one(pool)
-		.await?;
-
-	if !exists {
+	if !User::username_exists(pool, base_username, None).await? {
 		return Ok(base_username.to_string());
 	}
 
 	let mut i = 1u64;
 	loop {
 		let candidate = format!("{base_username}{i}");
-		let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)")
-			.bind(&candidate)
-			.fetch_one(pool)
-			.await?;
-
-		if !exists {
+		if !User::username_exists(pool, &candidate, None).await? {
 			return Ok(candidate);
 		}
 		i += 1;

@@ -153,8 +153,8 @@ export const useThemeStore = defineStore('theme', {
 						this.apply();
 					}
 				}
-			} catch (e) {
-				if (!isServerUnreachable(e)) {
+			} catch (e: any) {
+				if (!isServerUnreachable(e) && e?.status !== 401) {
 					console.error('Failed to load global config:', e);
 				}
 			}

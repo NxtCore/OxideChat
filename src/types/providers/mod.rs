@@ -19,6 +19,7 @@ pub use responses::*;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "provider_kind", rename_all = "SCREAMING_SNAKE_CASE")]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub enum ProviderKind {
 	Openai,
 	OpenaiCompat,
@@ -40,43 +41,6 @@ impl ProviderKind {
 			Self::Custom => OmniProviderKind::Custom("CUSTOM".to_string()),
 		}
 	}
-
-	#[must_use]
-	pub fn from_omni_kind(kind: &OmniProviderKind) -> Self {
-		match kind {
-			OmniProviderKind::OpenAI => Self::Openai,
-			OmniProviderKind::OpenAICompat => Self::OpenaiCompat,
-			OmniProviderKind::Anthropic => Self::Anthropic,
-			OmniProviderKind::Google => Self::Google,
-			OmniProviderKind::OpenRouter => Self::Openrouter,
-			OmniProviderKind::Custom(_) => Self::Custom,
-		}
-	}
-
-	#[must_use]
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			Self::Openai => "OPENAI",
-			Self::OpenaiCompat => "OPENAI_COMPAT",
-			Self::Openrouter => "OPENROUTER",
-			Self::Anthropic => "ANTHROPIC",
-			Self::Google => "GOOGLE",
-			Self::Custom => "CUSTOM",
-		}
-	}
-
-	#[must_use]
-	pub fn from_str(s: &str) -> Option<Self> {
-		match s {
-			"OPENAI" => Some(Self::Openai),
-			"OPENAI_COMPAT" => Some(Self::OpenaiCompat),
-			"OPENROUTER" => Some(Self::Openrouter),
-			"ANTHROPIC" => Some(Self::Anthropic),
-			"GOOGLE" => Some(Self::Google),
-			"CUSTOM" => Some(Self::Custom),
-			_ => None,
-		}
-	}
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -94,6 +58,7 @@ pub struct Provider {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ProviderSlim {
 	pub id: Uuid,
 	pub name: String,
@@ -102,11 +67,7 @@ pub struct ProviderSlim {
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ProviderBillingConnection {
-	pub provider_id: Uuid,
 	pub credential: Option<String>,
-	pub last_status: String,
-	pub last_error_code: Option<String>,
-	pub last_synced_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,7 +103,6 @@ pub(crate) struct ProviderBillingOverviewRow {
 	pub remaining_amount: Option<Decimal>,
 	pub is_hard_limit: Option<bool>,
 	pub thresholds: Option<Value>,
-	pub details: Option<Value>,
 	pub fetched_at: Option<DateTime<Utc>>,
 }
 

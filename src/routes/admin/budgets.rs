@@ -1,236 +1,151 @@
 use crate::types::consts::{ADMIN_BUDGETS_EDIT, ADMIN_BUDGETS_VIEW};
-use crate::types::{Budget, BudgetAssignmentRequest, BudgetResetRequest, CreateBudgetRequest, JobState, ListBudgetsQuery, RequestContext, UpdateBudgetRequest};
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use crate::types::{AppError, AuthUser, Budget, BudgetAssignmentRequest, BudgetResetRequest, CreateBudgetRequest, JobState, ListBudgetsQuery, PageQuery, UpdateBudgetRequest, json_ok};
+use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Extension, Path, Query, State},
+	extract::{Path, Query, State},
 	http::StatusCode,
-	response::IntoResponse,
+	response::{IntoResponse, Response},
 };
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub async fn list_budgets(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Query(params): Query<ListBudgetsQuery>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-	match Budget::list(&state.db, params.page.unwrap_or(1), params.size.unwrap_or(50), params.search.as_deref()).await {
-		Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to list budgets: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+pub async fn list_budgets(State(state): State<Arc<JobState>>, auth: AuthUser, Query(page): Query<PageQuery>, Query(params): Query<ListBudgetsQuery>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_VIEW).await?;
+
+	let budgets = Budget::list(&state.db, &page, params.search.as_deref())
+		.await
+		.map_err(AppError::database)?;
+	json_ok(budgets)
 }
 
-pub async fn create_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateBudgetRequest>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+pub async fn create_budget(State(state): State<Arc<JobState>>, auth: AuthUser, Json(req): Json<CreateBudgetRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_EDIT).await?;
+
 	if req.name.trim().is_empty() {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		return Err(ErrorCode::ValidationFailed.into());
 	}
 	if req.amount <= rust_decimal::Decimal::ZERO {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		return Err(ErrorCode::ValidationFailed.into());
 	}
 	if !req.has_valid_enums() {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		return Err(ErrorCode::ValidationFailed.into());
 	}
-	match Budget::create(&state.db, &req).await {
-		Ok(budget) => ResponseBuilder::new(ResponseBody::Json(crate::types::BudgetResponse::from(budget)))
-			.status(StatusCode::CREATED)
-			.build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to create budget: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+
+	let budget = Budget::create(&state.db, &req)
+		.await
+		.map_err(AppError::database)?;
+	Ok(ResponseBuilder::new(ResponseBody::Json(crate::types::BudgetResponse::from(budget))).status(StatusCode::CREATED).build())
 }
 
-pub async fn update_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateBudgetRequest>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+pub async fn update_budget(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<UpdateBudgetRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_EDIT).await?;
+
 	if req.amount.is_some_and(|amount| amount <= rust_decimal::Decimal::ZERO) {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		return Err(ErrorCode::ValidationFailed.into());
 	}
 	if !req.has_valid_enums() {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		return Err(ErrorCode::ValidationFailed.into());
 	}
-	let budget = match Budget::find_by_id(&state.db, &id).await {
-		Ok(Some(budget)) => budget,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to fetch budget: {e}");
-			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-		}
-	};
-	match budget.update(&state.db, &req).await {
-		Ok(updated) => ResponseBuilder::new(ResponseBody::Json(crate::types::BudgetResponse::from(updated))).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to update budget: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+
+	let budget = Budget::find_by_id(&state.db, &id)
+		.await
+		.map_err(AppError::database)?
+		.ok_or(ErrorCode::NotFound)?;
+	let updated = budget
+		.update(&state.db, &req)
+		.await
+		.map_err(AppError::database)?;
+	json_ok(crate::types::BudgetResponse::from(updated))
 }
 
-pub async fn delete_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-	let budget = match Budget::find_by_id(&state.db, &id).await {
-		Ok(Some(budget)) => budget,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to fetch budget for delete: {e}");
-			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-		}
-	};
-	match budget.delete(&state.db).await {
-		Ok(()) => (StatusCode::NO_CONTENT, "").into_response(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to delete budget: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+pub async fn delete_budget(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_EDIT).await?;
+
+	let budget = Budget::find_by_id(&state.db, &id)
+		.await
+		.map_err(AppError::database)?
+		.ok_or(ErrorCode::NotFound)?;
+	budget
+		.delete(&state.db)
+		.await
+		.map_err(AppError::database)?;
+	Ok((StatusCode::NO_CONTENT, "").into_response())
 }
 
-pub async fn assign_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<BudgetAssignmentRequest>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+pub async fn assign_budget(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<BudgetAssignmentRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_EDIT).await?;
+
 	if req.team_id.is_none() && req.user_id.is_none() {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		return Err(ErrorCode::ValidationFailed.into());
 	}
-	let budget = match Budget::find_by_id(&state.db, &id).await {
-		Ok(Some(budget)) => budget,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to fetch budget for assignment: {e}");
-			return ErrorBuilder::new(ErrorCode::DatabaseError).build();
-		}
-	};
-	match budget.assign(&state.db, &user.id, &req).await {
-		Ok(()) => ResponseBuilder::<()>::new(ResponseBody::Empty).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to assign budget: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+
+	let budget = Budget::find_by_id(&state.db, &id)
+		.await
+		.map_err(AppError::database)?
+		.ok_or(ErrorCode::NotFound)?;
+	budget
+		.assign(&state.db, &auth.id, &req)
+		.await
+		.map_err(AppError::database)?;
+	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).build())
 }
 
-pub async fn get_budget_assignments(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-	match Budget::list_assignments(&state.db, &id).await {
-		Ok(assignments) => ResponseBuilder::new(ResponseBody::Json(assignments)).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to list assignments: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+pub async fn get_budget_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_VIEW).await?;
+
+	let assignments = Budget::list_assignments(&state.db, &id)
+		.await
+		.map_err(AppError::database)?;
+	json_ok(assignments)
 }
 
-pub async fn delete_assignment(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path((budget_id, assignment_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-	match Budget::delete_assignment(&state.db, &user.id, &budget_id, &assignment_id).await {
-		Ok(()) => (StatusCode::NO_CONTENT, "").into_response(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to delete assignment: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+pub async fn delete_assignment(State(state): State<Arc<JobState>>, auth: AuthUser, Path((budget_id, assignment_id)): Path<(Uuid, Uuid)>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_EDIT).await?;
+
+	Budget::delete_assignment(&state.db, &auth.id, &budget_id, &assignment_id)
+		.await
+		.map_err(AppError::database)?;
+	Ok((StatusCode::NO_CONTENT, "").into_response())
 }
 
+pub async fn user_overview(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_VIEW).await?;
 
-pub async fn user_overview(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-	match Budget::user_overview(&state.db).await {
-		Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to load user overview: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+	let rows = Budget::user_overview(&state.db)
+		.await
+		.map_err(AppError::database)?;
+	json_ok(rows)
 }
 
-pub async fn team_overview(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-	match Budget::team_overview(&state.db).await {
-		Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to load team overview: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+pub async fn team_overview(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_VIEW).await?;
+
+	let rows = Budget::team_overview(&state.db)
+		.await
+		.map_err(AppError::database)?;
+	json_ok(rows)
 }
 
-pub async fn reset_history(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-	match Budget::reset_history(&state.db).await {
-		Ok(rows) => ResponseBuilder::new(ResponseBody::Json(rows)).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to load reset history: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+pub async fn reset_history(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_VIEW).await?;
+
+	let rows = Budget::reset_history(&state.db)
+		.await
+		.map_err(AppError::database)?;
+	json_ok(rows)
 }
 
-pub async fn reset_budget(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<BudgetResetRequest>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_BUDGETS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-	let valid_kind = req.kind.as_deref().map_or(true, |kind| matches!(kind, "pooled" | "per_user"));
+pub async fn reset_budget(State(state): State<Arc<JobState>>, auth: AuthUser, Json(req): Json<BudgetResetRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_BUDGETS_EDIT).await?;
+
+	let valid_kind = req.kind.as_deref().is_none_or(|kind| matches!(kind, "pooled" | "per_user"));
 	if !valid_kind || (req.assignment_id.is_none() && req.budget_id.is_none() && req.team_id.is_none() && req.user_id.is_none()) {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+		return Err(ErrorCode::ValidationFailed.into());
 	}
-	match Budget::reset(&state.db, &req, &user.id).await {
-		Ok(row) => ResponseBuilder::new(ResponseBody::Json(row)).status(StatusCode::CREATED).build(),
-		Err(e) => {
-			eprintln!("[BUDGETS] Failed to reset budget: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
-	}
+
+	let row = Budget::reset(&state.db, &req, &auth.id)
+		.await
+		.map_err(AppError::database)?;
+	Ok(ResponseBuilder::new(ResponseBody::Json(row)).status(StatusCode::CREATED).build())
 }

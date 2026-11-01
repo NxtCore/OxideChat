@@ -14,6 +14,7 @@ where
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub struct CreateWorkspaceRequest {
 	pub name: String,
 	pub icon: Option<String>,
@@ -23,6 +24,7 @@ pub struct CreateWorkspaceRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub struct UpdateWorkspaceRequest {
 	pub name: Option<String>,
 	pub icon: Option<String>,
@@ -34,6 +36,7 @@ pub struct UpdateWorkspaceRequest {
 
 #[derive(Debug, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub enum WorkspaceDeleteAction {
 	#[default]
 	Archive,
@@ -42,6 +45,7 @@ pub enum WorkspaceDeleteAction {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeleteWorkspaceOptions", optional_fields = nullable))]
 pub struct DeleteWorkspaceParams {
 	#[serde(default)]
 	pub action: WorkspaceDeleteAction,
@@ -49,17 +53,18 @@ pub struct DeleteWorkspaceParams {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub struct CreateChatRequest {
 	pub workspace_id: Option<Uuid>,
 	pub title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub struct UpdateChatRequest {
 	pub title: Option<String>,
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub workspace_id: Option<Option<Uuid>>,
-	pub model_id: Option<Uuid>,
 	pub is_pinned: Option<bool>,
 	pub is_archived: Option<bool>,
 }
@@ -69,23 +74,19 @@ pub struct ChatListParams {
 	pub workspace_id: Option<Uuid>,
 	#[serde(default)]
 	pub include_archived: bool,
-	pub limit: Option<i32>,
-	pub offset: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub struct SendMessageRequest {
 	pub content: String,
 	pub model_id: Option<Uuid>,
 	pub reasoning_effort: Option<String>,
 	pub reasoning_budget_tokens: Option<i32>,
-	#[serde(default)]
-	pub tools_enabled: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct MessageListParams {
-	pub limit: Option<i32>,
 	pub before: Option<Uuid>,
 	pub after: Option<Uuid>,
 }
@@ -93,8 +94,6 @@ pub struct MessageListParams {
 #[derive(Debug, Deserialize)]
 pub struct EditMessageRequest {
 	pub content: String,
-	#[serde(default)]
-	pub regenerate: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,6 +102,7 @@ pub struct SwitchForkRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub struct UpdatePreferencesRequest {
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub default_model_key: Option<Option<String>>,
@@ -162,7 +162,7 @@ pub struct StreamRequest {
 	#[serde(default)]
 	pub skip_user_message: bool,
 	pub regenerate_from_message_id: Option<String>,
-	/// Upstream-provider slug the user picked in the chat provider selector (OpenRouter only).
+	/// Upstream-provider slug the user picked in the chat provider selector (`OpenRouter` only).
 	/// Empty/None means automatic routing.
 	pub provider_slug: Option<String>,
 	/// How the picked provider is applied: `"prefer"` (order, fallbacks on) or `"lock"`

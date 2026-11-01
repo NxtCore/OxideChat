@@ -1,108 +1,43 @@
-export interface PaginatedResponse<T> {
-	has_more: boolean;
-	items: T[];
-}
+import type {Chat} from './generated/Chat';
+import type {CreateMcpServerRequest as GeneratedCreateMcpServerRequest} from './generated/CreateMcpServerRequest';
+import type {CreateWorkspaceRequest as GeneratedCreateWorkspaceRequest} from './generated/CreateWorkspaceRequest';
+import type {ThemeCssVars} from './generated/ThemeCssVars';
 
-export interface TeamSummary {
-	id: string;
-	name: string;
-	is_default: boolean;
-}
+export type {Chat} from './generated/Chat';
+export type {Base} from './generated/Base';
+export type {Role} from './generated/Role';
+export type {UserPreferences} from './generated/UserPreferences';
+export type {ProviderResponse} from './generated/ProviderResponse';
+export type {ProviderOption} from './generated/ProviderOption';
+export type {ProviderOptionsResponse} from './generated/ProviderOptionsResponse';
+export type {ThemeCssVars} from './generated/ThemeCssVars';
+export type {TeamSummary} from './generated/TeamSummary';
+export type {TeamList} from './generated/TeamList';
+export type {TeamRole} from './generated/TeamRole';
+export type {TeamMember} from './generated/TeamMember';
+export type {TeamDetailed} from './generated/TeamDetailed';
+export type {ProviderTab} from './generated/ProviderTab';
+export type {Workspace} from './generated/Workspace';
+export type {McpServer} from './generated/McpServer';
+export type {UpdateMcpServerRequest} from './generated/UpdateMcpServerRequest';
+export type {CreateChatRequest} from './generated/CreateChatRequest';
+export type {UpdateChatRequest} from './generated/UpdateChatRequest';
+export type {UpdatePreferencesRequest} from './generated/UpdatePreferencesRequest';
+export type {ModelList} from './generated/ModelList';
+export type {ModelListAdmin} from './generated/ModelListAdmin';
+export type {GlobalConfig} from './generated/GlobalConfig';
+export type {DeleteWorkspaceOptions} from './generated/DeleteWorkspaceOptions';
+export type {WorkspaceDeleteAction} from './generated/WorkspaceDeleteAction';
+export type {UserListResponse} from './generated/UserListResponse';
+export type {UserResponse} from './generated/UserResponse';
+export type {SendMessageRequest} from './generated/SendMessageRequest';
+export type {Page as PaginatedResponse} from './generated/Page';
+export type {McpDiscoveryResult} from './generated/McpDiscoveryResult';
+export type {UpdateWorkspaceRequest} from './generated/UpdateWorkspaceRequest';
 
-export interface TeamList {
-	id: string;
-	name: string;
-	description: string | null;
-	is_default: boolean;
-	allow_all_models: boolean;
-	budget_id: string | null;
-	member_count: number;
-	created_at: string;
-	updated_at: string;
-}
+export type CreateWorkspaceRequest = Omit<GeneratedCreateWorkspaceRequest, 'is_default'> & {is_default?: boolean};
 
-export type TeamRole = 'member' | 'admin';
-
-export interface TeamMember {
-	id: string;
-	email: string;
-	username: string;
-	role: TeamRole;
-}
-
-export interface TeamDetailed extends Omit<TeamList, 'member_count'> {
-	default_model_id: string | null;
-	members: TeamMember[];
-	model_access: {
-		provider_ids: string[];
-		model_ids: string[];
-	};
-}
-
-export interface ProviderTab {
-	id: string;
-	name: string;
-}
-
-export interface Workspace {
-	id: string;
-	name: string;
-	icon: string | null;
-	color: string | null;
-	sort_order: number;
-	is_default: boolean;
-	chat_count: number;
-	created_at: string;
-	updated_at: string;
-}
-
-export interface McpServer {
-	id: string;
-	owner_id: string | null;
-	name: string;
-	transport: string;
-	connection_config: Record<string, any>;
-	is_enabled: boolean;
-	last_health_check: string | null;
-	health_status: string | null;
-	discovered_tools: string[];
-	created_at: string;
-	updated_at: string;
-}
-
-export interface CreateMcpServerRequest {
-	name: string;
-	transport: string;
-	connection_config: Record<string, any>;
-	is_enabled?: boolean;
-}
-
-export interface UpdateMcpServerRequest {
-	name?: string;
-	transport?: string;
-	connection_config?: Record<string, any>;
-	is_enabled?: boolean;
-}
-
-export interface McpDiscoveryResult {
-	tools: {name: string; description: string | null; input_schema: any}[];
-	server_name: string;
-	server_version: string | null;
-}
-
-export interface Chat {
-	id: string;
-	workspace_id: string | null;
-	title: string | null;
-	is_pinned: boolean;
-	is_archived: boolean;
-	branched_from_chat_id: string | null;
-	branched_from_message_id: string | null;
-	message_count: number;
-	last_message_at: string | null;
-	created_at: string;
-	updated_at: string;
-}
+export type CreateMcpServerRequest = Omit<GeneratedCreateMcpServerRequest, 'is_enabled'> & {is_enabled?: boolean};
 
 export interface ToolCallState {
 	name: string;
@@ -179,29 +114,6 @@ export interface ChatWithMessages {
 
 export type StreamingAnimation = 'fade' | 'typewriter' | 'slide' | 'none';
 
-export interface ThemeCssVars {
-	theme: Record<string, string>;
-	light: Record<string, string>;
-	dark: Record<string, string>;
-}
-
-export interface UserPreferences {
-	default_model_key: string | null;
-	effective_default_model_key: string | null;
-	default_provider_slug: string | null;
-	default_tools: string[];
-	favorite_model_keys: string[];
-	streaming_animation: StreamingAnimation;
-	use_remend: boolean;
-	theme_css_vars: ThemeCssVars;
-	custom_theme_urls: string[];
-}
-
-export interface GlobalConfig {
-	default_theme: ThemeCssVars;
-	default_model_key: string | null;
-}
-
 export interface FetchedTheme {
 	name: string;
 	preset: {cssVars: ThemeCssVars};
@@ -210,105 +122,9 @@ export interface FetchedTheme {
 	type: 'custom' | 'built-in';
 }
 
-export interface CreateWorkspaceRequest {
-	name: string;
-	icon?: string;
-	color?: string;
-	is_default?: boolean;
-}
-
-export interface UpdateWorkspaceRequest {
-	name?: string;
-	icon?: string;
-	color?: string | null;
-	sort_order?: number;
-	is_default?: boolean;
-}
-
-export type WorkspaceDeleteAction = 'move' | 'archive' | 'delete';
-
-export interface DeleteWorkspaceOptions {
-	action: WorkspaceDeleteAction;
-	target_workspace_id?: string;
-}
-
-export interface CreateChatRequest {
-	workspace_id?: string;
-	title?: string;
-	model_id?: string;
-}
-
-export interface UpdateChatRequest {
-	title?: string;
-	workspace_id?: string | null;
-	is_pinned?: boolean;
-	is_archived?: boolean;
-}
-
-export interface SendMessageRequest {
-	content: string;
-	model_id?: string;
-	reasoning_effort?: string;
-	tools_enabled?: string[];
-}
-
-export interface UpdatePreferencesRequest {
-	default_model_key?: string | null;
-	default_provider_slug?: string | null;
-	default_tools?: string[];
-	favorite_model_keys?: string[];
-	streaming_animation?: StreamingAnimation;
-	use_remend?: boolean;
-	reasoning_effort?: string | null;
-	theme_css_vars?: ThemeCssVars;
-	custom_theme_urls?: string[];
-}
-
-export interface ModelList {
-	id: string;
-	model_id: string;
-	display_name: string;
-	capabilities: string[];
-	input_modalities: string[];
-	output_modalities: string[];
-	context_length: number | null;
-	max_tokens: number | null;
-	is_enabled: boolean;
-	provider: {
-		id: string;
-		name: string;
-		kind: string;
-	};
-	provider_name: string;
-	icon: string | null;
-	is_favorite: boolean;
-	budget_blocked: boolean;
-}
-
-export interface ModelListAdmin {
-	id: string;
-	provider_id: string;
-	model_id: string;
-	display_name: string;
-	capabilities: string[];
-	input_modalities: string[];
-	output_modalities: string[];
-	context_length: number | null;
-	max_tokens: number | null;
-	is_enabled: boolean;
-	created_at: string;
-	updated_at: string;
-	provider: {
-		id: string;
-		name: string;
-		kind: string;
-	};
-	icon: string | null;
-}
-
 export interface ChatListParams {
 	workspace_id?: string;
 	include_archived?: boolean;
-	limit?: number;
-	offset?: number;
+	page?: number;
+	size?: number;
 }

@@ -1,4 +1,4 @@
-//! Background job scheduler for OxideChat.
+//! Background job scheduler for `OxideChat`.
 //!
 //! Contains scheduled tasks like session cleanup and provider model sync that run periodically.
 
@@ -41,6 +41,7 @@ pub async fn start_job_scheduler(state: Arc<super::JobState>) {
 	}
 }
 
+#[allow(clippy::cognitive_complexity)]
 async fn provider_billing_job(state: Arc<super::JobState>) {
 	tracing::info!("[JOBS] Provider billing refresh job started");
 	loop {
@@ -59,7 +60,7 @@ async fn provider_billing_job(state: Arc<super::JobState>) {
 					match refresh_provider_billing(&state.db, &provider).await {
 						Ok(_) => tracing::info!(provider_id=%provider.id, provider_name=%provider.name, status="AVAILABLE", "[JOBS] Refreshed provider billing"),
 						Err(error) => {
-							tracing::warn!(provider_id=%provider.id, provider_name=%provider.name, category=error.code(), "[JOBS] Provider billing refresh failed")
+							tracing::warn!(provider_id=%provider.id, provider_name=%provider.name, category=error.code(), "[JOBS] Provider billing refresh failed");
 						}
 					}
 				}
@@ -69,6 +70,7 @@ async fn provider_billing_job(state: Arc<super::JobState>) {
 }
 
 /// Sync models for every enabled system provider once.
+#[allow(clippy::cognitive_complexity)]
 pub async fn sync_provider_models_once(state: &super::JobState) {
 	match Provider::list_enabled_system(&state.db).await {
 		Ok(providers) => {

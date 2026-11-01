@@ -3,7 +3,8 @@
 //! CRUD operations for system-wide AI providers.
 
 use crate::ai::{parse_extra_headers, reload_providers};
-use crate::types::{JobState, RequestContext};
+use crate::types::consts::{ADMIN_PROVIDERS_EDIT, ADMIN_PROVIDERS_VIEW};
+use crate::types::{AppError, AuthUser, JobState};
 use crate::types::models::Model;
 use crate::types::providers::{
 	CreateProviderRequest, Provider, ProviderResponse, SyncProviderResponse, TestProviderRequest, TestProviderResponse, UpdateProviderRequest,
@@ -11,12 +12,12 @@ use crate::types::providers::{
 
 use crate::utils::encryption::{decrypt_api_key, encrypt_api_key};
 use crate::utils::providers::sync_provider_models;
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Extension, Path, State},
+	extract::{Path, State},
 	http::StatusCode,
-	response::IntoResponse,
+	response::{IntoResponse, Response},
 };
 use omniference::{
 	OmniferenceEngine,
@@ -25,123 +26,59 @@ use omniference::{
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub const ADMIN_PROVIDERS_VIEW: &str = "admin.providers.view";
-pub const ADMIN_PROVIDERS_EDIT: &str = "admin.providers.edit";
-
 /// List all system providers
-pub async fn list_providers(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn list_providers(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_VIEW).await?;
 
-	if !user.has_permission(&state.db, ADMIN_PROVIDERS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+	let responses: Vec<ProviderResponse> = Provider::list_for_admin(&state.db).await?.into_iter().map(Into::into).collect();
 
-	let providers = Provider::list_for_admin(&state.db).await;
-
-	match providers {
-		Ok(providers) => {
-			let responses: Vec<ProviderResponse> = providers.into_iter().map(Into::into).collect();
-			ResponseBuilder::new(ResponseBody::Json(responses)).build()
-		}
-		Err(e) => {
-			eprintln!("[AI] Failed to list providers: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	Ok(ResponseBuilder::new(ResponseBody::Json(responses)).build())
 }
 
 /// Get a single provider by ID
-pub async fn get_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn get_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_VIEW).await?;
 
-	if !user.has_permission(&state.db, ADMIN_PROVIDERS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+	let provider = Provider::find_for_admin(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
+	let response: ProviderResponse = provider.into();
 
-	let provider = Provider::find_for_admin(&state.db, &id).await;
-
-	match provider {
-		Ok(Some(provider)) => {
-			let response: ProviderResponse = provider.into();
-			ResponseBuilder::new(ResponseBody::Json(response)).build()
-		}
-		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[AI] Failed to get provider: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())
 }
 
 /// Create a new system provider
-pub async fn create_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateProviderRequest>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn create_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Json(req): Json<CreateProviderRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
 
-	if !user.has_permission(&state.db, ADMIN_PROVIDERS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	let api_key = match req.api_key.as_deref().map(encrypt_api_key).transpose() {
-		Ok(api_key) => api_key,
-		Err(error) => {
-			tracing::error!("Failed to encrypt provider credential: {error}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	let api_key = req.api_key.as_deref().map(encrypt_api_key).transpose().map_err(|error| {
+		tracing::error!("Failed to encrypt provider credential: {error}");
+		ErrorCode::InternalError
+	})?;
 	let base_url = req.base_url.trim_end_matches('/').to_string();
 
-	let provider = Provider::create_system(&state.db, &req.kind, &req.name, &base_url, api_key.as_deref(), &req.extra_headers, req.is_enabled).await;
+	let provider = Provider::create_system(&state.db, &req.kind, &req.name, &base_url, api_key.as_deref(), &req.extra_headers, req.is_enabled)
+		.await
+		.map_err(|e| AppError::unique_or(e, ErrorCode::AlreadyExists))?;
 
-	match provider {
-		Ok(provider) => {
-			reload_providers(&state.db).await;
-			if provider.is_enabled
-				&& let Err(e) = sync_provider_models(&state.db, &provider).await
-			{
-				eprintln!("[AI] Warning: Failed to sync models for new provider: {e}");
-			}
-			let response: ProviderResponse = provider.into();
-			ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
-		}
-		Err(e) => {
-			if e.to_string().contains("duplicate key") || e.to_string().contains("unique") {
-				ErrorBuilder::new(ErrorCode::AlreadyExists).build()
-			} else {
-				eprintln!("[AI] Failed to create provider: {e}");
-				ErrorBuilder::new(ErrorCode::InternalError).build()
-			}
-		}
+	reload_providers(&state.db).await;
+	if provider.is_enabled
+		&& let Err(e) = sync_provider_models(&state.db, &provider).await
+	{
+		tracing::warn!("Failed to sync models for new provider: {e}");
 	}
+	let response: ProviderResponse = provider.into();
+
+	Ok(ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build())
 }
 
 /// Update an existing provider
-pub async fn update_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>, Json(req): Json<UpdateProviderRequest>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
-
-	if !user.has_permission(&state.db, ADMIN_PROVIDERS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<UpdateProviderRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
 
 	let base_url = req.base_url.as_deref().map(|url| url.trim_end_matches('/').to_string());
-	let api_key = match req.api_key.as_deref().map(encrypt_api_key).transpose() {
-		Ok(api_key) => api_key,
-		Err(error) => {
-			tracing::error!("Failed to encrypt provider credential: {error}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	let api_key = req.api_key.as_deref().map(encrypt_api_key).transpose().map_err(|error| {
+		tracing::error!("Failed to encrypt provider credential: {error}");
+		ErrorCode::InternalError
+	})?;
 	let provider = Provider::patch_system(
 		&state.db,
 		&id,
@@ -152,91 +89,46 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, Extension(Reque
 		req.extra_headers.as_ref(),
 		req.is_enabled,
 	)
-	.await;
+	.await?
+	.ok_or(ErrorCode::NotFound)?;
 
-	match provider {
-		Ok(Some(provider)) => {
-			reload_providers(&state.db).await;
-			if provider.is_enabled
-				&& let Err(e) = sync_provider_models(&state.db, &provider).await
-			{
-				eprintln!("[AI] Warning: Failed to sync models after provider update: {e}");
-			}
-			let response: ProviderResponse = provider.into();
-			ResponseBuilder::new(ResponseBody::Json(response)).build()
-		}
-		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[AI] Failed to update provider: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
+	reload_providers(&state.db).await;
+	if provider.is_enabled
+		&& let Err(e) = sync_provider_models(&state.db, &provider).await
+	{
+		tracing::warn!("Failed to sync models after provider update: {e}");
 	}
+	let response: ProviderResponse = provider.into();
+
+	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())
 }
 
 /// Delete a provider
-pub async fn delete_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn delete_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
 
-	if !user.has_permission(&state.db, ADMIN_PROVIDERS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	if !Provider::delete_system(&state.db, &id).await? {
+		return Err(ErrorCode::NotFound.into());
 	}
+	reload_providers(&state.db).await;
 
-	let result = Provider::delete_system(&state.db, &id).await;
-
-	match result {
-		Ok(true) => {
-			reload_providers(&state.db).await;
-			(StatusCode::NO_CONTENT, "").into_response()
-		}
-		Ok(false) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[AI] Failed to delete provider: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	Ok((StatusCode::NO_CONTENT, "").into_response())
 }
 
 /// Test a provider connection (can use either an existing provider ID or inline config)
-pub async fn test_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn test_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_VIEW).await?;
 
-	if !user.has_permission(&state.db, ADMIN_PROVIDERS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+	let provider = Provider::find_for_admin(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
 
-	let provider = Provider::find_for_admin(&state.db, &id).await;
-
-	let provider = match provider {
-		Ok(Some(p)) => p,
-		Ok(None) => {
-			return ErrorBuilder::new(ErrorCode::NotFound).build();
-		}
-		Err(e) => {
-			eprintln!("[AI] Failed to fetch provider for test: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let api_key = match provider.api_key.as_deref().map(decrypt_api_key).transpose() {
-		Ok(api_key) => api_key,
-		Err(error) => {
-			tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-	let extra_headers = match parse_extra_headers(&provider.extra_headers.0) {
-		Ok(headers) => headers,
-		Err(error) => {
-			tracing::error!(provider_id=%provider.id, "Failed to decrypt provider headers: {error}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	let api_key = provider.api_key.as_deref().map(decrypt_api_key).transpose().map_err(|error| {
+		tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
+		ErrorCode::InternalError
+	})?;
+	let extra_headers = parse_extra_headers(&provider.extra_headers.0).map_err(|error| {
+		tracing::error!(provider_id=%provider.id, "Failed to decrypt provider headers: {error}");
+		ErrorCode::InternalError
+	})?;
 
 	let config = ProviderConfig {
 		name: provider.name.clone(),
@@ -251,38 +143,23 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, Extension(Request
 		catalog_provider_slug: None,
 	};
 
-	// Test the connection
-	match test_provider_connection(config).await {
-		Ok(result) => ResponseBuilder::new(ResponseBody::Json(result)).build(),
-		Err(e) => {
-			let result = TestProviderResponse {
-				success: false,
-				models_found: 0,
-				message: e,
-			};
-			ResponseBuilder::new(ResponseBody::Json(result)).build()
-		}
-	}
+	let result = test_provider_connection(config).await.unwrap_or_else(|message| TestProviderResponse {
+		success: false,
+		models_found: 0,
+		message,
+	});
+
+	Ok(ResponseBuilder::new(ResponseBody::Json(result)).build())
 }
 
 /// Test a provider with inline configuration (doesn't require existing provider)
-pub async fn test_provider_inline(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<TestProviderRequest>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn test_provider_inline(State(state): State<Arc<JobState>>, auth: AuthUser, Json(req): Json<TestProviderRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_VIEW).await?;
 
-	if !user.has_permission(&state.db, ADMIN_PROVIDERS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	let extra_headers = match parse_extra_headers(&req.extra_headers) {
-		Ok(headers) => headers,
-		Err(error) => {
-			tracing::error!("Failed to read provider headers: {error}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	let extra_headers = parse_extra_headers(&req.extra_headers).map_err(|error| {
+		tracing::error!("Failed to read provider headers: {error}");
+		ErrorCode::InternalError
+	})?;
 
 	let config = ProviderConfig {
 		name: "test".to_string(),
@@ -297,76 +174,39 @@ pub async fn test_provider_inline(State(state): State<Arc<JobState>>, Extension(
 		catalog_provider_slug: None,
 	};
 
-	match test_provider_connection(config).await {
-		Ok(result) => ResponseBuilder::new(ResponseBody::Json(result)).build(),
-		Err(e) => {
-			let result = TestProviderResponse {
-				success: false,
-				models_found: 0,
-				message: e,
-			};
-			ResponseBuilder::new(ResponseBody::Json(result)).build()
-		}
-	}
+	let result = test_provider_connection(config).await.unwrap_or_else(|message| TestProviderResponse {
+		success: false,
+		models_found: 0,
+		message,
+	});
+
+	Ok(ResponseBuilder::new(ResponseBody::Json(result)).build())
 }
 
 /// Sync models from a provider
-pub async fn sync_provider(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn sync_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
 
-	if !user.has_permission(&state.db, ADMIN_PROVIDERS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+	let provider = Provider::find_for_admin(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
 
-	let provider = Provider::find_for_admin(&state.db, &id).await;
+	let response = sync_provider_models(&state.db, &provider).await.unwrap_or_else(|message| SyncProviderResponse {
+		success: false,
+		models_added: 0,
+		models_updated: 0,
+		models_removed: 0,
+		message,
+	});
 
-	let provider = match provider {
-		Ok(Some(p)) => p,
-		Ok(None) => {
-			return ErrorBuilder::new(ErrorCode::NotFound).build();
-		}
-		Err(e) => {
-			eprintln!("[AI] Failed to fetch provider for sync: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	match sync_provider_models(&state.db, &provider).await {
-		Ok(response) => ResponseBuilder::new(ResponseBody::Json(response)).build(),
-		Err(e) => ResponseBuilder::new(ResponseBody::Json(SyncProviderResponse {
-			success: false,
-			models_added: 0,
-			models_updated: 0,
-			models_removed: 0,
-			message: e,
-		}))
-		.build(),
-	}
+	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())
 }
 
 /// List models for a provider
-pub async fn list_models(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn list_models(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_VIEW).await?;
 
-	if !user.has_permission(&state.db, ADMIN_PROVIDERS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+	let models = Model::list_by_provider_for_admin(&state.db, &id).await?;
 
-	let models = Model::list_by_provider_for_admin(&state.db, &id).await;
-
-	match models {
-		Ok(models) => ResponseBuilder::new(ResponseBody::Json(models)).build(),
-		Err(e) => {
-			eprintln!("[AI] Failed to list models: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	Ok(ResponseBuilder::new(ResponseBody::Json(models)).build())
 }
 
 async fn test_provider_connection(config: ProviderConfig) -> Result<TestProviderResponse, String> {

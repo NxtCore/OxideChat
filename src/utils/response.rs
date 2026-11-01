@@ -6,14 +6,13 @@
 use axum::{
 	Json,
 	body::Body,
-	http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
+	http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
 	response::{IntoResponse, Response},
 };
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::i18n::I18n;
-pub use axum::http::header::InvalidHeaderValue;
 
 // ============================================================================
 // Response Builder
@@ -28,7 +27,6 @@ pub struct ResponseBuilder<T: Serialize> {
 
 pub enum ResponseBody<T: Serialize> {
 	Json(T),
-	Text(String),
 	Empty,
 }
 
@@ -55,103 +53,11 @@ impl<T: Serialize> ResponseBuilder<T> {
 		self
 	}
 
-	/// Add a header from string values.
-	///
-	/// # Errors
-	///
-	/// Returns `InvalidHeaderValue` if the value cannot be parsed as a valid header component.
-	pub fn header_str(mut self, key: &'static str, value: &str) -> Result<Self, InvalidHeaderValue> {
-		self.headers.insert(HeaderName::from_static(key), HeaderValue::from_str(value)?);
-		Ok(self)
-	}
-
-	/// Add multiple headers from a `HeaderMap`.
-	#[must_use]
-	pub fn headers(mut self, headers: HeaderMap) -> Self {
-		self.headers.extend(headers);
-		self
-	}
-
-	/// Set the `Content-Type` header.
-	///
-	/// # Errors
-	///
-	/// Returns `InvalidHeaderValue` if the content type cannot be parsed.
-	pub fn content_type(mut self, content_type: &str) -> Result<Self, InvalidHeaderValue> {
-		self.headers.insert(header::CONTENT_TYPE, HeaderValue::from_str(content_type)?);
-		Ok(self)
-	}
-
-	/// Set a `Cache-Control` directive.
-	///
-	/// # Errors
-	///
-	/// Returns `InvalidHeaderValue` if the directive cannot be parsed.
-	pub fn cache_control(mut self, directive: &str) -> Result<Self, InvalidHeaderValue> {
-		self.headers.insert(header::CACHE_CONTROL, HeaderValue::from_str(directive)?);
-		Ok(self)
-	}
-
-	/// Set `Cache-Control: no-store, no-cache, must-revalidate`.
-	///
-	/// # Errors
-	///
-	/// Returns `InvalidHeaderValue` if the directive cannot be parsed.
-	pub fn no_cache(self) -> Result<Self, InvalidHeaderValue> {
-		self.cache_control("no-store, no-cache, must-revalidate")
-	}
-
-	/// Set `Cache-Control: max-age=<seconds>`.
-	///
-	/// # Errors
-	///
-	/// Returns `InvalidHeaderValue` if the directive cannot be parsed.
-	pub fn cache_max_age(self, seconds: u32) -> Result<Self, InvalidHeaderValue> {
-		self.cache_control(&format!("max-age={seconds}"))
-	}
-
-	/// Set `Cache-Control: private, max-age=<seconds>`.
-	///
-	/// # Errors
-	///
-	/// Returns `InvalidHeaderValue` if the directive cannot be parsed.
-	pub fn cache_private(self, seconds: u32) -> Result<Self, InvalidHeaderValue> {
-		self.cache_control(&format!("private, max-age={seconds}"))
-	}
-
-	/// Set `Access-Control-Allow-Origin` header.
-	///
-	/// # Errors
-	///
-	/// Returns `InvalidHeaderValue` if the origin cannot be parsed.
-	pub fn allow_origin(mut self, origin: &str) -> Result<Self, InvalidHeaderValue> {
-		self.headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_str(origin)?);
-		Ok(self)
-	}
-
-	/// Add common security headers.
-	#[must_use]
-	pub fn security_headers(mut self) -> Self {
-		self.headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-		self.headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-		self.headers.insert(header::X_XSS_PROTECTION, HeaderValue::from_static("1; mode=block"));
-		self.headers.insert(
-			HeaderName::from_static("referrer-policy"),
-			HeaderValue::from_static("strict-origin-when-cross-origin"),
-		);
-		self
-	}
-
 	/// Build the final response.
 	#[must_use]
 	pub fn build(self) -> Response {
 		let mut response = match self.body {
 			ResponseBody::Json(data) => Json(data).into_response(),
-			ResponseBody::Text(content) => {
-				let mut resp = Response::new(Body::from(content));
-				resp.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
-				resp
-			}
 			ResponseBody::Empty => Response::new(Body::empty()),
 		};
 
@@ -189,7 +95,6 @@ pub enum ErrorCode {
 	PasswordNoSpecial,
 	SetupRequired,
 	SetupCompleted,
-	MalformedRequest,
 	InvalidProvider,
 	ProviderNotConfigured,
 	DefaultWorkspaceDelete,
@@ -204,12 +109,8 @@ pub enum ErrorCode {
 	GatewayAdminReasonInvalid,
 
 	// 401 Unauthorized
-	Unauthorized,
 	NotAuthenticated,
 	InvalidCredentials,
-	SessionExpired,
-	TokenInvalid,
-	TokenExpired,
 	ExternalAuthRequired,
 	OAuthStateMismatch,
 	OAuthTokenError,
@@ -218,7 +119,6 @@ pub enum ErrorCode {
 	// 403 Forbidden
 	Forbidden,
 	InsufficientPermissions,
-	AccountDisabled,
 	ApiKeyTeamForbidden,
 	ApiKeyTeamAdminRequired,
 	ApiKeyServiceAccountForbidden,
@@ -226,23 +126,17 @@ pub enum ErrorCode {
 	// 404 Not Found
 	NotFound,
 	UserNotFound,
-	ResourceNotFound,
 	TranslationNotFound,
 	ApiKeyNotFound,
 
 	// 409 Conflict
-	Conflict,
 	EmailTaken,
 	UsernameTaken,
 	EmailOrUsernameTaken,
 	AlreadyExists,
-	OAuthEmailConflict,
 	ApiKeyRevoked,
 	ApiKeyRuleDuplicate,
 	ApiKeyAdminDisabled,
-
-	// 422 Unprocessable Entity
-	UnprocessableEntity,
 
 	// 429 Too Many Requests
 	RateLimited,
@@ -274,7 +168,6 @@ impl ErrorCode {
 			| Self::PasswordNoSpecial
 			| Self::SetupRequired
 			| Self::SetupCompleted
-			| Self::MalformedRequest
 			| Self::InvalidProvider
 			| Self::ProviderNotConfigured
 			| Self::DefaultWorkspaceDelete
@@ -289,20 +182,15 @@ impl ErrorCode {
 			| Self::GatewayAdminReasonInvalid
 			=> StatusCode::BAD_REQUEST,
 
-			Self::Unauthorized
-			| Self::NotAuthenticated
+			Self::NotAuthenticated
 			| Self::InvalidCredentials
-			| Self::SessionExpired
-			| Self::TokenInvalid
-			| Self::TokenExpired
 			| Self::ExternalAuthRequired
 			| Self::OAuthStateMismatch
 			| Self::OAuthTokenError
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
-			Self::Forbidden | Self::InsufficientPermissions | Self::AccountDisabled | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden => StatusCode::FORBIDDEN,
-			Self::NotFound | Self::UserNotFound | Self::ResourceNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
-			Self::Conflict | Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::OAuthEmailConflict | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled => StatusCode::CONFLICT,
-			Self::UnprocessableEntity => StatusCode::UNPROCESSABLE_ENTITY,
+			Self::Forbidden | Self::InsufficientPermissions | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden => StatusCode::FORBIDDEN,
+			Self::NotFound | Self::UserNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
+			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled => StatusCode::CONFLICT,
 			Self::RateLimited | Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -327,7 +215,6 @@ impl ErrorCode {
 			Self::PasswordNoSpecial => "auth.errors.password_no_special",
 			Self::SetupRequired => "auth.errors.setup_required",
 			Self::SetupCompleted => "auth.errors.setup_completed",
-			Self::MalformedRequest => "errors.malformed_request",
 			Self::InvalidProvider => "auth.errors.oauth_provider_invalid",
 			Self::ProviderNotConfigured => "auth.errors.oauth_provider_disabled",
 			Self::DefaultWorkspaceDelete => "workspace.cannot_delete_default",
@@ -341,12 +228,8 @@ impl ErrorCode {
 			Self::RequestLogRetentionInvalid => "developer.errors.retention_invalid",
 			Self::GatewayAdminReasonInvalid => "developer.admin.errors.reason_invalid",
 
-			Self::Unauthorized => "auth.errors.unauthorized",
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
 			Self::InvalidCredentials => "auth.errors.invalid_credentials",
-			Self::SessionExpired => "auth.errors.session_expired",
-			Self::TokenInvalid => "auth.errors.token_invalid",
-			Self::TokenExpired => "auth.errors.token_expired",
 			Self::ExternalAuthRequired => "auth.errors.external_auth",
 			Self::OAuthStateMismatch => "auth.errors.oauth_state_mismatch",
 			Self::OAuthTokenError => "auth.errors.oauth_token_error",
@@ -354,28 +237,22 @@ impl ErrorCode {
 
 			Self::Forbidden => "errors.forbidden",
 			Self::InsufficientPermissions => "errors.insufficient_permissions",
-			Self::AccountDisabled => "auth.errors.account_disabled",
 			Self::ApiKeyTeamForbidden => "developer.errors.team_forbidden",
 			Self::ApiKeyTeamAdminRequired => "developer.errors.team_admin_required",
 			Self::ApiKeyServiceAccountForbidden => "developer.errors.service_account_forbidden",
 
 			Self::NotFound => "errors.not_found",
 			Self::UserNotFound => "auth.errors.user_not_found",
-			Self::ResourceNotFound => "errors.resource_not_found",
 			Self::TranslationNotFound => "i18n.errors.translation_not_found",
 			Self::ApiKeyNotFound => "developer.errors.key_not_found",
 
-			Self::Conflict => "errors.conflict",
 			Self::EmailTaken => "auth.errors.email_taken",
 			Self::UsernameTaken => "auth.errors.username_taken",
 			Self::EmailOrUsernameTaken => "auth.errors.email_or_username_taken",
 			Self::AlreadyExists => "errors.already_exists",
-			Self::OAuthEmailConflict => "auth.errors.oauth_email_conflict",
 			Self::ApiKeyRevoked => "developer.errors.key_revoked",
 			Self::ApiKeyRuleDuplicate => "developer.errors.rule_duplicate",
 			Self::ApiKeyAdminDisabled => "developer.errors.key_admin_disabled",
-
-			Self::UnprocessableEntity => "errors.unprocessable_entity",
 
 			Self::RateLimited => "errors.rate_limited",
 			Self::TooManyRequests => "errors.too_many_requests",
@@ -385,7 +262,7 @@ impl ErrorCode {
 		}
 	}
 
-	/// Get the error code string (snake_case).
+	/// Get the error code string (`snake_case`).
 	#[must_use]
 	pub const fn code(&self) -> &'static str {
 		match self {
@@ -403,7 +280,6 @@ impl ErrorCode {
 			Self::PasswordNoSpecial => "password_no_special",
 			Self::SetupRequired => "setup_required",
 			Self::SetupCompleted => "setup_completed",
-			Self::MalformedRequest => "malformed_request",
 			Self::InvalidProvider => "invalid_provider",
 			Self::ProviderNotConfigured => "provider_not_configured",
 			Self::DefaultWorkspaceDelete => "default_workspace_delete",
@@ -417,12 +293,8 @@ impl ErrorCode {
 			Self::RequestLogRetentionInvalid => "request_log_retention_invalid",
 			Self::GatewayAdminReasonInvalid => "gateway_admin_reason_invalid",
 
-			Self::Unauthorized => "unauthorized",
 			Self::NotAuthenticated => "not_authenticated",
 			Self::InvalidCredentials => "invalid_credentials",
-			Self::SessionExpired => "session_expired",
-			Self::TokenInvalid => "token_invalid",
-			Self::TokenExpired => "token_expired",
 			Self::ExternalAuthRequired => "external_auth_required",
 			Self::OAuthStateMismatch => "oauth_state_mismatch",
 			Self::OAuthTokenError => "oauth_token_error",
@@ -430,28 +302,22 @@ impl ErrorCode {
 
 			Self::Forbidden => "forbidden",
 			Self::InsufficientPermissions => "insufficient_permissions",
-			Self::AccountDisabled => "account_disabled",
 			Self::ApiKeyTeamForbidden => "api_key_team_forbidden",
 			Self::ApiKeyTeamAdminRequired => "api_key_team_admin_required",
 			Self::ApiKeyServiceAccountForbidden => "api_key_service_account_forbidden",
 
 			Self::NotFound => "not_found",
 			Self::UserNotFound => "user_not_found",
-			Self::ResourceNotFound => "resource_not_found",
 			Self::TranslationNotFound => "translation_not_found",
 			Self::ApiKeyNotFound => "api_key_not_found",
 
-			Self::Conflict => "conflict",
 			Self::EmailTaken => "email_taken",
 			Self::UsernameTaken => "username_taken",
 			Self::EmailOrUsernameTaken => "email_or_username_taken",
 			Self::AlreadyExists => "already_exists",
-			Self::OAuthEmailConflict => "oauth_email_conflict",
 			Self::ApiKeyRevoked => "api_key_revoked",
 			Self::ApiKeyRuleDuplicate => "api_key_rule_duplicate",
 			Self::ApiKeyAdminDisabled => "api_key_admin_disabled",
-
-			Self::UnprocessableEntity => "unprocessable_entity",
 
 			Self::RateLimited => "rate_limited",
 			Self::TooManyRequests => "too_many_requests",
@@ -488,74 +354,6 @@ pub struct ApiError {
 	pub errors: Vec<ErrorDetail>,
 }
 
-impl ApiError {
-	/// Create an error response with a single error.
-	#[must_use]
-	pub fn single(code: ErrorCode) -> Self {
-		Self {
-			errors: vec![ErrorDetail {
-				code: code.code(),
-				message: code.message(),
-				status: code.status().as_u16(),
-				details: None,
-				field: None,
-			}],
-		}
-	}
-
-	/// Create an error response with details.
-	#[must_use]
-	pub fn with_details(code: ErrorCode, details: Value) -> Self {
-		Self {
-			errors: vec![ErrorDetail {
-				code: code.code(),
-				message: code.message(),
-				status: code.status().as_u16(),
-				details: Some(details),
-				field: None,
-			}],
-		}
-	}
-
-	/// Create an error response with a field annotation.
-	#[must_use]
-	pub fn with_field(code: ErrorCode, field: impl Into<String>) -> Self {
-		Self {
-			errors: vec![ErrorDetail {
-				code: code.code(),
-				message: code.message(),
-				status: code.status().as_u16(),
-				details: None,
-				field: Some(field.into()),
-			}],
-		}
-	}
-
-	/// Create an error response with multiple errors.
-	#[must_use]
-	pub fn multiple(codes: Vec<ErrorCode>) -> Self {
-		Self {
-			errors: codes
-				.into_iter()
-				.map(|code| ErrorDetail {
-					code: code.code(),
-					message: code.message(),
-					status: code.status().as_u16(),
-					details: None,
-					field: None,
-				})
-				.collect(),
-		}
-	}
-
-	/// Get the primary status code (from first error, or 500).
-	pub fn primary_status(&self) -> StatusCode {
-		self.errors.first().map_or(StatusCode::INTERNAL_SERVER_ERROR, |e| {
-			StatusCode::from_u16(e.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
-		})
-	}
-}
-
 // ============================================================================
 // Error Builder
 // ============================================================================
@@ -586,22 +384,6 @@ impl ErrorBuilder {
 		}
 	}
 
-	/// Add another error to the response.
-	#[must_use]
-	pub fn add(mut self, code: ErrorCode) -> Self {
-		// Apply pending details/field to previous error
-		self.finalize_current();
-
-		self.errors.push(ErrorDetail {
-			code: code.code(),
-			message: code.message(),
-			status: code.status().as_u16(),
-			details: None,
-			field: None,
-		});
-		self
-	}
-
 	/// Add details to the current (last) error.
 	#[must_use]
 	pub fn details(mut self, details: Value) -> Self {
@@ -614,23 +396,6 @@ impl ErrorBuilder {
 	pub fn field(mut self, field: impl Into<String>) -> Self {
 		self.current_field = Some(field.into());
 		self
-	}
-
-	/// Add a response header.
-	#[must_use]
-	pub fn header(mut self, key: HeaderName, value: HeaderValue) -> Self {
-		self.headers.insert(key, value);
-		self
-	}
-
-	/// Add a response header from string values.
-	///
-	/// # Errors
-	///
-	/// Returns `InvalidHeaderValue` if the value cannot be parsed as a valid header component.
-	pub fn header_str(mut self, key: &'static str, value: &str) -> Result<Self, InvalidHeaderValue> {
-		self.headers.insert(HeaderName::from_static(key), HeaderValue::from_str(value)?);
-		Ok(self)
 	}
 
 	fn finalize_current(&mut self) {

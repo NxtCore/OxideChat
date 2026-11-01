@@ -9,15 +9,15 @@ const VALID_ON_EXCEED: [&str; 3] = ["block", "warn", "allow"];
 
 #[derive(Debug, Deserialize)]
 pub struct ListBudgetsQuery {
-	pub page: Option<i64>,
-	pub size: Option<i64>,
 	pub search: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "BudgetPayload", optional_fields = nullable))]
 pub struct CreateBudgetRequest {
 	pub name: String,
 	pub description: Option<String>,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub amount: Decimal,
 	pub kind: String,
 	pub interval: String,
@@ -65,6 +65,7 @@ pub struct BudgetAssignmentRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "BudgetResetPayload", optional_fields = nullable))]
 pub struct BudgetResetRequest {
 	pub assignment_id: Option<Uuid>,
 	pub budget_id: Option<Uuid>,

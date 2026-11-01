@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "UpdateProviderBillingPayload", optional_fields = nullable))]
 pub struct UpdateProviderBillingRequest {
 	pub credential: Option<String>,
 }

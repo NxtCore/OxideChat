@@ -1,106 +1,39 @@
-use crate::types::{JobState, RequestContext};
-use crate::types::models::Model;
 use crate::types::{
-	BranchFromMessageRequest, BranchResponse, Chat, ChatMessageResponse, ChatResponse, EditMessageRequest, Message, MessageListParams, ReasoningDetails,
-	SendMessageRequest, SwitchForkRequest,
+	AppError, AuthUser, BranchFromMessageRequest, BranchResponse, Chat, ChatMessageResponse, ChatResponse, EditMessageRequest, JobState, Message, MessageListParams, ReasoningDetails,
+	SendMessageRequest, SwitchForkRequest, json_ok,
 };
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
-	extract::{Extension, Path, Query, State},
+	extract::{Path, Query, State},
 	http::StatusCode,
-	response::IntoResponse,
+	response::Response,
 };
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// GET /api/v1/chats/:chat_id/messages
-pub async fn list_messages(
-	State(state): State<Arc<JobState>>,
-	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
-	Path(chat_id): Path<Uuid>,
-	Query(params): Query<MessageListParams>,
-) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	match Chat::exists_for_user(&state.db, &chat_id, &user.id).await {
-		Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to validate chat: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-		_ => {}
+async fn require_chat(state: &JobState, chat_id: &Uuid, user: &AuthUser) -> Result<(), AppError> {
+	if Chat::exists_for_user(&state.db, chat_id, &user.id).await? {
+		Ok(())
+	} else {
+		Err(ErrorCode::NotFound.into())
 	}
-
-	let messages = match Message::list_by_chat(&state.db, &chat_id, params.before.as_ref(), params.after.as_ref()).await {
-		Ok(m) => m,
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to list messages: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let message_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
-	let model_ids: Vec<Uuid> = messages.iter().filter_map(|m| m.model_id).collect();
-	let model_keys = match Model::model_keys_by_ids(&state.db, &model_ids).await {
-		Ok(keys) => keys,
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to get message model keys: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let sibling_counts = match Message::sibling_counts_for_chat(&state.db, &chat_id).await {
-		Ok(c) => c,
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to get sibling counts: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let mut tool_executions = match Message::tool_executions_for_messages(&state.db, &message_ids).await {
-		Ok(t) => t,
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to get tool executions: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let responses: Vec<ChatMessageResponse> = messages
-		.into_iter()
-		.map(|m| {
-			let msg_id = m.id;
-			let parent_id = m.parent_id;
-			let role = m.role.clone();
-			let mut response = ChatMessageResponse::from(m);
-			if response.model_key.is_none() {
-				response.model_key = response.model_id.and_then(|model_id| model_keys.get(&model_id).cloned());
-			}
-			response.tool_calls = tool_executions.remove(&msg_id);
-			response.sibling_count = sibling_counts.get(&(parent_id, role)).copied().unwrap_or(1) as i32;
-			response
-		})
-		.collect();
-
-	ResponseBuilder::new(ResponseBody::Json(responses)).build()
 }
 
-/// POST /api/v1/chats/:chat_id/messages
-pub async fn send_message(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(chat_id): Path<Uuid>, Json(req): Json<SendMessageRequest>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
+async fn find_message(state: &JobState, chat_id: &Uuid, message_id: &Uuid) -> Result<Message, AppError> {
+	Ok(Message::find_by_id_and_chat(&state.db, message_id, chat_id).await?.ok_or(ErrorCode::NotFound)?)
+}
 
-	match Chat::find_by_id_and_user(&state.db, &chat_id, &user.id).await {
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to validate chat: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-		_ => {}
-	}
+/// GET /`api/v1/chats/:chat_id/messages`
+pub async fn list_messages(State(state): State<Arc<JobState>>, user: AuthUser, Path(chat_id): Path<Uuid>, Query(params): Query<MessageListParams>) -> Result<Response, AppError> {
+	require_chat(&state, &chat_id, &user).await?;
+	let messages = Message::list_by_chat(&state.db, &chat_id, params.before.as_ref(), params.after.as_ref()).await?;
+	json_ok(ChatMessageResponse::list_for(&state.db, &chat_id, messages).await?)
+}
+
+/// POST /`api/v1/chats/:chat_id/messages`
+pub async fn send_message(State(state): State<Arc<JobState>>, user: AuthUser, Path(chat_id): Path<Uuid>, Json(req): Json<SendMessageRequest>) -> Result<Response, AppError> {
+	Chat::find_by_id_and_user(&state.db, &chat_id, &user.id).await?.ok_or(ErrorCode::NotFound)?;
 
 	let reasoning_details = ReasoningDetails {
 		effort: req.reasoning_effort,
@@ -110,208 +43,64 @@ pub async fn send_message(State(state): State<Arc<JobState>>, Extension(RequestC
 	let message = Message::create_user_message(&state.db, &chat_id, &req.content, req.model_id.as_ref(), &reasoning_details).await;
 	let _ = Chat::touch(&state.db, &chat_id).await;
 
-	match message {
-		Ok(msg) => {
-			let response = ChatMessageResponse::from(msg);
-			ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
-		}
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to save message: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	let response = ChatMessageResponse::from(message?);
+	Ok(ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build())
 }
 
-/// POST /api/v1/chats/:chat_id/messages/:message_id/edit
-pub async fn edit_message(
-	State(state): State<Arc<JobState>>,
-	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
-	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
-	Json(req): Json<EditMessageRequest>,
-) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	match Chat::exists_for_user(&state.db, &chat_id, &user.id).await {
-		Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to validate chat: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-		_ => {}
-	}
-
-	let original = match Message::find_by_id_and_chat(&state.db, &message_id, &chat_id).await {
-		Ok(Some(m)) => m,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to fetch message: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let new_message = match Message::create_fork(&state.db, &chat_id, &original, &req.content).await {
-		Ok(m) => m,
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to create fork: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
+/// POST /`api/v1/chats/:chat_id/messages/:message_id/edit`
+pub async fn edit_message(State(state): State<Arc<JobState>>, user: AuthUser, Path((chat_id, message_id)): Path<(Uuid, Uuid)>, Json(req): Json<EditMessageRequest>) -> Result<Response, AppError> {
+	require_chat(&state, &chat_id, &user).await?;
+	let original = find_message(&state, &chat_id, &message_id).await?;
+	let new_message = Message::create_fork(&state.db, &chat_id, &original, &req.content).await?;
 	let _ = Chat::touch(&state.db, &chat_id).await;
-
-	let sibling_count = match Message::sibling_count(&state.db, &chat_id, new_message.parent_id.as_ref()).await {
-		Ok(c) => c,
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to count sibling forks: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	let sibling_count = Message::sibling_count(&state.db, &chat_id, new_message.parent_id.as_ref()).await?;
 
 	let mut response = ChatMessageResponse::from(new_message);
 	response.sibling_count = sibling_count as i32;
-	ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build()
+	Ok(ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build())
 }
 
 /// POST /api/v1/chats/:chat_id/messages/:message_id/switch-fork
-pub async fn switch_fork(
-	State(state): State<Arc<JobState>>,
-	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
-	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
-	Json(req): Json<SwitchForkRequest>,
-) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
+pub async fn switch_fork(State(state): State<Arc<JobState>>, user: AuthUser, Path((chat_id, message_id)): Path<(Uuid, Uuid)>, Json(req): Json<SwitchForkRequest>) -> Result<Response, AppError> {
+	require_chat(&state, &chat_id, &user).await?;
+	let msg = find_message(&state, &chat_id, &message_id).await?;
+	let target = Message::switch_to_fork(&state.db, &chat_id, msg.parent_id.as_ref(), req.fork_index).await?.ok_or(ErrorCode::NotFound)?;
+	json_ok(ChatMessageResponse::from(target))
+}
 
-	match Chat::exists_for_user(&state.db, &chat_id, &user.id).await {
-		Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to validate chat: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-		_ => {}
-	}
+/// GET /`api/v1/chats/:chat_id/messages/:message_id/siblings`
+pub async fn get_siblings(State(state): State<Arc<JobState>>, user: AuthUser, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> Result<Response, AppError> {
+	require_chat(&state, &chat_id, &user).await?;
+	let msg = find_message(&state, &chat_id, &message_id).await?;
+	let siblings = Message::siblings(&state.db, &chat_id, msg.parent_id.as_ref()).await?;
+	let count = siblings.len() as i32;
+	let responses: Vec<ChatMessageResponse> = siblings
+		.into_iter()
+		.map(|m| {
+			let mut r = ChatMessageResponse::from(m);
+			r.sibling_count = count;
+			r
+		})
+		.collect();
+	json_ok(responses)
+}
 
-	let msg = match Message::find_by_id_and_chat(&state.db, &message_id, &chat_id).await {
-		Ok(Some(m)) => m,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to fetch message: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	match Message::switch_to_fork(&state.db, &chat_id, msg.parent_id.as_ref(), req.fork_index).await {
-		Ok(Some(target)) => ResponseBuilder::new(ResponseBody::Json(ChatMessageResponse::from(target))).build(),
-		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to switch fork: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
+/// DELETE /`api/v1/chats/:chat_id/messages/:message_id/fork`
+pub async fn delete_fork(State(state): State<Arc<JobState>>, user: AuthUser, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> Result<Response, AppError> {
+	require_chat(&state, &chat_id, &user).await?;
+	if Message::delete(&state.db, &message_id, &chat_id).await? {
+		Ok(ResponseBuilder::new(ResponseBody::<()>::Empty).status(StatusCode::NO_CONTENT).build())
+	} else {
+		Err(ErrorCode::NotFound.into())
 	}
 }
 
-/// GET /api/v1/chats/:chat_id/messages/:message_id/siblings
-pub async fn get_siblings(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
+/// POST /`api/v1/chats/:chat_id/messages/:message_id/branch`
+pub async fn branch_from_message(State(state): State<Arc<JobState>>, user: AuthUser, Path((chat_id, message_id)): Path<(Uuid, Uuid)>, Json(req): Json<BranchFromMessageRequest>) -> Result<Response, AppError> {
+	let source_chat = Chat::find_by_id_and_user(&state.db, &chat_id, &user.id).await?.ok_or(ErrorCode::NotFound)?;
+	let source_message = find_message(&state, &chat_id, &message_id).await?;
 
-	match Chat::exists_for_user(&state.db, &chat_id, &user.id).await {
-		Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to validate chat: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-		_ => {}
-	}
-
-	let msg = match Message::find_by_id_and_chat(&state.db, &message_id, &chat_id).await {
-		Ok(Some(m)) => m,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to fetch message: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	match Message::siblings(&state.db, &chat_id, msg.parent_id.as_ref()).await {
-		Ok(siblings) => {
-			let count = siblings.len() as i32;
-			let responses: Vec<ChatMessageResponse> = siblings
-				.into_iter()
-				.map(|m| {
-					let mut r = ChatMessageResponse::from(m);
-					r.sibling_count = count;
-					r
-				})
-				.collect();
-			ResponseBuilder::new(ResponseBody::Json(responses)).build()
-		}
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to fetch siblings: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
-}
-
-/// DELETE /api/v1/chats/:chat_id/messages/:message_id/fork
-pub async fn delete_fork(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	match Chat::exists_for_user(&state.db, &chat_id, &user.id).await {
-		Ok(false) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to validate chat: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-		_ => {}
-	}
-
-	match Message::delete(&state.db, &message_id, &chat_id).await {
-		Ok(true) => ResponseBuilder::new(ResponseBody::<()>::Empty).status(StatusCode::NO_CONTENT).build(),
-		Ok(false) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to delete fork: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
-}
-
-/// POST /api/v1/chats/:chat_id/messages/:message_id/branch
-pub async fn branch_from_message(
-	State(state): State<Arc<JobState>>,
-	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
-	Path((chat_id, message_id)): Path<(Uuid, Uuid)>,
-	Json(req): Json<BranchFromMessageRequest>,
-) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-
-	let source_chat = match Chat::find_by_id_and_user(&state.db, &chat_id, &user.id).await {
-		Ok(Some(c)) => c,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to validate chat: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let source_message = match Message::find_by_id_and_chat(&state.db, &message_id, &chat_id).await {
-		Ok(Some(m)) => m,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to fetch message: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let new_chat = match Chat::create_branched(
+	let new_chat = Chat::create_branched(
 		&state.db,
 		&user.id,
 		req.workspace_id.or(source_chat.workspace_id).as_ref(),
@@ -319,35 +108,17 @@ pub async fn branch_from_message(
 		&chat_id,
 		&message_id,
 	)
-	.await
-	{
-		Ok(c) => c,
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to create branched chat: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+	.await?;
 
 	let is_user_message = source_message.role == "user";
 
 	let messages_to_copy = if is_user_message {
-		Message::list_active_before(&state.db, &chat_id, source_message.created_at).await
+		Message::list_active_before(&state.db, &chat_id, source_message.created_at).await?
 	} else {
-		Message::list_active_up_to(&state.db, &chat_id, source_message.created_at).await
+		Message::list_active_up_to(&state.db, &chat_id, source_message.created_at).await?
 	};
 
-	let messages_to_copy = match messages_to_copy {
-		Ok(m) => m,
-		Err(e) => {
-			eprintln!("[MESSAGES] Failed to fetch messages to copy: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	if let Err(e) = Message::copy_to_chat(&state.db, &new_chat.id, &messages_to_copy).await {
-		eprintln!("[MESSAGES] Failed to copy messages: {e}");
-		return ErrorBuilder::new(ErrorCode::InternalError).build();
-	}
+	Message::copy_to_chat(&state.db, &new_chat.id, &messages_to_copy).await?;
 
 	let message_count = messages_to_copy.len() as i64;
 	let last_message_at = messages_to_copy.last().map(|m| m.created_at);
@@ -372,11 +143,11 @@ pub async fn branch_from_message(
 		(None, None)
 	};
 
-	ResponseBuilder::new(ResponseBody::Json(BranchResponse {
+	Ok(ResponseBuilder::new(ResponseBody::Json(BranchResponse {
 		chat: chat_response,
 		prefill_content,
 		prefill_parts,
 	}))
 	.status(StatusCode::CREATED)
-	.build()
+	.build())
 }

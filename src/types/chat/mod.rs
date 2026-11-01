@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
+pub mod runner;
 mod patch;
 mod repository;
 mod requests;
@@ -11,60 +12,6 @@ mod rows;
 
 pub use requests::*;
 pub use responses::*;
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "VARCHAR", rename_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
-pub enum StreamingAnimation {
-	#[default]
-	Fade,
-	Typewriter,
-	Slide,
-	None,
-}
-
-impl StreamingAnimation {
-	#[must_use]
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			Self::Fade => "fade",
-			Self::Typewriter => "typewriter",
-			Self::Slide => "slide",
-			Self::None => "none",
-		}
-	}
-
-	#[must_use]
-	pub fn from_str(s: &str) -> Option<Self> {
-		match s.to_lowercase().as_str() {
-			"fade" => Some(Self::Fade),
-			"typewriter" => Some(Self::Typewriter),
-			"slide" => Some(Self::Slide),
-			"none" => Some(Self::None),
-			_ => None,
-		}
-	}
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "VARCHAR", rename_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
-pub enum MessageRole {
-	User,
-	Assistant,
-	System,
-}
-
-impl MessageRole {
-	#[must_use]
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			Self::User => "user",
-			Self::Assistant => "assistant",
-			Self::System => "system",
-		}
-	}
-}
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct CostDetails {
@@ -142,6 +89,7 @@ pub struct ToolExecutionInternal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ThemeCssVars {
 	#[serde(default)]
 	pub theme: std::collections::HashMap<String, String>,
@@ -154,7 +102,6 @@ pub struct ThemeCssVars {
 #[derive(Debug, Clone, FromRow)]
 pub struct Workspace {
 	pub id: Uuid,
-	pub user_id: Uuid,
 	pub name: String,
 	pub icon: Option<String>,
 	pub color: Option<String>,
@@ -167,7 +114,6 @@ pub struct Workspace {
 #[derive(Debug, Clone, FromRow)]
 pub struct Chat {
 	pub id: Uuid,
-	pub user_id: Uuid,
 	pub workspace_id: Option<Uuid>,
 	pub title: Option<String>,
 	pub is_pinned: bool,
@@ -181,7 +127,6 @@ pub struct Chat {
 #[derive(Debug, Clone, FromRow)]
 pub struct Message {
 	pub id: Uuid,
-	pub chat_id: Uuid,
 	pub role: String,
 	pub content: String,
 	pub content_parts: Option<serde_json::Value>,
@@ -194,7 +139,6 @@ pub struct Message {
 	pub created_at: DateTime<Utc>,
 	pub parent_id: Option<Uuid>,
 	pub fork_index: i32,
-	pub is_active_fork: bool,
 }
 
 pub struct StreamingUserMessageCreate<'a> {

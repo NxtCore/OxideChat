@@ -6,7 +6,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Base"))]
 pub struct BaseResponse {
+	#[cfg_attr(test, ts(type = "any"))]
 	pub i18n: Arc<Value>,
 	pub language: String,
 	pub needs_setup: bool,

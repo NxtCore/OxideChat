@@ -139,8 +139,8 @@
 							<DefaultModelPicker
 								v-model="teamDefaultModelId"
 								:disabled="!canEdit"
-								endpoint="/api/v1/admin/models"
-								selected-model-endpoint="/api/v1/admin/models"
+								:endpoint="adminModelsPath"
+								:selected-model-endpoint="adminModelsPath"
 								value-mode="uuid"
 								:placeholder="store.getTranslation('settings.teams.use_global_default')"
 								@update:model-value="v => (teamDefaultModelId = v)"
@@ -207,11 +207,11 @@
 										v-for="model in models"
 										:key="model.id"
 										class="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5"
-										:class="isProviderGranted(model.provider_id) ? 'opacity-50' : 'hover:bg-accent/40'"
+										:class="isProviderGranted(model.provider.id) ? 'opacity-50' : 'hover:bg-accent/40'"
 									>
 										<ShadCheckbox
-											:model-value="selectedModelIds.includes(model.id) || isProviderGranted(model.provider_id)"
-											:disabled="!canEdit || isProviderGranted(model.provider_id)"
+											:model-value="selectedModelIds.includes(model.id) || isProviderGranted(model.provider.id)"
+											:disabled="!canEdit || isProviderGranted(model.provider.id)"
 											@update:model-value="checked => toggleId(selectedModelIds, model.id, Boolean(checked))"
 										/>
 										<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted overflow-hidden">
@@ -297,37 +297,21 @@
 </template>
 
 <script setup lang="ts">
+import {ADMIN_TEAMS_EDIT} from '~/types/generated/permissions';
 import {computed, onMounted, onUnmounted, reactive, ref, watch} from 'vue';
 import {Bot, Loader2, Network, Plus, Search, Trash2, Users} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
 import {sanitizeSvg} from '@/composables/useMarkdown';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
-import type {ModelListAdmin, PaginatedResponse, TeamDetailed, TeamList, TeamRole} from '~/types/chat';
+import type {ProviderResponse as ProviderListItem, ModelListAdmin, TeamDetailed, TeamList, TeamRole, UserListResponse} from '~/types/chat';
 
-interface UserListItem {
-	id: string;
-	email: string;
-	username: string;
-}
-
-interface PaginatedUsersResponse {
-	users: UserListItem[];
-}
-
-interface ProviderListItem {
-	id: string;
-	name: string;
-	is_enabled: boolean;
-}
-
-const {$customFetch} = useNuxtApp();
 const store = useMainStore();
 const iconStore = useIconsStore();
 
 const teams = ref<TeamList[]>([]);
 const selectedTeam = ref<TeamDetailed | null>(null);
-const users = ref<UserListItem[]>([]);
+const users = ref<UserListResponse[]>([]);
 const providers = ref<ProviderListItem[]>([]);
 const search = ref('');
 const memberSearch = ref('');
@@ -344,7 +328,7 @@ const selectedMemberIds = ref<string[]>([]);
 const selectedProviderIds = ref<string[]>([]);
 const selectedModelIds = ref<string[]>([]);
 
-const canEdit = computed(() => store.hasPermission('admin.teams.edit'));
+const canEdit = computed(() => store.hasPermission(ADMIN_TEAMS_EDIT));
 const filteredUsers = computed(() => {
 	const query = memberSearch.value.trim().toLowerCase();
 	if (!query) return users.value;
@@ -356,62 +340,19 @@ function isProviderGranted(providerId: string) {
 }
 
 // --- Lazy-loaded models (admin) ---
-const models = ref<ModelListAdmin[]>([]);
-const modelSearch = ref('');
-const modelPage = ref(1);
-const modelPageSize = 30;
-const modelsHasMore = ref(false);
-const modelsLoading = ref(false);
-const modelsLoadingMore = ref(false);
+const {
+	models,
+	loading: modelsLoading,
+	loadingMore: modelsLoadingMore,
+	searchQuery: modelSearch,
+	canLoadMore: canLoadMoreModels,
+	loadInitial: loadModelsInitial,
+	loadMore: loadMoreModels,
+	onSearchInput: onModelSearch,
+} = useModelPicker<ModelListAdmin>({endpoint: adminModelsPath});
 const modelScroll = ref<HTMLElement | null>(null);
 const modelSentinel = ref<HTMLElement | null>(null);
 let modelObserver: IntersectionObserver | null = null;
-let modelSearchTimer: ReturnType<typeof setTimeout> | null = null;
-
-const canLoadMoreModels = computed(() => modelsHasMore.value && !modelsLoading.value && !modelsLoadingMore.value);
-
-async function fetchModels(page: number): Promise<ModelListAdmin[]> {
-	const params: Record<string, string> = {page: page.toString(), size: modelPageSize.toString()};
-	if (modelSearch.value.trim()) params.query = modelSearch.value.trim();
-	const res = await $customFetch<PaginatedResponse<ModelListAdmin>>('/api/v1/admin/models', {params});
-	modelsHasMore.value = res?.has_more ?? false;
-	return res?.items ?? [];
-}
-
-async function loadModelsInitial() {
-	modelsLoading.value = true;
-	modelPage.value = 1;
-	try {
-		models.value = await fetchModels(1);
-	} catch (e) {
-		console.error('Failed to load models:', e);
-		models.value = [];
-		modelsHasMore.value = false;
-	} finally {
-		modelsLoading.value = false;
-	}
-}
-
-async function loadMoreModels() {
-	if (!canLoadMoreModels.value) return;
-	modelsLoadingMore.value = true;
-	const next = modelPage.value + 1;
-	try {
-		const items = await fetchModels(next);
-		models.value.push(...items);
-		modelPage.value = next;
-	} catch (e) {
-		console.error('Failed to load more models:', e);
-	} finally {
-		modelsLoadingMore.value = false;
-	}
-}
-
-function onModelSearch(value: string) {
-	modelSearch.value = value;
-	if (modelSearchTimer) clearTimeout(modelSearchTimer);
-	modelSearchTimer = setTimeout(loadModelsInitial, 300);
-}
 
 function setupModelObserver() {
 	teardownModelObserver();
@@ -469,7 +410,7 @@ watch(search, () => {
 async function loadTeams() {
 	loadingTeams.value = true;
 	try {
-		const result = await $customFetch<PaginatedResponse<TeamList>>('/api/v1/admin/teams', {params: {size: 100, search: search.value}});
+		const result = await adminTeams({size: 100, search: search.value});
 		teams.value = result.items ?? [];
 		if (!selectedTeam.value && teams.value.length > 0) {
 			await selectTeam(teams.value[0].id);
@@ -482,18 +423,18 @@ async function loadTeams() {
 }
 
 async function loadUsers() {
-	const result = await $customFetch<PaginatedUsersResponse>('/api/v1/admin/users', {params: {per_page: 100}});
-	users.value = result.users ?? [];
+	const result = await adminUsers({size: 100});
+	users.value = result.items ?? [];
 }
 
 async function loadProviders() {
-	const result = await $customFetch<ProviderListItem[]>('/api/v1/admin/providers');
+	const result = (await adminProviders()) as ProviderListItem[];
 	providers.value = (result ?? []).filter(p => p.is_enabled).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function selectTeam(id: string) {
 	try {
-		const team = await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${id}`);
+		const team = await adminTeam(id);
 		selectedTeam.value = team;
 		applySelected(team);
 	} catch (e: any) {
@@ -509,10 +450,7 @@ async function setMemberRole(userId: string, role: TeamRole) {
 	if (!selectedTeam.value || !canEdit.value || savedMemberRole(userId) === role) return;
 	saving.value = true;
 	try {
-		const updated = await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${selectedTeam.value.id}/members/${userId}/role`, {
-			method: 'PUT',
-			body: {role},
-		});
+		const updated = await putAdminTeam(selectedTeam.value.id, `/members/${userId}/role`, {role});
 		selectedTeam.value = updated;
 		store.toast(store.getTranslation('settings.teams.role_saved'), {type: 'success'});
 	} catch (e: any) {
@@ -540,10 +478,7 @@ function openCreate() {
 async function createTeam() {
 	saving.value = true;
 	try {
-		const team = await $customFetch<TeamDetailed>('/api/v1/admin/teams', {
-			method: 'POST',
-			body: {name: createForm.name.trim(), description: createForm.description || null, allow_all_models: createForm.allow_all_models},
-		});
+		const team = await createAdminTeam({name: createForm.name.trim(), description: createForm.description || null, allow_all_models: createForm.allow_all_models});
 		store.toast(store.getTranslation('settings.teams.create_success'), {type: 'success'});
 		createOpen.value = false;
 		await loadTeams();
@@ -561,23 +496,14 @@ async function saveAll() {
 	try {
 		const id = selectedTeam.value.id;
 
-		await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${id}`, {
-			method: 'PATCH',
-			body: {name: form.name, description: form.description ? form.description : null, allow_all_models: form.allow_all_models, default_model_id: teamDefaultModelId.value},
-		});
+		await patchAdminTeam(id, {name: form.name, description: form.description ? form.description : null, allow_all_models: form.allow_all_models, default_model_id: teamDefaultModelId.value});
 
-		await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${id}/members`, {
-			method: 'PUT',
-			body: {user_ids: selectedMemberIds.value},
-		});
+		await putAdminTeam(id, '/members', {user_ids: selectedMemberIds.value});
 
 		const providerIds = [...selectedProviderIds.value];
 		const modelIds = [...selectedModelIds.value];
 
-		const withModels = await $customFetch<TeamDetailed>(`/api/v1/admin/teams/${id}/models`, {
-			method: 'PUT',
-			body: {provider_ids: providerIds, model_ids: modelIds},
-		});
+		const withModels = await putAdminTeam(id, '/models', {provider_ids: providerIds, model_ids: modelIds});
 
 		selectedTeam.value = withModels;
 		applySelected(withModels);
@@ -595,7 +521,7 @@ async function deleteSelected() {
 	if (!selectedTeam.value || selectedTeam.value.is_default) return;
 	saving.value = true;
 	try {
-		await $customFetch(`/api/v1/admin/teams/${selectedTeam.value.id}`, {method: 'DELETE'});
+		await deleteAdminTeam(selectedTeam.value.id);
 		store.toast(store.getTranslation('settings.teams.delete_success'), {type: 'success'});
 		deleteOpen.value = false;
 		selectedTeam.value = null;

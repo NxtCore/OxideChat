@@ -187,8 +187,4 @@ impl ToolExecutor for HttpExecutor {
 			Err(_) => Ok(Value::String(body)),
 		}
 	}
-
-	fn name(&self) -> &str {
-		&self.name
-	}
 }

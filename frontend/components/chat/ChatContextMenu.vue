@@ -20,7 +20,7 @@
 
 				<div class="max-h-64 overflow-y-auto">
 					<ShadButton
-						v-for="workspace in chatStore.workspaces"
+						v-for="workspace in workspaceStore.workspaces"
 						:key="workspace.id"
 						variant="ghost"
 						class="flex w-full justify-start items-center gap-2 rounded-md px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
@@ -149,6 +149,7 @@
 import {Pin, Pencil, FolderInput, Archive, Download, Trash2, ChevronLeft, Check, Ban} from 'lucide-vue-next';
 import type {Chat} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
+import {useWorkspaceStore} from '~/stores/workspaceStore';
 import {useMainStore} from '~/stores';
 
 const props = defineProps<{
@@ -161,6 +162,7 @@ const emit = defineEmits<{
 }>();
 
 const chatStore = useChatStore();
+const workspaceStore = useWorkspaceStore();
 const store = useMainStore();
 const menuRef = ref<HTMLElement>();
 const showMoveMenu = ref(false);
@@ -197,8 +199,8 @@ async function moveToWorkspace(workspaceId: string | null) {
 		return;
 	}
 	await chatStore.updateChat(props.chat.id, {workspace_id: workspaceId});
-	await chatStore.fetchChats({workspace_id: chatStore.activeWorkspaceId || undefined});
-	chatStore.fetchWorkspaces();
+	await chatStore.fetchChats({workspace_id: workspaceStore.activeWorkspaceId || undefined});
+	workspaceStore.fetchWorkspaces();
 	emit('close');
 }
 

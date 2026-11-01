@@ -62,8 +62,4 @@ async function copy() {
 	await navigator.clipboard.writeText(props.token);
 	copied.value = true;
 }
-
-function formatDateTime(value: string) {
-	return new Date(value).toLocaleString(store.base?.language ?? 'en');
-}
 </script>

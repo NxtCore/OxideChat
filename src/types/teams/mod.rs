@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub enum TeamRole {
 	Member,
 	Admin,

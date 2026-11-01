@@ -4,18 +4,7 @@ mod support {
 	use sqlx::PgPool;
 	use uuid::Uuid;
 
-	pub type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
-
-	pub async fn create_user(pool: &PgPool) -> TestResult<Uuid> {
-		let name = format!("user{}", Uuid::new_v4().simple());
-		Ok(
-			sqlx::query_scalar("INSERT INTO users (email, username, password_hash) VALUES ($1, $2, 'hash') RETURNING id")
-				.bind(format!("{name}@example.com"))
-				.bind(&name)
-				.fetch_one(pool)
-				.await?,
-		)
-	}
+	pub use crate::tests::support::{TestResult, create_user};
 
 	pub async fn create_team(pool: &PgPool, user_id: Uuid) -> TestResult<Uuid> {
 		let team_id: Uuid = sqlx::query_scalar("INSERT INTO teams (name, allow_all_models) VALUES ($1, true) RETURNING id")
@@ -110,18 +99,18 @@ mod keys {
 		let second_team = create_team(&pool, second).await?;
 		let (first_key, _) = create_key(&pool, first, first_team).await?;
 		let (second_key, _) = create_key(&pool, second, second_team).await?;
-		let all = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery::default()).await?;
+		let all = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery::default(), &PageQuery::default()).await?;
 		assert_eq!(all.items.len(), 2);
-		let by_team = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { team_id: Some(second_team), ..Default::default() }).await?;
+		let by_team = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { team_id: Some(second_team), ..Default::default() }, &PageQuery::default()).await?;
 		assert_eq!(by_team.items.iter().map(|key| key.id).collect::<Vec<_>>(), vec![second_key.id]);
-		let by_user = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { user_id: Some(first), ..Default::default() }).await?;
+		let by_user = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { user_id: Some(first), ..Default::default() }, &PageQuery::default()).await?;
 		assert_eq!(by_user.items.iter().map(|key| key.id).collect::<Vec<_>>(), vec![first_key.id]);
-		let never_used = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { never_used: Some(true), ..Default::default() }).await?;
+		let never_used = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { never_used: Some(true), ..Default::default() }, &PageQuery::default()).await?;
 		assert_eq!(never_used.items.len(), 2);
 		sqlx::query("UPDATE gateway_api_keys SET last_used_at = NOW() WHERE id = $1").bind(first_key.id).execute(&pool).await?;
-		let never_used = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { never_used: Some(true), ..Default::default() }).await?;
+		let never_used = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { never_used: Some(true), ..Default::default() }, &PageQuery::default()).await?;
 		assert_eq!(never_used.items.len(), 1);
-		let stale = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { last_used_before: Some(Utc::now() + Duration::hours(1)), ..Default::default() }).await?;
+		let stale = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { last_used_before: Some(Utc::now() + Duration::hours(1)), ..Default::default() }, &PageQuery::default()).await?;
 		assert_eq!(stale.items.len(), 1);
 		Ok(())
 	}
@@ -137,12 +126,12 @@ mod keys {
 		sqlx::query("UPDATE gateway_api_keys SET expires_at = NOW() + INTERVAL '2 days' WHERE id = $1").bind(active.id).execute(&pool).await?;
 		sqlx::query("UPDATE gateway_api_keys SET is_enabled = FALSE WHERE id = $1").bind(disabled.id).execute(&pool).await?;
 		for (status, id) in [("active", active.id), ("expired", expired.id), ("disabled", disabled.id)] {
-			let page = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { status: Some(status.to_string()), ..Default::default() }).await?;
+			let page = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { status: Some(status.to_string()), ..Default::default() }, &PageQuery::default()).await?;
 			assert_eq!(page.items.iter().map(|key| key.id).collect::<Vec<_>>(), vec![id]);
 		}
-		let soon = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { expires_to: Some(Utc::now() + Duration::days(3)), expires_from: Some(Utc::now()), ..Default::default() }).await?;
+		let soon = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { expires_to: Some(Utc::now() + Duration::days(3)), expires_from: Some(Utc::now()), ..Default::default() }, &PageQuery::default()).await?;
 		assert_eq!(soon.items.len(), 1);
-		let invalid = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { status: Some("bogus".to_string()), ..Default::default() }).await;
+		let invalid = GatewayAdminKeyResponse::list(&pool, &GatewayAdminKeyQuery { status: Some("bogus".to_string()), ..Default::default() }, &PageQuery::default()).await;
 		assert!(matches!(invalid, Err(GatewayAdminError::InvalidQuery)));
 		Ok(())
 	}
@@ -337,7 +326,7 @@ mod teams {
 		let team = create_team(&pool, user).await?;
 		create_key(&pool, user, team).await?;
 		GatewayAdminTeamResponse::replace_limits(&pool, &admin, &team, &limits(vec![rule(7)], None)).await?;
-		let page = GatewayAdminTeamResponse::list(&pool, &GatewayAdminTeamQuery { search: Some("Team".to_string()), ..Default::default() }).await?;
+		let page = GatewayAdminTeamResponse::list(&pool, &GatewayAdminTeamQuery { search: Some("Team".to_string()) }, &PageQuery::default()).await?;
 		let listed = page.items.iter().find(|item| item.id == team).ok_or("team missing")?;
 		assert_eq!((listed.rules.len(), listed.active_key_count), (1, 1));
 		Ok(())
@@ -375,7 +364,7 @@ mod audit_and_events {
 			.execute(&pool)
 			.await?;
 		sqlx::query("INSERT INTO audit_logs (event, actor_id) VALUES ('user_login', $1)").bind(admin).execute(&pool).await?;
-		let all = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery::default()).await?;
+		let all = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery::default(), &PageQuery::default()).await?;
 		assert_eq!(all.items.len(), 4);
 		assert!(all.items.iter().all(|entry| entry.event != "user_login"));
 		let disabled = all.items.iter().find(|entry| entry.event == "gateway_api_key_admin_disabled").ok_or("missing")?;
@@ -384,13 +373,13 @@ mod audit_and_events {
 		assert!(disabled.before.is_some() && disabled.after.is_some());
 		let updated = all.items.iter().find(|entry| entry.event == "gateway_api_key_updated" && entry.actor_id.is_none()).ok_or("missing")?;
 		assert_eq!(updated.before.as_ref().map(|value| value["secret_hash"].clone()), Some(serde_json::json!(REDACTED_MARKER)));
-		let access = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery { category: Some("access".to_string()), ..Default::default() }).await?;
+		let access = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery { category: Some("access".to_string()), ..Default::default() }, &PageQuery::default()).await?;
 		assert_eq!(access.items.len(), 1);
-		let by_target = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery { target_id: Some(team), ..Default::default() }).await?;
+		let by_target = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery { target_id: Some(team), ..Default::default() }, &PageQuery::default()).await?;
 		assert_eq!(by_target.items.len(), 1);
-		let future = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery { from: Some(Utc::now() + Duration::hours(1)), ..Default::default() }).await?;
+		let future = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery { from: Some(Utc::now() + Duration::hours(1)), ..Default::default() }, &PageQuery::default()).await?;
 		assert!(future.items.is_empty());
-		let bad = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery { category: Some("nope".to_string()), ..Default::default() }).await;
+		let bad = GatewayAuditEntryResponse::list(&pool, &GatewayAuditQuery { category: Some("nope".to_string()), ..Default::default() }, &PageQuery::default()).await;
 		assert!(matches!(bad, Err(GatewayAdminError::InvalidQuery)));
 		Ok(())
 	}
@@ -465,9 +454,9 @@ mod permissions {
 		let member = user_with_role(&pool, Some("user")).await?;
 		let plain = user_with_role(&pool, None).await?;
 		for permission in [ADMIN_DEVELOPER_VIEW, ADMIN_DEVELOPER_KEYS_EDIT, ADMIN_DEVELOPER_LIMITS_EDIT, ADMIN_DEVELOPER_ACCESS_EDIT, ADMIN_DEVELOPER_AUDIT_VIEW] {
-			assert!(admin.has_permission(&pool, permission).await, "{permission}");
-			assert!(!member.has_permission(&pool, permission).await, "{permission}");
-			assert!(!plain.has_permission(&pool, permission).await, "{permission}");
+			assert!(admin.check_permission(&pool, permission).await?, "{permission}");
+			assert!(!member.check_permission(&pool, permission).await?, "{permission}");
+			assert!(!plain.check_permission(&pool, permission).await?, "{permission}");
 		}
 		let seeded: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM permissions WHERE name LIKE 'admin.developer.%'").fetch_one(&pool).await?;
 		assert_eq!(seeded, 6);
@@ -480,9 +469,9 @@ mod permissions {
 		sqlx::query("INSERT INTO roles (name) VALUES ('gateway_viewer')").execute(&pool).await?;
 		sqlx::query("INSERT INTO role_permissions (role_id, permission_id) SELECT r.id, p.id FROM roles r, permissions p WHERE r.name = 'gateway_viewer' AND p.name = 'admin.developer.view'").execute(&pool).await?;
 		sqlx::query("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name = 'gateway_viewer'").bind(user.id).execute(&pool).await?;
-		assert!(user.has_permission(&pool, ADMIN_DEVELOPER_VIEW).await);
-		assert!(!user.has_permission(&pool, ADMIN_DEVELOPER_KEYS_EDIT).await);
-		assert!(!user.has_permission(&pool, ADMIN_DEVELOPER_AUDIT_VIEW).await);
+		assert!(user.check_permission(&pool, ADMIN_DEVELOPER_VIEW).await?);
+		assert!(!user.check_permission(&pool, ADMIN_DEVELOPER_KEYS_EDIT).await?);
+		assert!(!user.check_permission(&pool, ADMIN_DEVELOPER_AUDIT_VIEW).await?);
 		Ok(())
 	}
 }

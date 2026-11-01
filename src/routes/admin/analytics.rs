@@ -1,41 +1,19 @@
 use crate::types::consts::ADMIN_ANALYTICS_VIEW;
-use crate::types::{AnalyticsQuery, JobState, RequestContext, UsageEvent};
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
+use crate::types::{AnalyticsQuery, AppError, AuthUser, JobState, UsageEvent, json_ok};
 use axum::{
-	extract::{Extension, Query, State},
-	response::IntoResponse,
+	extract::{Query, State},
+	response::Response,
 };
 use std::sync::Arc;
 
-pub async fn get_analytics(
-	State(state): State<Arc<JobState>>,
-	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
-	Query(params): Query<AnalyticsQuery>,
-) -> impl IntoResponse {
-	let Some(user) = current_user else {
-		return ErrorBuilder::new(ErrorCode::NotAuthenticated).build();
-	};
-	if !user.has_permission(&state.db, ADMIN_ANALYTICS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+pub async fn get_analytics(State(state): State<Arc<JobState>>, auth: AuthUser, Query(params): Query<AnalyticsQuery>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_ANALYTICS_VIEW).await?;
+
 	let group_by = params.group_by.as_deref().unwrap_or("model");
 	let filter = params.filter();
-	let result = match group_by {
-		"day_model" => UsageEvent::day_model_analytics(&state.db, params.from, params.to, filter)
-			.await
-			.map(|rows| ResponseBuilder::new(ResponseBody::Json(rows)).build()),
-		"api_key" => UsageEvent::api_key_analytics(&state.db, params.from, params.to, filter)
-			.await
-			.map(|rows| ResponseBuilder::new(ResponseBody::Json(rows)).build()),
-		_ => UsageEvent::analytics(&state.db, params.from, params.to, group_by, filter)
-			.await
-			.map(|rows| ResponseBuilder::new(ResponseBody::Json(rows)).build()),
-	};
-	match result {
-		Ok(response) => response,
-		Err(e) => {
-			eprintln!("[ANALYTICS] Failed to load analytics: {e}");
-			ErrorBuilder::new(ErrorCode::DatabaseError).build()
-		}
+	match group_by {
+		"day_model" => json_ok(UsageEvent::day_model_analytics(&state.db, params.from, params.to, filter).await.map_err(AppError::database)?),
+		"api_key" => json_ok(UsageEvent::api_key_analytics(&state.db, params.from, params.to, filter).await.map_err(AppError::database)?),
+		_ => json_ok(UsageEvent::analytics(&state.db, params.from, params.to, group_by, filter).await.map_err(AppError::database)?),
 	}
 }

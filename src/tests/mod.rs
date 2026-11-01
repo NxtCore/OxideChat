@@ -1,7 +1,10 @@
 pub mod auth;
 pub mod base;
+pub mod bindings;
 pub mod budgets;
 pub mod catalog;
+pub mod chat_runner;
+pub mod chat_usage;
 pub mod config;
 pub mod developer_keys;
 pub mod encryption;
@@ -17,6 +20,7 @@ pub mod oauth;
 pub mod request_logs;
 pub mod response;
 pub mod service_accounts;
+pub mod support;
 pub mod teams;
 pub mod tools;
 pub mod workspaces;

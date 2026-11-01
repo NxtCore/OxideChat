@@ -1,0 +1,484 @@
+use super::{CreateToolRequest, McpServer, Tool, ToolFunction, ToolResponse, ToolSourceKind, UpdateToolRequest};
+use crate::utils::encryption::{decrypt_object_values, decrypt_schema_secrets, encrypt_object_values, encrypt_schema_secrets, mask_schema_secrets};
+use serde_json::Value;
+use sqlx::types::Json;
+use std::collections::HashMap;
+use uuid::Uuid;
+
+fn protect_tool_source_config(kind: &ToolSourceKind, config: &Value, existing: Option<&Value>) -> Result<Value, crate::utils::encryption::EncryptionError> {
+	if kind != &ToolSourceKind::Http || config.get("headers").is_none() {
+		return Ok(config.clone());
+	}
+	let mut protected = config.clone();
+	protected["headers"] = encrypt_object_values(config.get("headers").unwrap_or(&Value::Null), existing.and_then(|value| value.get("headers")))?;
+	Ok(protected)
+}
+
+impl Tool {
+	/// Create a system tool and its functions atomically.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the transaction or a database operation fails.
+	pub async fn create_system(pool: &sqlx::PgPool, request: &CreateToolRequest) -> Result<(Self, Vec<ToolFunction>), sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let source_config = protect_tool_source_config(&request.source_kind, &request.source_config, None).map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+		let legacy_schema = request
+			.input_schema
+			.clone()
+			.unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
+		let tool = sqlx::query_as::<_, Tool>(
+			r#"
+			INSERT INTO tools (
+				owner_id, name, display_name, description, icon,
+				source_kind, source_config, input_schema, settings_schema,
+				is_enabled, system_prompt
+			)
+			VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			RETURNING *
+			"#,
+		)
+		.bind(&request.name)
+		.bind(&request.display_name)
+		.bind(&request.description)
+		.bind(&request.icon)
+		.bind(&request.source_kind)
+		.bind(&source_config)
+		.bind(&legacy_schema)
+		.bind(&request.settings_schema)
+		.bind(request.is_enabled)
+		.bind(&request.system_prompt)
+		.fetch_one(&mut *tx)
+		.await?;
+
+		let function_count = if request.functions.is_empty() && request.input_schema.is_some() {
+			1
+		} else {
+			request.functions.len()
+		};
+		let mut functions = Vec::with_capacity(function_count);
+		for (index, function) in request.functions.iter().enumerate() {
+			let created = sqlx::query_as::<_, ToolFunction>(
+				r#"
+				INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
+				VALUES ($1, $2, $3, $4, $5, $6)
+				RETURNING *
+				"#,
+			)
+			.bind(tool.id)
+			.bind(&function.name)
+			.bind(&function.description)
+			.bind(&function.input_schema)
+			.bind(&function.entrypoint)
+			.bind(index as i32)
+			.fetch_one(&mut *tx)
+			.await?;
+			functions.push(created);
+		}
+		if request.functions.is_empty() && request.input_schema.is_some() {
+			let created = sqlx::query_as::<_, ToolFunction>(
+				r#"
+				INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
+				VALUES ($1, $2, $3, $4, NULL, 0)
+				RETURNING *
+				"#,
+			)
+			.bind(tool.id)
+			.bind(&request.name)
+			.bind(&request.description)
+			.bind(&legacy_schema)
+			.fetch_one(&mut *tx)
+			.await?;
+			functions.push(created);
+		}
+
+		tx.commit().await?;
+		Ok((tool, functions))
+	}
+
+	/// Update a system tool and its functions atomically.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the transaction or a database operation fails.
+	#[allow(clippy::too_many_lines)]
+	pub async fn update_system(pool: &sqlx::PgPool, tool_id: &Uuid, request: &UpdateToolRequest) -> Result<Option<(Self, Vec<ToolFunction>)>, sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let existing = sqlx::query_as::<_, (ToolSourceKind, Json<Value>)>("SELECT source_kind, source_config FROM tools WHERE id = $1 AND owner_id IS NULL")
+			.bind(tool_id)
+			.fetch_optional(&mut *tx)
+			.await?;
+		let Some((source_kind, existing_source_config)) = existing else {
+			tx.rollback().await?;
+			return Ok(None);
+		};
+		let source_config = request
+			.source_config
+			.as_ref()
+			.map(|config| protect_tool_source_config(&source_kind, config, Some(&existing_source_config.0)))
+			.transpose()
+			.map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+		let tool = sqlx::query_as::<_, Tool>(
+			r#"
+			UPDATE tools SET
+				name = COALESCE($2, name),
+				display_name = COALESCE($3, display_name),
+				description = COALESCE($4, description),
+				icon = COALESCE($5, icon),
+				source_config = COALESCE($6, source_config),
+				input_schema = COALESCE($7, input_schema),
+				settings_schema = COALESCE($8, settings_schema),
+				is_enabled = COALESCE($9, is_enabled),
+				system_prompt = COALESCE($10, system_prompt),
+				updated_at = NOW()
+			WHERE id = $1 AND owner_id IS NULL
+			RETURNING *
+			"#,
+		)
+		.bind(tool_id)
+		.bind(&request.name)
+		.bind(&request.display_name)
+		.bind(&request.description)
+		.bind(&request.icon)
+		.bind(&source_config)
+		.bind(&request.input_schema)
+		.bind(&request.settings_schema)
+		.bind(request.is_enabled)
+		.bind(&request.system_prompt)
+		.fetch_optional(&mut *tx)
+		.await?;
+		let Some(tool) = tool else {
+			tx.rollback().await?;
+			return Ok(None);
+		};
+
+		if let Some(delete_ids) = request.delete_function_ids.as_deref().filter(|ids| !ids.is_empty()) {
+			sqlx::query("DELETE FROM tool_functions WHERE id = ANY($1) AND tool_id = $2")
+				.bind(delete_ids)
+				.bind(tool_id)
+				.execute(&mut *tx)
+				.await?;
+		}
+
+		if let Some(functions) = &request.functions {
+			for (index, function) in functions.iter().enumerate() {
+				if let Some(function_id) = function.id {
+					sqlx::query(
+						r#"
+						UPDATE tool_functions SET
+							name = $2,
+							description = $3,
+							input_schema = $4,
+							entrypoint = $5,
+							sort_order = $6
+						WHERE id = $1 AND tool_id = $7
+						"#,
+					)
+					.bind(function_id)
+					.bind(&function.name)
+					.bind(&function.description)
+					.bind(&function.input_schema)
+					.bind(&function.entrypoint)
+					.bind(index as i32)
+					.bind(tool_id)
+					.execute(&mut *tx)
+					.await?;
+				} else {
+					sqlx::query(
+						r#"
+						INSERT INTO tool_functions (tool_id, name, description, input_schema, entrypoint, sort_order)
+						VALUES ($1, $2, $3, $4, $5, $6)
+						"#,
+					)
+					.bind(tool_id)
+					.bind(&function.name)
+					.bind(&function.description)
+					.bind(&function.input_schema)
+					.bind(&function.entrypoint)
+					.bind(index as i32)
+					.execute(&mut *tx)
+					.await?;
+				}
+			}
+		}
+
+		let functions = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 ORDER BY sort_order, created_at")
+			.bind(tool_id)
+			.fetch_all(&mut *tx)
+			.await?;
+		tx.commit().await?;
+		Ok(Some((tool, functions)))
+	}
+
+	/// Store validated settings for a system tool.
+	///
+	/// # Errors
+	///
+	/// Returns an error when the tool does not exist, image model settings are invalid, or a database operation fails.
+	pub async fn set_system_settings(pool: &sqlx::PgPool, tool_id: &Uuid, settings: &serde_json::Value) -> Result<(), super::ToolSettingsError> {
+		let mut tx = pool.begin().await?;
+		let tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
+			.bind(tool_id)
+			.fetch_optional(&mut *tx)
+			.await?
+			.ok_or(super::ToolSettingsError::NotFound)?;
+
+		if tool.source_kind == ToolSourceKind::Builtin && tool.source_config.get("builtin_id").and_then(serde_json::Value::as_str) == Some("imagegen") {
+			let model_id = settings
+				.get("image_model_id")
+				.and_then(serde_json::Value::as_str)
+				.and_then(|value| Uuid::parse_str(value).ok())
+				.ok_or(super::ToolSettingsError::Invalid)?;
+			let valid = sqlx::query_scalar::<_, bool>(
+				r#"
+				SELECT EXISTS (
+					SELECT 1
+					FROM models m
+					JOIN providers p ON p.id = m.provider_id
+					WHERE m.id = $1
+					  AND m.is_enabled = true
+					  AND p.is_enabled = true
+					  AND p.kind IN ('OPENAI', 'OPENROUTER', 'GOOGLE')
+					  AND EXISTS (
+						  SELECT 1
+						  FROM jsonb_array_elements_text(COALESCE(m.output_modalities, '[]'::jsonb)) AS modality(value)
+						  WHERE LOWER(modality.value) = 'image'
+					  )
+				)
+				"#,
+			)
+			.bind(model_id)
+			.fetch_one(&mut *tx)
+			.await?;
+			if !valid {
+				return Err(super::ToolSettingsError::Invalid);
+			}
+		}
+
+		let existing = sqlx::query_scalar::<_, Json<Value>>("SELECT settings FROM user_tool_settings WHERE tool_id = $1 AND user_id IS NULL")
+			.bind(tool_id)
+			.fetch_optional(&mut *tx)
+			.await?
+			.map(|settings| settings.0);
+		let protected = encrypt_schema_secrets(settings, &tool.settings_schema, existing.as_ref())?;
+
+		sqlx::query(
+			r#"
+			INSERT INTO user_tool_settings (user_id, tool_id, settings)
+			VALUES (NULL, $1, $2)
+			ON CONFLICT (tool_id) WHERE user_id IS NULL
+			DO UPDATE SET settings = EXCLUDED.settings, updated_at = NOW()
+			"#,
+		)
+		.bind(tool_id)
+		.bind(&protected)
+		.execute(&mut *tx)
+		.await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	pub async fn system_settings_for_admin(pool: &sqlx::PgPool, tool_id: &Uuid) -> Result<Value, super::ToolSettingsError> {
+		let row = sqlx::query_as::<_, (Json<Value>, Option<Json<Value>>)>(
+			r#"
+			SELECT t.settings_schema, settings.settings
+			FROM tools t
+			LEFT JOIN user_tool_settings settings ON settings.tool_id = t.id AND settings.user_id IS NULL
+			WHERE t.id = $1 AND t.owner_id IS NULL
+			"#,
+		)
+		.bind(tool_id)
+		.fetch_optional(pool)
+		.await?
+		.ok_or(super::ToolSettingsError::NotFound)?;
+		Ok(row
+			.1
+			.map_or_else(|| Ok(serde_json::json!({})), |settings| mask_schema_secrets(&settings.0, &row.0.0))?)
+	}
+
+	pub async fn effective_settings_for_user(pool: &sqlx::PgPool, tool_id: &Uuid, user_id: Option<&Uuid>) -> Result<Value, super::ToolSettingsError> {
+		let row = sqlx::query_as::<_, (Json<Value>, Option<Json<Value>>)>(
+			r#"
+			SELECT t.settings_schema, settings.settings
+			FROM tools t
+			LEFT JOIN LATERAL (
+				SELECT user_tool_settings.settings
+				FROM user_tool_settings
+				WHERE user_tool_settings.tool_id = t.id
+				  AND (user_tool_settings.user_id = $2 OR user_tool_settings.user_id IS NULL)
+				ORDER BY user_tool_settings.user_id NULLS LAST
+				LIMIT 1
+			) settings ON true
+			WHERE t.id = $1
+			"#,
+		)
+		.bind(tool_id)
+		.bind(user_id)
+		.fetch_optional(pool)
+		.await?
+		.ok_or(super::ToolSettingsError::NotFound)?;
+		Ok(row
+			.1
+			.map_or_else(|| Ok(serde_json::json!({})), |settings| decrypt_schema_secrets(&settings.0, &row.0.0))?)
+	}
+
+	pub fn revealed_source_config(&self) -> Result<Value, crate::utils::encryption::EncryptionError> {
+		if self.source_kind != ToolSourceKind::Http || self.source_config.get("headers").is_none() {
+			return Ok(self.source_config.clone());
+		}
+		let mut revealed = self.source_config.clone();
+		revealed["headers"] = decrypt_object_values(self.source_config.get("headers").unwrap_or(&Value::Null))?;
+		Ok(revealed)
+	}
+
+	#[deprecated(note = "Use to_tool_specs with functions instead")]
+	pub fn to_tool_spec(&self) -> omniference::types::ToolSpec {
+		omniference::types::ToolSpec::JsonSchema {
+			name: self.name.clone(),
+			description: self.description.clone(),
+			schema: self.input_schema.clone(),
+			strict: Some(false),
+		}
+	}
+
+	pub fn to_tool_specs(&self, functions: &[ToolFunction]) -> Vec<omniference::types::ToolSpec> {
+		if functions.is_empty() {
+			#[allow(deprecated)]
+			return vec![self.to_tool_spec()];
+		}
+
+		functions
+			.iter()
+			.map(|f| {
+				let name = if functions.len() == 1 {
+					self.name.clone()
+				} else {
+					format!("{}_{}", self.name, f.name)
+				};
+				omniference::types::ToolSpec::JsonSchema {
+					name,
+					description: f.description.clone().or_else(|| self.description.clone()),
+					schema: f.input_schema.clone(),
+					strict: Some(false),
+				}
+			})
+			.collect()
+	}
+
+	pub async fn list_system(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE owner_id IS NULL ORDER BY created_at DESC")
+			.fetch_all(pool)
+			.await
+	}
+
+	pub async fn find_by_id_system(pool: &sqlx::PgPool, id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
+			.bind(id)
+			.fetch_optional(pool)
+			.await
+	}
+
+	pub async fn delete_system(pool: &sqlx::PgPool, id: &Uuid) -> Result<bool, sqlx::Error> {
+		let result = sqlx::query("DELETE FROM tools WHERE id = $1 AND owner_id IS NULL").bind(id).execute(pool).await?;
+		Ok(result.rows_affected() > 0)
+	}
+
+	/// Fetch enabled tools by id that the user may use (owned by the user or global).
+	pub async fn find_enabled_for_user(pool: &sqlx::PgPool, ids: &[Uuid], user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Tool>(
+			r#"
+			SELECT id, owner_id, name, display_name, description, icon, source_kind,
+			       source_config, input_schema, settings_schema, is_enabled, system_prompt, created_at, updated_at
+			FROM tools
+			WHERE id = ANY($1) AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)
+			"#,
+		)
+		.bind(ids)
+		.bind(user_id)
+		.fetch_all(pool)
+		.await
+	}
+
+	/// Look up an enabled tool by name that the user may use, preferring the
+	/// user-owned tool over a global one on a name collision.
+	pub async fn find_enabled_by_name_for_user(pool: &sqlx::PgPool, name: &str, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Tool>(
+			r#"
+			SELECT id, owner_id, name, display_name, description, icon, source_kind,
+			       source_config, input_schema, settings_schema, is_enabled, system_prompt, created_at, updated_at
+			FROM tools
+			WHERE name = $1 AND is_enabled = true AND (owner_id = $2 OR owner_id IS NULL)
+			ORDER BY owner_id NULLS LAST
+			LIMIT 1
+			"#,
+		)
+		.bind(name)
+		.bind(user_id)
+		.fetch_optional(pool)
+		.await
+	}
+
+	/// Display names of the generated tools for a given MCP server and owner scope.
+	pub async fn names_for_mcp_server(pool: &sqlx::PgPool, server_id: &Uuid, owner_id: Option<&Uuid>) -> Result<Vec<String>, sqlx::Error> {
+		let rows: Vec<(String,)> = sqlx::query_as(
+			"SELECT display_name FROM tools WHERE source_kind = 'MCP' AND owner_id IS NOT DISTINCT FROM $2 AND source_config->>'mcp_server_id' = $1 ORDER BY display_name",
+		)
+		.bind(server_id.to_string())
+		.bind(owner_id)
+		.fetch_all(pool)
+		.await?;
+		Ok(rows.into_iter().map(|r| r.0).collect())
+	}
+
+	/// List enabled tools visible to the user in the chat tool selector
+	/// (their own tools plus global tools).
+	pub async fn list_for_user(pool: &sqlx::PgPool, user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Tool>(
+			r#"
+			SELECT id, owner_id, name, display_name, description, icon, source_kind,
+			       source_config, input_schema, settings_schema, is_enabled, system_prompt, created_at, updated_at
+			FROM tools
+			WHERE is_enabled = true AND (owner_id = $1 OR owner_id IS NULL)
+			ORDER BY created_at DESC
+			"#,
+		)
+		.bind(user_id)
+		.fetch_all(pool)
+		.await
+	}
+	/// List tools as API responses: all system tools for `None`, or the enabled
+	/// tools a user may use (without system prompts) for `Some(user_id)`.
+	pub async fn list_responses(pool: &sqlx::PgPool, user_id: Option<&Uuid>) -> Result<Vec<ToolResponse>, sqlx::Error> {
+		let tools = match user_id {
+			Some(user_id) => Self::list_for_user(pool, user_id).await?,
+			None => Self::list_system(pool).await?,
+		};
+
+		let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
+		let mut functions_by_tool: HashMap<Uuid, Vec<ToolFunction>> = HashMap::new();
+		for f in ToolFunction::list_by_tool_ids(pool, &tool_ids).await.unwrap_or_default() {
+			functions_by_tool.entry(f.tool_id).or_default().push(f);
+		}
+
+		let mut responses: Vec<ToolResponse> = tools
+			.into_iter()
+			.map(|t| {
+				let funcs = functions_by_tool.remove(&t.id).unwrap_or_default();
+				ToolResponse::from_tool_with_functions(t, funcs)
+			})
+			.collect();
+
+		let server_ids: Vec<Uuid> = responses.iter().filter_map(|r| r.mcp_server_id).collect();
+		if !server_ids.is_empty() {
+			let server_names = McpServer::names_by_ids(pool, &server_ids).await.unwrap_or_default();
+			for r in &mut responses {
+				r.mcp_server_name = r.mcp_server_id.and_then(|id| server_names.get(&id).cloned());
+			}
+		}
+
+		if user_id.is_some() {
+			responses = responses.into_iter().map(ToolResponse::into_public).collect();
+		}
+		Ok(responses)
+	}
+}

@@ -1,13 +1,16 @@
 use super::{McpServer, Tool, ToolFunction, ToolSourceKind};
+use crate::utils::tools::mcp::McpToolInfo;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ToolFunction"))]
 pub struct ToolFunctionResponse {
 	pub id: Uuid,
 	pub name: String,
 	pub description: Option<String>,
+	#[cfg_attr(test, ts(type = "any"))]
 	pub input_schema: serde_json::Value,
 	pub entrypoint: Option<String>,
 	pub sort_order: i32,
@@ -27,6 +30,7 @@ impl From<ToolFunction> for ToolFunctionResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Tool"))]
 pub struct ToolResponse {
 	pub id: Uuid,
 	pub owner_id: Option<Uuid>,
@@ -35,8 +39,10 @@ pub struct ToolResponse {
 	pub description: Option<String>,
 	pub icon: Option<String>,
 	pub source_kind: ToolSourceKind,
+	#[cfg_attr(test, ts(type = "any"))]
 	pub input_schema: serde_json::Value,
 	pub functions: Vec<ToolFunctionResponse>,
+	#[cfg_attr(test, ts(type = "any"))]
 	pub settings_schema: serde_json::Value,
 	pub is_enabled: bool,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -105,11 +111,13 @@ impl From<Tool> for ToolResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "McpServer"))]
 pub struct McpServerResponse {
 	pub id: Uuid,
 	pub owner_id: Option<Uuid>,
 	pub name: String,
 	pub transport: String,
+	#[cfg_attr(test, ts(type = "any"))]
 	pub connection_config: serde_json::Value,
 	pub is_enabled: bool,
 	pub last_health_check: Option<DateTime<Utc>>,
@@ -185,28 +193,36 @@ pub struct ToolExecutionResult {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "McpDiscoveryResult"))]
 pub struct McpDiscoveryResponse {
 	pub tools: Vec<McpDiscoveredTool>,
 	pub server_name: String,
 	pub server_version: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct McpDiscoveredTool {
-	pub name: String,
-	pub description: Option<String>,
-	pub input_schema: serde_json::Value,
+impl McpDiscoveryResponse {
+	#[must_use]
+	pub fn new(server_name: String, tools: Vec<McpToolInfo>) -> Self {
+		Self {
+			tools: tools
+				.into_iter()
+				.map(|t| McpDiscoveredTool {
+					name: t.name,
+					description: t.description,
+					input_schema: t.input_schema,
+				})
+				.collect(),
+			server_name,
+			server_version: None,
+		}
+	}
 }
 
 #[derive(Debug, Serialize)]
-pub struct ToolExecutionLogResponse {
-	pub id: Uuid,
-	pub tool_id: Option<Uuid>,
-	pub tool_name: Option<String>,
-	pub tool_call_id: String,
-	pub input_args: serde_json::Value,
-	pub output: Option<serde_json::Value>,
-	pub error: Option<String>,
-	pub execution_ms: Option<i32>,
-	pub created_at: DateTime<Utc>,
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct McpDiscoveredTool {
+	pub name: String,
+	pub description: Option<String>,
+	#[cfg_attr(test, ts(type = "any"))]
+	pub input_schema: serde_json::Value,
 }

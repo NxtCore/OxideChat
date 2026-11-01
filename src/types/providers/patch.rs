@@ -4,6 +4,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 impl Provider {
+	#[allow(clippy::too_many_arguments)]
 	pub async fn patch_system(
 		pool: &sqlx::PgPool,
 		id: &Uuid,
@@ -14,9 +15,8 @@ impl Provider {
 		extra_headers: Option<&Value>,
 		is_enabled: Option<bool>,
 	) -> Result<Option<Self>, sqlx::Error> {
-		let existing = match Self::find_for_admin(pool, id).await? {
-			Some(provider) => provider,
-			None => return Ok(None),
+		let Some(existing) = Self::find_for_admin(pool, id).await? else {
+			return Ok(None);
 		};
 
 		let api_key = api_key.map_or(existing.api_key.as_deref(), |value| value);

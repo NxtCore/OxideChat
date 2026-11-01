@@ -5,7 +5,7 @@
 				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('settings.tabs.admin_users') }}</h2>
 				<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.admin_users.description') }}</p>
 			</div>
-			<ShadButton v-if="store.hasPermission('admin.users.edit')" variant="default" size="sm" class="gap-2" @click="openCreateDialog">
+			<ShadButton v-if="store.hasPermission(ADMIN_USERS_EDIT)" variant="default" size="sm" class="gap-2" @click="openCreateDialog">
 				<Plus class="h-4 w-4" />
 				<span>{{ store.getTranslation('settings.admin_users.create_user') }}</span>
 			</ShadButton>
@@ -88,7 +88,7 @@
 					<ShadButton
 						variant="outline"
 						size="sm"
-						:disabled="user.id === store.auth.user?.id || !store.hasPermission('admin.users.edit')"
+						:disabled="user.id === store.auth.user?.id || !store.hasPermission(ADMIN_USERS_EDIT)"
 						:title="user.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
 						@click="openEditDialog(user)"
 					>
@@ -98,7 +98,7 @@
 						variant="outline"
 						size="sm"
 						class="text-destructive hover:text-destructive"
-						:disabled="user.id === store.auth.user?.id || !store.hasPermission('admin.users.delete')"
+						:disabled="user.id === store.auth.user?.id || !store.hasPermission(ADMIN_USERS_EDIT)"
 						:title="user.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
 						@click="openDeleteDialog(user)"
 					>
@@ -108,17 +108,7 @@
 			</div>
 		</div>
 
-		<div class="flex flex-col w-full mt-6">
-			<ShadPagination :total="total" :items-per-page="perPage" class="justify-start">
-				<ShadPaginationContent>
-					<ShadPaginationPrevious @click="previousPage" :disabled="page === 1" />
-					<ShadPaginationItem v-for="p in visiblePages" :key="p" :is-active="p === page" @click="page = p">
-						{{ p }}
-					</ShadPaginationItem>
-					<ShadPaginationNext @click="nextPage" :disabled="page === totalPages" />
-				</ShadPaginationContent>
-			</ShadPagination>
-		</div>
+		<AppPagination v-model="page" :has-more="hasMore" />
 
 		<ShadDialog v-model:open="createOpen">
 			<ShadDialogContent class="sm:max-w-[480px]">
@@ -250,37 +240,18 @@
 </template>
 
 <script setup lang="ts">
+import {ADMIN_USERS_EDIT} from '~/types/generated/permissions';
 import {ref, reactive, computed, watch, onMounted} from 'vue';
 import {Users, Plus, Pencil, Trash2, Loader2, BarChart2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
-import type {PaginatedResponse, TeamList, TeamSummary} from '~/types/chat';
+import type {TeamList, UserListResponse} from '~/types/chat';
 
-const {$customFetch} = useNuxtApp();
 const store = useMainStore();
 const router = useRouter();
 
-interface UserResponse {
-	id: string;
-	email: string;
-	username: string;
-	auth_method: string;
-	roles: string[];
-	teams: TeamSummary[];
-	permissions: string[];
-	created_at: string;
-}
-
-interface PaginatedUsersResponse {
-	users: UserResponse[];
-	total: number;
-	page: number;
-	per_page: number;
-}
-
-const users = ref<UserResponse[]>([]);
-const total = ref(0);
+const users = ref<UserListResponse[]>([]);
+const hasMore = ref(false);
 const page = ref(1);
-const perPage = ref(20);
 const searchRaw = ref('');
 const search = ref('');
 const roleFilter = ref(null);
@@ -291,7 +262,7 @@ const saving = ref(false);
 const createOpen = ref(false);
 const editOpen = ref(false);
 const deleteOpen = ref(false);
-const selectedUser = ref<UserResponse | null>(null);
+const selectedUser = ref<UserListResponse | null>(null);
 const teams = ref<TeamList[]>([]);
 
 const defaultTeamIds = computed(() => teams.value.filter(t => t.is_default).map(t => t.id));
@@ -307,37 +278,8 @@ const editForm = reactive({email: '', username: '', roles: [] as string[], team_
 watch(() => createForm.team_ids, () => ensureDefaultTeams(createForm.team_ids));
 watch(() => editForm.team_ids, () => ensureDefaultTeams(editForm.team_ids));
 
-const totalPages = computed(() => Math.ceil(total.value / perPage.value));
 const availableRoles = computed(() => store.roles);
 const availableTeams = computed(() => teams.value);
-const visiblePages = computed(() => {
-	const pages: number[] = [];
-	const maxPages = 5;
-	const halfWindow = Math.floor(maxPages / 2);
-	let start = Math.max(1, page.value - halfWindow);
-	let end = Math.min(totalPages.value, start + maxPages - 1);
-
-	if (end - start + 1 < maxPages) {
-		start = Math.max(1, end - maxPages + 1);
-	}
-
-	for (let i = start; i <= end; i++) {
-		pages.push(i);
-	}
-	return pages;
-});
-
-function previousPage() {
-	if (page.value > 1) {
-		page.value--;
-	}
-}
-
-function nextPage() {
-	if (page.value < totalPages.value) {
-		page.value++;
-	}
-}
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 watch(searchRaw, val => {
@@ -348,7 +290,7 @@ watch(searchRaw, val => {
 	}, 300);
 });
 
-watch([roleFilter, teamFilter, page, perPage], () => {
+watch([roleFilter, teamFilter, page], () => {
 	loadUsers();
 });
 
@@ -359,14 +301,14 @@ watch(search, () => {
 async function loadUsers() {
 	loading.value = true;
 	try {
-		const params: Record<string, string | number> = {page: page.value, per_page: perPage.value};
+		const params: Record<string, string | number> = {page: page.value};
 		if (search.value) params.search = search.value;
 		if (roleFilter.value) params.role = roleFilter.value;
 		if (teamFilter.value) params.team_id = teamFilter.value;
 
-		const result = await $customFetch<PaginatedUsersResponse>('/api/v1/admin/users', {params});
-		users.value = result.users ?? [];
-		total.value = result.total ?? 0;
+		const result = await adminUsers(params);
+		users.value = result.items ?? [];
+		hasMore.value = result.has_more ?? false;
 	} catch (e: any) {
 		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
 		store.toast(store.getTranslation('settings.admin_users.load_error'), {type: 'error', description: errorMessage});
@@ -377,16 +319,12 @@ async function loadUsers() {
 
 async function loadTeams() {
 	try {
-		const result = await $customFetch<PaginatedResponse<TeamList>>('/api/v1/admin/teams', {params: {size: 100}});
+		const result = await adminTeams({size: 100});
 		teams.value = result.items ?? [];
 	} catch (e: any) {
 		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
 		store.toast(store.getTranslation('settings.teams.load_error'), {type: 'error', description: errorMessage});
 	}
-}
-
-function formatDate(iso: string) {
-	return new Date(iso).toLocaleDateString(undefined, {year: 'numeric', month: 'short', day: 'numeric'});
 }
 
 function openCreateDialog() {
@@ -398,7 +336,7 @@ function openCreateDialog() {
 	createOpen.value = true;
 }
 
-function openEditDialog(u: UserResponse) {
+function openEditDialog(u: UserListResponse) {
 	selectedUser.value = u;
 	editForm.email = u.email;
 	editForm.username = u.username;
@@ -408,7 +346,7 @@ function openEditDialog(u: UserResponse) {
 	editOpen.value = true;
 }
 
-function openDeleteDialog(u: UserResponse) {
+function openDeleteDialog(u: UserListResponse) {
 	selectedUser.value = u;
 	deleteOpen.value = true;
 }
@@ -416,10 +354,7 @@ function openDeleteDialog(u: UserResponse) {
 async function submitCreate() {
 	saving.value = true;
 	try {
-		await $customFetch('/api/v1/admin/users', {
-			method: 'POST',
-			body: {email: createForm.email, username: createForm.username, password: createForm.password, roles: createForm.roles, team_ids: createForm.team_ids},
-		});
+		await createAdminUser({email: createForm.email, username: createForm.username, password: createForm.password, roles: createForm.roles, team_ids: createForm.team_ids});
 		store.toast(store.getTranslation('settings.admin_users.create_success'), {type: 'success'});
 		createOpen.value = false;
 		await loadUsers();
@@ -435,26 +370,14 @@ async function submitEdit() {
 	if (!selectedUser.value) return;
 	saving.value = true;
 	try {
-		await $customFetch(`/api/v1/admin/users/${selectedUser.value.id}`, {
-			method: 'PUT',
-			body: {email: editForm.email, username: editForm.username},
-		});
+		await updateAdminUser(selectedUser.value.id, {email: editForm.email, username: editForm.username});
 
-		await $customFetch(`/api/v1/admin/users/${selectedUser.value.id}/roles`, {
-			method: 'PUT',
-			body: {roles: editForm.roles},
-		});
+		await updateAdminUser(selectedUser.value.id, {roles: editForm.roles}, '/roles');
 
-		await $customFetch(`/api/v1/admin/users/${selectedUser.value.id}/teams`, {
-			method: 'PUT',
-			body: {team_ids: editForm.team_ids},
-		});
+		await updateAdminUser(selectedUser.value.id, {team_ids: editForm.team_ids}, '/teams');
 
 		if (editForm.newPassword) {
-			await $customFetch(`/api/v1/admin/users/${selectedUser.value.id}/password`, {
-				method: 'PUT',
-				body: {password: editForm.newPassword},
-			});
+			await updateAdminUser(selectedUser.value.id, {password: editForm.newPassword}, '/password');
 		}
 
 		store.toast(store.getTranslation('settings.admin_users.edit_success'), {type: 'success'});
@@ -472,7 +395,7 @@ async function submitDelete() {
 	if (!selectedUser.value) return;
 	saving.value = true;
 	try {
-		await $customFetch(`/api/v1/admin/users/${selectedUser.value.id}`, {method: 'DELETE'});
+		await deleteAdminUser(selectedUser.value.id);
 		store.toast(store.getTranslation('settings.admin_users.delete_success'), {type: 'success'});
 		deleteOpen.value = false;
 		await loadUsers();

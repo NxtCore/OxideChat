@@ -2,6 +2,8 @@
 import {ref, computed, onMounted} from 'vue';
 import {useThemeStore} from '~/stores/theme';
 import {useMainStore} from '~/stores';
+import {usePreferencesStore} from '~/stores/preferencesStore';
+
 import ThemeCard from '~/components/themes/ThemeCard.vue';
 import ImportThemeDialog from '~/components/themes/ImportThemeDialog.vue';
 import {Button} from '~/components/ui/button';
@@ -32,14 +34,8 @@ function handleThemeDelete(url: string) {
 
 async function saveThemeToPreferences() {
 	try {
-		const {$customFetch} = useNuxtApp();
-		await $customFetch('/api/v1/users/@me/preferences', {
-			method: 'PATCH',
-			body: {
-				theme_css_vars: themeStore.cssVars,
-				custom_theme_urls: themeStore.customThemeUrls,
-			},
-		});
+		const saved = await usePreferencesStore().updatePreferences({theme_css_vars: themeStore.cssVars, custom_theme_urls: themeStore.customThemeUrls});
+		if (!saved) throw new Error('save failed');
 		mainStore.toast(mainStore.getTranslation('settings.theme_saved'), {type: 'success'});
 	} catch (e) {
 		mainStore.toast(mainStore.getTranslation('common.error'), {type: 'error'});

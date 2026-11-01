@@ -49,7 +49,10 @@ jobs:
               run: sqlx migrate run
 
             - name: Clippy
-              run: cargo clippy --all-targets
+              run: cargo clippy --all-targets -- -D warnings
 
             - name: Test
               run: cargo test
+
+            - name: Generated frontend types are current
+              run: git diff --exit-code frontend/types/generated

@@ -4,6 +4,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct UserResponse {
 	pub id: Uuid,
 	pub email: String,
@@ -17,6 +18,7 @@ pub struct UserResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct UserListResponse {
 	pub id: Uuid,
 	pub email: String,
@@ -25,22 +27,6 @@ pub struct UserListResponse {
 	pub roles: Vec<String>,
 	pub teams: Vec<TeamSummaryResponse>,
 	pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PaginatedUsersResponse {
-	pub users: Vec<UserResponse>,
-	pub total: i64,
-	pub page: i64,
-	pub per_page: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PaginatedUsersListResponse {
-	pub users: Vec<UserListResponse>,
-	pub total: i64,
-	pub page: i64,
-	pub per_page: i64,
 }
 
 #[derive(Debug, Serialize)]

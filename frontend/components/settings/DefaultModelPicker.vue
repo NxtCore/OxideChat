@@ -143,7 +143,7 @@ const props = withDefaults(defineProps<{
 	placeholder?: string;
 	valueMode?: 'model_id' | 'uuid';
 }>(), {
-	endpoint: '/api/v1/models',
+	endpoint: modelsPath,
 	providerEndpoint: undefined,
 	selectedModelEndpoint: undefined,
 	disabled: false,

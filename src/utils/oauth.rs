@@ -14,19 +14,13 @@ use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, Pkce
 pub enum OAuthError {
 	/// Provider is not configured
 	ProviderNotConfigured,
-	/// Invalid provider name
-	InvalidProvider,
 	/// Failed to build OAuth client
 	ClientBuildError(String),
 	/// Failed to exchange code for token
 	TokenExchangeError(String),
 	/// Failed to fetch user info
 	UserInfoError(String),
-	/// CSRF state mismatch
-	StateMismatch,
-	/// Email is required but not provided
-	EmailRequired,
-	/// BASE_URL environment variable is missing
+	/// `BASE_URL` environment variable is missing
 	MissingBaseUrl,
 }
 
@@ -34,12 +28,9 @@ impl std::fmt::Display for OAuthError {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			Self::ProviderNotConfigured => write!(f, "OAuth provider not configured"),
-			Self::InvalidProvider => write!(f, "Invalid OAuth provider"),
 			Self::ClientBuildError(e) => write!(f, "Failed to build OAuth client: {e}"),
 			Self::TokenExchangeError(e) => write!(f, "Failed to exchange code: {e}"),
 			Self::UserInfoError(e) => write!(f, "Failed to fetch user info: {e}"),
-			Self::StateMismatch => write!(f, "CSRF state mismatch"),
-			Self::EmailRequired => write!(f, "Email is required for registration"),
 			Self::MissingBaseUrl => write!(f, "BASE_URL environment variable must be set for OAuth redirect URL"),
 		}
 	}

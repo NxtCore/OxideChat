@@ -1,13 +1,14 @@
+import type {Ref} from 'vue';
 import type {ModelList, PaginatedResponse, ProviderTab} from '~/types/chat';
 
 export type ModelFilter = 'all' | 'favorites' | string;
 
-export function useModelPicker(options: {endpoint?: string; providerEndpoint?: string} = {}) {
+export function useModelPicker<T = ModelList>(options: {endpoint?: string; providerEndpoint?: string} = {}) {
 	const {$customFetch} = useNuxtApp();
-	const endpoint = options.endpoint ?? '/api/v1/models';
+	const endpoint = options.endpoint ?? modelsPath;
 	const providerEndpoint = options.providerEndpoint ?? '/api/v1/providers';
 
-	const models = ref<ModelList[]>([]);
+	const models = ref([]) as Ref<T[]>;
 	const providers = ref<ProviderTab[]>([]);
 	const loading = ref(false);
 	const loadingMore = ref(false);
@@ -50,7 +51,7 @@ export function useModelPicker(options: {endpoint?: string; providerEndpoint?: s
 		loading.value = true;
 		page.value = 1;
 		try {
-			const res = await $customFetch<PaginatedResponse<ModelList>>(endpoint, {params: buildParams(1)});
+			const res = await $customFetch<PaginatedResponse<T>>(endpoint, {params: buildParams(1)});
 			if (res) {
 				models.value = res.items ?? [];
 				hasMore.value = res.has_more ?? false;
@@ -69,7 +70,7 @@ export function useModelPicker(options: {endpoint?: string; providerEndpoint?: s
 		loadingMore.value = true;
 		const nextPage = page.value + 1;
 		try {
-			const res = await $customFetch<PaginatedResponse<ModelList>>(endpoint, {params: buildParams(nextPage)});
+			const res = await $customFetch<PaginatedResponse<T>>(endpoint, {params: buildParams(nextPage)});
 			if (res) {
 				models.value.push(...(res.items ?? []));
 				hasMore.value = res.has_more ?? false;

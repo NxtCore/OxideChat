@@ -49,6 +49,7 @@ impl Workspace {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub async fn update(
 		pool: &PgPool,
 		id: &Uuid,
@@ -179,6 +180,7 @@ impl Workspace {
 }
 
 impl Chat {
+	#[allow(clippy::too_many_arguments)]
 	pub async fn update(
 		pool: &PgPool,
 		id: &Uuid,
@@ -258,7 +260,7 @@ impl Chat {
 }
 
 impl Message {
-	/// Deactivate all siblings at the given parent_id level and their entire subtrees.
+	/// Deactivate all siblings at the given `parent_id` level and their entire subtrees.
 	pub async fn deactivate_fork_level(pool: &PgPool, chat_id: &Uuid, parent_id: Option<&Uuid>) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
@@ -330,7 +332,7 @@ impl Message {
 		.bind(original.model_id)
 		.bind(&original.reasoning_details)
 		.bind(&original.usage_details)
-		.bind(&original.cost_details)
+		.bind(original.cost_details)
 		.bind(&original.request_settings)
 		.bind(original.parent_id)
 		.bind(next_fork_index)
@@ -338,8 +340,8 @@ impl Message {
 		.await
 	}
 
-	/// Switch the active fork at the given parent_id level to the specified fork_index.
-	/// Deactivates the currently active subtree and activates the target + its descendants (following fork_index = 1).
+	/// Switch the active fork at the given `parent_id` level to the specified `fork_index`.
+	/// Deactivates the currently active subtree and activates the target + its descendants (following `fork_index` = 1).
 	pub async fn switch_to_fork(pool: &PgPool, chat_id: &Uuid, parent_id: Option<&Uuid>, fork_index: i32) -> Result<Option<Self>, sqlx::Error> {
 		sqlx::query(
 			r#"
@@ -410,7 +412,7 @@ impl Message {
 			.bind(&msg.content_parts)
 			.bind(&msg.reasoning_content)
 			.bind(msg.model_id)
-			.bind(&msg.cost_details)
+			.bind(msg.cost_details)
 			.bind(&msg.usage_details)
 			.bind(&msg.reasoning_details)
 			.bind(&msg.request_settings)

@@ -72,8 +72,8 @@
 								{{ store.getTranslation(`developer.status.${apiKey.status}`) }}
 							</ShadBadge>
 						</td>
-						<td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(apiKey.expires_at) }}</td>
-						<td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(apiKey.last_used_at) }}</td>
+						<td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDateTime(apiKey.expires_at) }}</td>
+						<td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDateTime(apiKey.last_used_at) }}</td>
 						<td class="px-4 py-3">
 							<div class="flex justify-end gap-1">
 								<ShadButton variant="ghost" size="icon" :aria-label="store.getTranslation('developer.admin.keys.inspect')" @click="inspectId = apiKey.id">
@@ -119,10 +119,11 @@
 </template>
 
 <script setup lang="ts">
+import {ADMIN_DEVELOPER_KEYS_EDIT} from '~/types/generated/permissions';
 import {Ban, CheckCircle2, Eye, RefreshCw, Trash2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useGatewayAdminStore} from '@/stores/gatewayAdminStore';
-import {errorMessage} from '~/utils/developer';
+import {errorMessage} from '~/utils/format';
 import {ADMIN_KEY_STATUSES} from '~/types/gatewayAdmin';
 import type {AdminKey, AdminKeyFilters, AdminKeyStatus, AdminTeam} from '~/types/gatewayAdmin';
 
@@ -133,7 +134,7 @@ const keys = ref<AdminKey[]>([]);
 const teams = ref<AdminTeam[]>([]);
 const hasMore = ref(false);
 const page = ref(1);
-const loading = ref(false);
+const {loading, run} = useAsyncAction();
 const search = ref('');
 const teamFilter = ref('all');
 const statusFilter = ref('all');
@@ -144,11 +145,7 @@ const inspectId = ref<string | null>(null);
 const pending = ref<{key: AdminKey; action: 'revoke' | 'disable' | 'enable'} | null>(null);
 const acting = ref(false);
 
-const canEdit = computed(() => store.hasPermission('admin.developer.keys.edit'));
-
-function formatDate(value: string | null): string {
-	return value ? new Date(value).toLocaleString(store.base?.language ?? 'en') : '–';
-}
+const canEdit = computed(() => store.hasPermission(ADMIN_DEVELOPER_KEYS_EDIT));
 
 function endOfDay(value: string): string | null {
 	return value ? new Date(`${value}T23:59:59`).toISOString() : null;
@@ -166,16 +163,11 @@ function filters(): AdminKeyFilters {
 }
 
 async function load() {
-	loading.value = true;
-	try {
+	await run(async () => {
 		const result = await admin.listKeys(filters(), page.value);
 		keys.value = result.items;
 		hasMore.value = result.has_more;
-	} catch (e: any) {
-		store.toast(store.getTranslation('developer.admin.keys.load_error'), {type: 'error', description: errorMessage(e, '')});
-	} finally {
-		loading.value = false;
-	}
+	}, null, 'developer.admin.keys.load_error');
 }
 
 async function reload() {

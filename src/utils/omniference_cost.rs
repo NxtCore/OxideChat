@@ -8,7 +8,6 @@ use omniference::catalog::UsageBreakdown;
 use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
 use omniference::stream::{CostDetails, FinishReason};
 use rust_decimal::Decimal;
-use rust_decimal::prelude::FromPrimitive;
 use std::collections::BTreeMap;
 use std::sync::{
 	Arc,
@@ -54,18 +53,12 @@ impl OxideCostSink {
 		let input_tokens = token_count(record.usage.input_tokens);
 		let output_tokens = token_count(record.usage.output_tokens);
 		let reasoning_tokens = token_count(record.usage.reasoning_tokens);
-		let cost_total = ModelPricing::usage_cost(&self.state.db, &model.id, input_tokens, output_tokens, reasoning_tokens)
-			.await?
-			.unwrap_or_else(|| Decimal::from_f64(record.cost.total).unwrap_or(Decimal::ZERO));
 		let team_id = match (metadata_team_id, user_id.as_ref()) {
 			(Some(team_id), _) => Some(team_id),
 			(None, Some(user_id)) => Budget::primary_team_id(&self.state.db, user_id).await?,
 			(None, None) => None,
 		};
-		if let Some(id) = budget_id {
-			self.state.budget_ledger.reconcile(id, cost_total);
-		}
-		let usage = UsageEventRecord {
+		let mut usage = UsageEventRecord {
 			user_id: user_id.as_ref(),
 			team_id,
 			api_key_id,
@@ -75,8 +68,14 @@ impl OxideCostSink {
 			input_tokens,
 			output_tokens,
 			reasoning_tokens,
-			cost_total,
+			cost_total: Decimal::ZERO,
 		};
+		let provider_cost = matches!(record.finalization, CostFinalization::ProviderReported).then_some(record.cost.total);
+		ModelPricing::price(&self.state.db, provider_cost, record.cost.total, &mut usage).await?;
+		let cost_total = usage.cost_total;
+		if let Some(id) = budget_id {
+			self.state.budget_ledger.reconcile(id, cost_total);
+		}
 		UsageEvent::record(&self.state.db, usage).await?;
 		let (status, error_category) = request_outcome(record.finalization);
 		let streaming = record.metadata.get(STREAMING_METADATA_KEY).is_some_and(|value| value == "true");
@@ -168,6 +167,7 @@ impl OxideCostQueue {
 	}
 
 	/// Drains all queued cost operations and awaits the worker.
+	#[allow(clippy::cognitive_complexity)]
 	pub async fn shutdown(&self) {
 		if !self.shutdown_started.swap(true, Ordering::AcqRel) {
 			let (completion, completed) = oneshot::channel();

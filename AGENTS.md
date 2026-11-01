@@ -44,6 +44,15 @@
 - Service-account keys have no user: `GatewayAuthContext.user_id` is `None`, they authenticate while the team exists and has the gateway enabled, their budget subject is `BudgetSubject::service_key` (own key budgets plus the team's pooled budgets only), and `usage_events.user_id` / `gateway_request_logs.user_id` are nullable (`ON DELETE SET NULL`) so usage is attributed through `team_id` and `api_key_id`; pooled team spend counts events of members and user-less events of the team
 - `src/utils/gateway_limits.rs` - HTTP glue only: admission for a route and Omniference-rendered OpenAI limit headers; protocol formatting belongs to Omniference, not the limiter
 - `src/routes/` - HTTP route handlers (handlers only, no type definitions)
+    - Handlers take `auth: AuthUser` (`src/types/auth_user.rs`, reads the session user from `RequestContext`; missing user is 401), call `auth.require(&state.db, PERMISSION).await?` (a database failure is a 500, never a 403) and return `Result<Response, AppError>`
+    - `AppError` (`src/types/error.rs`) renders the standard JSON error and logs 5xx through `tracing`; use `?` on `sqlx::Error`, `ErrorCode` (`Err(ErrorCode::NotFound.into())`, `.ok_or(ErrorCode::NotFound)?`) and the gateway error enums, `AppError::unique_or(e, ErrorCode::AlreadyExists)` for unique violations, `is_unique_violation` instead of matching error text, and `json_ok(body)` for 200 responses; never `eprintln!`
+    - `src/routes/admin/mod.rs` and `src/routes/public/mod.rs` each expose a `router()` that `src/routes/mod.rs` merges; `get_current_user` lives in `src/utils/auth.rs`
+- `src/routes/gateway/` - OpenAI-compatible gateway handlers (moved from `src/utils/openai_gateway.rs`)
+- `src/types/chat/runner/` - Agent loop for web chat (`prepare_turn`, `stream_turn`): history, request building, tool calls
+- `src/types/tools/` - One file per entity (`tool.rs`, `tool_function.rs`, `tool_execution.rs`, `wasm_blob.rs`, `mcp_server.rs`); `McpScope` (`mcp_scope.rs`) separates admin-wide and per-user MCP servers
+- `src/types/page.rs` - `PageQuery` (`page`, `size`) and `Page<T>` (`has_more`, `items`) for paginated endpoints
+- `src/types/usage/` - Usage events; `ChatUsageGuard` records a chat stream's usage once, even if the client disconnects
+- `AuditLog::write` (`src/types/gateway/admin.rs`) writes an audit row in the caller's transaction and always redacts its metadata
 - `migrations/` - SQLx database migrations
 - `JobState` struct contains shared application state (database pool)
 - Wrap `JobState` in `Arc<JobState>` for sharing across async tasks
@@ -55,9 +64,9 @@
 
 ### Types Module (`src/types/`)
 
-- All request/response structs live in `src/types/`, not in the code files files
+- All request/response structs live in `src/types/`, not in route files
 - Organized by domain: `i18n.rs`, `base.rs`, etc.
-- `providers_billing` re-exports all types for easy importing: `use crate::types::*;`
+- `src/types/mod.rs` re-exports all types for easy importing: `use crate::types::*;`
 - Each file uses section comments for clarity:
     - Request Types (structs with `Deserialize`)
     - Response Types (structs with `Serialize`)
@@ -108,6 +117,7 @@
 - Clean up test data or use transactions that rollback
 - Test error cases, not just happy paths
 - Use `Result<(), Error>` return type in tests for cleaner error propagation
+- Frontend DTO types and permission names are generated into `frontend/types/generated/` (committed, CI-checked): derive `#[cfg_attr(test, derive(ts_rs::TS))]` on the Rust type, add it to `src/tests/bindings.rs`, and regenerate with `cargo test generate_frontend_types`
 - UI end-to-end tests live in `e2e/` (Playwright, run with Bun) against the real backend, an isolated `oxidechat_e2e` database and a real LLM provider with a cheap model (configured in `e2e/.env`; without a key it falls back to a local stand-in); see `e2e/README.md`
 - New UI features get an e2e spec; locate elements through the `t()` fixture (translations) or `data-testid`, never hardcoded English text
 

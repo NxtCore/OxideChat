@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::utils::encryption::mask_object_values;
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ProviderResponse {
 	pub id: Uuid,
 	pub owner_id: Option<Uuid>,
@@ -14,6 +15,7 @@ pub struct ProviderResponse {
 	pub name: String,
 	pub base_url: String,
 	pub has_api_key: bool,
+	#[cfg_attr(test, ts(type = "any"))]
 	pub extra_headers: Value,
 	pub is_enabled: bool,
 	pub created_at: DateTime<Utc>,
@@ -69,6 +71,7 @@ impl From<Provider> for ProviderResponse {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub enum ProviderBillingStatus {
 	NotConfigured,
 	Available,
@@ -104,6 +107,7 @@ impl ProviderBillingStatus {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub enum ProviderBillingMetricKind {
 	CreditBalance,
 	KeyLimit,
@@ -135,6 +139,7 @@ impl ProviderBillingMetricKind {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProviderBillingOverview"))]
 pub struct ProviderBillingOverviewResponse {
 	pub provider_id: Uuid,
 	pub provider_kind: ProviderKind,
@@ -149,22 +154,29 @@ pub struct ProviderBillingOverviewResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProviderBillingMetric"))]
 pub struct ProviderBillingMetricResponse {
 	pub metric_kind: ProviderBillingMetricKind,
 	pub currency: String,
 	pub period_start: Option<DateTime<Utc>>,
 	pub period_end: Option<DateTime<Utc>>,
+	#[cfg_attr(test, ts(type = "string | null"))]
 	pub limit_amount: Option<Decimal>,
+	#[cfg_attr(test, ts(type = "string | null"))]
 	pub spent_amount: Option<Decimal>,
+	#[cfg_attr(test, ts(type = "string | null"))]
 	pub remaining_amount: Option<Decimal>,
 	pub is_hard_limit: bool,
+	#[cfg_attr(test, ts(type = "Array<string>"))]
 	pub thresholds: Vec<Decimal>,
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ProviderLocalSpendResponse {
 	pub currency: String,
 	pub period_start: DateTime<Utc>,
 	pub period_end: DateTime<Utc>,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub spent_amount: Decimal,
 }

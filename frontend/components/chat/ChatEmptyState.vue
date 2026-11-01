@@ -14,7 +14,7 @@
 <script setup lang="ts">
 import {MessageSquare} from 'lucide-vue-next';
 import ChatComposer from './ChatComposer.vue';
-import {useChatStore} from '~/stores/chatStore';
+
 import {useMainStore} from '~/stores';
 
 const emit = defineEmits<{

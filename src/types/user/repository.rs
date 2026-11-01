@@ -1,6 +1,6 @@
 use crate::types::user::rows::{CountRow, PermissionNameRow, RoleNameRow, UserRoleRow};
-use crate::types::user::{PaginatedUsersListResponse, PaginatedUsersResponse, User, UserListResponse, UserResponse};
-use crate::types::{PreferencesResponse, Team, UserPreferences};
+use crate::types::user::{User, UserListResponse, UserResponse};
+use crate::types::{BaseType, Page, PageQuery, PreferencesResponse, Team, UserPreferences};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -78,10 +78,6 @@ impl User {
 		.await
 	}
 
-	pub async fn role_exists(pool: &PgPool, role_name: &str) -> Result<bool, sqlx::Error> {
-		crate::types::Role::exists(pool, role_name).await
-	}
-
 	pub async fn initialize_defaults(&self, pool: &PgPool) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			"INSERT INTO user_preferences (user_id, default_model_key, favorite_model_keys, streaming_animation, use_remend)
@@ -142,18 +138,9 @@ impl User {
 		}
 	}
 
-	pub async fn has_permission(&self, pool: &PgPool, permission: &str) -> bool {
-		self.permissions(pool)
-			.await
-			.map(|perms| perms.iter().any(|p| Self::permission_matches(p, permission)))
-			.unwrap_or(false)
-	}
-
-	pub async fn has_any_permission(&self, pool: &PgPool, permissions: &[&str]) -> bool {
-		self.permissions(pool)
-			.await
-			.map(|user_perms| permissions.iter().any(|req| user_perms.iter().any(|p| Self::permission_matches(p, req))))
-			.unwrap_or(false)
+	pub async fn check_permission(&self, pool: &PgPool, permission: &str) -> Result<bool, sqlx::Error> {
+		let permissions = self.permissions(pool).await?;
+		Ok(permissions.iter().any(|p| Self::permission_matches(p, permission)))
 	}
 
 	pub async fn to_response(&self, pool: &PgPool) -> Result<UserResponse, sqlx::Error> {
@@ -174,98 +161,15 @@ impl User {
 		})
 	}
 
-	pub async fn list_paginated(
-		pool: &PgPool,
-		page: i64,
-		per_page: i64,
-		search: Option<&str>,
-		role: Option<&str>,
-		team_id: Option<&Uuid>,
-	) -> Result<PaginatedUsersResponse, sqlx::Error> {
-		let offset = (page - 1) * per_page;
-		let search_pattern = search.map(|s| format!("%{}%", Self::escape_like_pattern(s)));
-
-		let total: CountRow = sqlx::query_as(
-			r#"
-			SELECT COUNT(DISTINCT u.id) as count
-			FROM users u
-			LEFT JOIN user_roles ur ON u.id = ur.user_id
-			LEFT JOIN roles r ON ur.role_id = r.id
-			LEFT JOIN team_members tm ON tm.user_id = u.id
-			WHERE ($1::text IS NULL OR r.name = $1)
-			  AND ($2::uuid IS NULL OR tm.team_id = $2)
-			  AND ($3::text IS NULL OR u.email ILIKE $3 ESCAPE '\' OR u.username ILIKE $3 ESCAPE '\')
-			"#,
-		)
-		.bind(role)
-		.bind(team_id)
-		.bind(&search_pattern)
-		.fetch_one(pool)
-		.await?;
-
-		let users: Vec<User> = sqlx::query_as(
-			r#"
-			SELECT DISTINCT u.*
-			FROM users u
-			LEFT JOIN user_roles ur ON u.id = ur.user_id
-			LEFT JOIN roles r ON ur.role_id = r.id
-			LEFT JOIN team_members tm ON tm.user_id = u.id
-			WHERE ($1::text IS NULL OR r.name = $1)
-			  AND ($2::uuid IS NULL OR tm.team_id = $2)
-			  AND ($3::text IS NULL OR u.email ILIKE $3 ESCAPE '\' OR u.username ILIKE $3 ESCAPE '\')
-			ORDER BY u.created_at DESC
-			LIMIT $4 OFFSET $5
-			"#,
-		)
-		.bind(role)
-		.bind(team_id)
-		.bind(&search_pattern)
-		.bind(per_page)
-		.bind(offset)
-		.fetch_all(pool)
-		.await?;
-
-		let mut responses = Vec::with_capacity(users.len());
-		for u in users {
-			responses.push(u.to_response(pool).await?);
-		}
-
-		Ok(PaginatedUsersResponse {
-			users: responses,
-			total: total.count,
-			page,
-			per_page,
-		})
-	}
-
 	pub async fn list_paginated_light(
 		pool: &PgPool,
-		page: i64,
-		per_page: i64,
+		page: &PageQuery,
 		search: Option<&str>,
 		role: Option<&str>,
 		team_id: Option<&Uuid>,
-	) -> Result<PaginatedUsersListResponse, sqlx::Error> {
-		let offset = (page - 1) * per_page;
+	) -> Result<Page<UserListResponse>, sqlx::Error> {
+		let pagination = Self::pagination(page);
 		let search_pattern = search.map(|s| format!("%{}%", Self::escape_like_pattern(s)));
-
-		let total: CountRow = sqlx::query_as(
-			r#"
-			SELECT COUNT(DISTINCT u.id) as count
-			FROM users u
-			LEFT JOIN user_roles ur ON u.id = ur.user_id
-			LEFT JOIN roles r ON ur.role_id = r.id
-			LEFT JOIN team_members tm ON tm.user_id = u.id
-			WHERE ($1::text IS NULL OR r.name = $1)
-			  AND ($2::uuid IS NULL OR tm.team_id = $2)
-			  AND ($3::text IS NULL OR u.email ILIKE $3 ESCAPE '\' OR u.username ILIKE $3 ESCAPE '\')
-			"#,
-		)
-		.bind(role)
-		.bind(team_id)
-		.bind(&search_pattern)
-		.fetch_one(pool)
-		.await?;
 
 		let users: Vec<User> = sqlx::query_as(
 			r#"
@@ -284,18 +188,15 @@ impl User {
 		.bind(role)
 		.bind(team_id)
 		.bind(&search_pattern)
-		.bind(per_page)
-		.bind(offset)
+		.bind(pagination.limit)
+		.bind(pagination.offset)
 		.fetch_all(pool)
 		.await?;
 
+		let has_more = users.len() > pagination.page_size;
+		let users: Vec<User> = users.into_iter().take(pagination.page_size).collect();
 		if users.is_empty() {
-			return Ok(PaginatedUsersListResponse {
-				users: Vec::new(),
-				total: total.count,
-				page,
-				per_page,
-			});
+			return Ok(Page { has_more, items: Vec::new() });
 		}
 
 		let user_ids: Vec<Uuid> = users.iter().map(|u| u.id).collect();
@@ -315,7 +216,7 @@ impl User {
 		}
 		let all_teams = Team::summaries_for_users(pool, &user_ids).await?;
 
-		let responses = users
+		let items = users
 			.into_iter()
 			.map(|u| {
 				let roles = user_roles_map.get(&u.id).cloned().unwrap_or_default();
@@ -332,12 +233,7 @@ impl User {
 			})
 			.collect();
 
-		Ok(PaginatedUsersListResponse {
-			users: responses,
-			total: total.count,
-			page,
-			per_page,
-		})
+		Ok(Page { has_more, items })
 	}
 
 	pub(super) fn permission_matches(user_permission: &str, required: &str) -> bool {

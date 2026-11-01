@@ -39,22 +39,22 @@
 							<Layers class="mr-2 h-4 w-4" />
 							<span>{{ store.getTranslation('sidebar.workspace') }}</span>
 							<span class="ml-auto text-xs text-muted-foreground">
-								{{ chatStore.activeWorkspace?.name || store.getTranslation('sidebar.all') }}
+								{{ workspaceStore.activeWorkspace?.name || store.getTranslation('sidebar.all') }}
 							</span>
 						</ShadDropdownMenuSubTrigger>
 						<ShadDropdownMenuSubContent class="border-border bg-popover">
-							<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent" @click="chatStore.setActiveWorkspace(null)">
-								<span :class="!chatStore.activeWorkspaceId ? 'font-medium' : ''">{{ store.getTranslation('sidebar.all_chats') }}</span>
+							<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent" @click="workspaceStore.setActiveWorkspace(null)">
+								<span :class="!workspaceStore.activeWorkspaceId ? 'font-medium' : ''">{{ store.getTranslation('sidebar.all_chats') }}</span>
 							</ShadDropdownMenuItem>
 							<ShadDropdownMenuSeparator class="bg-border" />
 							<ShadDropdownMenuItem
-								v-for="workspace in chatStore.workspaces"
+								v-for="workspace in workspaceStore.workspaces"
 								:key="workspace.id"
 								class="text-popover-foreground focus:bg-accent"
-								@click="chatStore.setActiveWorkspace(workspace.id)"
+								@click="workspaceStore.setActiveWorkspace(workspace.id)"
 							>
 								<span class="mr-2 h-2.5 w-2.5 shrink-0 rounded-full border border-border" :style="{backgroundColor: workspace.color || 'var(--muted)'}" />
-								<span :class="workspace.id === chatStore.activeWorkspaceId ? 'font-medium' : ''">
+								<span :class="workspace.id === workspaceStore.activeWorkspaceId ? 'font-medium' : ''">
 									{{ workspace.name }}
 								</span>
 								<span class="ml-auto text-xs text-muted-foreground">{{ workspace.chat_count }}</span>
@@ -110,11 +110,11 @@
 <script setup lang="ts">
 import {ChevronUp, Code2, LogOut, Settings, Settings2, Layers} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
-import {useChatStore} from '@/stores/chatStore';
+import {useWorkspaceStore} from '@/stores/workspaceStore';
 import {useBudgetStore} from '@/stores/budgetStore';
 
 const store = useMainStore();
-const chatStore = useChatStore();
+const workspaceStore = useWorkspaceStore();
 const budgetStore = useBudgetStore();
 const router = useRouter();
 const route = useRoute();
@@ -134,10 +134,6 @@ function goToSettings() {
 async function handleLogout() {
 	await store.logout();
 	router.push('/auth/login');
-}
-
-function formatMoney(value: number) {
-	return `$${value.toFixed(2)}`;
 }
 
 onMounted(() => {

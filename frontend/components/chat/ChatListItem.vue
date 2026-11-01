@@ -22,7 +22,7 @@
 				</NuxtLink>
 			</ShadTooltipTrigger>
 			<ShadTooltipContent side="right">
-				<p class="text-xs">Go to source chat</p>
+				<p class="text-xs">{{ store.getTranslation('chat.go_to_source_chat') }}</p>
 			</ShadTooltipContent>
 		</ShadTooltip>
 	</ShadButton>

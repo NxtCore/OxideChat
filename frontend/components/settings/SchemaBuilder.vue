@@ -32,12 +32,12 @@
 									<ShadSelectValue />
 								</ShadSelectTrigger>
 								<ShadSelectContent>
-									<ShadSelectItem value="string">String</ShadSelectItem>
-									<ShadSelectItem value="number">Number</ShadSelectItem>
-									<ShadSelectItem value="integer">Integer</ShadSelectItem>
-									<ShadSelectItem value="boolean">Boolean</ShadSelectItem>
-									<ShadSelectItem value="array">Array</ShadSelectItem>
-									<ShadSelectItem value="object">Object</ShadSelectItem>
+									<ShadSelectItem value="string">{{ store.getTranslation('settings.schema_builder.type_string') }}</ShadSelectItem>
+									<ShadSelectItem value="number">{{ store.getTranslation('settings.schema_builder.type_number') }}</ShadSelectItem>
+									<ShadSelectItem value="integer">{{ store.getTranslation('settings.schema_builder.type_integer') }}</ShadSelectItem>
+									<ShadSelectItem value="boolean">{{ store.getTranslation('settings.schema_builder.type_boolean') }}</ShadSelectItem>
+									<ShadSelectItem value="array">{{ store.getTranslation('settings.schema_builder.type_array') }}</ShadSelectItem>
+									<ShadSelectItem value="object">{{ store.getTranslation('settings.schema_builder.type_object') }}</ShadSelectItem>
 								</ShadSelectContent>
 							</ShadSelect>
 						</div>

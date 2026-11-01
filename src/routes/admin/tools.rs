@@ -1,513 +1,217 @@
-use crate::types::{JobState, RequestContext};
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
-
-use crate::utils::response::{ErrorBuilder, ErrorCode, ResponseBody, ResponseBuilder};
-use crate::utils::tools::ToolExecutor;
+use crate::types::{AppError, AuthUser, JobState, json_ok};
+use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
+use crate::utils::tools::{ToolContext, ToolError, ToolExecutor};
 use axum::{
 	Json,
-	extract::{Extension, Path, State},
+	extract::{Path, State},
 	http::StatusCode,
-	response::IntoResponse,
+	response::{IntoResponse, Response},
 };
+use base64::Engine;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub async fn list_tools(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
-
-	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	let tools = match sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE owner_id IS NULL ORDER BY created_at DESC")
-		.fetch_all(&state.db)
-		.await
-	{
-		Ok(t) => t,
-		Err(e) => {
-			eprintln!("[TOOLS] Failed to list tools: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	let tool_ids: Vec<Uuid> = tools.iter().map(|t| t.id).collect();
-	let functions: Vec<ToolFunction> = if tool_ids.is_empty() {
-		vec![]
-	} else {
-		sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = ANY($1) ORDER BY sort_order, created_at")
-			.bind(&tool_ids)
-			.fetch_all(&state.db)
-			.await
-			.unwrap_or_default()
-	};
-
-	let mut functions_by_tool: HashMap<Uuid, Vec<ToolFunction>> = HashMap::new();
-	for f in functions {
-		functions_by_tool.entry(f.tool_id).or_default().push(f);
-	}
-
-	let mut responses: Vec<ToolResponse> = tools
-		.into_iter()
-		.map(|t| {
-			let funcs = functions_by_tool.remove(&t.id).unwrap_or_default();
-			ToolResponse::from_tool_with_functions(t, funcs)
-		})
-		.collect();
-
-	let server_ids: Vec<Uuid> = responses
-		.iter()
-		.filter_map(|r| r.mcp_server_id)
-		.collect::<std::collections::HashSet<_>>()
-		.into_iter()
-		.collect();
-
-	if !server_ids.is_empty() {
-		let server_names: HashMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>("SELECT id, name FROM mcp_servers WHERE id = ANY($1)")
-			.bind(&server_ids)
-			.fetch_all(&state.db)
-			.await
-			.unwrap_or_default()
-			.into_iter()
-			.collect();
-
-		for r in &mut responses {
-			r.mcp_server_name = r.mcp_server_id.and_then(|id| server_names.get(&id).cloned());
-		}
-	}
-
-	ResponseBuilder::new(ResponseBody::Json(responses)).build()
+fn internal(what: &str, error: impl std::fmt::Display) -> ErrorCode {
+	tracing::error!(%error, "{what}");
+	ErrorCode::InternalError
 }
 
-pub async fn get_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
-
-	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	let tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
-		.bind(tool_id)
-		.fetch_optional(&state.db)
-		.await;
-
-	match tool {
-		Ok(Some(tool)) => {
-			let functions = sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 ORDER BY sort_order, created_at")
-				.bind(tool_id)
-				.fetch_all(&state.db)
-				.await
-				.unwrap_or_default();
-
-			ResponseBuilder::new(ResponseBody::Json(ToolResponse::from_tool_with_functions(tool, functions))).build()
-		}
-		Ok(None) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[TOOLS] Failed to get tool: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+pub async fn list_tools(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TOOLS_VIEW).await?;
+	json_ok(Tool::list_responses(&state.db, None).await?)
 }
 
-pub async fn create_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<CreateToolRequest>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn get_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(tool_id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TOOLS_VIEW).await?;
 
-	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
+	let tool = Tool::find_by_id_system(&state.db, &tool_id).await?.ok_or(ErrorCode::NotFound)?;
+	let functions = ToolFunction::list_by_tool(&state.db, &tool_id).await.unwrap_or_default();
+	json_ok(ToolResponse::from_tool_with_functions(tool, functions))
+}
 
-	let (tool, functions) = match Tool::create_system(&state.db, &req).await {
-		Ok(created) => created,
-		Err(e) => {
-			eprintln!("[TOOLS] Failed to create tool: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
+pub async fn create_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Json(req): Json<CreateToolRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TOOLS_EDIT).await?;
 
-	ResponseBuilder::new(ResponseBody::Json(ToolResponse::from_tool_with_functions(tool, functions)))
+	let (tool, functions) = Tool::create_system(&state.db, &req).await?;
+	Ok(ResponseBuilder::new(ResponseBody::Json(ToolResponse::from_tool_with_functions(tool, functions)))
 		.status(StatusCode::CREATED)
-		.build()
+		.build())
 }
 
-pub async fn update_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>, Json(req): Json<UpdateToolRequest>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn update_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(tool_id): Path<Uuid>, Json(req): Json<UpdateToolRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TOOLS_EDIT).await?;
 
-	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	let (tool, functions) = match Tool::update_system(&state.db, &tool_id, &req).await {
-		Ok(Some(updated)) => updated,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[TOOLS] Failed to update tool: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
-	};
-
-	ResponseBuilder::new(ResponseBody::Json(ToolResponse::from_tool_with_functions(tool, functions))).build()
+	let (tool, functions) = Tool::update_system(&state.db, &tool_id, &req).await?.ok_or(ErrorCode::NotFound)?;
+	json_ok(ToolResponse::from_tool_with_functions(tool, functions))
 }
 
-pub async fn delete_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+pub async fn delete_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(tool_id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TOOLS_EDIT).await?;
 
-	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	if !Tool::delete_system(&state.db, &tool_id).await? {
+		return Err(ErrorCode::NotFound.into());
 	}
-
-	let result = sqlx::query("DELETE FROM tools WHERE id = $1 AND owner_id IS NULL")
-		.bind(tool_id)
-		.execute(&state.db)
-		.await;
-
-	match result {
-		Ok(res) if res.rows_affected() > 0 => (StatusCode::NO_CONTENT, "").into_response(),
-		Ok(_) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[TOOLS] Failed to delete tool: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	Ok((StatusCode::NO_CONTENT, "").into_response())
 }
 
-pub async fn get_tool_settings(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
-
-	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	match Tool::system_settings_for_admin(&state.db, &tool_id).await {
-		Ok(settings) => ResponseBuilder::new(ResponseBody::Json(settings)).build(),
-		Err(ToolSettingsError::NotFound) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[TOOLS] Failed to get tool settings: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+pub async fn get_tool_settings(State(state): State<Arc<JobState>>, auth: AuthUser, Path(tool_id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TOOLS_VIEW).await?;
+	json_ok(Tool::system_settings_for_admin(&state.db, &tool_id).await?)
 }
 
 /// PUT /api/v1/admin/tools/:id/settings
 pub async fn set_tool_settings(
 	State(state): State<Arc<JobState>>,
-	Extension(RequestContext { user: current_user }): Extension<RequestContext>,
+	auth: AuthUser,
 	Path(tool_id): Path<Uuid>,
 	Json(req): Json<SetToolSettingsRequest>,
-) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TOOLS_EDIT).await?;
 
-	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	match Tool::set_system_settings(&state.db, &tool_id, &req.settings).await {
-		Ok(()) => (StatusCode::NO_CONTENT, "").into_response(),
-		Err(ToolSettingsError::NotFound) => ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(ToolSettingsError::Invalid) => ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
-		Err(ToolSettingsError::Database(e)) => {
-			eprintln!("[TOOLS] Failed to save tool settings: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-		Err(ToolSettingsError::Encryption(e)) => {
-			eprintln!("[TOOLS] Failed to protect tool settings: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	Tool::set_system_settings(&state.db, &tool_id, &req.settings).await?;
+	Ok((StatusCode::NO_CONTENT, "").into_response())
 }
 
-pub async fn upload_wasm(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Json(req): Json<UploadWasmRequest>) -> impl IntoResponse {
-	use base64::Engine;
+pub async fn upload_wasm(State(state): State<Arc<JobState>>, auth: AuthUser, Json(req): Json<UploadWasmRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TOOLS_EDIT).await?;
 
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
-	};
+	let blob = base64::engine::general_purpose::STANDARD
+		.decode(&req.content)
+		.map_err(|_| ErrorCode::ValidationFailed)?;
 
-	if !user.has_permission(&state.db, ADMIN_TOOLS_EDIT).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
+	if blob.len() > 4 * 1024 * 1024 || blob.first_chunk::<4>() != Some(&[0x00, 0x61, 0x73, 0x6D]) {
+		return Err(ErrorCode::ValidationFailed.into());
 	}
 
-	let blob = match base64::engine::general_purpose::STANDARD.decode(&req.content) {
-		Ok(b) => b,
-		Err(e) => {
-			eprintln!("[TOOLS] Invalid base64: {e}");
-			return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
-		}
-	};
-
-	if blob.len() > 4 * 1024 * 1024 {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
-	}
-
-	if blob.first_chunk::<4>() != Some(&[0x00, 0x61, 0x73, 0x6D]) {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
-	}
-
-	let extension = req.filename.split('.').last().unwrap_or("");
-	let compiled_from = match extension {
-		"wasm" => "wasm",
-		"rs" => "rust",
-		"js" | "ts" => "javascript",
-		_ => return ErrorBuilder::new(ErrorCode::ValidationFailed).build(),
-	};
-
-	if compiled_from != "wasm" {
-		return ErrorBuilder::new(ErrorCode::ValidationFailed).build();
+	if req.filename.split('.').next_back() != Some("wasm") {
+		return Err(ErrorCode::ValidationFailed.into());
 	}
 
 	let mut hasher = Sha256::new();
 	hasher.update(&blob);
 	let hash = format!("{:x}", hasher.finalize());
 
-	let existing: Option<Uuid> = sqlx::query_scalar("SELECT id FROM wasm_blobs WHERE sha256_hash = $1 AND owner_id IS NULL")
-		.bind(&hash)
-		.fetch_optional(&state.db)
-		.await
-		.ok()
-		.flatten();
+	let existing = WasmBlob::find_by_hash(&state.db, &hash, None).await?;
+	let created = existing.is_none();
+	let blob_id = match existing {
+		Some(id) => id,
+		None => WasmBlob::create(&state.db, None, Some(&req.filename), Some("wasm"), &blob, blob.len() as i32, &hash).await?,
+	};
 
-	if let Some(existing_id) = existing {
-		return ResponseBuilder::new(ResponseBody::Json(UploadWasmResponse {
-			blob_id: existing_id,
-			size_bytes: blob.len() as i32,
-			sha256_hash: hash,
-			compiled_from: Some(compiled_from.to_string()),
-		}))
-		.build();
-	}
-
-	let blob_id = sqlx::query_scalar::<_, Uuid>(
-		r#"
-        INSERT INTO wasm_blobs (owner_id, original_filename, compiled_from, blob, size_bytes, sha256_hash)
-        VALUES (NULL, $1, $2, $3, $4, $5)
-        RETURNING id
-        "#,
-	)
-	.bind(&req.filename)
-	.bind(compiled_from)
-	.bind(&blob)
-	.bind(blob.len() as i32)
-	.bind(&hash)
-	.fetch_one(&state.db)
-	.await;
-
-	match blob_id {
-		Ok(blob_id) => ResponseBuilder::new(ResponseBody::Json(UploadWasmResponse {
-			blob_id,
-			size_bytes: blob.len() as i32,
-			sha256_hash: hash,
-			compiled_from: Some(compiled_from.to_string()),
-		}))
-		.status(StatusCode::CREATED)
-		.build(),
-		Err(e) => {
-			eprintln!("[TOOLS] Failed to store WASM: {e}");
-			ErrorBuilder::new(ErrorCode::InternalError).build()
-		}
-	}
+	let response = UploadWasmResponse {
+		blob_id,
+		size_bytes: blob.len() as i32,
+		sha256_hash: hash,
+		compiled_from: Some("wasm".to_string()),
+	};
+	let status = if created { StatusCode::CREATED } else { StatusCode::OK };
+	Ok(ResponseBuilder::new(ResponseBody::Json(response)).status(status).build())
 }
 
-pub async fn test_tool(State(state): State<Arc<JobState>>, Extension(RequestContext { user: current_user }): Extension<RequestContext>, Path(tool_id): Path<Uuid>, Json(req): Json<TestToolRequest>) -> impl IntoResponse {
-	let user = match current_user {
-		Some(user) => user,
-		None => return ErrorBuilder::new(ErrorCode::NotAuthenticated).build(),
+async fn run_wasm(state: &JobState, tool: &Tool, req: &TestToolRequest, ctx: &ToolContext) -> Result<Result<Value, ToolError>, ErrorCode> {
+	let config: WasmSourceConfig = serde_json::from_value(tool.source_config.clone()).map_err(|e| internal("invalid WASM tool config", e))?;
+	let blob = WasmBlob::find_by_id(&state.db, &config.wasm_blob_id).await.ok().flatten().ok_or(ErrorCode::NotFound)?;
+	Ok(match crate::utils::tools::WasmExecutor::new(&blob, config.entrypoint) {
+		Ok(executor) => executor.execute(req.input.clone(), ctx).await,
+		Err(e) => Err(e),
+	})
+}
+
+async fn run_http(state: &JobState, tool: &Tool, req: &TestToolRequest, ctx: &ToolContext) -> Result<Result<Value, ToolError>, ErrorCode> {
+	let source_config = tool.revealed_source_config().map_err(|e| internal("failed to decrypt HTTP tool credentials", e))?;
+	let config: HttpSourceConfig = serde_json::from_value(source_config).map_err(|e| internal("invalid HTTP tool config", e))?;
+
+	let function_entrypoint = match &req.function_name {
+		Some(fn_name) => ToolFunction::find_by_tool_and_name(&state.db, &tool.id, fn_name)
+			.await
+			.ok()
+			.flatten()
+			.and_then(|f| f.entrypoint),
+		None => None,
 	};
 
-	if !user.has_permission(&state.db, ADMIN_TOOLS_VIEW).await {
-		return ErrorBuilder::new(ErrorCode::InsufficientPermissions).build();
-	}
-
-	let tool = sqlx::query_as::<_, Tool>("SELECT * FROM tools WHERE id = $1 AND owner_id IS NULL")
-		.bind(tool_id)
-		.fetch_optional(&state.db)
-		.await;
-
-	let tool = match tool {
-		Ok(Some(t)) => t,
-		Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-		Err(e) => {
-			eprintln!("[TOOLS] Failed to fetch tool: {e}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
+	let url = match &function_entrypoint {
+		Some(entrypoint) if entrypoint.starts_with("http") => entrypoint.clone(),
+		Some(entrypoint) => format!("{}{}", config.url.trim_end_matches('/'), entrypoint),
+		None => config.url.clone(),
 	};
 
-	let tool_settings = match Tool::effective_settings_for_user(&state.db, &tool_id, None).await {
-		Ok(settings) => settings,
-		Err(error) => {
-			eprintln!("[TOOLS] Failed to load tool settings: {error}");
-			return ErrorBuilder::new(ErrorCode::InternalError).build();
-		}
+	let http_config = crate::utils::tools::http::HttpConfig {
+		url,
+		method: config.method,
+		headers: config.headers,
+		body_template: config.body_template,
 	};
 
-	let ctx = crate::utils::tools::ToolContext {
+	Ok(match crate::utils::tools::HttpExecutor::new(tool.name.clone(), http_config) {
+		Ok(executor) => executor.execute(req.input.clone(), ctx).await,
+		Err(e) => Err(e),
+	})
+}
+
+async fn run_mcp(state: &JobState, tool: &Tool, req: &TestToolRequest) -> Result<Result<Value, ToolError>, AppError> {
+	let config: McpSourceConfig = serde_json::from_value(tool.source_config.clone()).map_err(|e| internal("invalid MCP tool config", e))?;
+	let server = McpServer::find_scoped(&state.db, &config.mcp_server_id, None).await?.ok_or(ErrorCode::NotFound)?;
+
+	Ok(match server.get_client(&state.mcp_pool).await {
+		Ok(client) => match client.call_tool(&config.tool_name, req.input.clone()).await {
+			Ok(output) => Ok(output),
+			Err(e) => {
+				state.mcp_pool.evict(&server.id).await;
+				Err(e)
+			}
+		},
+		Err(e) => Err(e),
+	})
+}
+
+pub async fn test_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(tool_id): Path<Uuid>, Json(req): Json<TestToolRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TOOLS_VIEW).await?;
+
+	let tool = Tool::find_by_id_system(&state.db, &tool_id).await?.ok_or(ErrorCode::NotFound)?;
+	let tool_settings = Tool::effective_settings_for_user(&state.db, &tool_id, None)
+		.await
+		.map_err(|e| internal("failed to load tool settings", e))?;
+
+	let ctx = ToolContext {
 		user_id: None,
 		settings: tool_settings,
 		timeout_ms: Some(30000),
 		function_name: req.function_name.clone(),
-		db: Some(std::sync::Arc::new(state.db.clone())),
+		db: Some(Arc::new(state.db.clone())),
 	};
 
 	let start = std::time::Instant::now();
 	let result = match tool.source_kind {
 		ToolSourceKind::Builtin => {
-			let config: BuiltinSourceConfig = match serde_json::from_value(tool.source_config.clone()) {
-				Ok(c) => c,
-				Err(e) => {
-					eprintln!("[TOOLS] Invalid builtin config: {e}");
-					return ErrorBuilder::new(ErrorCode::InternalError).build();
-				}
-			};
-
+			let config: BuiltinSourceConfig = serde_json::from_value(tool.source_config.clone()).map_err(|e| internal("invalid builtin tool config", e))?;
 			match crate::utils::tools::get_builtin_executor(&config.builtin_id) {
 				Ok(executor) => executor.execute(req.input.clone(), &ctx).await,
 				Err(e) => Err(e),
 			}
 		}
-		ToolSourceKind::Wasm => {
-			let config: WasmSourceConfig = match serde_json::from_value(tool.source_config.clone()) {
-				Ok(c) => c,
-				Err(e) => {
-					eprintln!("[TOOLS] Invalid WASM config: {e}");
-					return ErrorBuilder::new(ErrorCode::InternalError).build();
-				}
-			};
-
-			let blob: Result<Vec<u8>, _> = sqlx::query_scalar("SELECT blob FROM wasm_blobs WHERE id = $1")
-				.bind(config.wasm_blob_id)
-				.fetch_one(&state.db)
-				.await;
-
-			match blob {
-				Ok(blob) => match crate::utils::tools::WasmExecutor::new(tool.name.clone(), &blob, config.entrypoint) {
-					Ok(executor) => executor.execute(req.input.clone(), &ctx).await,
-					Err(e) => Err(e),
-				},
-				Err(e) => {
-					eprintln!("[TOOLS] WASM blob not found: {e}");
-					return ErrorBuilder::new(ErrorCode::NotFound).build();
-				}
-			}
-		}
-		ToolSourceKind::Http => {
-			let source_config = match tool.revealed_source_config() {
-				Ok(config) => config,
-				Err(e) => {
-					eprintln!("[TOOLS] Failed to decrypt HTTP tool credentials: {e}");
-					return ErrorBuilder::new(ErrorCode::InternalError).build();
-				}
-			};
-			let config: HttpSourceConfig = match serde_json::from_value(source_config) {
-				Ok(c) => c,
-				Err(e) => {
-					eprintln!("[TOOLS] Invalid HTTP config: {e}");
-					return ErrorBuilder::new(ErrorCode::InternalError).build();
-				}
-			};
-
-			let function_entrypoint = if let Some(ref fn_name) = req.function_name {
-				sqlx::query_as::<_, ToolFunction>("SELECT * FROM tool_functions WHERE tool_id = $1 AND name = $2")
-					.bind(tool_id)
-					.bind(fn_name)
-					.fetch_optional(&state.db)
-					.await
-					.ok()
-					.flatten()
-					.and_then(|f| f.entrypoint)
-			} else {
-				None
-			};
-
-			let url = if let Some(entrypoint) = &function_entrypoint {
-				if entrypoint.starts_with("http") {
-					entrypoint.clone()
-				} else {
-					format!("{}{}", config.url.trim_end_matches('/'), entrypoint)
-				}
-			} else {
-				config.url.clone()
-			};
-
-			let http_config = crate::utils::tools::http::HttpConfig {
-				url,
-				method: config.method,
-				headers: config.headers,
-				body_template: config.body_template,
-			};
-
-			match crate::utils::tools::HttpExecutor::new(tool.name.clone(), http_config) {
-				Ok(executor) => executor.execute(req.input.clone(), &ctx).await,
-				Err(e) => Err(e),
-			}
-		}
-		ToolSourceKind::Mcp => {
-			let config: McpSourceConfig = match serde_json::from_value(tool.source_config.clone()) {
-				Ok(c) => c,
-				Err(e) => {
-					eprintln!("[TOOLS] Invalid MCP config: {e}");
-					return ErrorBuilder::new(ErrorCode::InternalError).build();
-				}
-			};
-
-			let server = match McpServer::find_scoped(&state.db, &config.mcp_server_id, None).await {
-				Ok(Some(s)) => s,
-				Ok(None) => return ErrorBuilder::new(ErrorCode::NotFound).build(),
-				Err(e) => {
-					eprintln!("[TOOLS] Failed to load MCP server: {e}");
-					return ErrorBuilder::new(ErrorCode::InternalError).build();
-				}
-			};
-
-			match server.get_client(&state.mcp_pool).await {
-				Ok(client) => match client.call_tool(&config.tool_name, req.input.clone()).await {
-					Ok(output) => Ok(output),
-					Err(e) => {
-						state.mcp_pool.evict(&server.id).await;
-						Err(e)
-					}
-				},
-				Err(e) => Err(e),
-			}
-		}
+		ToolSourceKind::Wasm => run_wasm(&state, &tool, &req, &ctx).await?,
+		ToolSourceKind::Http => run_http(&state, &tool, &req, &ctx).await?,
+		ToolSourceKind::Mcp => run_mcp(&state, &tool, &req).await?,
 	};
 	let execution_ms = start.elapsed().as_millis() as i32;
 
-	match result {
-		Ok(output) => ResponseBuilder::new(ResponseBody::Json(TestToolResponse {
+	json_ok(match result {
+		Ok(output) => TestToolResponse {
 			success: true,
 			output: Some(output),
 			error: None,
 			execution_ms,
-		}))
-		.build(),
-		Err(e) => ResponseBuilder::new(ResponseBody::Json(TestToolResponse {
+		},
+		Err(e) => TestToolResponse {
 			success: false,
 			output: None,
 			error: Some(format!("{e}")),
 			execution_ms,
-		}))
-		.build(),
-	}
+		},
+	})
 }

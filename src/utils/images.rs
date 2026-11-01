@@ -4,6 +4,7 @@
 //! Set `IMAGE_STORAGE_TYPE` env var to "database" or "file" (default: "database").
 //! For file storage, set `IMAGE_STORAGE_PATH` (default: "./uploads/images").
 
+use crate::types::{ImageContent, ImageInsert};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use sqlx::PgPool;
 use std::path::PathBuf;
@@ -20,7 +21,7 @@ pub enum StorageType {
 impl StorageType {
 	pub fn from_env() -> Self {
 		match std::env::var("IMAGE_STORAGE_TYPE").as_deref() {
-			Ok("file") | Ok("filesystem") => StorageType::File,
+			Ok("file" | "filesystem") => StorageType::File,
 			_ => StorageType::Database,
 		}
 	}
@@ -53,23 +54,11 @@ pub async fn store_image(db: &PgPool, data: &[u8], mime_type: &str, user_id: Opt
 	let id = Uuid::new_v4();
 	let size_bytes = i64::try_from(data.len()).map_err(|_| "Image size too large to represent in 64-bit".to_string())?;
 
+	let insert = ImageInsert { id, mime_type, size_bytes, user_id, source };
+
 	match storage_type {
 		StorageType::Database => {
-			sqlx::query(
-				r#"
-				INSERT INTO images (id, data, mime_type, size_bytes, user_id, source)
-				VALUES ($1, $2, $3, $4, $5, $6)
-				"#,
-			)
-			.bind(id)
-			.bind(data)
-			.bind(mime_type)
-			.bind(size_bytes)
-			.bind(user_id)
-			.bind(source)
-			.execute(db)
-			.await
-			.map_err(|e| format!("Failed to store image in database: {e}"))?;
+			insert.insert_data(db, data).await.map_err(|e| format!("Failed to store image in database: {e}"))?;
 		}
 		StorageType::File => {
 			let base_path = storage_path();
@@ -81,24 +70,7 @@ pub async fn store_image(db: &PgPool, data: &[u8], mime_type: &str, user_id: Opt
 
 			fs::write(&file_path, data).await.map_err(|e| format!("Failed to write image file: {e}"))?;
 
-			let relative_path = filename;
-
-			let db_result = sqlx::query(
-				r#"
-				INSERT INTO images (id, file_path, mime_type, size_bytes, user_id, source)
-				VALUES ($1, $2, $3, $4, $5, $6)
-				"#,
-			)
-			.bind(id)
-			.bind(&relative_path)
-			.bind(mime_type)
-			.bind(size_bytes)
-			.bind(user_id)
-			.bind(source)
-			.execute(db)
-			.await;
-
-			if let Err(e) = db_result {
+			if let Err(e) = insert.insert_file(db, &filename).await {
 				let _ = fs::remove_file(&file_path).await;
 				return Err(format!("Failed to store image metadata: {e}"));
 			}
@@ -128,24 +100,9 @@ pub fn safe_image_mime(data: &[u8], declared_mime: &str) -> Option<&'static str>
 
 /// Retrieve an image by ID
 ///
-/// Returns (data, mime_type) or None if not found.
+/// Returns (data, `mime_type`) or None if not found.
 pub async fn get_image(db: &PgPool, id: Uuid) -> Result<Option<(Vec<u8>, String)>, String> {
-	#[derive(sqlx::FromRow)]
-	struct ImageRow {
-		data: Option<Vec<u8>>,
-		file_path: Option<String>,
-		mime_type: String,
-	}
-
-	let row: Option<ImageRow> = sqlx::query_as(
-		r#"
-		SELECT data, file_path, mime_type FROM images WHERE id = $1
-		"#,
-	)
-	.bind(id)
-	.fetch_optional(db)
-	.await
-	.map_err(|e| format!("Failed to fetch image: {e}"))?;
+	let row = ImageContent::find(db, id).await.map_err(|e| format!("Failed to fetch image: {e}"))?;
 
 	match row {
 		Some(img) => {
@@ -171,13 +128,7 @@ pub async fn get_image(db: &PgPool, id: Uuid) -> Result<Option<(Vec<u8>, String)
 ///
 /// Returns an error when the database update fails.
 pub async fn set_image_caption(db: &PgPool, id: Uuid, caption: &str) -> Result<(), String> {
-	sqlx::query("UPDATE images SET caption = $2 WHERE id = $1")
-		.bind(id)
-		.bind(caption)
-		.execute(db)
-		.await
-		.map_err(|e| format!("Failed to set image caption: {e}"))?;
-	Ok(())
+	ImageContent::set_caption(db, id, caption).await.map_err(|e| format!("Failed to set image caption: {e}"))
 }
 
 /// Retrieve the stored caption for an image, if any.
@@ -186,15 +137,10 @@ pub async fn set_image_caption(db: &PgPool, id: Uuid, caption: &str) -> Result<(
 ///
 /// Returns an error when the database query fails.
 pub async fn image_caption(db: &PgPool, id: Uuid) -> Result<Option<String>, String> {
-	let row: Option<(Option<String>,)> = sqlx::query_as("SELECT caption FROM images WHERE id = $1")
-		.bind(id)
-		.fetch_optional(db)
-		.await
-		.map_err(|e| format!("Failed to fetch image caption: {e}"))?;
-	Ok(row.and_then(|r| r.0))
+	ImageContent::caption(db, id).await.map_err(|e| format!("Failed to fetch image caption: {e}"))
 }
 
-/// Parse a base64 data URI into (mime_type, decoded_bytes)
+/// Parse a base64 data URI into (`mime_type`, `decoded_bytes`)
 pub(crate) fn parse_data_uri(data_uri: &str) -> Result<(String, Vec<u8>), String> {
 	if !data_uri.starts_with("data:") {
 		return Err("Invalid data URI: must start with 'data:'".to_string());

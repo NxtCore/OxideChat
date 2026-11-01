@@ -1,22 +1,13 @@
 #[cfg(test)]
 mod tests {
+	use crate::tests::support::paged;
 	use crate::types::teams::{CreateTeamRequest, Team};
+	use crate::tests::support::insert_user;
 	use sqlx::PgPool;
 	use uuid::Uuid;
 
 	async fn create_user(pool: &PgPool, suffix: &str) -> Uuid {
-		sqlx::query_scalar::<_, Uuid>(
-			r#"
-			INSERT INTO users (email, username, password_hash)
-			VALUES ($1, $2, 'hash')
-			RETURNING id
-			"#,
-		)
-		.bind(format!("{suffix}@example.com"))
-		.bind(format!("team_user_{suffix}"))
-		.fetch_one(pool)
-		.await
-		.unwrap()
+		insert_user(pool, &format!("team_user_{suffix}")).await.unwrap()
 	}
 
 	async fn create_provider(pool: &PgPool, name: &str) -> Uuid {
@@ -146,15 +137,15 @@ mod tests {
 		create_team(&pool, r"slash\name").await;
 		create_team(&pool, "slash-name").await;
 
-		let percent = Team::list_paginated(&pool, 1, 10, Some("100%")).await.unwrap();
+		let percent = Team::list_paginated(&pool, &paged(1, 10), Some("100%")).await.unwrap();
 		assert_eq!(percent.items.len(), 1);
 		assert_eq!(percent.items[0].name, "100% Real");
 
-		let underscore = Team::list_paginated(&pool, 1, 10, Some("under_")).await.unwrap();
+		let underscore = Team::list_paginated(&pool, &paged(1, 10), Some("under_")).await.unwrap();
 		assert_eq!(underscore.items.len(), 1);
 		assert_eq!(underscore.items[0].name, "under_score");
 
-		let slash = Team::list_paginated(&pool, 1, 10, Some(r"slash\")).await.unwrap();
+		let slash = Team::list_paginated(&pool, &paged(1, 10), Some(r"slash\")).await.unwrap();
 		assert_eq!(slash.items.len(), 1);
 		assert_eq!(slash.items[0].name, r"slash\name");
 	}

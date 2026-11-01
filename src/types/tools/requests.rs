@@ -62,23 +62,25 @@ pub struct UpdateToolRequest {
 pub struct UploadWasmRequest {
 	pub filename: String,
 	pub content: String,
-	#[serde(default)]
-	pub force_compile: bool,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub struct CreateMcpServerRequest {
 	pub name: String,
 	pub transport: String,
+	#[cfg_attr(test, ts(type = "any"))]
 	pub connection_config: serde_json::Value,
 	#[serde(default = "default_true")]
 	pub is_enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub struct UpdateMcpServerRequest {
 	pub name: Option<String>,
 	pub transport: Option<String>,
+	#[cfg_attr(test, ts(type = "any"))]
 	pub connection_config: Option<serde_json::Value>,
 	pub is_enabled: Option<bool>,
 }

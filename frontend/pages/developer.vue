@@ -27,7 +27,7 @@
 							<span>{{ store.getTranslation(tab.label) }}</span>
 						</NuxtLink>
 						<NuxtLink
-							v-if="store.hasPermission('admin.developer.view')"
+							v-if="store.hasPermission(ADMIN_DEVELOPER_VIEW)"
 							to="/settings/gateway-admin"
 							class="flex shrink-0 items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-[15px] text-muted-foreground transition-all duration-200 hover:bg-accent/50 hover:text-foreground"
 						>
@@ -56,6 +56,7 @@
 </template>
 
 <script setup lang="ts">
+import {ADMIN_DEVELOPER_VIEW} from '~/types/generated/permissions';
 import {ArrowLeft, LayoutDashboard, KeyRound, BarChart3, ScrollText, Bot, FlaskConical, BookOpen, ShieldCheck} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 

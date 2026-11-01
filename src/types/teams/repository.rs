@@ -2,8 +2,9 @@ use super::{
 	CreateTeamRequest, Team, TeamDetailedResponse, TeamMemberResponse, TeamModelAccessResponse, TeamResponse, TeamSummaryResponse, UpdateTeamBudgetRequest,
 	TeamRole, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest,
 };
-use crate::types::axum::PaginatedResponse;
-use crate::types::{AUDIT_TEAM_TARGET, BaseType, Budget, EVENT_TEAM_MEMBER_ROLE_UPDATED, EVENT_TEAM_MODELS_UPDATED};
+use crate::types::{Page, PageQuery};
+use crate::logging::AuditLog;
+use crate::types::{AUDIT_TEAM_TARGET, AuditEntry, BaseType, Budget, EVENT_TEAM_MEMBER_ROLE_UPDATED, EVENT_TEAM_MODELS_UPDATED};
 use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -40,8 +41,8 @@ impl Team {
 		Ok(())
 	}
 
-	pub async fn list_paginated(pool: &PgPool, page: i64, size: i64, search: Option<&str>) -> Result<PaginatedResponse<TeamResponse>, sqlx::Error> {
-		let pagination = Self::pagination(page, size);
+	pub async fn list_paginated(pool: &PgPool, page: &PageQuery, search: Option<&str>) -> Result<Page<TeamResponse>, sqlx::Error> {
+		let pagination = Self::pagination(page);
 		let search = Self::search_pattern(search);
 
 		let rows = sqlx::query_as::<
@@ -102,7 +103,7 @@ impl Team {
 			)
 			.collect();
 
-		Ok(PaginatedResponse { has_more, items })
+		Ok(Page { has_more, items })
 	}
 
 	pub async fn find_by_id(pool: &PgPool, id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
@@ -301,14 +302,14 @@ impl Team {
 			.execute(&mut *tx)
 			.await?;
 		let metadata = serde_json::json!({ "user_id": user_id, "before": before, "after": role.as_str() });
-		sqlx::query("INSERT INTO audit_logs (event, actor_id, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5)")
-			.bind(EVENT_TEAM_MEMBER_ROLE_UPDATED)
-			.bind(actor_id)
-			.bind(AUDIT_TEAM_TARGET)
-			.bind(self.id)
-			.bind(metadata)
-			.execute(&mut *tx)
-			.await?;
+		let entry = AuditEntry {
+			event: EVENT_TEAM_MEMBER_ROLE_UPDATED,
+			actor_id,
+			target_type: AUDIT_TEAM_TARGET,
+			target_id: &self.id,
+			metadata,
+		};
+		AuditLog::write(&mut tx, entry).await?;
 		tx.commit().await?;
 		Ok(true)
 	}
@@ -340,14 +341,14 @@ impl Team {
 			"before": { "provider_ids": before_providers, "model_ids": before_models },
 			"after": { "provider_ids": provider_ids, "model_ids": model_ids },
 		});
-		sqlx::query("INSERT INTO audit_logs (event, actor_id, target_type, target_id, metadata) VALUES ($1, $2, $3, $4, $5)")
-			.bind(EVENT_TEAM_MODELS_UPDATED)
-			.bind(actor_id)
-			.bind(AUDIT_TEAM_TARGET)
-			.bind(self.id)
-			.bind(metadata)
-			.execute(&mut *tx)
-			.await?;
+		let entry = AuditEntry {
+			event: EVENT_TEAM_MODELS_UPDATED,
+			actor_id,
+			target_type: AUDIT_TEAM_TARGET,
+			target_id: &self.id,
+			metadata,
+		};
+		AuditLog::write(&mut tx, entry).await?;
 		tx.commit().await?;
 		Ok(())
 	}
