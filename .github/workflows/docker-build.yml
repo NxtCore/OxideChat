@@ -58,6 +58,7 @@ jobs:
         outputs:
             image_name: ${{ steps.vars.outputs.image_name }}
             tag: ${{ steps.vars.outputs.tag }}
+            is_latest: ${{ steps.vars.outputs.is_latest }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
@@ -69,17 +70,27 @@ jobs:
                   OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
                   IMAGE_NAME=ghcr.io/${OWNER_LC}/oxidechat
 
-                  # Extract version from Cargo.toml
-                  VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*= *"\([^"]*\)".*/\1/')
-                  [ -z "$VERSION" ] && VERSION="0.0.0"
+                  IS_LATEST=true
+                  if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+                      TAG="${GITHUB_REF_NAME#v}"
+                      if [[ "$TAG" == *-* ]]; then
+                          IS_LATEST=false
+                      fi
+                  else
+                      # Extract version from Cargo.toml
+                      VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*= *"\([^"]*\)".*/\1/')
+                      [ -z "$VERSION" ] && VERSION="0.0.0"
 
-                  TIMESTAMP=$(date +%Y%m%d-%H%M)
-                  TAG="${VERSION}-${TIMESTAMP}"
+                      TIMESTAMP=$(date +%Y%m%d-%H%M)
+                      TAG="${VERSION}-${TIMESTAMP}"
+                  fi
 
                   echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
                   echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+                  echo "is_latest=$IS_LATEST" >> "$GITHUB_OUTPUT"
                   echo "📦 Image: $IMAGE_NAME"
                   echo "🏷️  Tag: $TAG"
+                  echo "📌 Latest: $IS_LATEST"
 
     build:
         needs: [init, sqlx]
@@ -183,16 +194,19 @@ jobs:
               env:
                   IMAGE_NAME: ${{ needs.init.outputs.image_name }}
                   TAG: ${{ needs.init.outputs.tag }}
+                  IS_LATEST: ${{ needs.init.outputs.is_latest }}
               working-directory: /tmp/digests
               run: |
-                  # Create versioned tag and latest tag
+                  TAGS=(-t "$IMAGE_NAME:$TAG")
+                  if [ "$IS_LATEST" = "true" ]; then
+                      TAGS+=(-t "$IMAGE_NAME:latest")
+                  fi
+
                   docker buildx imagetools create \
-                    -t $IMAGE_NAME:$TAG \
-                    -t $IMAGE_NAME:latest \
+                    "${TAGS[@]}" \
                     $(printf "$IMAGE_NAME@sha256:%s " *)
 
-                  echo "✅ Pushed $IMAGE_NAME:$TAG"
-                  echo "✅ Pushed $IMAGE_NAME:latest"
+                  echo "✅ Pushed ${TAGS[*]}"
 
             - name: Inspect image
               env:
