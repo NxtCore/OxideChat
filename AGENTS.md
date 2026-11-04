@@ -49,6 +49,7 @@
     - `src/routes/admin/mod.rs` and `src/routes/public/mod.rs` each expose a `router()` that `src/routes/mod.rs` merges; `get_current_user` lives in `src/utils/auth.rs`
 - `src/routes/gateway/` - OpenAI-compatible gateway handlers (moved from `src/utils/openai_gateway.rs`)
 - `src/types/chat/runner/` - Agent loop for web chat (`prepare_turn`, `stream_turn`): history, request building, tool calls
+    - Sampling is merged request > chat (`chats.sampling`, `ChatSampling`, set via `PUT /api/v1/chats/{id}/sampling`) > model config > model; `ChatSampling.custom` becomes Omniference's `extra_body`, which never overrides reserved keys such as `model` or `stream`
 - `src/types/tools/` - One file per entity (`tool.rs`, `tool_function.rs`, `tool_execution.rs`, `wasm_blob.rs`, `mcp_server.rs`); `McpScope` (`mcp_scope.rs`) separates admin-wide and per-user MCP servers
 - `src/types/page.rs` - `PageQuery` (`page`, `size`) and `Page<T>` (`has_more`, `items`) for paginated endpoints
 - `src/types/usage/` - Usage events; `ChatUsageGuard` records a chat stream's usage once, even if the client disconnects

@@ -107,6 +107,7 @@ pub enum ErrorCode {
 	ApiKeyBudgetInvalid,
 	RequestLogRetentionInvalid,
 	GatewayAdminReasonInvalid,
+	ChatSamplingInvalid,
 
 	// 401 Unauthorized
 	NotAuthenticated,
@@ -180,6 +181,7 @@ impl ErrorCode {
 			| Self::ApiKeyBudgetInvalid
 			| Self::RequestLogRetentionInvalid
 			| Self::GatewayAdminReasonInvalid
+			| Self::ChatSamplingInvalid
 			=> StatusCode::BAD_REQUEST,
 
 			Self::NotAuthenticated
@@ -227,6 +229,7 @@ impl ErrorCode {
 			Self::ApiKeyBudgetInvalid => "developer.errors.budget_invalid",
 			Self::RequestLogRetentionInvalid => "developer.errors.retention_invalid",
 			Self::GatewayAdminReasonInvalid => "developer.admin.errors.reason_invalid",
+			Self::ChatSamplingInvalid => "chat.errors.sampling_invalid",
 
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
 			Self::InvalidCredentials => "auth.errors.invalid_credentials",
@@ -292,6 +295,7 @@ impl ErrorCode {
 			Self::ApiKeyBudgetInvalid => "api_key_budget_invalid",
 			Self::RequestLogRetentionInvalid => "request_log_retention_invalid",
 			Self::GatewayAdminReasonInvalid => "gateway_admin_reason_invalid",
+			Self::ChatSamplingInvalid => "chat_sampling_invalid",
 
 			Self::NotAuthenticated => "not_authenticated",
 			Self::InvalidCredentials => "invalid_credentials",

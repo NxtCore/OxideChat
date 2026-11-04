@@ -1,7 +1,7 @@
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-use super::{Chat, CreateWorkspaceRequest, Message, UpdateWorkspaceRequest, Workspace, WorkspaceDeleteAction};
+use super::{Chat, ChatSampling, CreateWorkspaceRequest, Message, UpdateWorkspaceRequest, Workspace, WorkspaceDeleteAction};
 
 impl Workspace {
 	pub async fn create_from_request(pool: &PgPool, user_id: &Uuid, req: &CreateWorkspaceRequest) -> Result<Self, sqlx::Error> {
@@ -214,6 +214,19 @@ impl Chat {
 		.bind(update_workspace)
 		.fetch_optional(pool)
 		.await
+	}
+
+	/// Replaces the chat's sampling options without changing its position in the chat list.
+	///
+	/// # Errors
+	/// Returns a database error when the update fails.
+	pub async fn set_sampling(pool: &PgPool, id: &Uuid, user_id: &Uuid, sampling: &ChatSampling) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Chat>("UPDATE chats SET sampling = $3 WHERE id = $1 AND user_id = $2 RETURNING *")
+			.bind(id)
+			.bind(user_id)
+			.bind(sqlx::types::Json(sampling))
+			.fetch_optional(pool)
+			.await
 	}
 
 	pub async fn touch(pool: &PgPool, id: &Uuid) -> Result<(), sqlx::Error> {
