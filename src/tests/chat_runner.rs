@@ -34,7 +34,7 @@ mod pending_calls {
 #[cfg(test)]
 mod agent {
 	use crate::tests::gateway::support::{TestResult, create_provider_model, create_team, create_user, job_state};
-	use crate::types::chat::runner::agent::{AgentRun, Finish, ToolOutput};
+	use crate::types::chat::runner::agent::{AgentRun, Finish, StepError, ToolOutput};
 	use crate::types::chat::runner::prepare::PreparedTurn;
 	use crate::types::*;
 	use omniference::stream::StreamEvent;
@@ -225,8 +225,8 @@ mod agent {
 		assert!(matches!(run.finish_iteration().await, Finish::Continue));
 		exhaust_budget(&pool, fixture.user_id).await?;
 
-		let refused = run.next_request().await;
-		assert!(matches!(refused, Err(StreamData::Error { ref code, .. }) if code == "budget_exceeded"));
+		let refused = run.next_request().await.err().ok_or("the step was not refused")?;
+		assert_eq!(refused.code, "budget_exceeded");
 		let saved = run.save_partial().await.ok_or("nothing was saved")?;
 		let StreamData::Done { message } = saved else {
 			return Err("expected the saved message".into());
@@ -255,7 +255,7 @@ mod agent {
 		for _ in 0..10 {
 			assert!(run.next_request().await.is_ok());
 		}
-		assert!(matches!(run.next_request().await, Err(StreamData::Error { code, .. }) if code == "max_iterations"));
+		assert!(matches!(run.next_request().await, Err(StepError { code: "max_iterations", .. })));
 		Ok(())
 	}
 }

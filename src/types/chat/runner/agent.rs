@@ -91,6 +91,32 @@ fn error_event(code: &str, message: impl Into<String>) -> StreamData {
 	}
 }
 
+/// Why the next request of a turn cannot be sent.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct StepError {
+	pub(crate) code: &'static str,
+	message: &'static str,
+}
+
+impl StepError {
+	const MAX_ITERATIONS: Self = Self {
+		code: "max_iterations",
+		message: "Maximum tool call iterations reached",
+	};
+	const BUDGET_EXCEEDED: Self = Self {
+		code: "budget_exceeded",
+		message: "Budget exceeded for this model",
+	};
+	const BUDGET_UNAVAILABLE: Self = Self {
+		code: "internal_error",
+		message: "Failed to check budget status",
+	};
+
+	fn event(&self) -> StreamData {
+		error_event(self.code, self.message)
+	}
+}
+
 fn add_cost(total: &mut Option<f64>, cost: Option<f64>) {
 	if let Some(cost) = cost {
 		*total = Some(total.unwrap_or(0.0) + cost);
@@ -140,11 +166,11 @@ impl AgentRun {
 
 	/// Builds the next request of the turn. Every request after the first reserves its own budget,
 	/// which Omniference's cost record settles once the request ends.
-	pub(crate) async fn next_request(&mut self) -> Result<ChatRequestIR, StreamData> {
+	pub(crate) async fn next_request(&mut self) -> Result<ChatRequestIR, StepError> {
 		self.iteration += 1;
 		if self.iteration > MAX_ITERATIONS {
 			tracing::warn!(max_iterations = MAX_ITERATIONS, "max agentic iterations reached");
-			return Err(error_event("max_iterations", "Maximum tool call iterations reached"));
+			return Err(StepError::MAX_ITERATIONS);
 		}
 		self.step = IterationState::default();
 		if self.iteration > 1 {
@@ -159,17 +185,17 @@ impl AgentRun {
 		Ok(ir)
 	}
 
-	async fn reserve_step(&self) -> Result<Option<BudgetReservation>, StreamData> {
+	async fn reserve_step(&self) -> Result<Option<BudgetReservation>, StepError> {
 		let estimate = TokenEstimate {
 			input: TokenEstimate::input_for_bytes(prompt_bytes(&self.current_messages)),
 			output: self.output_estimate,
 		};
 		match self.state.budget_ledger.reserve_for_model(&self.state.db, BudgetSubject::user(self.user_id), &self.model_id, estimate).await {
 			Ok(admission) => Ok(admission.reservation),
-			Err(BudgetError::Exceeded) => Err(error_event("budget_exceeded", "Budget exceeded for this model")),
+			Err(BudgetError::Exceeded) => Err(StepError::BUDGET_EXCEEDED),
 			Err(error) => {
 				tracing::error!(%error, "failed to check budget status");
-				Err(error_event("internal_error", "Failed to check budget status"))
+				Err(StepError::BUDGET_UNAVAILABLE)
 			}
 		}
 	}
@@ -464,8 +490,8 @@ pub fn stream_turn(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant
 		'agentic_loop: loop {
 			let request = match run.next_request().await {
 				Ok(request) => request,
-				Err(event) => {
-					yield sse(event);
+				Err(error) => {
+					yield sse(error.event());
 					if let Some(done) = run.save_partial().await {
 						yield sse(done);
 					}
