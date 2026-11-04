@@ -10,44 +10,22 @@
 		</div>
 
 		<div class="flex flex-1 flex-col gap-2" :class="isUser ? 'items-end' : 'items-start'">
-			<div
+			<ReasoningBlock
 				v-if="!isUser && !hasInterleavedParts && message.reasoning_content"
-				class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none"
-				@click="showReasoning = !showReasoning"
-			>
-				<Brain class="h-3.5 w-3.5 fill-current" />
-				<span class="text-[10px] font-bold uppercase tracking-widest">{{ store.getTranslation('chat.message_item.reasoning') }}</span>
-				<ChevronDown class="h-3 w-3 transition-transform" :class="showReasoning ? 'rotate-180' : ''" />
-			</div>
-
-			<Transition name="expand">
-				<div v-if="!hasInterleavedParts && showReasoning && (message.reasoning_content || isStreamingReasoning)" class="w-full max-w-3xl rounded-xl bg-muted/50 border p-4">
-					<div class="prose prose-sm dark:prose-invert max-w-none opacity-80" v-html="renderedReasoning" @click="handleCodeBlockClick" />
-					<div v-if="isStreamingReasoning && !message.reasoning_content" class="flex items-center gap-1 py-1">
-						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" />
-						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" style="animation-delay: 0.15s" />
-						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" style="animation-delay: 0.3s" />
-					</div>
-				</div>
-			</Transition>
+				v-model:open="showReasoning"
+				:html="renderedReasoning"
+				@code-click="handleCodeBlockClick"
+			/>
 
 			<div v-if="!isUser && hasInterleavedParts" class="flex flex-col gap-2 mt-2 w-full max-w-3xl">
 				<template v-for="(part, idx) in orderedParts" :key="idx">
-					<div v-if="part.type === 'reasoning'" class="w-full max-w-3xl">
-						<div
-							class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none"
-							@click="toggleReasoning(idx)"
-						>
-							<Brain class="h-3.5 w-3.5 fill-current" />
-							<span class="text-[10px] font-bold uppercase tracking-widest">{{ store.getTranslation('chat.message_item.reasoning') }}</span>
-							<ChevronDown class="h-3 w-3 transition-transform" :class="isReasoningOpen(idx) ? 'rotate-180' : ''" />
-						</div>
-						<Transition name="expand">
-							<div v-if="isReasoningOpen(idx)" class="mt-2 rounded-xl bg-muted/50 border p-4">
-								<div class="prose prose-sm dark:prose-invert max-w-none opacity-80" v-html="part.html" @click="handleCodeBlockClick" />
-							</div>
-						</Transition>
-					</div>
+					<ReasoningBlock
+						v-if="part.type === 'reasoning'"
+						:open="isReasoningOpen(idx)"
+						:html="part.html"
+						@update:open="toggleReasoning(idx)"
+						@code-click="handleCodeBlockClick"
+					/>
 					<div
 						v-else-if="part.type === 'text'"
 						class="prose prose-sm md:prose-base dark:prose-invert max-w-3xl"
@@ -227,11 +205,12 @@
 </template>
 
 <script setup lang="ts">
-import {User, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, Pencil, Copy, Check, GitBranch} from 'lucide-vue-next';
+import {User, Bot, ChevronLeft, ChevronRight, Pencil, Copy, Check, GitBranch} from 'lucide-vue-next';
 import MessageActions from './MessageActions.vue';
 import CodePreview from './CodePreview.vue';
 import ImagePreview from '~/components/ImagePreview.vue';
 import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
+import ReasoningBlock from './ReasoningBlock.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
@@ -266,7 +245,6 @@ const userCopied = ref(false);
 
 const isUser = computed(() => props.message.role === 'user');
 const isStreaming = computed(() => props.message.id.startsWith('streaming-'));
-const isStreamingReasoning = computed(() => isStreaming.value && chatStore.isStreaming && !props.message.content);
 
 const attachedImages = computed(() => {
 	if (!props.message.content_parts || !Array.isArray(props.message.content_parts)) {
@@ -501,26 +479,6 @@ async function saveEdit() {
 </script>
 
 <style scoped>
-.expand-enter-active,
-.expand-leave-active {
-	transition: all 0.3s ease;
-	overflow: hidden;
-}
-
-.expand-enter-from,
-.expand-leave-to {
-	opacity: 0;
-	max-height: 0;
-	padding-top: 0;
-	padding-bottom: 0;
-	margin-bottom: 0;
-}
-
-.expand-enter-to,
-.expand-leave-from {
-	max-height: 500px;
-}
-
 .prose :deep(img) {
 	cursor: pointer;
 	transition: opacity 0.2s;

@@ -11,6 +11,8 @@ export interface PlaygroundMetrics {
 export interface PlaygroundMessage {
 	role: 'user' | 'assistant';
 	content: string;
+	reasoning?: string;
+	reasoningOpen?: boolean;
 	error?: string;
 	metrics?: PlaygroundMetrics;
 }
@@ -49,9 +51,12 @@ export function usePlaygroundChat(settings: PlaygroundSettings, failureText: () 
 	function applyChunk(reply: PlaygroundMessage, startedAt: number, chunk: any) {
 		const metrics = reply.metrics as PlaygroundMetrics;
 		const choice = chunk.choices?.[0];
-		const text = choice?.delta?.content ?? choice?.message?.content ?? '';
-		if (text && metrics.ttftMs === null && settings.stream) metrics.ttftMs = Math.round(performance.now() - startedAt);
+		const part = choice?.delta ?? choice?.message;
+		const text = part?.content ?? '';
+		const reasoning = part?.reasoning_content ?? part?.reasoning ?? '';
+		if ((text || reasoning) && metrics.ttftMs === null && settings.stream) metrics.ttftMs = Math.round(performance.now() - startedAt);
 		reply.content += text;
+		if (reasoning) reply.reasoning = (reply.reasoning ?? '') + reasoning;
 		metrics.finishReason = choice?.finish_reason ?? metrics.finishReason;
 		metrics.inputTokens = chunk.usage?.prompt_tokens ?? metrics.inputTokens;
 		metrics.outputTokens = chunk.usage?.completion_tokens ?? metrics.outputTokens;
