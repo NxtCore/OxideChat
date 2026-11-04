@@ -9,26 +9,7 @@
 		<div class="flex max-w-[80%] flex-col gap-1">
 			<span class="text-xs text-muted-foreground">{{ store.getTranslation('chat.streaming_message.assistant') }}</span>
 
-			<div
-				v-if="reasoningContent"
-				class="flex cursor-pointer items-center gap-2 text-primary transition-opacity hover:opacity-80 select-none"
-				@click="showReasoning = !showReasoning"
-			>
-				<Brain class="h-3.5 w-3.5 fill-current" />
-				<span class="text-[10px] font-bold uppercase tracking-widest">{{ store.getTranslation('chat.message_item.reasoning') }}</span>
-				<ChevronDown class="h-3 w-3 transition-transform" :class="showReasoning ? 'rotate-180' : ''" />
-			</div>
-
-			<Transition name="expand">
-				<div v-if="showReasoning && reasoningContent" class="w-full max-w-3xl rounded-xl bg-muted/50 border p-4">
-					<div class="prose prose-sm dark:prose-invert max-w-none opacity-80" v-html="renderedReasoning" @click="handleCodeBlockClick" />
-					<div v-if="!reasoningContent" class="flex items-center gap-1 py-1">
-						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" />
-						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" style="animation-delay: 0.15s" />
-						<span class="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/50" style="animation-delay: 0.3s" />
-					</div>
-				</div>
-			</Transition>
+			<ReasoningBlock v-if="reasoningContent" v-model:open="showReasoning" :html="renderedReasoning" @code-click="handleCodeBlockClick" />
 
 			<div v-if="Object.keys(toolCalls).length > 0" class="flex flex-col gap-2 mt-2">
 				<ToolExecutionDisplay
@@ -65,7 +46,8 @@
 </template>
 
 <script setup lang="ts">
-import {Bot, Brain, ChevronDown} from 'lucide-vue-next';
+import {Bot} from 'lucide-vue-next';
+import ReasoningBlock from './ReasoningBlock.vue';
 import CodePreview from './CodePreview.vue';
 import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
 import {useMarkdown, extractCodeForPreview, ICON_COPY, ICON_CHECK} from '~/composables/useMarkdown';
@@ -233,24 +215,5 @@ defineExpose({
 		opacity: 1;
 		transform: translateY(0);
 	}
-}
-
-.expand-enter-active,
-.expand-leave-active {
-	transition: all 0.3s ease;
-	overflow: hidden;
-}
-
-.expand-enter-from,
-.expand-leave-to {
-	opacity: 0;
-	max-height: 0;
-	padding-top: 0;
-	padding-bottom: 0;
-}
-
-.expand-enter-to,
-.expand-leave-from {
-	max-height: 500px;
 }
 </style>

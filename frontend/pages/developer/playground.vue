@@ -30,6 +30,13 @@
 							<p v-if="!chat.messages.value.length" class="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">{{ store.getTranslation('developer.playground.empty') }}</p>
 							<div v-for="(message, index) in chat.messages.value" :key="index" :data-testid="`playground-${message.role}`">
 								<p class="mb-1 text-xs font-medium text-muted-foreground">{{ store.getTranslation(message.role === 'user' ? 'developer.playground.you' : 'developer.playground.assistant') }}</p>
+								<ReasoningBlock
+									v-if="message.reasoning"
+									class="mb-2"
+									:html="renderStreaming(message.reasoning)"
+									:open="message.reasoningOpen ?? !message.content"
+									@update:open="message.reasoningOpen = $event"
+								/>
 								<div v-if="message.content" class="whitespace-pre-wrap break-words rounded-md p-3 text-sm text-foreground" :class="message.role === 'user' ? 'bg-accent/50' : 'bg-muted/50'">{{ message.content }}</div>
 								<Loader2 v-else-if="!message.error && chat.running.value" class="h-4 w-4 animate-spin text-muted-foreground" />
 								<div v-if="message.error" class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-foreground" role="alert">
@@ -164,6 +171,7 @@
 import {Check, Copy, Eraser, KeyRound, Loader2, RotateCcw, Send as SendIcon, Square} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useDeveloperStore} from '@/stores/developerStore';
+import ReasoningBlock from '@/components/chat/ReasoningBlock.vue';
 
 const LANGUAGES = ['curl', 'python', 'javascript'] as const;
 
@@ -178,6 +186,7 @@ const prompt = ref('');
 const scroller = ref<HTMLElement | null>(null);
 const settings = reactive({model: '', system: '', temperature: '' as string | number, maxTokens: '' as string | number, stream: true});
 const chat = usePlaygroundChat(settings, () => store.getTranslation('developer.playground.error'));
+const {renderStreaming} = useMarkdown();
 
 const usableKeys = computed(() => developer.activeKeys.filter(key => key.scopes.includes('inference:write')));
 const selectedKey = computed(() => developer.keys.find(key => key.id === keyId.value));
@@ -236,7 +245,7 @@ watch(keyId, () => {
 });
 
 watch(
-	() => chat.messages.value.map(message => message.content.length + (message.metrics?.totalMs ?? 0)).join(),
+	() => chat.messages.value.map(message => message.content.length + (message.reasoning?.length ?? 0) + (message.metrics?.totalMs ?? 0)).join(),
 	() => nextTick(() => scroller.value?.scrollTo({top: scroller.value.scrollHeight})),
 );
 

@@ -97,4 +97,26 @@ test.describe('developer area', () => {
 		await expect(alert).toBeVisible();
 		await expect(alert.getByRole('button', {name: t('developer.playground.retry')})).toBeVisible();
 	});
+
+	test('the playground shows streamed reasoning above the reply', async ({page, t, api, seed}) => {
+		const key = await createKeyViaApi(api, seed.teamId, uniqueName('playground-reasoning'));
+		const chunk = (delta: Record<string, string>) => `data: ${JSON.stringify({id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 0, model: seed.model.publicId, choices: [{index: 0, delta, finish_reason: null}]})}\n\n`;
+		await page.route('**/chat/completions', route =>
+			route.fulfill({
+				status: 200,
+				headers: {'content-type': 'text/event-stream'},
+				body: chunk({reasoning_content: 'Thinking it through', reasoning: 'Thinking it through'}) + chunk({content: 'pong'}) + 'data: [DONE]\n\n',
+			})
+		);
+		await page.goto(`/developer/playground?key=${key.id}&model=${encodeURIComponent(seed.model.publicId)}`);
+		await page.getByLabel(t('developer.playground.token')).fill(key.token);
+		await page.getByTestId('playground-prompt').fill('ping');
+		await page.getByTestId('playground-send').click();
+
+		const reply = page.getByTestId('playground-assistant').last();
+		await expect(reply).toContainText('pong');
+		await expect(reply.getByTestId('reasoning-content')).toHaveCount(0);
+		await reply.getByTestId('reasoning-toggle').click();
+		await expect(reply.getByTestId('reasoning-content')).toHaveText('Thinking it through');
+	});
 });
