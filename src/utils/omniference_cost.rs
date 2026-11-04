@@ -1,4 +1,4 @@
-use crate::types::models::{Model, ModelPricing};
+use crate::types::models::Model;
 use crate::types::{
 	BUDGET_RESERVATION_METADATA_KEY, Budget, BudgetLedger, GatewayLimitBackend, GatewayLimiter, JobState, PUBLIC_MODEL_METADATA_KEY, REQUEST_ID_METADATA_KEY, RESERVATION_METADATA_KEY,
 	RequestLog, RequestLogContext, RequestLogErrorCategory, RequestLogRecord, RequestLogStatus, STARTED_AT_METADATA_KEY, STREAMING_METADATA_KEY, UsageEvent, UsageEventRecord,
@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use omniference::catalog::UsageBreakdown;
 use omniference::middleware::cost::{CostFinalization, CostRecord, CostSink};
 use omniference::stream::{CostDetails, FinishReason};
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, prelude::FromPrimitive};
 use std::collections::BTreeMap;
 use std::sync::{
 	Arc,
@@ -70,8 +70,7 @@ impl OxideCostSink {
 			reasoning_tokens,
 			cost_total: Decimal::ZERO,
 		};
-		let provider_cost = matches!(record.finalization, CostFinalization::ProviderReported).then_some(record.cost.total);
-		ModelPricing::price(&self.state.db, provider_cost, record.cost.total, &mut usage).await?;
+		usage.cost_total = Decimal::from_f64(record.cost.total).unwrap_or(Decimal::ZERO);
 		let cost_total = usage.cost_total;
 		if let Some(id) = budget_id {
 			self.state.budget_ledger.reconcile(id, cost_total);

@@ -5,6 +5,24 @@ use serde_json::Value;
 use sqlx::types::Json;
 use uuid::Uuid;
 
+/// A model with its provider and manual price, for pricing it through the catalog.
+#[derive(sqlx::FromRow)]
+pub struct ModelPricingRow {
+	pub model_id: Uuid,
+	pub provider_model_id: String,
+	pub provider_name: String,
+	pub provider_kind: ProviderKind,
+	pub override_pricing: Option<Value>,
+}
+
+impl ModelPricingRow {
+	/// The model ID the provider knows, without the `provider/` prefix.
+	#[must_use]
+	pub fn native_model_id(&self) -> &str {
+		self.provider_model_id.split_once('/').map_or(self.provider_model_id.as_str(), |(_, id)| id)
+	}
+}
+
 #[derive(sqlx::FromRow)]
 pub(super) struct ModelListPublicRow {
 	pub id: Uuid,

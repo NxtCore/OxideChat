@@ -247,6 +247,9 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, auth: AuthUser, Pat
 	}
 
 	tx.commit().await?;
+	if req.pricing.is_some() {
+		ModelPricing::push_to_engine(&state.db, &id).await?;
+	}
 
 	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).build())
 }
