@@ -97,6 +97,7 @@ pub fn provider_to_config(provider: &Provider) -> Result<ProviderConfig, crate::
 			api_key,
 			extra_headers,
 			timeout: None,
+			reported_cost: None,
 		},
 		enabled: provider.is_enabled,
 		catalog_provider_slug: None,
