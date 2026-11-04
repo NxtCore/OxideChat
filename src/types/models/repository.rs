@@ -570,15 +570,26 @@ impl ModelPricing {
 	pub async fn effective(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
 			r#"
+			WITH catalog AS (
+				SELECT
+					gcm.id,
+					gcm.local_model_id,
+					CASE WHEN gcm.raw->'pricing'->>'prompt' ~ '^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$'
+						THEN (gcm.raw->'pricing'->>'prompt')::numeric * 1000000 END AS price_input,
+					CASE WHEN gcm.raw->'pricing'->>'completion' ~ '^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$'
+						THEN (gcm.raw->'pricing'->>'completion')::numeric * 1000000 END AS price_output
+				FROM gateway_catalog_models gcm
+				WHERE gcm.local_model_id = $1
+			)
 			SELECT
 				m.id AS model_id,
-				MIN(gmpo.price_input)::numeric AS reported_input,
-				MIN(gmpo.price_output)::numeric AS reported_output,
+				COALESCE(MIN(gmpo.price_input)::numeric, MIN(gcm.price_input)) AS reported_input,
+				COALESCE(MIN(gmpo.price_output)::numeric, MIN(gcm.price_output)) AS reported_output,
 				mpo.pricing AS override_pricing,
-				COALESCE((mpo.pricing->>'input')::numeric, MIN(gmpo.price_input)::numeric, 0) AS effective_input,
-				COALESCE((mpo.pricing->>'output')::numeric, MIN(gmpo.price_output)::numeric, 0) AS effective_output
+				COALESCE((mpo.pricing->>'input')::numeric, MIN(gmpo.price_input)::numeric, MIN(gcm.price_input), 0) AS effective_input,
+				COALESCE((mpo.pricing->>'output')::numeric, MIN(gmpo.price_output)::numeric, MIN(gcm.price_output), 0) AS effective_output
 			FROM models m
-			LEFT JOIN gateway_catalog_models gcm ON gcm.local_model_id = m.id
+			LEFT JOIN catalog gcm ON gcm.local_model_id = m.id
 			LEFT JOIN gateway_model_provider_options gmpo ON gmpo.catalog_model_id = gcm.id
 			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
 			WHERE m.id = $1

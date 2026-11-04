@@ -485,3 +485,60 @@ mod tests {
 		assert_eq!(stored_icon(&pool, model_id).await.as_deref(), Some(""));
 	}
 }
+
+#[cfg(test)]
+mod catalog_pricing {
+	use crate::tests::gateway::support::{TestResult, create_provider_model};
+	use crate::types::models::ModelPricing;
+	use rust_decimal::Decimal;
+	use sqlx::PgPool;
+	use std::str::FromStr;
+	use uuid::Uuid;
+
+	fn decimal(value: &str) -> Decimal {
+		Decimal::from_str(value).unwrap_or_default()
+	}
+
+	async fn link_catalog(pool: &PgPool, provider_id: Uuid, model_id: Uuid, pricing: serde_json::Value) -> Result<Uuid, sqlx::Error> {
+		sqlx::query_scalar(
+			"INSERT INTO gateway_catalog_models (provider_id, source_gateway, gateway_model_id, local_model_id, raw) VALUES ($1, 'openrouter', 'author/model', $2, $3) RETURNING id",
+		)
+		.bind(provider_id)
+		.bind(model_id)
+		.bind(serde_json::json!({"id": "author/model", "pricing": pricing}))
+		.fetch_one(pool)
+		.await
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn the_first_fetch_uses_catalog_pricing_before_endpoints_are_fetched(pool: PgPool) -> TestResult {
+		let (provider_id, model_id) = create_provider_model(&pool, "Catalog Provider", "catalog-model").await?;
+		let catalog_id = link_catalog(&pool, provider_id, model_id, serde_json::json!({"prompt": "0.000002", "completion": "0.000008"})).await?;
+
+		let first = ModelPricing::effective(&pool, &model_id).await?.ok_or("missing pricing")?;
+		assert_eq!(first.reported_input, Some(decimal("2")));
+		assert_eq!(first.reported_output, Some(decimal("8")));
+		assert_eq!(first.effective_input, decimal("2"));
+		assert_eq!(first.effective_output, decimal("8"));
+
+		sqlx::query("INSERT INTO gateway_model_provider_options (catalog_model_id, provider_slug, price_input, price_output) VALUES ($1, 'cheap', 1.5, 6.0)")
+			.bind(catalog_id)
+			.execute(&pool)
+			.await?;
+		let with_endpoints = ModelPricing::effective(&pool, &model_id).await?.ok_or("missing pricing")?;
+		assert_eq!(with_endpoints.reported_input, Some(decimal("1.5")));
+		assert_eq!(with_endpoints.reported_output, Some(decimal("6")));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn variable_or_missing_catalog_prices_are_not_reported(pool: PgPool) -> TestResult {
+		let (provider_id, model_id) = create_provider_model(&pool, "Router Provider", "router-model").await?;
+		link_catalog(&pool, provider_id, model_id, serde_json::json!({"prompt": "-1", "completion": "abc"})).await?;
+		let pricing = ModelPricing::effective(&pool, &model_id).await?.ok_or("missing pricing")?;
+		assert_eq!(pricing.reported_input, None);
+		assert_eq!(pricing.reported_output, None);
+		assert_eq!(pricing.effective_input, Decimal::ZERO);
+		Ok(())
+	}
+}
