@@ -7,7 +7,7 @@ use crate::i18n::Language;
 
 /// Distinguishes an absent field (`None`) from an explicit JSON `null` (`Some(None)`),
 /// so a PATCH can clear a nullable column instead of leaving it unchanged.
-fn deserialize_nullable_field<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+pub(crate) fn deserialize_nullable_field<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
 	T: Deserialize<'de>,
 	D: Deserializer<'de>,

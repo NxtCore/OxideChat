@@ -32,6 +32,7 @@ pub mod budgets;
 pub mod catalog;
 pub mod chat;
 pub mod error;
+pub mod exchange_rates;
 pub mod gateway;
 pub mod i18n;
 pub mod images;

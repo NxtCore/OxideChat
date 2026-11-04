@@ -3,6 +3,7 @@ import http from 'node:http';
 const port = Number(process.env.MOCK_LLM_PORT ?? 3103);
 
 export const USAGE = {prompt_tokens: 1000, completion_tokens: 2000};
+export const REPORTED_COST = 86;
 
 const MODELS = ['mock-chat', 'mock-error', 'mock-slow'];
 
@@ -27,7 +28,7 @@ function replyFor(body) {
 }
 
 function usage() {
-	return {...USAGE, total_tokens: USAGE.prompt_tokens + USAGE.completion_tokens};
+	return {...USAGE, total_tokens: USAGE.prompt_tokens + USAGE.completion_tokens, cost: REPORTED_COST};
 }
 
 function readBody(req) {

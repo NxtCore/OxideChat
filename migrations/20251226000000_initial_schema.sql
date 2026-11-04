@@ -140,9 +140,18 @@ CREATE TABLE IF NOT EXISTS providers (
     api_key TEXT,  -- Encrypted if ENCRYPTION_KEY set, else plaintext
     extra_headers JSONB DEFAULT '{}',
     is_enabled BOOLEAN DEFAULT true,
+    reported_cost JSONB,  -- how the provider reports request cost (unit, currency, credit value, field); NULL = token pricing
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(owner_id, name)
+);
+
+-- Exchange rates: ECB reference rates as US dollars per unit, refreshed by a background job
+CREATE TABLE IF NOT EXISTS exchange_rates (
+    currency VARCHAR(3) PRIMARY KEY,
+    usd_per_unit NUMERIC NOT NULL CHECK (usd_per_unit > 0),
+    rate_date DATE NOT NULL,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS models (
@@ -1106,6 +1115,22 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.provider_selector.title', 'Anbieter'),
     ('de', 'chat.provider_selector.unavailable_for_key', 'Dieses Modell ist für den konfigurierten Schlüssel deaktiviert'),
     ('de', 'chat.reasoning_selector.disabled', 'Deaktiviert'),
+    ('de', 'settings.providers.reported_cost_scale', 'Wertfaktor'),
+    ('de', 'settings.providers.reported_cost_scale_hint', 'Multipliziert den gemeldeten Wert, bevor die Einheit greift, für Anbieter, die Bruchteile davon melden. Cortecs meldet Credits (1 EUR = 1.000.000): nutze 0.000001 mit EUR oder sende den Header x-cortecs-cost-unit: USD und wähle US-Dollar. Leer lassen für 1.'),
+    ('de', 'settings.providers.reported_cost', 'Gemeldete Kosten'),
+    ('de', 'settings.providers.reported_cost_hint', 'Die Kosten aus den Antworten dieses Anbieters statt der Tokenpreise verwenden.'),
+    ('de', 'settings.providers.reported_cost_off', 'Aus (Tokenpreise verwenden)'),
+    ('de', 'settings.providers.reported_cost_usd', 'US-Dollar'),
+    ('de', 'settings.providers.reported_cost_currency', 'Andere Währung'),
+    ('de', 'settings.providers.reported_cost_credits', 'Credits'),
+    ('de', 'settings.providers.reported_cost_currency_code', 'Währung'),
+    ('de', 'settings.providers.reported_cost_rate', '1 {currency} = {rate} USD (EZB, {date})'),
+    ('de', 'settings.providers.reported_cost_no_rate', 'Noch kein Wechselkurs. Bis die täglichen EZB-Kurse abgerufen sind, werden Tokenpreise verwendet.'),
+    ('de', 'settings.providers.reported_cost_usd_per_credit', 'US-Dollar pro Credit'),
+    ('de', 'settings.providers.reported_cost_source', 'Kostenfeld'),
+    ('de', 'settings.providers.reported_cost_source_placeholder', 'Automatisch erkennen'),
+    ('de', 'settings.providers.reported_cost_source_hint', 'Ein Pfad in der Antwort wie usage.cost oder header:name für einen Antwort-Header. Leer lassen, um die üblichen Felder zu erkennen.'),
+    ('de', 'settings.providers.reported_cost_invalid', 'Wähle eine Währung, gib einen positiven Wert pro Credit ein und nutze ein gültiges Kostenfeld'),
     ('de', 'chat.sampling.title', 'Sampling'),
     ('de', 'chat.sampling.description', 'Einstellungen für diesen Chat. Nicht gesetzte Werte nutzen die Modellstandards.'),
     ('de', 'chat.sampling.custom', 'Eigene Felder'),
@@ -1987,6 +2012,22 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.provider_selector.title', 'Provider'),
     ('en', 'chat.provider_selector.unavailable_for_key', 'This model is disabled for the configured key'),
     ('en', 'chat.reasoning_selector.disabled', 'Disabled'),
+    ('en', 'settings.providers.reported_cost_scale', 'Value scale'),
+    ('en', 'settings.providers.reported_cost_scale_hint', 'Multiplies the reported value before the unit applies, for providers that report fractions of it. Cortecs reports credits (1 EUR = 1,000,000): use 0.000001 with EUR, or send the header x-cortecs-cost-unit: USD and pick US dollars. Leave empty for 1.'),
+    ('en', 'settings.providers.reported_cost', 'Reported cost'),
+    ('en', 'settings.providers.reported_cost_hint', 'Use the cost this provider puts in its responses instead of token prices.'),
+    ('en', 'settings.providers.reported_cost_off', 'Off (use token prices)'),
+    ('en', 'settings.providers.reported_cost_usd', 'US dollars'),
+    ('en', 'settings.providers.reported_cost_currency', 'Another currency'),
+    ('en', 'settings.providers.reported_cost_credits', 'Credits'),
+    ('en', 'settings.providers.reported_cost_currency_code', 'Currency'),
+    ('en', 'settings.providers.reported_cost_rate', '1 {currency} = {rate} USD (ECB, {date})'),
+    ('en', 'settings.providers.reported_cost_no_rate', 'No exchange rate yet. Token prices are used until the daily ECB rates are fetched.'),
+    ('en', 'settings.providers.reported_cost_usd_per_credit', 'US dollars per credit'),
+    ('en', 'settings.providers.reported_cost_source', 'Cost field'),
+    ('en', 'settings.providers.reported_cost_source_placeholder', 'Detect automatically'),
+    ('en', 'settings.providers.reported_cost_source_hint', 'A path in the response such as usage.cost, or header:name for a response header. Leave empty to detect the common fields.'),
+    ('en', 'settings.providers.reported_cost_invalid', 'Pick a currency, enter a positive value per credit, and use a valid cost field'),
     ('en', 'chat.sampling.title', 'Sampling'),
     ('en', 'chat.sampling.description', 'Settings for this chat. Unset values use the model defaults.'),
     ('en', 'chat.sampling.custom', 'Custom fields'),

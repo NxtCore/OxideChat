@@ -1,3 +1,4 @@
+import type {ExchangeRate} from '~/types/generated/ExchangeRate';
 export const adminProviders = () => useNuxtApp().$customFetch('/api/v1/admin/providers');
 
 export const providerCatalog = (id: string, params: Record<string, string>) =>
@@ -5,6 +6,8 @@ export const providerCatalog = (id: string, params: Record<string, string>) =>
 
 export const saveProvider = (id: string | undefined, body: object) =>
 	useNuxtApp().$customFetch(id ? `/api/v1/admin/providers/${id}` : '/api/v1/admin/providers', {method: id ? 'PUT' : 'POST', body});
+
+export const exchangeRates = () => useNuxtApp().$customFetch<ExchangeRate[]>('/api/v1/admin/exchange-rates');
 
 export const deleteProvider = (id: string) => useNuxtApp().$customFetch(`/api/v1/admin/providers/${id}`, {method: 'DELETE'});
 

@@ -119,7 +119,7 @@
 		</div>
 
 		<ShadDialog v-model:open="dialogOpen">
-			<ShadDialogContent class="sm:max-w-[500px]">
+			<ShadDialogContent class="max-h-[90dvh] overflow-y-auto sm:max-w-[500px]">
 				<ShadDialogHeader>
 					<ShadDialogTitle class="flex items-center gap-3">
 						<div
@@ -174,6 +174,64 @@
 							<div v-if="!selectedProvider?.isPreConfigured" class="space-y-2">
 								<ShadLabel for="base-url">{{ store.getTranslation('settings.providers.base_url') }}</ShadLabel>
 								<ShadInput id="base-url" v-model="configForm.baseUrl" type="text" :placeholder="selectedProvider?.defaultBaseUrl || 'https://api.example.com'" />
+							</div>
+
+							<div class="space-y-2">
+								<ShadLabel>{{ store.getTranslation('settings.providers.reported_cost') }}</ShadLabel>
+								<ShadSelect v-model="configForm.reportedUnit">
+									<ShadSelectTrigger class="w-full" data-testid="provider-reported-cost-unit">
+										<ShadSelectValue />
+									</ShadSelectTrigger>
+									<ShadSelectContent>
+										<ShadSelectItem v-for="unit in reportedCostUnits" :key="unit" :value="unit">
+											{{ store.getTranslation(`settings.providers.reported_cost_${unit}`) }}
+										</ShadSelectItem>
+									</ShadSelectContent>
+								</ShadSelect>
+								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.reported_cost_hint') }}</p>
+							</div>
+
+							<div v-if="configForm.reportedUnit === 'currency'" class="space-y-2">
+								<ShadLabel>{{ store.getTranslation('settings.providers.reported_cost_currency_code') }}</ShadLabel>
+								<ShadSelect v-model="configForm.reportedCurrency">
+									<ShadSelectTrigger class="w-full" data-testid="provider-reported-cost-currency">
+										<ShadSelectValue />
+									</ShadSelectTrigger>
+									<ShadSelectContent>
+										<ShadSelectItem v-for="code in currencyOptions" :key="code" :value="code">{{ code }}</ShadSelectItem>
+									</ShadSelectContent>
+								</ShadSelect>
+								<p class="text-xs text-muted-foreground" data-testid="provider-reported-cost-rate">
+									{{
+										selectedRate
+											? store.getTranslation('settings.providers.reported_cost_rate', {currency: selectedRate.currency, rate: selectedRate.usd_per_unit, date: selectedRate.rate_date})
+											: store.getTranslation('settings.providers.reported_cost_no_rate')
+									}}
+								</p>
+							</div>
+
+							<div v-if="configForm.reportedUnit === 'credits'" class="space-y-2">
+								<ShadLabel for="reported-cost-credit">{{ store.getTranslation('settings.providers.reported_cost_usd_per_credit') }}</ShadLabel>
+								<ShadInput id="reported-cost-credit" v-model="configForm.reportedCredit" type="number" min="0" step="any" data-testid="provider-reported-cost-credit" />
+							</div>
+
+							<div v-if="configForm.reportedUnit !== 'off'" class="space-y-2">
+								<ShadLabel for="reported-cost-source">{{ store.getTranslation('settings.providers.reported_cost_source') }}</ShadLabel>
+								<ShadInput
+									id="reported-cost-source"
+									v-model="configForm.reportedSource"
+									type="text"
+									class="font-mono"
+									:placeholder="store.getTranslation('settings.providers.reported_cost_source_placeholder')"
+									data-testid="provider-reported-cost-source"
+								/>
+								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.reported_cost_source_hint') }}</p>
+							</div>
+
+							<div v-if="configForm.reportedUnit !== 'off'" class="space-y-2">
+								<ShadLabel for="reported-cost-scale">{{ store.getTranslation('settings.providers.reported_cost_scale') }}</ShadLabel>
+								<ShadInput id="reported-cost-scale" v-model="configForm.reportedScale" type="number" min="0" step="any" placeholder="1" data-testid="provider-reported-cost-scale" />
+								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.reported_cost_scale_hint') }}</p>
 							</div>
 
 							<ShadButton variant="outline" size="sm" class="gap-2" :disabled="!canTestConnection || testing" data-testid="provider-test" @click="testConnection">
@@ -273,6 +331,8 @@ import {useProviderBillingStore} from '@/stores/providerBillingStore';
 import type {ProviderBillingOverview} from '@/types/providers';
 import type {ProviderResponse as ConfiguredProvider} from '~/types/chat';
 import type {TestProviderResponse} from '~/types/generated/TestProviderResponse';
+import type {ExchangeRate} from '~/types/generated/ExchangeRate';
+import type {ProviderReportedCost} from '~/types/generated/ProviderReportedCost';
 
 interface ProviderConfig {
 	kind: string;
@@ -391,11 +451,60 @@ const displayProviders = computed(() => {
 const billingProviders = computed(() => displayProviders.value.filter(provider => provider.isConfigured && provider.billing));
 const isRefreshingBilling = computed(() => billingProviders.value.some(provider => billingStore.states[provider.id]?.loading));
 
+type ReportedUnitOption = 'off' | ProviderReportedCost['unit'];
+const reportedCostUnits: ReportedUnitOption[] = ['off', 'usd', 'currency', 'credits'];
+const rates = ref<ExchangeRate[]>([]);
+const currencyOptions = computed(() => {
+	const codes = rates.value.map(rate => rate.currency).filter(code => code !== 'USD');
+	return codes.length > 0 ? codes : ['EUR'];
+});
+const selectedRate = computed(() => rates.value.find(rate => rate.currency === configForm.reportedCurrency) ?? null);
+
+function applyReportedCost(cost: ProviderReportedCost | null) {
+	configForm.reportedUnit = cost?.unit ?? 'off';
+	configForm.reportedCurrency = cost?.currency ?? 'EUR';
+	configForm.reportedCredit = cost?.usd_per_credit ?? '';
+	configForm.reportedSource = cost?.source ?? '';
+	configForm.reportedScale = cost?.scale ?? '';
+}
+
+function buildReportedCost(): ProviderReportedCost | null | undefined {
+	if (configForm.reportedUnit === 'off') return null;
+	const cost: ProviderReportedCost = {unit: configForm.reportedUnit};
+	const source = configForm.reportedSource.trim();
+	if (source) cost.source = source;
+	if (configForm.reportedUnit === 'currency') cost.currency = configForm.reportedCurrency;
+	const scale = String(configForm.reportedScale ?? '').trim();
+	if (scale) {
+		if (!(Number(scale) > 0)) return undefined;
+		cost.scale = scale;
+	}
+	if (configForm.reportedUnit === 'credits') {
+		const credit = String(configForm.reportedCredit ?? '').trim();
+		if (!(Number(credit) > 0)) return undefined;
+		cost.usd_per_credit = credit;
+	}
+	return cost;
+}
+
+async function loadExchangeRates() {
+	try {
+		rates.value = await exchangeRates();
+	} catch (e) {
+		console.error('Failed to load exchange rates:', e);
+	}
+}
+
 const configForm = reactive({
 	name: '',
 	apiKey: '',
 	baseUrl: '',
 	isEnabled: true,
+	reportedUnit: 'off' as ReportedUnitOption,
+	reportedCurrency: 'EUR',
+	reportedCredit: '',
+	reportedSource: '',
+	reportedScale: '',
 	existingProvider: null as ConfiguredProvider | null,
 });
 
@@ -479,12 +588,14 @@ function openConfigDialog(item: any) {
 		configForm.apiKey = '';
 		configForm.baseUrl = item.base_url;
 		configForm.isEnabled = item.is_enabled;
+		applyReportedCost(item.reported_cost ?? null);
 		configForm.existingProvider = item;
 	} else {
 		configForm.name = item.name;
 		configForm.apiKey = '';
 		configForm.baseUrl = item.template?.defaultBaseUrl || '';
 		configForm.isEnabled = true;
+		applyReportedCost(null);
 		configForm.existingProvider = null;
 	}
 
@@ -716,6 +827,11 @@ async function testConnection() {
 
 async function saveConfig() {
 	if (!selectedProvider.value) return;
+	const reportedCost = buildReportedCost();
+	if (reportedCost === undefined) {
+		store.toast(store.getTranslation('settings.providers.reported_cost_invalid'), {type: 'error'});
+		return;
+	}
 
 	saving.value = true;
 	try {
@@ -724,6 +840,7 @@ async function saveConfig() {
 			name: configForm.name || selectedProvider.value.name,
 			base_url: configForm.baseUrl || selectedProvider.value.defaultBaseUrl || '',
 			is_enabled: configForm.isEnabled,
+			reported_cost: reportedCost,
 		};
 
 		if (configForm.apiKey) {
@@ -765,6 +882,6 @@ async function deleteConfig() {
 }
 
 onMounted(() => {
-	Promise.all([loadProviders(), billingStore.fetchBillingOverviews()]);
+	Promise.all([loadProviders(), billingStore.fetchBillingOverviews(), loadExchangeRates()]);
 });
 </script>

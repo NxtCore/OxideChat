@@ -1,9 +1,37 @@
-use super::{Provider, ProviderKind};
+use super::{Provider, ProviderKind, ProviderReportedCost};
 use crate::utils::encryption::encrypt_object_values;
 use serde_json::Value;
 use uuid::Uuid;
 
 impl Provider {
+	/// Sets how this provider reports request cost, or clears it to use token pricing.
+	///
+	/// # Errors
+	/// Returns a database error when the update fails.
+	pub async fn set_reported_cost(pool: &sqlx::PgPool, id: &Uuid, reported_cost: Option<&ProviderReportedCost>) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Self>(
+			r#"
+			UPDATE providers SET reported_cost = $2, updated_at = NOW()
+			WHERE id = $1 AND owner_id IS NULL
+			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, reported_cost, created_at, updated_at
+			"#,
+		)
+		.bind(id)
+		.bind(reported_cost.map(sqlx::types::Json))
+		.fetch_optional(pool)
+		.await
+	}
+
+	/// Returns `true` when a system provider reports its cost in a currency other than US dollars.
+	///
+	/// # Errors
+	/// Returns a database error when the query fails.
+	pub async fn any_reports_cost_in_currency(pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
+		sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM providers WHERE owner_id IS NULL AND reported_cost->>'unit' = 'currency')")
+			.fetch_one(pool)
+			.await
+	}
+
 	#[allow(clippy::too_many_arguments)]
 	pub async fn patch_system(
 		pool: &sqlx::PgPool,
@@ -37,7 +65,7 @@ impl Provider {
 				is_enabled = COALESCE($7, is_enabled),
 				updated_at = NOW()
 			WHERE id = $1 AND owner_id IS NULL
-			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, created_at, updated_at
+			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, reported_cost, created_at, updated_at
 			"#,
 		)
 		.bind(id)
