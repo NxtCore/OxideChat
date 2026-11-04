@@ -13,6 +13,7 @@ mod reported_cost {
 			currency: None,
 			usd_per_credit: None,
 			source: Some("invalid source".to_string()),
+			scale: None,
 		})
 	}
 
@@ -36,6 +37,17 @@ mod reported_cost {
 		for source in ["", "usage..cost", ".cost", "header:", "header:x cost", "usage.cost[0]", &"a".repeat(201)] {
 			assert!(!cost(json!({"unit": "usd", "source": source})).is_valid(), "{source}");
 		}
+	}
+
+	#[test]
+	fn a_scale_must_be_positive_and_reaches_omniference() {
+		let rates = HashMap::from([("EUR".to_string(), Decimal::from_str("1.1").unwrap_or_default())]);
+		let cortecs = cost(json!({"unit": "currency", "currency": "EUR", "scale": "0.000001"}));
+		assert!(cortecs.is_valid());
+		assert_eq!(cortecs.to_omniference(&rates).and_then(|config| config.scale), Some(0.000001));
+		assert!(!cost(json!({"unit": "usd", "scale": "0"})).is_valid());
+		assert!(!cost(json!({"unit": "usd", "scale": "-1"})).is_valid());
+		assert_eq!(cost(json!({"unit": "usd"})).to_omniference(&rates).and_then(|config| config.scale), None);
 	}
 
 	#[test]

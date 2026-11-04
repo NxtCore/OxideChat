@@ -228,6 +228,12 @@
 								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.reported_cost_source_hint') }}</p>
 							</div>
 
+							<div v-if="configForm.reportedUnit !== 'off'" class="space-y-2">
+								<ShadLabel for="reported-cost-scale">{{ store.getTranslation('settings.providers.reported_cost_scale') }}</ShadLabel>
+								<ShadInput id="reported-cost-scale" v-model="configForm.reportedScale" type="number" min="0" step="any" placeholder="1" data-testid="provider-reported-cost-scale" />
+								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.reported_cost_scale_hint') }}</p>
+							</div>
+
 							<ShadButton variant="outline" size="sm" class="gap-2" :disabled="!canTestConnection || testing" data-testid="provider-test" @click="testConnection">
 								<Loader2 v-if="testing" class="h-4 w-4 animate-spin" />
 								<PlugZap v-else class="h-4 w-4" />
@@ -459,6 +465,7 @@ function applyReportedCost(cost: ProviderReportedCost | null) {
 	configForm.reportedCurrency = cost?.currency ?? 'EUR';
 	configForm.reportedCredit = cost?.usd_per_credit ?? '';
 	configForm.reportedSource = cost?.source ?? '';
+	configForm.reportedScale = cost?.scale ?? '';
 }
 
 function buildReportedCost(): ProviderReportedCost | null | undefined {
@@ -467,6 +474,11 @@ function buildReportedCost(): ProviderReportedCost | null | undefined {
 	const source = configForm.reportedSource.trim();
 	if (source) cost.source = source;
 	if (configForm.reportedUnit === 'currency') cost.currency = configForm.reportedCurrency;
+	const scale = String(configForm.reportedScale ?? '').trim();
+	if (scale) {
+		if (!(Number(scale) > 0)) return undefined;
+		cost.scale = scale;
+	}
 	if (configForm.reportedUnit === 'credits') {
 		const credit = String(configForm.reportedCredit ?? '').trim();
 		if (!(Number(credit) > 0)) return undefined;
@@ -492,6 +504,7 @@ const configForm = reactive({
 	reportedCurrency: 'EUR',
 	reportedCredit: '',
 	reportedSource: '',
+	reportedScale: '',
 	existingProvider: null as ConfiguredProvider | null,
 });
 

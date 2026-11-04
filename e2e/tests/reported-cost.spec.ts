@@ -71,15 +71,24 @@ test.describe('provider reported cost', () => {
 		expect(cost).toBeCloseTo(expectedCost(seed.pricing, usage), 9);
 	});
 
+	test('a scale turns provider credits into the unit, as Cortecs reports them', async ({page, api, seed}) => {
+		test.skip(!LLM.isMock, 'only the local stand-in reports a credit cost');
+		await api.put(`/api/v1/admin/providers/${seed.providerId}`, {reported_cost: {unit: 'usd', scale: '0.000001'}});
+		const {cost} = await gatewayRequest(page, api, seed.teamId, seed.model.publicId);
+		expect(cost).toBeCloseTo(REPORTED_CREDITS * 0.000001, 12);
+	});
+
 	test('a currency is saved and shows its exchange rate status', async ({page, t, api, seed}) => {
 		const provider = await api.get(`/api/v1/admin/providers/${seed.providerId}`);
 		await openProvider(page, t, provider.name);
 		await pickUnit(page, t, 'currency');
 		await expect(page.getByTestId('provider-reported-cost-rate')).not.toBeEmpty();
 		await page.getByTestId('provider-reported-cost-source').fill('header:x-provider-cost');
+		await page.getByTestId('provider-reported-cost-scale').fill('0.000001');
 		await save(page, t);
 		await expect(page.getByText(t('settings.providers.save_success')).first()).toBeVisible();
-		expect((await api.get(`/api/v1/admin/providers/${seed.providerId}`)).reported_cost).toEqual({unit: 'currency', currency: 'EUR', source: 'header:x-provider-cost'});
+		const saved = (await api.get(`/api/v1/admin/providers/${seed.providerId}`)).reported_cost;
+		expect({...saved, scale: Number(saved.scale)}).toEqual({unit: 'currency', currency: 'EUR', source: 'header:x-provider-cost', scale: 0.000001});
 	});
 
 	test('credits without a value are rejected before saving', async ({page, t, api, seed}) => {

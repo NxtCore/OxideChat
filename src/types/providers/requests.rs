@@ -58,6 +58,11 @@ pub struct ProviderReportedCost {
 	/// A body path such as `usage.cost`, or `header:<name>`; `None` detects the common fields.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub source: Option<String>,
+	/// Multiplies the reported value before the unit applies, e.g. `0.000001` for Cortecs credits
+	/// (1 EUR = 1,000,000 credits) with the EUR unit. `None` keeps the detected field's scale.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[cfg_attr(test, ts(type = "string"))]
+	pub scale: Option<rust_decimal::Decimal>,
 }
 
 const HEADER_SOURCE_PREFIX: &str = "header:";
@@ -81,7 +86,7 @@ impl ProviderReportedCost {
 			ReportedCostUnit::Currency => self.currency.as_deref().is_some_and(|code| code.len() == 3 && code.chars().all(|c| c.is_ascii_uppercase())),
 			ReportedCostUnit::Credits => self.usd_per_credit.is_some_and(|value| value > rust_decimal::Decimal::ZERO),
 		};
-		unit_ok && self.source.as_deref().is_none_or(valid_source)
+		unit_ok && self.source.as_deref().is_none_or(valid_source) && self.scale.is_none_or(|scale| scale > rust_decimal::Decimal::ZERO)
 	}
 
 	/// The Omniference config for this provider, using `usd_per_unit` for currencies.
@@ -107,7 +112,11 @@ impl ProviderReportedCost {
 			Some(name) => CostSource::Header { name: name.to_string() },
 			None => CostSource::Body { path: source.to_string() },
 		});
-		Some(ReportedCost { source, unit })
+		let scale = match self.scale {
+			Some(scale) => Some(scale.to_f64()?),
+			None => None,
+		};
+		Some(ReportedCost { source, unit, scale })
 	}
 }
 

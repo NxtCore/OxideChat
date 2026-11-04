@@ -9,4 +9,9 @@ export type ProviderReportedCost = { unit: ReportedCostUnit, currency?: string |
 /**
  * A body path such as `usage.cost`, or `header:<name>`; `None` detects the common fields.
  */
-source?: string | null, };
+source?: string | null, 
+/**
+ * Multiplies the reported value before the unit applies, e.g. `0.000001` for Cortecs credits
+ * (1 EUR = 1,000,000 credits) with the EUR unit. `None` keeps the detected field's scale.
+ */
+scale?: string, };
