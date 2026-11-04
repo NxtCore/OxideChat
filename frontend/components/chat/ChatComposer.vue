@@ -1,9 +1,17 @@
 <template>
 	<div class="p-0">
 		<div class="mx-auto max-w-4xl">
-			<div class="relative flex flex-col rounded-2xl border border-border bg-card shadow-sm">
+			<div
+				data-testid="chat-composer"
+				class="relative flex flex-col rounded-2xl border bg-card shadow-sm transition-colors"
+				:class="isDragging ? 'border-primary ring-2 ring-primary/30' : 'border-border'"
+				@dragenter.prevent="handleDragEnter"
+				@dragover.prevent="handleDragOver"
+				@dragleave="handleDragLeave"
+				@drop.prevent="handleDrop"
+			>
 				<div v-if="attachedImages.length > 0" class="flex gap-2 px-4 pt-3 flex-wrap bg-input/30">
-					<div v-for="(img, idx) in attachedImages" :key="img.id" class="relative h-20 w-20 rounded-lg overflow-hidden border border-border group">
+					<div v-for="(img, idx) in attachedImages" :key="img.id" data-testid="attached-image" class="relative h-20 w-20 rounded-lg overflow-hidden border border-border group">
 						<img :src="img.previewUrl" class="h-full w-full object-cover" alt="Attached image" />
 						<button
 							class="absolute top-1 right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
@@ -96,6 +104,8 @@ interface AttachedImage {
 }
 
 const attachedImages = ref<AttachedImage[]>([]);
+const isDragging = ref(false);
+let dragDepth = 0;
 
 onMounted(() => {
 	if (chatStore.pendingBranchContent) {
@@ -193,6 +203,38 @@ async function handlePaste(event: ClipboardEvent) {
 				await uploadImage(file);
 			}
 		}
+	}
+}
+
+function hasFiles(event: DragEvent) {
+	return event.dataTransfer?.types.includes('Files') ?? false;
+}
+
+function handleDragEnter(event: DragEvent) {
+	if (!hasFiles(event) || !supportsImages.value || chatStore.isStreaming) return;
+	dragDepth++;
+	isDragging.value = true;
+}
+
+function handleDragOver(event: DragEvent) {
+	if (!event.dataTransfer) return;
+	event.dataTransfer.dropEffect = hasFiles(event) && supportsImages.value && !chatStore.isStreaming ? 'copy' : 'none';
+}
+
+function handleDragLeave() {
+	if (!isDragging.value) return;
+	dragDepth = Math.max(0, dragDepth - 1);
+	if (dragDepth === 0) isDragging.value = false;
+}
+
+async function handleDrop(event: DragEvent) {
+	dragDepth = 0;
+	isDragging.value = false;
+	if (!supportsImages.value || chatStore.isStreaming) return;
+
+	const files = Array.from(event.dataTransfer?.files ?? []).filter(file => file.type.startsWith('image/'));
+	for (const file of files) {
+		await uploadImage(file);
 	}
 }
 
