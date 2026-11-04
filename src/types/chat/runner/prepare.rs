@@ -2,7 +2,7 @@ use super::request::{RequestInputs, build_request};
 use crate::types::models::Model;
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
 use crate::types::{
-	BudgetAdmission, BudgetError, BudgetSubject, Chat, ChatUsageGuard, CostDetails, JobState, Message, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
+	BudgetAdmission, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
 	StreamingUserMessageCreate, TokenEstimate, UsageDetails, User,
 };
 use axum::response::{
@@ -46,7 +46,8 @@ impl IntoResponse for TurnError {
 pub struct PreparedTurn {
 	pub(crate) chat_id: Uuid,
 	pub(crate) model_id: Uuid,
-	pub(crate) usage: ChatUsageGuard,
+	pub(crate) reservation: Option<BudgetReservation>,
+	pub(crate) output_estimate: u64,
 	pub(crate) user_id: Uuid,
 	pub(crate) user_message: Option<Message>,
 	pub(crate) ir: ChatRequestIR,
@@ -70,10 +71,14 @@ async fn prompt_bytes(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, system_c
 	Ok(history_bytes.saturating_add(req.content.len() as u64).saturating_add(system_bytes as u64))
 }
 
+fn output_estimate(model: &Model) -> u64 {
+	model.max_tokens.and_then(|tokens| u64::try_from(tokens).ok()).filter(|tokens| *tokens > 0).unwrap_or(DEFAULT_OUTPUT_ESTIMATE)
+}
+
 async fn admit(state: &JobState, user_id: Uuid, model: &Model, prompt_bytes: u64) -> Result<BudgetAdmission, TurnError> {
 	let estimate = TokenEstimate {
 		input: TokenEstimate::input_for_bytes(prompt_bytes),
-		output: model.max_tokens.and_then(|tokens| u64::try_from(tokens).ok()).filter(|tokens| *tokens > 0).unwrap_or(DEFAULT_OUTPUT_ESTIMATE),
+		output: output_estimate(model),
 	};
 	match state.budget_ledger.reserve_for_model(&state.db, BudgetSubject::user(user_id), &model.id, estimate).await {
 		Ok(admission) => Ok(admission),
@@ -207,7 +212,8 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 	Ok(PreparedTurn {
 		chat_id,
 		model_id: model.id,
-		usage: ChatUsageGuard::new(Arc::clone(state), budget.reservation, user.id, model.id, model.provider_id),
+		reservation: budget.reservation,
+		output_estimate: output_estimate(&model),
 		user_id: user.id,
 		user_message,
 		ir,

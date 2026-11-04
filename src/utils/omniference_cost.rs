@@ -16,7 +16,8 @@ use std::sync::{
 use tokio::sync::{Notify, mpsc, oneshot};
 use uuid::Uuid;
 
-/// Persists gateway usage received from the asynchronous cost queue.
+/// Persists usage from the asynchronous cost queue for gateway and web chat requests; request logs
+/// are written for requests made with an API key.
 pub struct OxideCostSink {
 	state: Arc<JobState>,
 }
@@ -76,6 +77,9 @@ impl OxideCostSink {
 			self.state.budget_ledger.reconcile(id, cost_total);
 		}
 		UsageEvent::record(&self.state.db, usage).await?;
+		if api_key_id.is_none() {
+			return Ok(());
+		}
 		let (status, error_category) = request_outcome(record.finalization);
 		let streaming = record.metadata.get(STREAMING_METADATA_KEY).is_some_and(|value| value == "true");
 		RequestLog::record(

@@ -1,5 +1,6 @@
 import type {Page} from '@playwright/test';
 import {test, expect} from './support/fixtures';
+import {expectedCost} from './support/cost';
 import {uniqueName} from './support/gateway';
 import {createBrokenProvider} from './support/providers';
 
@@ -75,6 +76,24 @@ test.describe('web chat', () => {
 		await send(page, 'Say ok.');
 		await expectReplyCount(page, 1);
 		await expect.poll(async () => JSON.stringify(await api.get('/api/v1/me/analytics')) !== before, {timeout: 15_000}).toBe(true);
+	});
+
+	test('a web chat reply is priced by Omniference with the model price', async ({page, t, api, seed}) => {
+		const spentBefore = (await api.get('/api/v1/me/analytics')).reduce((sum: number, row: any) => sum + Number(row.cost_total), 0);
+		await page.goto('/');
+		await pickModel(page, t, seed.model.displayName);
+		await send(page, 'Say ok.');
+		await expectReplyCount(page, 1);
+		const chatId = new URL(page.url()).pathname.split('/').pop();
+		const messages = await api.get(`/api/v1/chats/${chatId}/messages`);
+		const reply = messages.find((message: any) => message.role === 'assistant');
+		const usage = {input: reply.usage_details.input_tokens, output: reply.usage_details.output_tokens, reasoning: reply.usage_details.reasoning_tokens ?? 0};
+		const expected = expectedCost(seed.pricing, usage);
+		expect(expected).toBeGreaterThan(0);
+		expect(Number(reply.cost_details.total)).toBeCloseTo(expected, 9);
+		await expect
+			.poll(async () => (await api.get('/api/v1/me/analytics')).reduce((sum: number, row: any) => sum + Number(row.cost_total), 0) - spentBefore, {timeout: 15_000})
+			.toBeCloseTo(expected, 9);
 	});
 
 	test('an image dropped onto the composer is attached', async ({page, t, seed}) => {
