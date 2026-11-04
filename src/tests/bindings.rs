@@ -26,6 +26,7 @@ mod tests {
 		}
 		export!(
 			AdminConfigResponse,
+			ChatSampling,
 			SessionResponse,
 			TestProviderResponse,
 			TranslationsResponse,

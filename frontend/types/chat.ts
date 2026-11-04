@@ -4,6 +4,7 @@ import type {CreateWorkspaceRequest as GeneratedCreateWorkspaceRequest} from './
 import type {ThemeCssVars} from './generated/ThemeCssVars';
 
 export type {Chat} from './generated/Chat';
+export type {ChatSampling} from './generated/ChatSampling';
 export type {Base} from './generated/Base';
 export type {Role} from './generated/Role';
 export type {UserPreferences} from './generated/UserPreferences';

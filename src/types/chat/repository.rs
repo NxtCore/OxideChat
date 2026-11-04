@@ -198,8 +198,8 @@ impl Chat {
 	) -> Result<Self, sqlx::Error> {
 		sqlx::query_as::<_, Chat>(
 			r#"
-			INSERT INTO chats (user_id, workspace_id, title, branched_from_chat_id, branched_from_message_id)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO chats (user_id, workspace_id, title, branched_from_chat_id, branched_from_message_id, sampling)
+			VALUES ($1, $2, $3, $4, $5, COALESCE((SELECT sampling FROM chats WHERE id = $4 AND user_id = $1), '{}'::jsonb))
 			RETURNING *
 			"#,
 		)

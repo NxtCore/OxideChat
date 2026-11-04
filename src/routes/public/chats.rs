@@ -1,4 +1,4 @@
-use crate::types::{AppError, AuthUser, BaseType, Chat, ChatListParams, ChatMessageResponse, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, JobState, Message, Page, PageQuery, UpdateChatRequest, json_ok};
+use crate::types::{AppError, AuthUser, BaseType, Chat, ChatListParams, ChatMessageResponse, ChatSampling, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, JobState, Message, Page, PageQuery, UpdateChatRequest, json_ok};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -20,6 +20,7 @@ fn chat_response_with_stats(chat: &Chat, message_count: i64, last_message_at: Op
 		is_archived: chat.is_archived,
 		branched_from_chat_id: chat.branched_from_chat_id,
 		branched_from_message_id: chat.branched_from_message_id,
+		sampling: chat.sampling.0.clone(),
 		message_count,
 		last_message_at,
 		created_at: chat.created_at,
@@ -89,6 +90,15 @@ pub async fn update_chat(State(state): State<Arc<JobState>>, user: AuthUser, Pat
 	)
 	.await?
 	.ok_or(ErrorCode::NotFound)?;
+	json_ok(build_chat_response(&state.db, &chat).await?)
+}
+
+/// PUT /api/v1/chats/:id/sampling
+pub async fn update_chat_sampling(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>, Json(req): Json<ChatSampling>) -> Result<Response, AppError> {
+	if !req.is_valid() {
+		return Err(ErrorCode::ChatSamplingInvalid.into());
+	}
+	let chat = Chat::set_sampling(&state.db, &id, &user.id, &req).await?.ok_or(ErrorCode::NotFound)?;
 	json_ok(build_chat_response(&state.db, &chat).await?)
 }
 

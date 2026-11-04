@@ -50,6 +50,7 @@
 							class="border-none! bg-transparent! shadow-none! hover:bg-muted/50"
 						/>
 						<ToolSelector v-if="modelStore.hasToolCapability(modelStore.selectedModel)" />
+						<SamplingSelector />
 						<ProviderSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
 					</div>
 
@@ -85,6 +86,7 @@ import ReasoningSelector from './ReasoningSelector.vue';
 import ContextLimitIndicator from './ContextLimitIndicator.vue';
 import ToolSelector from './ToolSelector.vue';
 import ProviderSelector from './ProviderSelector.vue';
+import SamplingSelector from './SamplingSelector.vue';
 import McpManagerDialog from '../mcp/McpManagerDialog.vue';
 
 const emit = defineEmits<{send: (content: string, parts?: any[]) => void}>();

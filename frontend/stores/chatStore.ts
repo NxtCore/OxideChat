@@ -2,7 +2,7 @@ import {defineStore} from 'pinia';
 import {useWorkspaceStore} from './workspaceStore';
 import {useModelStore} from './modelStore';
 import {usePreferencesStore} from './preferencesStore';
-import type {Chat, ChatMessage, ChatWithMessages, CreateChatRequest, UpdateChatRequest, ChatListParams, PaginatedResponse} from '~/types/chat';
+import type {Chat, ChatSampling, ChatMessage, ChatWithMessages, CreateChatRequest, UpdateChatRequest, ChatListParams, PaginatedResponse} from '~/types/chat';
 
 interface ChatState {
 	chats: Chat[];
@@ -17,6 +17,8 @@ interface ChatState {
 	pendingBranchContent: string | null;
 	pendingBranchParts: any[] | null;
 
+	draftSampling: ChatSampling;
+
 	initialized: boolean;
 }
 
@@ -25,6 +27,7 @@ export const useChatStore = defineStore('chat', {
 		chats: [],
 		activeChat: null,
 		chatsLoading: false,
+		draftSampling: {},
 
 		messages: [],
 		messagesLoading: false,
@@ -80,7 +83,11 @@ export const useChatStore = defineStore('chat', {
 					method: 'POST',
 					body: data || {},
 				});
-				const newChat = chat as Chat;
+				let newChat = chat as Chat;
+				if (Object.keys(this.draftSampling).length > 0) {
+					newChat = await $customFetch<Chat>(`/api/v1/chats/${newChat.id}/sampling`, {method: 'PUT', body: this.draftSampling});
+					this.draftSampling = {};
+				}
 				this.chats.unshift(newChat);
 				this.activeChat = newChat;
 				this.messages = [];
@@ -144,6 +151,19 @@ export const useChatStore = defineStore('chat', {
 			} finally {
 				this.messagesLoading = false;
 			}
+		},
+
+		async saveSampling(sampling: ChatSampling): Promise<void> {
+			if (!this.activeChat) {
+				this.draftSampling = sampling;
+				return;
+			}
+			const id = this.activeChat.id;
+			const {$customFetch} = useNuxtApp();
+			const updated = await $customFetch<Chat>(`/api/v1/chats/${id}/sampling`, {method: 'PUT', body: sampling});
+			const index = this.chats.findIndex(c => c.id === id);
+			if (index !== -1) this.chats[index] = updated;
+			if (this.activeChat?.id === id) this.activeChat = updated;
 		},
 
 		async updateChat(id: string, data: UpdateChatRequest): Promise<boolean> {
