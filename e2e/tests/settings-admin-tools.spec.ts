@@ -61,6 +61,21 @@ test.describe('admin configuration', () => {
 		expect((await api.get('/api/v1/admin/config')).oauth.find((item: {provider: string}) => item.provider === 'GOOGLE')).toMatchObject({client_id: null, has_client_secret: false});
 		await expect(page.getByTestId('oauth-card')).toContainText(t('settings.admin_config.oauth.configure'));
 	});
+
+	test('a configured sign-in provider shows its button on login and register', async ({browser, api, baseURL}) => {
+		await api.patch('/api/v1/admin/config', {oauth: [{provider: 'DISCORD', client_id: 'e2e-discord-id', client_secret: 'e2e-discord-secret'}]});
+		const visitor = await browser.newContext({baseURL, storageState: {cookies: [], origins: []}});
+		try {
+			const page = await visitor.newPage();
+			for (const path of ['/auth/login', '/auth/register']) {
+				await page.goto(path);
+				await expect(page.getByTestId('oauth-button-discord')).toBeVisible();
+			}
+		} finally {
+			await visitor.close();
+			await api.patch('/api/v1/admin/config', {oauth: [{provider: 'DISCORD', client_id: null, client_secret: null}]});
+		}
+	});
 });
 
 test.describe('translations', () => {
