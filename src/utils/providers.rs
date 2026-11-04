@@ -6,7 +6,6 @@ use crate::types::catalog::{AvailabilityState, GatewayCatalogModel, GatewayCatal
 use crate::types::models::{Model, ModelSyncInput};
 use crate::types::providers::{Provider, ProviderKind, SyncProviderResponse};
 use crate::utils::encryption::decrypt_api_key;
-use futures_util::{StreamExt, stream};
 use omniference::types::{ProviderConfig, ProviderEndpoint};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -14,12 +13,6 @@ use uuid::Uuid;
 
 /// Source-gateway tag stored on catalog rows for `OpenRouter` providers.
 const OPENROUTER_GATEWAY: &str = "openrouter";
-/// Provider options older than this are fetched again by the model sync.
-const ENDPOINT_MAX_AGE_SECS: f64 = 6.0 * 3600.0;
-/// Models whose endpoints one model sync fetches at most, oldest first.
-const ENDPOINT_FETCHES_PER_SYNC: i64 = 50;
-/// Endpoint requests one model sync runs at the same time.
-const ENDPOINT_FETCH_CONCURRENCY: usize = 4;
 
 pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<SyncProviderResponse, String> {
 	let api_key = provider
@@ -148,32 +141,6 @@ pub async fn sync_gateway_catalog(pool: &PgPool, provider: &Provider) -> Result<
 		.map_err(|e| format!("Catalog relink failed: {e}"))?;
 
 	Ok(())
-}
-
-/// Fetch provider options for the runnable models of an `OpenRouter` provider that have none yet
-/// or whose options are stale, so endpoint prices exist before anyone opens a model. Returns how
-/// many models were refreshed; a failed model is logged and retried by the next sync.
-///
-/// # Errors
-///
-/// Returns an error when the due models cannot be loaded.
-pub async fn sync_due_endpoint_options(pool: &PgPool, provider: &Provider) -> Result<usize, sqlx::Error> {
-	if provider.kind != ProviderKind::Openrouter {
-		return Ok(0);
-	}
-	let due = GatewayCatalogModel::models_due_for_endpoints(pool, &provider.id, OPENROUTER_GATEWAY, ENDPOINT_MAX_AGE_SECS, ENDPOINT_FETCHES_PER_SYNC).await?;
-	let refreshed = stream::iter(due)
-		.map(|model_id| async move {
-			sync_endpoint_options(pool, &model_id)
-				.await
-				.inspect_err(|error| tracing::warn!(%model_id, "Endpoint fetch during model sync failed: {error}"))
-				.is_ok()
-		})
-		.buffer_unordered(ENDPOINT_FETCH_CONCURRENCY)
-		.filter(|ok| std::future::ready(*ok))
-		.count()
-		.await;
-	Ok(refreshed)
 }
 
 /// Lazily fetch and store provider endpoint options for a runnable model. Skips models whose

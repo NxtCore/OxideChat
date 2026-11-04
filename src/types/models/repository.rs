@@ -1,4 +1,4 @@
-use super::rows::{ModelDetailedRow, ModelListAdminRow, ModelListPublicRow};
+use super::rows::{ModelDetailedRow, ModelListAdminRow, ModelListPublicRow, ModelPricingRow};
 use super::{Model, ModelDetailed, ModelListAdmin, ModelListPublic, ModelPricing, ModelSyncInput, ModelSyncSummary, ModelViewer};
 use crate::types::BaseType;
 use crate::types::PolicyResolver;
@@ -10,6 +10,8 @@ use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde_json::Value;
 use sqlx::types::Json;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use omniference::catalog::Catalog;
+use serde::Deserialize;
 use uuid::Uuid;
 
 impl Model {
@@ -567,46 +569,111 @@ impl ModelPricing {
 		Decimal::from(tokens.max(0)) * rate / Decimal::from(1_000_000)
 	}
 
-	pub async fn effective(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as::<_, Self>(
+	async fn rows(pool: &sqlx::PgPool, model_id: Option<&Uuid>) -> Result<Vec<ModelPricingRow>, sqlx::Error> {
+		sqlx::query_as::<_, ModelPricingRow>(
 			r#"
-			WITH catalog AS (
-				SELECT
-					gcm.id,
-					gcm.local_model_id,
-					CASE WHEN gcm.raw->'pricing'->>'prompt' ~ '^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$'
-						THEN (gcm.raw->'pricing'->>'prompt')::numeric * 1000000 END AS price_input,
-					CASE WHEN gcm.raw->'pricing'->>'completion' ~ '^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$'
-						THEN (gcm.raw->'pricing'->>'completion')::numeric * 1000000 END AS price_output
-				FROM gateway_catalog_models gcm
-				WHERE gcm.local_model_id = $1
-			)
-			SELECT
-				m.id AS model_id,
-				COALESCE(MIN(gmpo.price_input)::numeric, MIN(gcm.price_input)) AS reported_input,
-				COALESCE(MIN(gmpo.price_output)::numeric, MIN(gcm.price_output)) AS reported_output,
-				mpo.pricing AS override_pricing,
-				COALESCE((mpo.pricing->>'input')::numeric, MIN(gmpo.price_input)::numeric, MIN(gcm.price_input), 0) AS effective_input,
-				COALESCE((mpo.pricing->>'output')::numeric, MIN(gmpo.price_output)::numeric, MIN(gcm.price_output), 0) AS effective_output
+			SELECT m.id AS model_id, m.model_id AS provider_model_id, p.name AS provider_name, p.kind AS provider_kind, mpo.pricing AS override_pricing
 			FROM models m
-			LEFT JOIN catalog gcm ON gcm.local_model_id = m.id
-			LEFT JOIN gateway_model_provider_options gmpo ON gmpo.catalog_model_id = gcm.id
+			JOIN providers p ON p.id = m.provider_id
 			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
-			WHERE m.id = $1
-			GROUP BY m.id, mpo.pricing
+			WHERE $1::uuid IS NULL OR m.id = $1
 			"#,
 		)
 		.bind(model_id)
-		.fetch_optional(pool)
+		.fetch_all(pool)
 		.await
+	}
+
+	/// The catalog's input and output price for a provider's model, in USD per million tokens.
+	/// `provider_model_id` is the stored `provider/model` ID.
+	pub async fn catalog_rates(catalog: &Catalog, provider_name: &str, kind: &ProviderKind, provider_model_id: &str) -> (Option<Decimal>, Option<Decimal>) {
+		let native_model_id = provider_model_id.split_once('/').map_or(provider_model_id, |(_, id)| id);
+		let pricing = catalog.catalog_pricing(&crate::ai::catalog_provider(provider_name, kind), native_model_id).await;
+		match pricing {
+			Some(pricing) => (Decimal::from_f64(pricing.input), Decimal::from_f64(pricing.output)),
+			None => (None, None),
+		}
+	}
+
+	async fn from_row(catalog: &Catalog, row: ModelPricingRow) -> Self {
+		let (reported_input, reported_output) = Self::catalog_rates(catalog, &row.provider_name, &row.provider_kind, &row.provider_model_id).await;
+		let override_rate = |key: &str| row.override_pricing.as_ref().and_then(|value| Self::decimal_from_json(value.get(key)));
+		let effective_input = override_rate("input").or(reported_input).unwrap_or(Decimal::ZERO);
+		let effective_output = override_rate("output").or(reported_output).unwrap_or(Decimal::ZERO);
+		Self {
+			model_id: row.model_id,
+			reported_input,
+			reported_output,
+			override_pricing: row.override_pricing,
+			effective_input,
+			effective_output,
+		}
+	}
+
+	/// The model's price: the manual price when set, else the catalog price Omniference knows for
+	/// the model's provider (models.dev and the catalog overrides).
+	///
+	/// # Errors
+	/// Returns an error when the model cannot be loaded.
+	pub async fn effective(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+		let Some(row) = Self::rows(pool, Some(model_id)).await?.pop() else {
+			return Ok(None);
+		};
+		Ok(Some(Self::from_row(&crate::ai::catalog(), row).await))
+	}
+
+	/// Every manual price as `(provider name, model ID, pricing)`, the keys Omniference prices requests by.
+	///
+	/// # Errors
+	/// Returns an error when the prices cannot be loaded.
+	pub async fn engine_overrides(pool: &sqlx::PgPool) -> Result<Vec<(String, String, omniference::catalog::ModelPricing)>, sqlx::Error> {
+		let rows = sqlx::query_as::<_, ModelPricingRow>(
+			r#"
+			SELECT m.id AS model_id, m.model_id AS provider_model_id, p.name AS provider_name, p.kind AS provider_kind, mpo.pricing AS override_pricing
+			FROM model_pricing_overrides mpo
+			JOIN models m ON m.id = mpo.model_id
+			JOIN providers p ON p.id = m.provider_id
+			"#,
+		)
+		.fetch_all(pool)
+		.await?;
+		Ok(rows
+			.iter()
+			.filter_map(|row| {
+				let pricing = omniference::catalog::ModelPricing::deserialize(row.override_pricing.as_ref()?).ok()?;
+				Some((row.provider_name.clone(), row.native_model_id().to_string(), pricing))
+			})
+			.collect())
+	}
+
+	/// Sends the model's manual price to the running engine, or removes it there when none is stored.
+	///
+	/// # Errors
+	/// Returns an error when the model cannot be loaded.
+	pub async fn push_to_engine(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<(), sqlx::Error> {
+		let Some(row) = Self::rows(pool, Some(model_id)).await?.pop() else {
+			return Ok(());
+		};
+		let catalog = crate::ai::catalog();
+		let pricing = row
+			.override_pricing
+			.as_ref()
+			.and_then(|value| omniference::catalog::ModelPricing::deserialize(value).ok());
+		match pricing {
+			Some(pricing) => catalog.set_pricing_override(&row.provider_name, row.native_model_id(), pricing).await,
+			None => catalog.clear_pricing_override(&row.provider_name, row.native_model_id()).await,
+		}
+		Ok(())
 	}
 
 	pub async fn upsert_override(pool: &sqlx::PgPool, model_id: &Uuid, pricing: &Value) -> Result<Self, sqlx::Error> {
 		Self::store_override(pool, model_id, pricing).await?;
+		Self::push_to_engine(pool, model_id).await?;
 		Self::effective(pool, model_id).await?.ok_or(sqlx::Error::RowNotFound)
 	}
 
-	/// Stores a pricing override, inside the caller's transaction when given one.
+	/// Stores a pricing override, inside the caller's transaction when given one. Call
+	/// [`ModelPricing::push_to_engine`] once it is committed.
 	///
 	/// # Errors
 	///
@@ -633,13 +700,13 @@ impl ModelPricing {
 			.bind(model_id)
 			.execute(pool)
 			.await?;
-		Ok(())
+		Self::push_to_engine(pool, model_id).await
 	}
 
-	/// Sets `record.cost_total`: the provider-reported cost when present, else local pricing, else `fallback_cost`.
+	/// Sets `record.cost_total`: the provider-reported cost when present, else the model's price, else `fallback_cost`.
 	///
 	/// # Errors
-	/// Returns an error when local pricing cannot be loaded.
+	/// Returns an error when the price cannot be loaded.
 	pub async fn price(pool: &sqlx::PgPool, provider_cost: Option<f64>, fallback_cost: f64, record: &mut UsageEventRecord<'_>) -> Result<(), sqlx::Error> {
 		record.cost_total = match provider_cost.and_then(Decimal::from_f64) {
 			Some(cost) => cost,
@@ -650,16 +717,20 @@ impl ModelPricing {
 		Ok(())
 	}
 
+	fn has_price(&self) -> bool {
+		self.override_pricing.is_some() || (self.reported_input.is_some() && self.reported_output.is_some())
+	}
+
+	fn reasoning_rate(&self) -> Option<Decimal> {
+		self.override_pricing.as_ref().and_then(|value| Self::decimal_from_json(value.get("reasoning")))
+	}
+
 	async fn usage_cost(pool: &sqlx::PgPool, model_id: &Uuid, input_tokens: i32, output_tokens: i32, reasoning_tokens: i32) -> Result<Option<Decimal>, sqlx::Error> {
-		let Some(pricing) = Self::effective(pool, model_id).await? else {
+		let Some(pricing) = Self::effective(pool, model_id).await?.filter(Self::has_price) else {
 			return Ok(None);
 		};
-		if pricing.override_pricing.is_none() && (pricing.reported_input.is_none() || pricing.reported_output.is_none()) {
-			return Ok(None);
-		}
-		let reasoning_rate = pricing.override_pricing.as_ref().and_then(|value| Self::decimal_from_json(value.get("reasoning")));
 		let input_cost = Self::millionths(input_tokens, pricing.effective_input);
-		let output_cost = if let Some(reasoning_rate) = reasoning_rate {
+		let output_cost = if let Some(reasoning_rate) = pricing.reasoning_rate() {
 			let billed_reasoning_tokens = reasoning_tokens.max(0).min(output_tokens.max(0));
 			let visible_output_tokens = output_tokens.max(0) - billed_reasoning_tokens;
 			Self::millionths(visible_output_tokens, pricing.effective_output) + Self::millionths(billed_reasoning_tokens, reasoning_rate)
@@ -678,41 +749,32 @@ impl ModelPricing {
 		Ok(Self::usage_cost(pool, model_id, clamp(tokens.input), clamp(tokens.output), 0).await?.unwrap_or(Decimal::ZERO))
 	}
 
-	pub async fn is_free(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<bool, sqlx::Error> {
-		let Some(pricing) = Self::effective(pool, model_id).await? else {
-			return Ok(false);
-		};
-		let reasoning_rate = pricing.override_pricing.as_ref().and_then(|v| Self::decimal_from_json(v.get("reasoning")));
-		let reasoning_free = reasoning_rate.is_none_or(|r| r.is_zero());
-		let override_free = pricing.override_pricing.is_some() && pricing.effective_input.is_zero() && pricing.effective_output.is_zero() && reasoning_free;
-		let reported_free = pricing.override_pricing.is_none()
-			&& pricing.reported_input.is_some()
-			&& pricing.reported_output.is_some()
-			&& pricing.effective_input.is_zero()
-			&& pricing.effective_output.is_zero();
-		Ok(override_free || reported_free)
+	fn charges(&self) -> bool {
+		self.effective_input > Decimal::ZERO || self.effective_output > Decimal::ZERO || self.reasoning_rate().is_some_and(|rate| rate > Decimal::ZERO)
 	}
 
+	/// Whether a known price is zero; models without a price are not free.
+	///
+	/// # Errors
+	/// Returns an error when pricing cannot be loaded.
+	pub async fn is_free(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<bool, sqlx::Error> {
+		Ok(Self::effective(pool, model_id).await?.is_some_and(|pricing| pricing.has_price() && !pricing.charges()))
+	}
+
+	/// Models that cost money, plus models without a known price, which budgets treat as priced.
+	///
+	/// # Errors
+	/// Returns an error when the models cannot be loaded.
 	pub async fn priced_model_ids(pool: &sqlx::PgPool) -> Result<Vec<Uuid>, sqlx::Error> {
-		sqlx::query_scalar(
-			r#"
-			SELECT m.id
-			FROM models m
-			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
-			LEFT JOIN gateway_catalog_models gcm ON gcm.local_model_id = m.id
-			LEFT JOIN gateway_model_provider_options gmpo ON gmpo.catalog_model_id = gcm.id
-			GROUP BY m.id, mpo.pricing
-			HAVING CASE
-				WHEN mpo.pricing IS NOT NULL THEN
-					(mpo.pricing->>'input')::numeric > 0 OR
-					(mpo.pricing->>'output')::numeric > 0 OR
-					(mpo.pricing->>'reasoning' IS NOT NULL AND (mpo.pricing->>'reasoning')::numeric > 0)
-				WHEN MIN(gmpo.price_input) IS NOT NULL AND MIN(gmpo.price_output) IS NOT NULL THEN MIN(gmpo.price_input) > 0 OR MIN(gmpo.price_output) > 0
-				ELSE TRUE
-			END
-			"#,
-		)
-		.fetch_all(pool)
-		.await
+		let rows = Self::rows(pool, None).await?;
+		let catalog = crate::ai::catalog();
+		let mut priced = Vec::with_capacity(rows.len());
+		for row in rows {
+			let pricing = Self::from_row(&catalog, row).await;
+			if !pricing.has_price() || pricing.charges() {
+				priced.push(pricing.model_id);
+			}
+		}
+		Ok(priced)
 	}
 }

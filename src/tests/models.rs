@@ -488,57 +488,115 @@ mod tests {
 
 #[cfg(test)]
 mod catalog_pricing {
-	use crate::tests::gateway::support::{TestResult, create_provider_model};
+	use crate::ai::{catalog, catalog_provider};
 	use crate::types::models::ModelPricing;
-	use rust_decimal::Decimal;
+	use crate::types::providers::ProviderKind;
+	use rust_decimal::{Decimal, prelude::FromPrimitive};
 	use sqlx::PgPool;
-	use std::str::FromStr;
+	use std::error::Error;
 	use uuid::Uuid;
 
-	fn decimal(value: &str) -> Decimal {
-		Decimal::from_str(value).unwrap_or_default()
+	type TestResult = Result<(), Box<dyn Error>>;
+
+	struct Served {
+		provider_name: String,
+		model_id: Uuid,
 	}
 
-	async fn link_catalog(pool: &PgPool, provider_id: Uuid, model_id: Uuid, pricing: serde_json::Value) -> Result<Uuid, sqlx::Error> {
-		sqlx::query_scalar(
-			"INSERT INTO gateway_catalog_models (provider_id, source_gateway, gateway_model_id, local_model_id, raw) VALUES ($1, 'openrouter', 'author/model', $2, $3) RETURNING id",
+	async fn serve(pool: &PgPool, native_model_id: &str) -> Result<Served, sqlx::Error> {
+		let provider_name = format!("OpenAI {}", Uuid::new_v4());
+		let provider_id: Uuid = sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, is_enabled) VALUES ('OPENAI', $1, 'https://api.openai.com', true) RETURNING id")
+			.bind(&provider_name)
+			.fetch_one(pool)
+			.await?;
+		let model_id = sqlx::query_scalar(
+			"INSERT INTO models (provider_id, model_id, display_name, capabilities, input_modalities, output_modalities, is_enabled) VALUES ($1, $2, $3, '[]', '[\"text\"]', '[\"text\"]', true) RETURNING id",
 		)
 		.bind(provider_id)
-		.bind(model_id)
-		.bind(serde_json::json!({"id": "author/model", "pricing": pricing}))
+		.bind(format!("{}/{native_model_id}", provider_name.to_lowercase()))
+		.bind(native_model_id)
 		.fetch_one(pool)
-		.await
+		.await?;
+		Ok(Served { provider_name, model_id })
+	}
+
+	fn manual(input: f64) -> omniference::catalog::ModelPricing {
+		omniference::catalog::ModelPricing {
+			input,
+			output: input * 2.0,
+			cache_read: None,
+			cache_write: None,
+			reasoning: None,
+			input_audio: None,
+			output_audio: None,
+			tiers: Vec::new(),
+		}
+	}
+
+	async fn models_dev_gpt5() -> Result<omniference::catalog::ModelPricing, Box<dyn Error>> {
+		let provider = catalog_provider("models.dev reference", &ProviderKind::Openai);
+		Ok(catalog().catalog_pricing(&provider, "gpt-5").await.ok_or("gpt-5 has a models.dev price")?)
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn the_first_fetch_uses_catalog_pricing_before_endpoints_are_fetched(pool: PgPool) -> TestResult {
-		let (provider_id, model_id) = create_provider_model(&pool, "Catalog Provider", "catalog-model").await?;
-		let catalog_id = link_catalog(&pool, provider_id, model_id, serde_json::json!({"prompt": "0.000002", "completion": "0.000008"})).await?;
+	async fn a_model_without_a_manual_price_reports_the_models_dev_price(pool: PgPool) -> TestResult {
+		let reference = models_dev_gpt5().await?;
+		let served = serve(&pool, "gpt-5").await?;
 
-		let first = ModelPricing::effective(&pool, &model_id).await?.ok_or("missing pricing")?;
-		assert_eq!(first.reported_input, Some(decimal("2")));
-		assert_eq!(first.reported_output, Some(decimal("8")));
-		assert_eq!(first.effective_input, decimal("2"));
-		assert_eq!(first.effective_output, decimal("8"));
+		let pricing = ModelPricing::effective(&pool, &served.model_id).await?.ok_or("model missing")?;
+		assert_eq!(pricing.reported_input, Decimal::from_f64(reference.input));
+		assert_eq!(pricing.reported_output, Decimal::from_f64(reference.output));
+		assert!(pricing.override_pricing.is_none());
+		assert_eq!(Some(pricing.effective_input), pricing.reported_input);
 
-		sqlx::query("INSERT INTO gateway_model_provider_options (catalog_model_id, provider_slug, price_input, price_output) VALUES ($1, 'cheap', 1.5, 6.0)")
-			.bind(catalog_id)
-			.execute(&pool)
-			.await?;
-		let with_endpoints = ModelPricing::effective(&pool, &model_id).await?.ok_or("missing pricing")?;
-		assert_eq!(with_endpoints.reported_input, Some(decimal("1.5")));
-		assert_eq!(with_endpoints.reported_output, Some(decimal("6")));
+		let tokens = crate::types::TokenEstimate { input: 1_000_000, output: 0 };
+		assert_eq!(ModelPricing::estimate_cost(&pool, &served.model_id, tokens).await?, pricing.effective_input);
+		assert!(!ModelPricing::is_free(&pool, &served.model_id).await?);
+		assert!(ModelPricing::priced_model_ids(&pool).await?.contains(&served.model_id));
 		Ok(())
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
-	async fn variable_or_missing_catalog_prices_are_not_reported(pool: PgPool) -> TestResult {
-		let (provider_id, model_id) = create_provider_model(&pool, "Router Provider", "router-model").await?;
-		link_catalog(&pool, provider_id, model_id, serde_json::json!({"prompt": "-1", "completion": "abc"})).await?;
-		let pricing = ModelPricing::effective(&pool, &model_id).await?.ok_or("missing pricing")?;
-		assert_eq!(pricing.reported_input, None);
-		assert_eq!(pricing.reported_output, None);
+	async fn a_manual_price_reaches_omniference_for_its_provider_only(pool: PgPool) -> TestResult {
+		let reference = models_dev_gpt5().await?;
+		let priced = serve(&pool, "gpt-5").await?;
+		let other = serve(&pool, "gpt-5").await?;
+		let priced_provider = catalog_provider(&priced.provider_name, &ProviderKind::Openai);
+		let other_provider = catalog_provider(&other.provider_name, &ProviderKind::Openai);
+
+		let saved = ModelPricing::upsert_override(&pool, &priced.model_id, &serde_json::to_value(manual(42.0))?).await?;
+		assert_eq!(saved.effective_input, Decimal::from(42));
+		assert_eq!(saved.reported_input, Decimal::from_f64(reference.input));
+		let untouched = ModelPricing::effective(&pool, &other.model_id).await?.ok_or("model missing")?;
+		assert_eq!(untouched.reported_input, Decimal::from_f64(reference.input));
+		assert!(untouched.override_pricing.is_none());
+
+		assert_eq!(catalog().effective_pricing(&priced_provider, "gpt-5").await, Some(manual(42.0)));
+		assert_eq!(catalog().effective_pricing(&other_provider, "gpt-5").await, Some(reference));
+		let overrides = ModelPricing::engine_overrides(&pool).await?;
+		assert_eq!(overrides, vec![(priced.provider_name.clone(), "gpt-5".to_string(), manual(42.0))]);
+
+		ModelPricing::delete_override(&pool, &priced.model_id).await?;
+		assert_eq!(catalog().pricing_override(&priced_provider, "gpt-5").await, None);
+		assert!(ModelPricing::engine_overrides(&pool).await?.is_empty());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_model_the_catalog_does_not_know_has_no_price_and_counts_as_priced(pool: PgPool) -> TestResult {
+		let served = serve(&pool, "in-house-model").await?;
+
+		let pricing = ModelPricing::effective(&pool, &served.model_id).await?.ok_or("model missing")?;
+		assert_eq!((pricing.reported_input, pricing.reported_output), (None, None));
 		assert_eq!(pricing.effective_input, Decimal::ZERO);
+		let tokens = crate::types::TokenEstimate { input: 1_000, output: 1_000 };
+		assert_eq!(ModelPricing::estimate_cost(&pool, &served.model_id, tokens).await?, Decimal::ZERO);
+		assert!(!ModelPricing::is_free(&pool, &served.model_id).await?);
+		assert!(ModelPricing::priced_model_ids(&pool).await?.contains(&served.model_id));
+
+		ModelPricing::upsert_override(&pool, &served.model_id, &serde_json::to_value(manual(0.0))?).await?;
+		assert!(ModelPricing::is_free(&pool, &served.model_id).await?);
+		assert!(!ModelPricing::priced_model_ids(&pool).await?.contains(&served.model_id));
 		Ok(())
 	}
 }

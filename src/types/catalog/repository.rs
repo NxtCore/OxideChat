@@ -229,36 +229,6 @@ impl GatewayCatalogModel {
 		}))
 	}
 
-	/// Runnable models whose provider options were never fetched or are older than
-	/// `max_age_secs`, oldest first, so a model sync can refresh their endpoint prices.
-	pub async fn models_due_for_endpoints(
-		pool: &sqlx::PgPool,
-		provider_id: &Uuid,
-		source_gateway: &str,
-		max_age_secs: f64,
-		limit: i64,
-	) -> Result<Vec<Uuid>, sqlx::Error> {
-		sqlx::query_scalar::<_, Uuid>(
-			r#"
-			SELECT local_model_id
-			FROM gateway_catalog_models
-			WHERE provider_id = $1
-			  AND source_gateway = $2
-			  AND local_model_id IS NOT NULL
-			  AND availability_state = 'AVAILABLE'
-			  AND (endpoints_fetched_at IS NULL OR endpoints_fetched_at < NOW() - make_interval(secs => $3))
-			ORDER BY endpoints_fetched_at ASC NULLS FIRST, gateway_model_id ASC
-			LIMIT $4
-			"#,
-		)
-		.bind(provider_id)
-		.bind(source_gateway)
-		.bind(max_age_secs)
-		.bind(limit)
-		.fetch_all(pool)
-		.await
-	}
-
 	/// Replace the stored provider options for a catalog model with a fresh set.
 	pub async fn upsert_provider_options(pool: &sqlx::PgPool, catalog_model_id: &Uuid, items: &[GatewayProviderOptionSyncInput]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
@@ -295,11 +265,6 @@ impl GatewayCatalogModel {
 			.execute(&mut *tx)
 			.await?;
 		}
-
-		sqlx::query("UPDATE gateway_catalog_models SET endpoints_fetched_at = NOW() WHERE id = $1")
-			.bind(catalog_model_id)
-			.execute(&mut *tx)
-			.await?;
 
 		tx.commit().await?;
 		Ok(())

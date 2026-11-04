@@ -449,7 +449,7 @@ mod usage {
 	async fn record(pool: &PgPool, metadata: &BTreeMap<String, String>) {
 		let queue = OxideCostQueue::spawn(job_state(pool.clone()));
 		let cost = CostDetails {
-			total: 0.0,
+			total: 7.0,
 			prompt: None,
 			completion: None,
 			reasoning: None,
