@@ -76,6 +76,33 @@ test.describe('web chat', () => {
 		await expectReplyCount(page, 1);
 		await expect.poll(async () => JSON.stringify(await api.get('/api/v1/me/analytics')) !== before, {timeout: 15_000}).toBe(true);
 	});
+
+	test('an image dropped onto the composer is attached', async ({page, t, seed}) => {
+		await page.route(/\/api\/v1\/models(\?|$)/, async route => {
+			const response = await route.fetch();
+			const body = await response.json();
+			for (const model of body.items ?? []) {
+				if (model.display_name === seed.model.displayName) model.input_modalities = [...new Set([...model.input_modalities, 'IMAGE'])];
+			}
+			await route.fulfill({response, json: body});
+		});
+		await page.goto('/');
+		await pickModel(page, t, seed.model.displayName);
+
+		const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+		const dataTransfer = await page.evaluateHandle(base64 => {
+			const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0));
+			const transfer = new DataTransfer();
+			transfer.items.add(new File([bytes], 'dot.png', {type: 'image/png'}));
+			return transfer;
+		}, png);
+		const composer = page.getByTestId('chat-composer');
+		await composer.dispatchEvent('dragenter', {dataTransfer});
+		await composer.dispatchEvent('dragover', {dataTransfer});
+		await composer.dispatchEvent('drop', {dataTransfer});
+
+		await expect(page.getByTestId('attached-image')).toHaveCount(1);
+	});
 });
 
 test.describe('chat navigation', () => {
