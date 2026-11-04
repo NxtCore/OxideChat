@@ -48,7 +48,7 @@ pub async fn chat_completions(
 	};
 	let admitted = match admit_inference(&state, scope, GatewayRoute::CHAT, &requested, estimate).await {
 		Ok(admitted) => admitted,
-		Err(response) => return response,
+		Err(response) => return *response,
 	};
 	let response = run_chat(request, admitted.inference, admitted.run).await;
 	gateway_limits::complete(&state, admitted.admission, response)
@@ -82,7 +82,7 @@ pub async fn responses(
 	};
 	let admitted = match admit_inference(&state, scope, GatewayRoute::RESPONSES, &requested, estimate).await {
 		Ok(admitted) => admitted,
-		Err(response) => return response,
+		Err(response) => return *response,
 	};
 	let response = run_responses(request, admitted.inference, admitted.run).await;
 	gateway_limits::complete(&state, admitted.admission, response)

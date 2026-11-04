@@ -19,7 +19,7 @@ impl Provider {
 			return Ok(None);
 		};
 
-		let api_key = api_key.map_or(existing.api_key.as_deref(), |value| value);
+		let api_key = api_key.unwrap_or(existing.api_key.as_deref());
 		let protected_headers = extra_headers
 			.map(|headers| encrypt_object_values(headers, Some(&existing.extra_headers.0)))
 			.transpose()

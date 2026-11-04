@@ -18,9 +18,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-async fn authenticate_owned(state: &JobState, headers: &HeaderMap, scope: &str) -> Result<GatewayAuthContext, (Response, Option<RequestLogOwner>)> {
+async fn authenticate_owned(state: &JobState, headers: &HeaderMap, scope: &str) -> Result<GatewayAuthContext, Box<(Response, Option<RequestLogOwner>)>> {
 	let Some(value) = headers.get(header::AUTHORIZATION).and_then(|value| value.to_str().ok()) else {
-		return Err((
+		return Err(Box::new((
 			error_response(
 				StatusCode::UNAUTHORIZED,
 				translation("gateway.errors.auth_missing"),
@@ -28,13 +28,13 @@ async fn authenticate_owned(state: &JobState, headers: &HeaderMap, scope: &str) 
 				"invalid_api_key",
 			),
 			None,
-		));
+		)));
 	};
 	let Some((scheme, token)) = value.split_once(' ') else {
-		return Err((invalid_bearer_response(), None));
+		return Err(Box::new((invalid_bearer_response(), None)));
 	};
 	if !scheme.eq_ignore_ascii_case("bearer") || token.is_empty() {
-		return Err((invalid_bearer_response(), None));
+		return Err(Box::new((invalid_bearer_response(), None)));
 	}
 	let context = crate::types::GatewayCredential::authenticate_with_owner(&state.db, token)
 		.await
@@ -62,7 +62,7 @@ async fn authenticate_owned(state: &JobState, headers: &HeaderMap, scope: &str) 
 			"permission_error",
 			"insufficient_scope",
 		);
-		return Err((response, Some(context.owner())));
+		return Err(Box::new((response, Some(context.owner()))));
 	}
 	Ok(context)
 }
@@ -188,18 +188,18 @@ pub async fn admit_inference<'a>(
 	route: GatewayRoute,
 	requested: &str,
 	estimate: impl FnOnce(&mut GatewayInference) -> GatewayEstimate,
-) -> Result<AdmittedInference<'a>, Response> {
+) -> Result<AdmittedInference<'a>, Box<Response>> {
 	let mut inference = match GatewayModel::resolve_inference(scope.db, scope.context, requested).await {
 		Ok(inference) => inference,
-		Err(error) => return Err(reject_model_access(&scope, None, error, requested).await),
+		Err(error) => return Err(Box::new(reject_model_access(&scope, None, error, requested).await)),
 	};
 	let estimate = estimate(&mut inference);
 	if let Err(error) = GatewayModel::reserve_budget(scope.db, &state.budget_ledger, scope.context, &mut inference, estimate.tokens()).await {
-		return Err(reject_model_access(&scope, Some(&inference), error, requested).await);
+		return Err(Box::new(reject_model_access(&scope, Some(&inference), error, requested).await));
 	}
 	let admission = match gateway_limits::admit(state, scope.context, route, estimate.limiter_tokens()).await {
 		Ok(admission) => admission,
-		Err(error) => return Err(reject_limited(&scope, &inference, error).await),
+		Err(error) => return Err(Box::new(reject_limited(&scope, &inference, error).await)),
 	};
 	let run = GatewayRun {
 		scope,
@@ -226,7 +226,8 @@ async fn authenticate_request(state: &JobState, mut request: Request, next: Next
 	}
 	let context = match authenticate_owned(state, request.headers(), scope).await {
 		Ok(context) => context,
-		Err((response, owner)) => {
+		Err(rejection) => {
+			let (response, owner) = *rejection;
 			let log = request.extensions().get::<RequestLogContext>().copied();
 			if let (Some(owner), Some(log)) = (owner.filter(|_| scope == INFERENCE_WRITE_SCOPE), log) {
 				let route = if request.uri().path().ends_with(GatewayRoute::RESPONSES.path) {
