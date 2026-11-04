@@ -152,6 +152,10 @@
 - Omniference is a major part of the application; developers may point Cargo at a local checkout with a patch override in `.cargo/config.toml`
 - A local reverse proxy must forward both `/api` and `/openai` to the backend, as `nginx.conf` does; otherwise the Playground gets a 404 from Nuxt
 
+## Branches and Pull Requests
+
+- Name branches, PR titles and PR descriptions as described in `CONTRIBUTING.md`; PR titles look like `[FEAT] - Add key expiry reminders`, and PRs are squash-merged, so the PR title becomes the commit subject on `master`
+
 ## Updating This Document
 
 - Update this file when adding new modules or restructuring code
