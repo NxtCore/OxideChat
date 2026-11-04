@@ -205,6 +205,9 @@ pub struct GatewayModelResponse {
 	pub model_id: String,
 	pub display_name: String,
 	pub provider: String,
+	#[serde(skip)]
+	#[cfg_attr(test, ts(skip))]
+	pub provider_kind: crate::types::providers::ProviderKind,
 	#[cfg_attr(test, ts(type = "Array<string>"))]
 	pub capabilities: Json<Vec<String>>,
 	#[cfg_attr(test, ts(type = "Array<string>"))]

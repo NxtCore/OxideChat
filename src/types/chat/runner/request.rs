@@ -3,7 +3,7 @@ use super::prepare::TurnError;
 use crate::ai;
 use crate::types::models::Model;
 use crate::types::models_configs::ModelConfig;
-use crate::types::{Message, StreamRequest, Tool, ToolFunction, User};
+use crate::types::{ChatSampling, Message, StreamRequest, Tool, ToolFunction, User};
 use omniference::Sampling;
 use omniference::types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec};
 use sqlx::PgPool;
@@ -14,6 +14,7 @@ pub(super) struct RequestInputs<'a> {
 	pub user: &'a User,
 	pub chat_id: &'a Uuid,
 	pub req: &'a StreamRequest,
+	pub chat_sampling: &'a ChatSampling,
 	pub model: &'a Model,
 	pub user_config: Option<&'a ModelConfig>,
 	pub system_config: Option<&'a ModelConfig>,
@@ -43,15 +44,18 @@ fn interpolate_system_prompt(template: &str, user: &User, model: &Model) -> Stri
 
 /// Merge sampling options with priority order:
 /// 1. Request-level (highest priority)
-/// 2. `model_configs` (user preferences)
-/// 3. models table (defaults)
-fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_config: Option<&ModelConfig>, model: &Model) -> Sampling {
+/// 2. Chat-level options the user saved on the chat
+/// 3. `model_configs` (user preferences)
+/// 4. models table (defaults)
+pub(crate) fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, chat_sampling: &ChatSampling, model_config: Option<&ModelConfig>, model: &Model) -> Sampling {
 	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.0.clone()).ok());
+	let chat_sampling = chat_sampling.to_sampling();
 
 	macro_rules! priority_field {
 		($field:ident) => {
 			request_sampling
 				.and_then(|s| s.$field.clone())
+				.or_else(|| chat_sampling.$field.clone())
 				.or_else(|| config_sampling.as_ref().and_then(|s| s.$field.clone()))
 		};
 	}
@@ -62,6 +66,7 @@ fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, model_confi
 		top_k: priority_field!(top_k),
 		max_tokens: request_sampling
 			.and_then(|s| s.max_tokens)
+			.or(chat_sampling.max_tokens)
 			.or_else(|| config_sampling.as_ref().and_then(|s| s.max_tokens))
 			.or_else(|| model_config.and_then(|mc| mc.max_output_tokens.map(|t| t as u32)))
 			.or_else(|| model.max_tokens.map(|tokens| tokens as u32)),
@@ -184,7 +189,8 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 	ir.stream = true;
 	ir.metadata.insert("user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), inputs.chat_id.to_string());
-	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), inputs.user_config, inputs.model);
+	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), inputs.chat_sampling, inputs.user_config, inputs.model);
+	ir.extra_body.clone_from(&inputs.chat_sampling.custom);
 	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, inputs.system_config);
 	Ok(ir)
 }

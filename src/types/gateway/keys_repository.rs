@@ -5,6 +5,7 @@ use super::{
 	UpdateGatewayKeyRequest, public_model_id,
 };
 use crate::logging::AuditLog;
+use crate::types::models::ModelPricing;
 use crate::types::{Budget, BudgetSubject, Team};
 use crate::utils::auth::hash_password;
 use chrono::{DateTime, Duration, Utc};
@@ -650,32 +651,31 @@ impl GatewayModelResponse {
 				m.model_id,
 				m.display_name,
 				p.name AS provider,
+				p.kind AS provider_kind,
 				COALESCE(sys_mc.capabilities, m.capabilities, '[]'::jsonb) AS capabilities,
 				COALESCE(sys_mc.input_modalities, m.input_modalities, '[]'::jsonb) AS input_modalities,
 				COALESCE(sys_mc.output_modalities, m.output_modalities, '[]'::jsonb) AS output_modalities,
 				COALESCE(sys_mc.context_length, m.context_length) AS context_length,
-				COALESCE((mpo.pricing->>'input')::numeric, reported.price_input) AS price_input,
-				COALESCE((mpo.pricing->>'output')::numeric, reported.price_output) AS price_output,
+				(mpo.pricing->>'input')::numeric AS price_input,
+				(mpo.pricing->>'output')::numeric AS price_output,
 				g.team_ids
 			FROM granted g
 			JOIN models m ON m.id = g.model_id
 			JOIN providers p ON p.id = m.provider_id
 			LEFT JOIN model_configs sys_mc ON sys_mc.model_id = m.id AND sys_mc.owner_id IS NULL
 			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
-			LEFT JOIN LATERAL (
-				SELECT MIN(o.price_input)::numeric AS price_input, MIN(o.price_output)::numeric AS price_output
-				FROM gateway_catalog_models gcm
-				JOIN gateway_model_provider_options o ON o.catalog_model_id = gcm.id
-				WHERE gcm.local_model_id = m.id
-			) reported ON TRUE
 			ORDER BY m.display_name, p.name
 			",
 		)
 		.bind(&team_ids)
 		.fetch_all(pool)
 		.await?;
+		let catalog = crate::ai::catalog();
 		for model in &mut models {
 			model.id = public_model_id(&model.provider, &model.model_id);
+			if model.price_input.is_none() && model.price_output.is_none() {
+				(model.price_input, model.price_output) = ModelPricing::catalog_rates(&catalog, &model.provider, &model.provider_kind, &model.model_id).await;
+			}
 		}
 		Ok(models)
 	}

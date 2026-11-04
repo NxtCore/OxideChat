@@ -5,6 +5,7 @@ pub mod budgets;
 pub mod catalog;
 pub mod chat_runner;
 pub mod chat_usage;
+pub mod chats;
 pub mod config;
 pub mod developer_keys;
 pub mod encryption;

@@ -131,6 +131,7 @@ pub async fn branch_from_message(State(state): State<Arc<JobState>>, user: AuthU
 		is_archived: new_chat.is_archived,
 		branched_from_chat_id: new_chat.branched_from_chat_id,
 		branched_from_message_id: new_chat.branched_from_message_id,
+		sampling: new_chat.sampling.0,
 		message_count,
 		last_message_at,
 		created_at: new_chat.created_at,

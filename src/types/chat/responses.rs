@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::config::OAuthProvider;
 use crate::types::models::Model;
-use super::{CostDetails, Message, ReasoningDetails, RequestSettings, ThemeCssVars, ToolExecutionResponse, UsageDetails, UserPreferences};
+use super::{ChatSampling, CostDetails, Message, ReasoningDetails, RequestSettings, ThemeCssVars, ToolExecutionResponse, UsageDetails, UserPreferences};
 
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Workspace"))]
@@ -65,6 +65,7 @@ pub struct ChatResponse {
 	pub branched_from_chat_id: Option<Uuid>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub branched_from_message_id: Option<Uuid>,
+	pub sampling: ChatSampling,
 	pub message_count: i64,
 	pub last_message_at: Option<DateTime<Utc>>,
 	pub created_at: DateTime<Utc>,

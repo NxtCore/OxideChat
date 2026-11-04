@@ -1,7 +1,7 @@
 pub(crate) mod agent;
 mod history;
 pub(crate) mod prepare;
-mod request;
+pub(crate) mod request;
 mod tools;
 
 pub use agent::stream_turn;

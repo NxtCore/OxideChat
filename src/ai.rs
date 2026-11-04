@@ -8,6 +8,7 @@
 
 use omniference::{
 	OmniferenceEngine,
+	catalog::Catalog,
 	types::{ProviderConfig, ProviderEndpoint},
 };
 use arc_swap::ArcSwap;
@@ -15,13 +16,15 @@ use sqlx::PgPool;
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::types::JobState;
-use crate::types::providers::Provider;
+use crate::types::models::ModelPricing;
+use crate::types::providers::{Provider, ProviderKind};
 use crate::utils::encryption::decrypt_api_key;
 use crate::utils::omniference_cost::OxideCostQueue;
 
 /// Someone kill me for this name please
 pub static OF_ENGINE: std::sync::OnceLock<ArcSwap<OmniferenceEngine>> = std::sync::OnceLock::new();
 static OF_COST_QUEUE: std::sync::OnceLock<Arc<OxideCostQueue>> = std::sync::OnceLock::new();
+static BUILT_IN_CATALOG: std::sync::OnceLock<Arc<Catalog>> = std::sync::OnceLock::new();
 
 /// Initialize the AI engine with providers from the database
 pub async fn init(state: &Arc<JobState>) {
@@ -67,7 +70,43 @@ async fn build_engine(pool: &PgPool, cost_sink: Arc<OxideCostQueue>) -> (Omnifer
 		}
 	}
 
+	load_pricing_overrides(pool, &engine).await;
 	(engine, providers.len())
+}
+
+/// Loads every manual model price into the engine's catalog, so Omniference prices requests with it.
+async fn load_pricing_overrides(pool: &PgPool, engine: &OmniferenceEngine) {
+	match ModelPricing::engine_overrides(pool).await {
+		Ok(overrides) => engine.service().catalog().replace_pricing_overrides(overrides).await,
+		Err(error) => tracing::error!("Failed to load manual model prices: {error}"),
+	}
+}
+
+/// The running engine's model catalog, or the built-in models.dev snapshot before the engine starts.
+#[must_use]
+pub fn catalog() -> Arc<Catalog> {
+	match OF_ENGINE.get() {
+		Some(engine) => engine.load().service().catalog(),
+		None => Arc::clone(BUILT_IN_CATALOG.get_or_init(|| Arc::new(Catalog::from_env().unwrap_or_default()))),
+	}
+}
+
+/// A provider config with only what catalog lookups read: the provider's name and kind.
+#[must_use]
+pub fn catalog_provider(name: &str, kind: &ProviderKind) -> ProviderConfig {
+	ProviderConfig {
+		name: name.to_string(),
+		endpoint: ProviderEndpoint {
+			kind: kind.to_omni_kind(),
+			base_url: String::new(),
+			api_key: None,
+			extra_headers: BTreeMap::new(),
+			timeout: None,
+			reported_cost: None,
+		},
+		enabled: true,
+		catalog_provider_slug: None,
+	}
 }
 
 /// Get the global AI engine
@@ -94,6 +133,7 @@ pub async fn reload_providers(pool: &PgPool) {
 	};
 	let (new_engine, provider_count) = build_engine(pool, cost_sink).await;
 	engine_arc.store(Arc::new(new_engine));
+	load_pricing_overrides(pool, &engine_arc.load()).await;
 	println!("[AI] Reloaded {} providers", provider_count);
 }
 

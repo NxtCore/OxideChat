@@ -120,6 +120,7 @@ pub struct Chat {
 	pub is_archived: bool,
 	pub branched_from_chat_id: Option<Uuid>,
 	pub branched_from_message_id: Option<Uuid>,
+	pub sampling: sqlx::types::Json<ChatSampling>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }

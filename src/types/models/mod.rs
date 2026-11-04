@@ -52,7 +52,7 @@ pub struct ModelSyncSummary {
 	pub removed: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModelPricing {
 	pub model_id: Uuid,
 	pub reported_input: Option<Decimal>,
