@@ -37,10 +37,14 @@ pub async fn init(state: &Arc<JobState>) {
 async fn build_engine(pool: &PgPool, cost_sink: Arc<OxideCostQueue>) -> (OmniferenceEngine, usize) {
 	let mut engine = OmniferenceEngine::with_cost_sink(cost_sink);
 	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
+	let reporting_cost = Provider::ids_with_cost_conversion(pool).await.unwrap_or_default();
 
 	for provider in &providers {
 		let config = match provider_to_config(provider) {
-			Ok(config) => config,
+			Ok(mut config) => {
+				config.endpoint.reports_cost = reporting_cost.contains(&provider.id);
+				config
+			}
 			Err(error) => {
 				tracing::error!(provider_id=%provider.id, "Failed to decrypt provider credential: {error}");
 				continue;
@@ -97,6 +101,7 @@ pub fn provider_to_config(provider: &Provider) -> Result<ProviderConfig, crate::
 			api_key,
 			extra_headers,
 			timeout: None,
+			reports_cost: provider.cost_conversion_factor.is_some(),
 		},
 		enabled: provider.is_enabled,
 		catalog_provider_slug: None,

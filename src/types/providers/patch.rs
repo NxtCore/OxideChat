@@ -4,6 +4,41 @@ use serde_json::Value;
 use uuid::Uuid;
 
 impl Provider {
+	/// Sets the factor applied to the cost this provider reports, or clears it.
+	///
+	/// # Errors
+	/// Returns a database error when the update fails.
+	pub async fn set_cost_conversion(pool: &sqlx::PgPool, id: &Uuid, factor: Option<rust_decimal::Decimal>) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Self>(
+			r#"
+			UPDATE providers SET cost_conversion_factor = $2, updated_at = NOW()
+			WHERE id = $1 AND owner_id IS NULL
+			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, cost_conversion_factor, created_at, updated_at
+			"#,
+		)
+		.bind(id)
+		.bind(factor)
+		.fetch_optional(pool)
+		.await
+	}
+
+	/// IDs of providers whose reported cost is used: those with a factor of their own or on one of their models.
+	///
+	/// # Errors
+	/// Returns a database error when the query fails.
+	pub async fn ids_with_cost_conversion(pool: &sqlx::PgPool) -> Result<std::collections::HashSet<Uuid>, sqlx::Error> {
+		let ids: Vec<Uuid> = sqlx::query_scalar(
+			r#"
+			SELECT id FROM providers WHERE cost_conversion_factor IS NOT NULL
+			UNION
+			SELECT provider_id FROM models WHERE cost_conversion_factor IS NOT NULL
+			"#,
+		)
+		.fetch_all(pool)
+		.await?;
+		Ok(ids.into_iter().collect())
+	}
+
 	#[allow(clippy::too_many_arguments)]
 	pub async fn patch_system(
 		pool: &sqlx::PgPool,
@@ -37,7 +72,7 @@ impl Provider {
 				is_enabled = COALESCE($7, is_enabled),
 				updated_at = NOW()
 			WHERE id = $1 AND owner_id IS NULL
-			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, created_at, updated_at
+			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, cost_conversion_factor, created_at, updated_at
 			"#,
 		)
 		.bind(id)

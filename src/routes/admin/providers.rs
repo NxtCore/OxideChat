@@ -7,7 +7,7 @@ use crate::types::consts::{ADMIN_PROVIDERS_EDIT, ADMIN_PROVIDERS_VIEW};
 use crate::types::{AppError, AuthUser, JobState};
 use crate::types::models::Model;
 use crate::types::providers::{
-	CreateProviderRequest, Provider, ProviderResponse, SyncProviderResponse, TestProviderRequest, TestProviderResponse, UpdateProviderRequest,
+	CreateProviderRequest, Provider, ProviderResponse, SyncProviderResponse, TestProviderRequest, TestProviderResponse, UpdateProviderRequest, valid_cost_conversion,
 };
 
 use crate::utils::encryption::{decrypt_api_key, encrypt_api_key};
@@ -54,10 +54,16 @@ pub async fn create_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 		ErrorCode::InternalError
 	})?;
 	let base_url = req.base_url.trim_end_matches('/').to_string();
+	if !valid_cost_conversion(req.cost_conversion_factor) {
+		return Err(ErrorCode::ValidationFailed.into());
+	}
 
-	let provider = Provider::create_system(&state.db, &req.kind, &req.name, &base_url, api_key.as_deref(), &req.extra_headers, req.is_enabled)
+	let mut provider = Provider::create_system(&state.db, &req.kind, &req.name, &base_url, api_key.as_deref(), &req.extra_headers, req.is_enabled)
 		.await
 		.map_err(|e| AppError::unique_or(e, ErrorCode::AlreadyExists))?;
+	if req.cost_conversion_factor.is_some() {
+		provider = Provider::set_cost_conversion(&state.db, &provider.id, req.cost_conversion_factor).await?.ok_or(ErrorCode::NotFound)?;
+	}
 
 	reload_providers(&state.db).await;
 	if provider.is_enabled
@@ -75,11 +81,14 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
 
 	let base_url = req.base_url.as_deref().map(|url| url.trim_end_matches('/').to_string());
+	if !valid_cost_conversion(req.cost_conversion_factor.flatten()) {
+		return Err(ErrorCode::ValidationFailed.into());
+	}
 	let api_key = req.api_key.as_deref().map(encrypt_api_key).transpose().map_err(|error| {
 		tracing::error!("Failed to encrypt provider credential: {error}");
 		ErrorCode::InternalError
 	})?;
-	let provider = Provider::patch_system(
+	let mut provider = Provider::patch_system(
 		&state.db,
 		&id,
 		req.kind.as_ref(),
@@ -91,6 +100,9 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 	)
 	.await?
 	.ok_or(ErrorCode::NotFound)?;
+	if let Some(factor) = req.cost_conversion_factor {
+		provider = Provider::set_cost_conversion(&state.db, &id, factor).await?.ok_or(ErrorCode::NotFound)?;
+	}
 
 	reload_providers(&state.db).await;
 	if provider.is_enabled
@@ -138,6 +150,7 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, auth: AuthUser, P
 			api_key,
 			extra_headers,
 			timeout: None,
+			reports_cost: false,
 		},
 		enabled: true,
 		catalog_provider_slug: None,
@@ -169,6 +182,7 @@ pub async fn test_provider_inline(State(state): State<Arc<JobState>>, auth: Auth
 			api_key: req.api_key,
 			extra_headers,
 			timeout: None,
+			reports_cost: false,
 		},
 		enabled: true,
 		catalog_provider_slug: None,

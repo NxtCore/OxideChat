@@ -176,6 +176,12 @@
 								<ShadInput id="base-url" v-model="configForm.baseUrl" type="text" :placeholder="selectedProvider?.defaultBaseUrl || 'https://api.example.com'" />
 							</div>
 
+							<div class="space-y-2">
+								<ShadLabel for="cost-conversion">{{ store.getTranslation('settings.providers.cost_conversion') }}</ShadLabel>
+								<ShadInput id="cost-conversion" v-model="configForm.costConversion" type="number" min="0" step="any" data-testid="provider-cost-conversion" />
+								<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.providers.cost_conversion_hint') }}</p>
+							</div>
+
 							<ShadButton variant="outline" size="sm" class="gap-2" :disabled="!canTestConnection || testing" data-testid="provider-test" @click="testConnection">
 								<Loader2 v-if="testing" class="h-4 w-4 animate-spin" />
 								<PlugZap v-else class="h-4 w-4" />
@@ -396,6 +402,7 @@ const configForm = reactive({
 	apiKey: '',
 	baseUrl: '',
 	isEnabled: true,
+	costConversion: '',
 	existingProvider: null as ConfiguredProvider | null,
 });
 
@@ -479,12 +486,14 @@ function openConfigDialog(item: any) {
 		configForm.apiKey = '';
 		configForm.baseUrl = item.base_url;
 		configForm.isEnabled = item.is_enabled;
+		configForm.costConversion = item.cost_conversion_factor ?? '';
 		configForm.existingProvider = item;
 	} else {
 		configForm.name = item.name;
 		configForm.apiKey = '';
 		configForm.baseUrl = item.template?.defaultBaseUrl || '';
 		configForm.isEnabled = true;
+		configForm.costConversion = '';
 		configForm.existingProvider = null;
 	}
 
@@ -716,6 +725,11 @@ async function testConnection() {
 
 async function saveConfig() {
 	if (!selectedProvider.value) return;
+	const costConversion = String(configForm.costConversion ?? '').trim();
+	if (costConversion !== '' && !(Number(costConversion) > 0)) {
+		store.toast(store.getTranslation('settings.providers.cost_conversion_invalid'), {type: 'error'});
+		return;
+	}
 
 	saving.value = true;
 	try {
@@ -724,6 +738,7 @@ async function saveConfig() {
 			name: configForm.name || selectedProvider.value.name,
 			base_url: configForm.baseUrl || selectedProvider.value.defaultBaseUrl || '',
 			is_enabled: configForm.isEnabled,
+			cost_conversion_factor: costConversion === '' ? null : costConversion,
 		};
 
 		if (configForm.apiKey) {

@@ -18,6 +18,8 @@ pub struct ProviderResponse {
 	#[cfg_attr(test, ts(type = "any"))]
 	pub extra_headers: Value,
 	pub is_enabled: bool,
+	#[cfg_attr(test, ts(type = "string | null"))]
+	pub cost_conversion_factor: Option<rust_decimal::Decimal>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }
@@ -64,6 +66,7 @@ impl From<Provider> for ProviderResponse {
 			has_api_key: provider.api_key.is_some(),
 			extra_headers: mask_object_values(&provider.extra_headers.0),
 			is_enabled: provider.is_enabled,
+			cost_conversion_factor: provider.cost_conversion_factor,
 			created_at: provider.created_at,
 			updated_at: provider.updated_at,
 		}

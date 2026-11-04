@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS providers (
     api_key TEXT,  -- Encrypted if ENCRYPTION_KEY set, else plaintext
     extra_headers JSONB DEFAULT '{}',
     is_enabled BOOLEAN DEFAULT true,
+    cost_conversion_factor NUMERIC CHECK (cost_conversion_factor > 0),  -- multiplies provider-reported cost; NULL = not reported
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(owner_id, name)
@@ -156,6 +157,7 @@ CREATE TABLE IF NOT EXISTS models (
     context_length INTEGER,
     max_tokens INTEGER,
     is_enabled BOOLEAN DEFAULT true,
+    cost_conversion_factor NUMERIC CHECK (cost_conversion_factor > 0),  -- overrides the provider's factor for this model
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(provider_id, model_id)
@@ -1105,6 +1107,11 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.provider_selector.title', 'Anbieter'),
     ('de', 'chat.provider_selector.unavailable_for_key', 'Dieses Modell ist für den konfigurierten Schlüssel deaktiviert'),
     ('de', 'chat.reasoning_selector.disabled', 'Deaktiviert'),
+    ('de', 'settings.providers.cost_conversion', 'Kostenumrechnungsfaktor'),
+    ('de', 'settings.providers.cost_conversion_hint', 'Rechnet die Kosten, die dieser Anbieter in seinen Antworten meldet (Credits oder eine andere Währung), in deine Abrechnungswährung um. Leer lassen, um Anfragen über Tokenpreise zu berechnen.'),
+    ('de', 'settings.providers.cost_conversion_invalid', 'Der Kostenumrechnungsfaktor muss eine positive Zahl sein'),
+    ('de', 'settings.models.editor.cost_conversion', 'Kostenumrechnungsfaktor'),
+    ('de', 'settings.models.editor.cost_conversion_hint', 'Überschreibt den Faktor des Anbieters für dieses Modell. Leer lassen, um den Faktor des Anbieters zu nutzen, der als Platzhalter angezeigt wird.'),
     ('de', 'chat.reasoning_selector.extra_high', 'Sehr Hoch'),
     ('de', 'chat.reasoning_selector.high', 'Hoch'),
     ('de', 'chat.reasoning_selector.low', 'Niedrig'),
@@ -1973,6 +1980,11 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.provider_selector.title', 'Provider'),
     ('en', 'chat.provider_selector.unavailable_for_key', 'This model is disabled for the configured key'),
     ('en', 'chat.reasoning_selector.disabled', 'Disabled'),
+    ('en', 'settings.providers.cost_conversion', 'Cost conversion factor'),
+    ('en', 'settings.providers.cost_conversion_hint', 'Multiplies the cost this provider reports in its responses (credits or another currency) into your billing currency. Leave empty to price requests from token prices.'),
+    ('en', 'settings.providers.cost_conversion_invalid', 'The cost conversion factor must be a positive number'),
+    ('en', 'settings.models.editor.cost_conversion', 'Cost conversion factor'),
+    ('en', 'settings.models.editor.cost_conversion_hint', 'Overrides the provider''s factor for this model. Leave empty to use the provider''s factor, shown as the placeholder.'),
     ('en', 'chat.reasoning_selector.extra_high', 'Extra High'),
     ('en', 'chat.reasoning_selector.high', 'High'),
     ('en', 'chat.reasoning_selector.low', 'Low'),

@@ -45,6 +45,19 @@
 				</div>
 			</div>
 			<p class="mt-2 text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.pricing_unit') }}</p>
+			<div class="mt-4 space-y-1.5 md:w-1/2">
+				<ShadLabel for="model-cost-conversion">{{ store.getTranslation('settings.models.editor.cost_conversion') }}</ShadLabel>
+				<ShadInput
+					id="model-cost-conversion"
+					v-model="form.cost_conversion"
+					type="number"
+					min="0"
+					step="any"
+					:placeholder="pricing?.provider_cost_conversion_factor ?? ''"
+					data-testid="pricing-cost-conversion"
+				/>
+				<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.cost_conversion_hint') }}</p>
+			</div>
 		</div>
 
 		<div v-if="!providerOptionsLoading && providerParentUnavailable" class="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">

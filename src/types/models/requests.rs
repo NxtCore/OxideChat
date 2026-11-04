@@ -32,6 +32,8 @@ pub struct AdminModelPatchBody {
 	pub reasoning_effort: Option<Option<String>>,
 	pub reasoning_budget_tokens: Option<Option<u32>>,
 	pub pricing: Option<omniference::catalog::ModelPricing>,
+	#[serde(default, deserialize_with = "crate::types::deserialize_nullable_field")]
+	pub cost_conversion_factor: Option<Option<rust_decimal::Decimal>>,
 }
 
 #[derive(Debug, Deserialize)]

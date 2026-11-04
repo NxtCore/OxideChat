@@ -168,6 +168,10 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, auth: AuthUser, Pat
 		None => None,
 	};
 
+	if !crate::types::providers::valid_cost_conversion(req.cost_conversion_factor.flatten()) {
+		return Err(ErrorCode::ValidationFailed.into());
+	}
+
 	let mut tx = state.db.begin().await?;
 
 	if req.display_name.is_some() || req.is_enabled.is_some() {
@@ -245,8 +249,14 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, auth: AuthUser, Pat
 		})?;
 		ModelPricing::store_override(&mut *tx, &id, &pricing_json).await?;
 	}
+	if let Some(factor) = req.cost_conversion_factor {
+		Model::set_cost_conversion(&mut tx, &id, factor).await?;
+	}
 
 	tx.commit().await?;
+	if req.cost_conversion_factor.is_some() {
+		crate::ai::reload_providers(&state.db).await;
+	}
 
 	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).build())
 }

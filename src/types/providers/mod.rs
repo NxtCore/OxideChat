@@ -53,6 +53,7 @@ pub struct Provider {
 	pub api_key: Option<String>,
 	pub extra_headers: Json<Value>,
 	pub is_enabled: bool,
+	pub cost_conversion_factor: Option<rust_decimal::Decimal>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }

@@ -576,13 +576,16 @@ impl ModelPricing {
 				MIN(gmpo.price_output)::numeric AS reported_output,
 				mpo.pricing AS override_pricing,
 				COALESCE((mpo.pricing->>'input')::numeric, MIN(gmpo.price_input)::numeric, 0) AS effective_input,
-				COALESCE((mpo.pricing->>'output')::numeric, MIN(gmpo.price_output)::numeric, 0) AS effective_output
+				COALESCE((mpo.pricing->>'output')::numeric, MIN(gmpo.price_output)::numeric, 0) AS effective_output,
+				m.cost_conversion_factor,
+				p.cost_conversion_factor AS provider_cost_conversion_factor
 			FROM models m
+			JOIN providers p ON p.id = m.provider_id
 			LEFT JOIN gateway_catalog_models gcm ON gcm.local_model_id = m.id
 			LEFT JOIN gateway_model_provider_options gmpo ON gmpo.catalog_model_id = gcm.id
 			LEFT JOIN model_pricing_overrides mpo ON mpo.model_id = m.id
 			WHERE m.id = $1
-			GROUP BY m.id, mpo.pricing
+			GROUP BY m.id, mpo.pricing, p.cost_conversion_factor
 			"#,
 		)
 		.bind(model_id)
@@ -625,13 +628,31 @@ impl ModelPricing {
 		Ok(())
 	}
 
-	/// Sets `record.cost_total`: the provider-reported cost when present, else local pricing, else `fallback_cost`.
+	/// The factor applied to a model's provider-reported cost: the model's own, else its provider's.
+	///
+	/// # Errors
+	/// Returns an error when the factor cannot be loaded.
+	pub async fn cost_conversion(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<Option<Decimal>, sqlx::Error> {
+		let factor: Option<Option<Decimal>> = sqlx::query_scalar(
+			"SELECT COALESCE(m.cost_conversion_factor, p.cost_conversion_factor) FROM models m JOIN providers p ON p.id = m.provider_id WHERE m.id = $1",
+		)
+		.bind(model_id)
+		.fetch_optional(pool)
+		.await?;
+		Ok(factor.flatten())
+	}
+
+	/// Sets `record.cost_total`: the provider-reported cost when present (times the model's cost
+	/// conversion factor), else local pricing, else `fallback_cost`.
 	///
 	/// # Errors
 	/// Returns an error when local pricing cannot be loaded.
 	pub async fn price(pool: &sqlx::PgPool, provider_cost: Option<f64>, fallback_cost: f64, record: &mut UsageEventRecord<'_>) -> Result<(), sqlx::Error> {
 		record.cost_total = match provider_cost.and_then(Decimal::from_f64) {
-			Some(cost) => cost,
+			Some(cost) => match Self::cost_conversion(pool, record.model_id).await? {
+				Some(factor) => cost * factor,
+				None => cost,
+			},
 			None => Self::usage_cost(pool, record.model_id, record.input_tokens, record.output_tokens, record.reasoning_tokens)
 				.await?
 				.unwrap_or_else(|| Decimal::from_f64(fallback_cost).unwrap_or(Decimal::ZERO)),
