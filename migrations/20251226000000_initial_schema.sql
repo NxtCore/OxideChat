@@ -509,6 +509,7 @@ CREATE TABLE IF NOT EXISTS gateway_catalog_models (
     reason TEXT,
     raw JSONB NOT NULL DEFAULT '{}',
     fetched_at TIMESTAMPTZ,
+    endpoints_fetched_at TIMESTAMPTZ,               -- last provider options fetch
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (provider_id, source_gateway, gateway_model_id)

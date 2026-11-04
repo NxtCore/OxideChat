@@ -6,7 +6,7 @@ use crate::types::providers::Provider;
 use crate::types::request_logs::RequestLog;
 use crate::types::tools::McpServer;
 use crate::utils::provider_billing::refresh_provider_billing;
-use crate::utils::providers::sync_provider_models;
+use crate::utils::providers::{sync_due_endpoint_options, sync_provider_models};
 use futures_util::{StreamExt, stream};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -84,6 +84,11 @@ pub async fn sync_provider_models_once(state: &super::JobState) {
 							summary.models_updated,
 							summary.models_removed
 						);
+						match sync_due_endpoint_options(&state.db, &provider).await {
+							Ok(0) => {}
+							Ok(count) => tracing::info!("[JOBS] Refreshed endpoint prices of {count} models for '{}'", provider.name),
+							Err(e) => tracing::error!("[JOBS] Failed to load models due for endpoint prices of '{}': {e}", provider.name),
+						}
 					}
 					Err(e) => {
 						tracing::error!("[JOBS] Failed to sync provider '{}': {e}", provider.name);

@@ -50,6 +50,7 @@
 - `src/routes/gateway/` - OpenAI-compatible gateway handlers (moved from `src/utils/openai_gateway.rs`)
 - `src/types/chat/runner/` - Agent loop for web chat (`prepare_turn`, `stream_turn`): history, request building, tool calls
 - `src/types/tools/` - One file per entity (`tool.rs`, `tool_function.rs`, `tool_execution.rs`, `wasm_blob.rs`, `mcp_server.rs`); `McpScope` (`mcp_scope.rs`) separates admin-wide and per-user MCP servers
+- OpenRouter endpoint prices (`gateway_model_provider_options`): the provider sync job fetches them for linked runnable models that have none or whose `endpoints_fetched_at` is older than 6 hours (`sync_due_endpoint_options`, at most 50 per run, 4 at a time); opening a model still fetches them on demand, and until then `ModelPricing::effective` uses the catalog price
 - `src/types/page.rs` - `PageQuery` (`page`, `size`) and `Page<T>` (`has_more`, `items`) for paginated endpoints
 - `src/types/usage/` - Usage events; `ChatUsageGuard` records a chat stream's usage once, even if the client disconnects
 - `src/types/user/sessions.rs` - A user's login sessions; the session ID is the login cookie's value, so clients only ever see `User::session_public_id` (its SHA-256 hash)

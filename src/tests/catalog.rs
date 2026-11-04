@@ -200,3 +200,125 @@ mod tests {
 		assert!(result.options.is_empty());
 	}
 }
+
+#[cfg(test)]
+mod endpoint_sync {
+	use crate::types::catalog::{GatewayCatalogModel, GatewayCatalogSyncInput, GatewayProviderOptionSyncInput};
+	use crate::types::providers::Provider;
+	use crate::utils::providers::sync_due_endpoint_options;
+	use axum::Json;
+	use axum::extract::Path;
+	use axum::http::StatusCode;
+	use axum::routing::get;
+	use serde_json::{Value, json};
+	use sqlx::PgPool;
+	use std::error::Error;
+	use uuid::Uuid;
+
+	type TestResult = Result<(), Box<dyn Error>>;
+
+	const GATEWAY: &str = "openrouter";
+	const SIX_HOURS: f64 = 6.0 * 3600.0;
+
+	async fn provider(pool: &PgPool, base_url: &str) -> Result<Uuid, sqlx::Error> {
+		sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, is_enabled) VALUES ('OPENROUTER', 'OpenRouter', $1, true) RETURNING id")
+			.bind(base_url)
+			.fetch_one(pool)
+			.await
+	}
+
+	async fn model(pool: &PgPool, provider_id: &Uuid, model_id: &str) -> Result<Uuid, sqlx::Error> {
+		sqlx::query_scalar(
+			"INSERT INTO models (provider_id, model_id, display_name, capabilities, input_modalities, output_modalities, is_enabled) VALUES ($1, $2, $2, '[]', '[\"text\"]', '[\"text\"]', true) RETURNING id",
+		)
+		.bind(provider_id)
+		.bind(model_id)
+		.fetch_one(pool)
+		.await
+	}
+
+	async fn catalog(pool: &PgPool, provider_id: &Uuid, ids: &[&str], runnable: &[&str]) -> Result<(), sqlx::Error> {
+		let inputs: Vec<GatewayCatalogSyncInput> = ids
+			.iter()
+			.map(|id| GatewayCatalogSyncInput {
+				gateway_model_id: (*id).to_string(),
+				display_name: (*id).to_string(),
+				raw: json!({"id": id}),
+			})
+			.collect();
+		GatewayCatalogModel::upsert_public_catalog(pool, provider_id, GATEWAY, &inputs).await?;
+		let runnable: Vec<String> = runnable.iter().map(|id| (*id).to_string()).collect();
+		GatewayCatalogModel::mark_availability(pool, provider_id, GATEWAY, &runnable).await?;
+		GatewayCatalogModel::refresh_local_model_ids(pool, provider_id, GATEWAY, "OpenRouter").await
+	}
+
+	async fn catalog_id(pool: &PgPool, gateway_model_id: &str) -> Result<Uuid, sqlx::Error> {
+		sqlx::query_scalar("SELECT id FROM gateway_catalog_models WHERE gateway_model_id = $1").bind(gateway_model_id).fetch_one(pool).await
+	}
+
+	async fn endpoints(Path((author, slug)): Path<(String, String)>) -> Result<Json<Value>, StatusCode> {
+		if slug == "broken" {
+			return Err(StatusCode::INTERNAL_SERVER_ERROR);
+		}
+		Ok(Json(json!({"data": {"id": format!("{author}/{slug}"), "endpoints": [
+			{"name": "OpenAI", "provider_name": "OpenAI", "tag": "openai", "pricing": {"prompt": "0.0000025", "completion": "0.00001"}}
+		]}})))
+	}
+
+	async fn fake_openrouter() -> Result<String, std::io::Error> {
+		let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+		let address = listener.local_addr()?;
+		let app = axum::Router::new().route("/v1/models/{author}/{slug}/endpoints", get(endpoints));
+		tokio::spawn(async move { axum::serve(listener, app).await });
+		Ok(format!("http://{address}"))
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn only_linked_runnable_models_without_fresh_options_are_due(pool: PgPool) -> TestResult {
+		let provider_id = provider(&pool, "https://openrouter.ai/api").await?;
+		let fresh = model(&pool, &provider_id, "openrouter/openai/gpt-4o").await?;
+		let stale = model(&pool, &provider_id, "openrouter/openai/gpt-4o-mini").await?;
+		let never = model(&pool, &provider_id, "openrouter/openai/o3").await?;
+		model(&pool, &provider_id, "openrouter/openai/blocked").await?;
+		catalog(
+			&pool,
+			&provider_id,
+			&["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o3", "openai/blocked", "openai/unlinked"],
+			&["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o3", "openai/unlinked"],
+		)
+		.await?;
+
+		for id in ["openai/gpt-4o", "openai/gpt-4o-mini"] {
+			GatewayCatalogModel::upsert_provider_options(&pool, &catalog_id(&pool, id).await?, &[] as &[GatewayProviderOptionSyncInput]).await?;
+		}
+		sqlx::query("UPDATE gateway_catalog_models SET endpoints_fetched_at = NOW() - INTERVAL '7 hours' WHERE gateway_model_id = 'openai/gpt-4o-mini'")
+			.execute(&pool)
+			.await?;
+
+		let due = GatewayCatalogModel::models_due_for_endpoints(&pool, &provider_id, GATEWAY, SIX_HOURS, 10).await?;
+		assert_eq!(due, vec![never, stale]);
+		assert!(!due.contains(&fresh));
+		assert_eq!(GatewayCatalogModel::models_due_for_endpoints(&pool, &provider_id, GATEWAY, SIX_HOURS, 1).await?, vec![never]);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn model_sync_fetches_endpoint_prices_before_a_model_is_opened(pool: PgPool) -> TestResult {
+		let provider_id = provider(&pool, &fake_openrouter().await?).await?;
+		let gpt = model(&pool, &provider_id, "openrouter/openai/gpt-4o").await?;
+		let broken = model(&pool, &provider_id, "openrouter/openai/broken").await?;
+		catalog(&pool, &provider_id, &["openai/gpt-4o", "openai/broken"], &["openai/gpt-4o", "openai/broken"]).await?;
+		let provider = Provider::find_for_admin(&pool, &provider_id).await?.ok_or("provider missing")?;
+
+		assert_eq!(sync_due_endpoint_options(&pool, &provider).await?, 1);
+		let options = GatewayCatalogModel::provider_options_for_model(&pool, &gpt).await?.options;
+		assert_eq!(options.len(), 1);
+		assert_eq!(options[0].price_input, Some(2.5));
+		assert_eq!(options[0].price_output, Some(10.0));
+
+		let due = GatewayCatalogModel::models_due_for_endpoints(&pool, &provider_id, GATEWAY, SIX_HOURS, 10).await?;
+		assert_eq!(due, vec![broken]);
+		assert_eq!(sync_due_endpoint_options(&pool, &provider).await?, 0);
+		Ok(())
+	}
+}
