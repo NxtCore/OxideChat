@@ -3,8 +3,8 @@ use super::prepare::PreparedTurn;
 use super::tools::{execute_tool_by_name, get_client_tool_info};
 use crate::ai;
 use crate::types::{
-	ChatMessageResponse, ChatUsageGuard, PendingCall, CostDetails, JobState, Message, MessagePart, ReasoningDetails, RequestSettings, StreamData,
-	StreamingAssistantMessageCreate, ToolExecution, ToolExecutionInternal, UsageDetails,
+	BUDGET_RESERVATION_METADATA_KEY, BudgetError, BudgetReservation, BudgetSubject, ChatMessageResponse, CostDetails, JobState, Message, MessagePart, PendingCall,
+	ReasoningDetails, RequestSettings, StreamData, StreamingAssistantMessageCreate, TokenEstimate, ToolExecution, ToolExecutionInternal, UsageDetails,
 };
 use axum::response::sse::Event;
 use futures_util::{Stream, StreamExt};
@@ -43,12 +43,21 @@ struct IterationState {
 	content: String,
 	reasoning: String,
 	completed_tool_calls: Vec<(String, String, serde_json::Value)>,
-	provider_cost: Option<f64>,
+}
+
+/// Tokens used by every request of a turn, shown on the message.
+#[derive(Default)]
+pub(crate) struct TokenTotals {
+	pub(crate) input: u32,
+	pub(crate) output: u32,
+	pub(crate) reasoning: u32,
 }
 
 pub(crate) struct AgentRun {
 	state: Arc<JobState>,
-	pub(crate) usage: ChatUsageGuard,
+	reservation: Option<BudgetReservation>,
+	output_estimate: u64,
+	pub(crate) tokens: TokenTotals,
 	user_id: Uuid,
 	chat_id: Uuid,
 	model_id: Uuid,
@@ -82,13 +91,56 @@ fn error_event(code: &str, message: impl Into<String>) -> StreamData {
 	}
 }
 
+/// Why the next request of a turn cannot be sent.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct StepError {
+	pub(crate) code: &'static str,
+	message: &'static str,
+}
+
+impl StepError {
+	const MAX_ITERATIONS: Self = Self {
+		code: "max_iterations",
+		message: "Maximum tool call iterations reached",
+	};
+	const BUDGET_EXCEEDED: Self = Self {
+		code: "budget_exceeded",
+		message: "Budget exceeded for this model",
+	};
+	const BUDGET_UNAVAILABLE: Self = Self {
+		code: "internal_error",
+		message: "Failed to check budget status",
+	};
+
+	fn event(&self) -> StreamData {
+		error_event(self.code, self.message)
+	}
+}
+
+fn add_cost(total: &mut Option<f64>, cost: Option<f64>) {
+	if let Some(cost) = cost {
+		*total = Some(total.unwrap_or(0.0) + cost);
+	}
+}
+
+fn prompt_bytes(messages: &[OmniMessage]) -> u64 {
+	let part_bytes = |part: &ContentPart| match part {
+		ContentPart::Text(text) => text.len(),
+		ContentPart::ToolCall { arguments, .. } => arguments.len(),
+		_ => 0,
+	};
+	messages.iter().flat_map(|message| &message.parts).map(part_bytes).sum::<usize>() as u64
+}
+
 impl AgentRun {
 	pub(crate) fn new(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant) -> Self {
 		let mut base_ir = turn.ir;
 		let current_messages = std::mem::take(&mut base_ir.messages);
 		Self {
 			state,
-			usage: turn.usage,
+			reservation: turn.reservation,
+			output_estimate: turn.output_estimate,
+			tokens: TokenTotals::default(),
 			user_id: turn.user_id,
 			chat_id: turn.chat_id,
 			model_id: turn.model_id,
@@ -112,18 +164,47 @@ impl AgentRun {
 		}
 	}
 
-	#[allow(clippy::result_large_err)]
-	pub(crate) fn next_request(&mut self) -> Result<ChatRequestIR, StreamData> {
+	/// Builds the next request of the turn. Every request after the first reserves its own budget,
+	/// which Omniference's cost record settles once the request ends.
+	pub(crate) async fn next_request(&mut self) -> Result<ChatRequestIR, StepError> {
 		self.iteration += 1;
 		if self.iteration > MAX_ITERATIONS {
 			tracing::warn!(max_iterations = MAX_ITERATIONS, "max agentic iterations reached");
-			return Err(error_event("max_iterations", "Maximum tool call iterations reached"));
+			return Err(StepError::MAX_ITERATIONS);
 		}
 		self.step = IterationState::default();
-		self.usage.start_iteration();
+		if self.iteration > 1 {
+			self.reservation = None;
+			self.reservation = self.reserve_step().await?;
+		}
 		let mut ir = self.base_ir.clone();
 		ir.messages = self.current_messages.clone();
+		if let Some(reservation) = &self.reservation {
+			ir.metadata.insert(BUDGET_RESERVATION_METADATA_KEY.to_string(), reservation.id.to_string());
+		}
 		Ok(ir)
+	}
+
+	async fn reserve_step(&self) -> Result<Option<BudgetReservation>, StepError> {
+		let estimate = TokenEstimate {
+			input: TokenEstimate::input_for_bytes(prompt_bytes(&self.current_messages)),
+			output: self.output_estimate,
+		};
+		match self.state.budget_ledger.reserve_for_model(&self.state.db, BudgetSubject::user(self.user_id), &self.model_id, estimate).await {
+			Ok(admission) => Ok(admission.reservation),
+			Err(BudgetError::Exceeded) => Err(StepError::BUDGET_EXCEEDED),
+			Err(error) => {
+				tracing::error!(%error, "failed to check budget status");
+				Err(StepError::BUDGET_UNAVAILABLE)
+			}
+		}
+	}
+
+	/// Saves what earlier requests of the turn produced when a later one cannot run, so a turn
+	/// stopped by its budget or the iteration limit keeps its answer so far.
+	pub(crate) async fn save_partial(&mut self) -> Option<StreamData> {
+		let produced = !self.full_content.is_empty() || !self.all_tool_executions.is_empty() || !self.step.content.is_empty();
+		if produced { Some(self.finalize_turn().await) } else { None }
 	}
 
 	fn chat_failed(&self, error: &impl std::fmt::Display) -> StreamData {
@@ -164,28 +245,27 @@ impl AgentRun {
 				Some(StreamData::ToolCallDelta { id, args_delta: delta_str })
 			}
 			StreamEvent::Tokens { input, output } => {
-				self.usage.input_tokens += input;
-				self.usage.output_tokens += output;
+				self.tokens.input += input;
+				self.tokens.output += output;
 				Some(StreamData::Tokens {
-					input: self.usage.input_tokens,
-					output: self.usage.output_tokens,
-					reasoning: if self.usage.reasoning_tokens > 0 { Some(self.usage.reasoning_tokens) } else { None },
+					input: self.tokens.input,
+					output: self.tokens.output,
+					reasoning: if self.tokens.reasoning > 0 { Some(self.tokens.reasoning) } else { None },
 				})
 			}
 			StreamEvent::OpenAIMetadata { completion_tokens_details, .. } => {
 				if let Some(details) = completion_tokens_details
 					&& details.reasoning_tokens > 0 {
-						self.usage.reasoning_tokens += details.reasoning_tokens;
+						self.tokens.reasoning += details.reasoning_tokens;
 					}
 				None
 			}
 			StreamEvent::Error { code, message } => Some(StreamData::Error { code, message }),
 			StreamEvent::Cost { cost } => {
-				self.cost_details.input = cost.prompt;
-				self.cost_details.output = cost.completion;
-				self.cost_details.reasoning = cost.reasoning;
-				self.cost_details.total = Some(cost.total);
-				self.step.provider_cost = Some(cost.total);
+				add_cost(&mut self.cost_details.input, cost.prompt);
+				add_cost(&mut self.cost_details.output, cost.completion);
+				add_cost(&mut self.cost_details.reasoning, cost.reasoning);
+				add_cost(&mut self.cost_details.total, Some(cost.total));
 				Some(StreamData::Usage { cost_details: self.cost_details })
 			}
 			_ => None,
@@ -264,9 +344,6 @@ impl AgentRun {
 	}
 
 	pub(crate) async fn finish_iteration(&mut self) -> Finish {
-		if let Some(cost) = self.step.provider_cost.take() {
-			self.usage.add_provider_cost(cost);
-		}
 		if self.step.tool_results.is_empty() {
 			Finish::Stop(self.finalize_turn().await)
 		} else {
@@ -335,9 +412,9 @@ impl AgentRun {
 
 	async fn save_message(&mut self) -> Result<Message, sqlx::Error> {
 		let usage_details = UsageDetails {
-			input_tokens: Some(self.usage.input_tokens as i32),
-			output_tokens: Some(self.usage.output_tokens as i32),
-			reasoning_tokens: Some(self.usage.reasoning_tokens as i32),
+			input_tokens: Some(self.tokens.input as i32),
+			output_tokens: Some(self.tokens.output as i32),
+			reasoning_tokens: Some(self.tokens.reasoning as i32),
 			latency_ms: Some(self.start_time.elapsed().as_millis() as i32),
 			reasoning_latency_ms: self.reasoning_latency_ms,
 		};
@@ -387,10 +464,6 @@ impl AgentRun {
 				return error_event("save_failed", "Failed to save response");
 			}
 		};
-		if let Err(error) = self.usage.record().await {
-			tracing::error!(%error, message_id = %msg.id, "failed to record usage event");
-			return error_event("accounting_failed", "Failed to record usage");
-		}
 		if !self.all_tool_executions.is_empty()
 			&& let Err(error) = ToolExecution::create_for_message_batch(&self.state.db, &msg.id, &self.all_tool_executions).await {
 				tracing::error!(%error, message_id = %msg.id, "failed to save tool executions");
@@ -402,8 +475,8 @@ impl AgentRun {
 
 /// Streams one chat turn to the client as SSE events.
 ///
-/// The usage guard lives inside the returned stream, so dropping the stream (client disconnect)
-/// cancels the loop and records any consumed tokens.
+/// Omniference records each request's usage and cost through `OxideCostSink`, also when the
+/// client disconnects and the stream is dropped mid-request.
 pub fn stream_turn(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant) -> impl Stream<Item = Result<Event, Infallible>> {
 	async_stream::stream! {
 		if let Some(msg) = &turn.user_message {
@@ -415,10 +488,13 @@ pub fn stream_turn(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant
 		let mut run = AgentRun::new(state, turn, start_time);
 
 		'agentic_loop: loop {
-			let request = match run.next_request() {
+			let request = match run.next_request().await {
 				Ok(request) => request,
-				Err(event) => {
-					yield sse(event);
+				Err(error) => {
+					yield sse(error.event());
+					if let Some(done) = run.save_partial().await {
+						yield sse(done);
+					}
 					break 'agentic_loop;
 				}
 			};
@@ -426,6 +502,9 @@ pub fn stream_turn(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant
 				Ok(upstream) => upstream,
 				Err(error) => {
 					yield sse(run.chat_failed(&error));
+					if let Some(done) = run.save_partial().await {
+						yield sse(done);
+					}
 					break 'agentic_loop;
 				}
 			};

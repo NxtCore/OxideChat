@@ -3,10 +3,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-mod chat_guard;
 mod repository;
 
-pub use chat_guard::ChatUsageGuard;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct UsageEvent {
