@@ -31,7 +31,7 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 			api_key,
 			extra_headers,
 			timeout: None,
-			reports_cost: false,
+			reported_cost: None,
 		},
 		enabled: true,
 		catalog_provider_slug: None,

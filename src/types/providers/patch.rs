@@ -1,42 +1,35 @@
-use super::{Provider, ProviderKind};
+use super::{Provider, ProviderKind, ProviderReportedCost};
 use crate::utils::encryption::encrypt_object_values;
 use serde_json::Value;
 use uuid::Uuid;
 
 impl Provider {
-	/// Sets the factor applied to the cost this provider reports, or clears it.
+	/// Sets how this provider reports request cost, or clears it to use token pricing.
 	///
 	/// # Errors
 	/// Returns a database error when the update fails.
-	pub async fn set_cost_conversion(pool: &sqlx::PgPool, id: &Uuid, factor: Option<rust_decimal::Decimal>) -> Result<Option<Self>, sqlx::Error> {
+	pub async fn set_reported_cost(pool: &sqlx::PgPool, id: &Uuid, reported_cost: Option<&ProviderReportedCost>) -> Result<Option<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
 			r#"
-			UPDATE providers SET cost_conversion_factor = $2, updated_at = NOW()
+			UPDATE providers SET reported_cost = $2, updated_at = NOW()
 			WHERE id = $1 AND owner_id IS NULL
-			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, cost_conversion_factor, created_at, updated_at
+			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, reported_cost, created_at, updated_at
 			"#,
 		)
 		.bind(id)
-		.bind(factor)
+		.bind(reported_cost.map(sqlx::types::Json))
 		.fetch_optional(pool)
 		.await
 	}
 
-	/// IDs of providers whose reported cost is used: those with a factor of their own or on one of their models.
+	/// Returns `true` when a system provider reports its cost in a currency other than US dollars.
 	///
 	/// # Errors
 	/// Returns a database error when the query fails.
-	pub async fn ids_with_cost_conversion(pool: &sqlx::PgPool) -> Result<std::collections::HashSet<Uuid>, sqlx::Error> {
-		let ids: Vec<Uuid> = sqlx::query_scalar(
-			r#"
-			SELECT id FROM providers WHERE cost_conversion_factor IS NOT NULL
-			UNION
-			SELECT provider_id FROM models WHERE cost_conversion_factor IS NOT NULL
-			"#,
-		)
-		.fetch_all(pool)
-		.await?;
-		Ok(ids.into_iter().collect())
+	pub async fn any_reports_cost_in_currency(pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
+		sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM providers WHERE owner_id IS NULL AND reported_cost->>'unit' = 'currency')")
+			.fetch_one(pool)
+			.await
 	}
 
 	#[allow(clippy::too_many_arguments)]
@@ -72,7 +65,7 @@ impl Provider {
 				is_enabled = COALESCE($7, is_enabled),
 				updated_at = NOW()
 			WHERE id = $1 AND owner_id IS NULL
-			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, cost_conversion_factor, created_at, updated_at
+			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, reported_cost, created_at, updated_at
 			"#,
 		)
 		.bind(id)

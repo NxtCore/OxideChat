@@ -37,6 +37,7 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/providers/{id}/billing/refresh", post(provider_billing::refresh_billing))
 		.route("/api/v1/admin/providers/test", post(providers::test_provider_inline))
 		.route("/api/v1/admin/providers/{id}", get(providers::get_provider).put(providers::update_provider).delete(providers::delete_provider))
+		.route("/api/v1/admin/exchange-rates", get(providers::list_exchange_rates))
 		.route("/api/v1/admin/providers/{id}/test", post(providers::test_provider))
 		.route("/api/v1/admin/providers/{id}/sync", post(providers::sync_provider))
 		.route("/api/v1/admin/providers/{id}/models", get(providers::list_models))

@@ -95,7 +95,6 @@ const formData = reactive({
 	reasoning_effort: null as string | null,
 	reasoning_budget_tokens: null as number | null,
 	pricing: {input: '0', output: '0', reasoning: '', cache_read: '', cache_write: ''},
-	cost_conversion: '',
 });
 
 const settingsForm = useSettingsForm({
@@ -144,7 +143,6 @@ async function loadPricing() {
 			cache_read: override?.cache_read != null ? String(override.cache_read) : '',
 			cache_write: override?.cache_write != null ? String(override.cache_write) : '',
 		};
-		formData.cost_conversion = pricing.value?.cost_conversion_factor ?? '';
 	} catch (e) {
 		console.error(e);
 	}
@@ -224,14 +222,6 @@ function buildPatchPayload(): Record<string, any> {
 
 	if (JSON.stringify(formData.pricing) !== JSON.stringify(original.pricing)) {
 		patch.pricing = buildPricingPayload();
-	}
-
-	const costConversion = String(formData.cost_conversion ?? '').trim();
-	if (costConversion !== String(original.cost_conversion ?? '').trim()) {
-		if (costConversion !== '' && !(Number(costConversion) > 0)) {
-			throw new Error(store.getTranslation('settings.providers.cost_conversion_invalid'));
-		}
-		patch.cost_conversion_factor = costConversion === '' ? null : costConversion;
 	}
 
 	return patch;

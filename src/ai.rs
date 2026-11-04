@@ -33,16 +33,25 @@ pub async fn init(state: &Arc<JobState>) {
 	println!("[AI] Engine initialized with {} system providers", provider_count);
 }
 
+/// The Omniference reported-cost config for a provider; warns when its currency has no rate yet.
+fn reported_cost_config(provider: &Provider, usd_per_unit: &std::collections::HashMap<String, rust_decimal::Decimal>) -> Option<omniference::reported_cost::ReportedCost> {
+	let config = provider.reported_cost.as_ref()?.0.to_omniference(usd_per_unit);
+	if config.is_none() {
+		tracing::warn!(provider_id=%provider.id, "no exchange rate for the provider's reported cost currency; using token prices");
+	}
+	config
+}
+
 /// Builds an engine with every enabled system provider registered and returns it with the provider count.
 async fn build_engine(pool: &PgPool, cost_sink: Arc<OxideCostQueue>) -> (OmniferenceEngine, usize) {
 	let mut engine = OmniferenceEngine::with_cost_sink(cost_sink);
 	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
-	let reporting_cost = Provider::ids_with_cost_conversion(pool).await.unwrap_or_default();
+	let usd_per_unit = crate::types::exchange_rates::ExchangeRate::usd_per_unit_map(pool).await.unwrap_or_default();
 
 	for provider in &providers {
 		let config = match provider_to_config(provider) {
 			Ok(mut config) => {
-				config.endpoint.reports_cost = reporting_cost.contains(&provider.id);
+				config.endpoint.reported_cost = reported_cost_config(provider, &usd_per_unit);
 				config
 			}
 			Err(error) => {
@@ -101,7 +110,7 @@ pub fn provider_to_config(provider: &Provider) -> Result<ProviderConfig, crate::
 			api_key,
 			extra_headers,
 			timeout: None,
-			reports_cost: provider.cost_conversion_factor.is_some(),
+			reported_cost: None,
 		},
 		enabled: provider.is_enabled,
 		catalog_provider_slug: None,

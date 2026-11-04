@@ -26,6 +26,7 @@ mod tests {
 		}
 		export!(
 			AdminConfigResponse,
+			crate::types::exchange_rates::ExchangeRate,
 			SessionResponse,
 			TestProviderResponse,
 			TranslationsResponse,

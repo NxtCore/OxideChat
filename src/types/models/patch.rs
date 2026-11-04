@@ -3,19 +3,6 @@ use sqlx::types::Json;
 use uuid::Uuid;
 
 impl Model {
-	/// Sets the factor that overrides the provider's cost conversion for this model, or clears it.
-	///
-	/// # Errors
-	/// Returns a database error when the update fails.
-	pub async fn set_cost_conversion(conn: &mut sqlx::PgConnection, id: &Uuid, factor: Option<rust_decimal::Decimal>) -> Result<bool, sqlx::Error> {
-		let result = sqlx::query("UPDATE models SET cost_conversion_factor = $2, updated_at = NOW() WHERE id = $1")
-			.bind(id)
-			.bind(factor)
-			.execute(conn)
-			.await?;
-		Ok(result.rows_affected() > 0)
-	}
-
 	pub async fn patch(conn: &mut sqlx::PgConnection, id: &Uuid, display_name: Option<&str>, is_enabled: Option<bool>) -> Result<Option<Self>, sqlx::Error> {
 		if display_name.is_none() && is_enabled.is_none() {
 			return Self::find_by_id_on_connection(conn, id).await;

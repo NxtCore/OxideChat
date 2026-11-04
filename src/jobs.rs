@@ -17,6 +17,8 @@ const SESSION_CLEANUP_INTERVAL_SECS: u64 = 3600; // 1 hour
 const PROVIDER_SYNC_INTERVAL_SECS: u64 = 500; // 5 minutes
 const PROVIDER_BILLING_INTERVAL_SECS: u64 = 900; // 15 minutes
 const REQUEST_LOG_PRUNE_INTERVAL_SECS: u64 = 3600; // 1 hour
+/// The ECB publishes reference rates once per banking day.
+const EXCHANGE_RATE_INTERVAL_SECS: u64 = 21600; // 6 hours
 /// How often to reap idle MCP clients and health-check system servers.
 const MCP_MAINTENANCE_INTERVAL_SECS: u64 = 300; // 5 minutes
 /// Close pooled MCP clients that have been idle for longer than this.
@@ -34,10 +36,33 @@ pub async fn start_job_scheduler(state: Arc<super::JobState>) {
 		tokio::spawn(provider_billing_job(Arc::clone(&state))),
 		tokio::spawn(mcp_maintenance_job(Arc::clone(&state))),
 		tokio::spawn(request_log_prune_job(Arc::clone(&state))),
+		tokio::spawn(exchange_rate_job(Arc::clone(&state))),
 	];
 
 	for handle in handles {
 		let _ = handle.await;
+	}
+}
+
+async fn exchange_rate_job(state: Arc<super::JobState>) {
+	tracing::info!("[JOBS] Exchange rate job started");
+	loop {
+		refresh_exchange_rates(&state.db).await;
+		tokio::time::sleep(Duration::from_secs(EXCHANGE_RATE_INTERVAL_SECS)).await;
+	}
+}
+
+/// Refreshes the ECB rates and rebuilds the engine when a provider's currency rate changed.
+async fn refresh_exchange_rates(db: &PgPool) {
+	let changed = match crate::utils::exchange_rates::refresh_exchange_rates(db).await {
+		Ok(changed) => changed,
+		Err(error) => {
+			tracing::warn!("[JOBS] {error}");
+			return;
+		}
+	};
+	if changed && Provider::any_reports_cost_in_currency(db).await.unwrap_or(false) {
+		crate::ai::reload_providers(db).await;
 	}
 }
 

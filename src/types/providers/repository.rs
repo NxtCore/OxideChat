@@ -15,7 +15,7 @@ impl Provider {
 	pub async fn list_for_admin(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
 			r#"
-			SELECT id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, cost_conversion_factor, created_at, updated_at
+			SELECT id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, reported_cost, created_at, updated_at
 			FROM providers
 			WHERE owner_id IS NULL
 			ORDER BY name
@@ -28,7 +28,7 @@ impl Provider {
 	pub async fn list_enabled_system(pool: &sqlx::PgPool) -> Result<Vec<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
 			r#"
-			SELECT id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, cost_conversion_factor, created_at, updated_at
+			SELECT id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, reported_cost, created_at, updated_at
 			FROM providers
 			WHERE owner_id IS NULL AND is_enabled = true
 			ORDER BY name
@@ -41,7 +41,7 @@ impl Provider {
 	pub async fn find_for_admin(pool: &sqlx::PgPool, id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
 			r#"
-			SELECT id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, cost_conversion_factor, created_at, updated_at
+			SELECT id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, reported_cost, created_at, updated_at
 			FROM providers
 			WHERE id = $1 AND owner_id IS NULL
 			"#,
@@ -66,7 +66,7 @@ impl Provider {
 			r#"
 			INSERT INTO providers (owner_id, kind, name, base_url, api_key, extra_headers, is_enabled)
 			VALUES (NULL, $1, $2, $3, $4, $5, $6)
-			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, cost_conversion_factor, created_at, updated_at
+			RETURNING id, owner_id, kind, name, base_url, api_key, extra_headers, is_enabled, reported_cost, created_at, updated_at
 			"#,
 		)
 		.bind(kind)
@@ -285,7 +285,7 @@ impl Provider {
 
 	pub async fn list_enabled_billing_connections(pool: &PgPool) -> Result<Vec<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
-			r#"SELECT p.id, p.owner_id, p.kind, p.name, p.base_url, p.api_key, p.extra_headers, p.is_enabled, p.cost_conversion_factor, p.created_at, p.updated_at
+			r#"SELECT p.id, p.owner_id, p.kind, p.name, p.base_url, p.api_key, p.extra_headers, p.is_enabled, p.reported_cost, p.created_at, p.updated_at
 			   FROM providers p
 			   LEFT JOIN provider_billing_connections c ON c.provider_id=p.id
 			   WHERE p.owner_id IS NULL

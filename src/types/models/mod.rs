@@ -60,8 +60,6 @@ pub struct ModelPricing {
 	pub override_pricing: Option<Value>,
 	pub effective_input: Decimal,
 	pub effective_output: Decimal,
-	pub cost_conversion_factor: Option<Decimal>,
-	pub provider_cost_conversion_factor: Option<Decimal>,
 }
 
 impl BaseType for Model {}

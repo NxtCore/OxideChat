@@ -50,7 +50,7 @@
 - `src/routes/gateway/` - OpenAI-compatible gateway handlers (moved from `src/utils/openai_gateway.rs`)
 - `src/types/chat/runner/` - Agent loop for web chat (`prepare_turn`, `stream_turn`): history, request building, tool calls
 - `src/types/tools/` - One file per entity (`tool.rs`, `tool_function.rs`, `tool_execution.rs`, `wasm_blob.rs`, `mcp_server.rs`); `McpScope` (`mcp_scope.rs`) separates admin-wide and per-user MCP servers
-- Provider-reported cost: `ModelPricing::price` multiplies it by `models.cost_conversion_factor`, else `providers.cost_conversion_factor`; Omniference only reports a plain `usage.cost` for providers with `reports_cost`, which `ai::build_engine` sets when a factor exists on the provider or one of its models (`Provider::ids_with_cost_conversion`), so unconfigured credit-based providers keep token pricing; xAI's `cost_in_usd_ticks` is always reported in USD
+- Provider-reported cost: `providers.reported_cost` (`ProviderReportedCost`: unit `usd`, `currency` or `credits`, optional `source` path or `header:<name>`) becomes Omniference's `ProviderEndpoint.reported_cost` in `ai::build_engine`, which emits the cost in USD; currencies use `exchange_rates`, refreshed from the ECB by `exchange_rate_job`, and a currency without a rate falls back to token pricing
 - `src/types/page.rs` - `PageQuery` (`page`, `size`) and `Page<T>` (`has_more`, `items`) for paginated endpoints
 - `src/types/usage/` - Usage events; `ChatUsageGuard` records a chat stream's usage once, even if the client disconnects
 - `src/types/user/sessions.rs` - A user's login sessions; the session ID is the login cookie's value, so clients only ever see `User::session_public_id` (its SHA-256 hash)

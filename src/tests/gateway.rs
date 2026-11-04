@@ -132,7 +132,7 @@ pub mod support {
 					api_key: None,
 					extra_headers: BTreeMap::new(),
 					timeout: None,
-					reports_cost: false,
+					reported_cost: None,
 				},
 				enabled: true,
 				catalog_provider_slug: None,

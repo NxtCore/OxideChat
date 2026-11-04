@@ -140,10 +140,18 @@ CREATE TABLE IF NOT EXISTS providers (
     api_key TEXT,  -- Encrypted if ENCRYPTION_KEY set, else plaintext
     extra_headers JSONB DEFAULT '{}',
     is_enabled BOOLEAN DEFAULT true,
-    cost_conversion_factor NUMERIC CHECK (cost_conversion_factor > 0),  -- multiplies provider-reported cost; NULL = not reported
+    reported_cost JSONB,  -- how the provider reports request cost (unit, currency, credit value, field); NULL = token pricing
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(owner_id, name)
+);
+
+-- Exchange rates: ECB reference rates as US dollars per unit, refreshed by a background job
+CREATE TABLE IF NOT EXISTS exchange_rates (
+    currency VARCHAR(3) PRIMARY KEY,
+    usd_per_unit NUMERIC NOT NULL CHECK (usd_per_unit > 0),
+    rate_date DATE NOT NULL,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS models (
@@ -157,7 +165,6 @@ CREATE TABLE IF NOT EXISTS models (
     context_length INTEGER,
     max_tokens INTEGER,
     is_enabled BOOLEAN DEFAULT true,
-    cost_conversion_factor NUMERIC CHECK (cost_conversion_factor > 0),  -- overrides the provider's factor for this model
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(provider_id, model_id)
@@ -1107,11 +1114,20 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.provider_selector.title', 'Anbieter'),
     ('de', 'chat.provider_selector.unavailable_for_key', 'Dieses Modell ist für den konfigurierten Schlüssel deaktiviert'),
     ('de', 'chat.reasoning_selector.disabled', 'Deaktiviert'),
-    ('de', 'settings.providers.cost_conversion', 'Kostenumrechnungsfaktor'),
-    ('de', 'settings.providers.cost_conversion_hint', 'Rechnet die Kosten, die dieser Anbieter in seinen Antworten meldet (Credits oder eine andere Währung), in deine Abrechnungswährung um. Leer lassen, um Anfragen über Tokenpreise zu berechnen.'),
-    ('de', 'settings.providers.cost_conversion_invalid', 'Der Kostenumrechnungsfaktor muss eine positive Zahl sein'),
-    ('de', 'settings.models.editor.cost_conversion', 'Kostenumrechnungsfaktor'),
-    ('de', 'settings.models.editor.cost_conversion_hint', 'Überschreibt den Faktor des Anbieters für dieses Modell. Leer lassen, um den Faktor des Anbieters zu nutzen, der als Platzhalter angezeigt wird.'),
+    ('de', 'settings.providers.reported_cost', 'Gemeldete Kosten'),
+    ('de', 'settings.providers.reported_cost_hint', 'Die Kosten aus den Antworten dieses Anbieters statt der Tokenpreise verwenden.'),
+    ('de', 'settings.providers.reported_cost_off', 'Aus (Tokenpreise verwenden)'),
+    ('de', 'settings.providers.reported_cost_usd', 'US-Dollar'),
+    ('de', 'settings.providers.reported_cost_currency', 'Andere Währung'),
+    ('de', 'settings.providers.reported_cost_credits', 'Credits'),
+    ('de', 'settings.providers.reported_cost_currency_code', 'Währung'),
+    ('de', 'settings.providers.reported_cost_rate', '1 {currency} = {rate} USD (EZB, {date})'),
+    ('de', 'settings.providers.reported_cost_no_rate', 'Noch kein Wechselkurs. Bis die täglichen EZB-Kurse abgerufen sind, werden Tokenpreise verwendet.'),
+    ('de', 'settings.providers.reported_cost_usd_per_credit', 'US-Dollar pro Credit'),
+    ('de', 'settings.providers.reported_cost_source', 'Kostenfeld'),
+    ('de', 'settings.providers.reported_cost_source_placeholder', 'Automatisch erkennen'),
+    ('de', 'settings.providers.reported_cost_source_hint', 'Ein Pfad in der Antwort wie usage.cost oder header:name für einen Antwort-Header. Leer lassen, um die üblichen Felder zu erkennen.'),
+    ('de', 'settings.providers.reported_cost_invalid', 'Wähle eine Währung, gib einen positiven Wert pro Credit ein und nutze ein gültiges Kostenfeld'),
     ('de', 'chat.reasoning_selector.extra_high', 'Sehr Hoch'),
     ('de', 'chat.reasoning_selector.high', 'Hoch'),
     ('de', 'chat.reasoning_selector.low', 'Niedrig'),
@@ -1980,11 +1996,20 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.provider_selector.title', 'Provider'),
     ('en', 'chat.provider_selector.unavailable_for_key', 'This model is disabled for the configured key'),
     ('en', 'chat.reasoning_selector.disabled', 'Disabled'),
-    ('en', 'settings.providers.cost_conversion', 'Cost conversion factor'),
-    ('en', 'settings.providers.cost_conversion_hint', 'Multiplies the cost this provider reports in its responses (credits or another currency) into your billing currency. Leave empty to price requests from token prices.'),
-    ('en', 'settings.providers.cost_conversion_invalid', 'The cost conversion factor must be a positive number'),
-    ('en', 'settings.models.editor.cost_conversion', 'Cost conversion factor'),
-    ('en', 'settings.models.editor.cost_conversion_hint', 'Overrides the provider''s factor for this model. Leave empty to use the provider''s factor, shown as the placeholder.'),
+    ('en', 'settings.providers.reported_cost', 'Reported cost'),
+    ('en', 'settings.providers.reported_cost_hint', 'Use the cost this provider puts in its responses instead of token prices.'),
+    ('en', 'settings.providers.reported_cost_off', 'Off (use token prices)'),
+    ('en', 'settings.providers.reported_cost_usd', 'US dollars'),
+    ('en', 'settings.providers.reported_cost_currency', 'Another currency'),
+    ('en', 'settings.providers.reported_cost_credits', 'Credits'),
+    ('en', 'settings.providers.reported_cost_currency_code', 'Currency'),
+    ('en', 'settings.providers.reported_cost_rate', '1 {currency} = {rate} USD (ECB, {date})'),
+    ('en', 'settings.providers.reported_cost_no_rate', 'No exchange rate yet. Token prices are used until the daily ECB rates are fetched.'),
+    ('en', 'settings.providers.reported_cost_usd_per_credit', 'US dollars per credit'),
+    ('en', 'settings.providers.reported_cost_source', 'Cost field'),
+    ('en', 'settings.providers.reported_cost_source_placeholder', 'Detect automatically'),
+    ('en', 'settings.providers.reported_cost_source_hint', 'A path in the response such as usage.cost, or header:name for a response header. Leave empty to detect the common fields.'),
+    ('en', 'settings.providers.reported_cost_invalid', 'Pick a currency, enter a positive value per credit, and use a valid cost field'),
     ('en', 'chat.reasoning_selector.extra_high', 'Extra High'),
     ('en', 'chat.reasoning_selector.high', 'High'),
     ('en', 'chat.reasoning_selector.low', 'Low'),

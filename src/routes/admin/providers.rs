@@ -7,7 +7,7 @@ use crate::types::consts::{ADMIN_PROVIDERS_EDIT, ADMIN_PROVIDERS_VIEW};
 use crate::types::{AppError, AuthUser, JobState};
 use crate::types::models::Model;
 use crate::types::providers::{
-	CreateProviderRequest, Provider, ProviderResponse, SyncProviderResponse, TestProviderRequest, TestProviderResponse, UpdateProviderRequest, valid_cost_conversion,
+	CreateProviderRequest, Provider, ProviderResponse, SyncProviderResponse, TestProviderRequest, TestProviderResponse, UpdateProviderRequest,
 };
 
 use crate::utils::encryption::{decrypt_api_key, encrypt_api_key};
@@ -54,15 +54,15 @@ pub async fn create_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 		ErrorCode::InternalError
 	})?;
 	let base_url = req.base_url.trim_end_matches('/').to_string();
-	if !valid_cost_conversion(req.cost_conversion_factor) {
+	if req.reported_cost.as_ref().is_some_and(|cost| !cost.is_valid()) {
 		return Err(ErrorCode::ValidationFailed.into());
 	}
 
 	let mut provider = Provider::create_system(&state.db, &req.kind, &req.name, &base_url, api_key.as_deref(), &req.extra_headers, req.is_enabled)
 		.await
 		.map_err(|e| AppError::unique_or(e, ErrorCode::AlreadyExists))?;
-	if req.cost_conversion_factor.is_some() {
-		provider = Provider::set_cost_conversion(&state.db, &provider.id, req.cost_conversion_factor).await?.ok_or(ErrorCode::NotFound)?;
+	if req.reported_cost.is_some() {
+		provider = Provider::set_reported_cost(&state.db, &provider.id, req.reported_cost.as_ref()).await?.ok_or(ErrorCode::NotFound)?;
 	}
 
 	reload_providers(&state.db).await;
@@ -81,7 +81,7 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
 
 	let base_url = req.base_url.as_deref().map(|url| url.trim_end_matches('/').to_string());
-	if !valid_cost_conversion(req.cost_conversion_factor.flatten()) {
+	if req.reported_cost.as_ref().and_then(Option::as_ref).is_some_and(|cost| !cost.is_valid()) {
 		return Err(ErrorCode::ValidationFailed.into());
 	}
 	let api_key = req.api_key.as_deref().map(encrypt_api_key).transpose().map_err(|error| {
@@ -100,8 +100,8 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 	)
 	.await?
 	.ok_or(ErrorCode::NotFound)?;
-	if let Some(factor) = req.cost_conversion_factor {
-		provider = Provider::set_cost_conversion(&state.db, &id, factor).await?.ok_or(ErrorCode::NotFound)?;
+	if let Some(reported_cost) = &req.reported_cost {
+		provider = Provider::set_reported_cost(&state.db, &id, reported_cost.as_ref()).await?.ok_or(ErrorCode::NotFound)?;
 	}
 
 	reload_providers(&state.db).await;
@@ -113,6 +113,13 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 	let response: ProviderResponse = provider.into();
 
 	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())
+}
+
+/// GET /api/v1/admin/exchange-rates
+pub async fn list_exchange_rates(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_VIEW).await?;
+	let rates = crate::types::exchange_rates::ExchangeRate::list(&state.db).await?;
+	Ok(ResponseBuilder::new(ResponseBody::Json(rates)).build())
 }
 
 /// Delete a provider
@@ -150,7 +157,7 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, auth: AuthUser, P
 			api_key,
 			extra_headers,
 			timeout: None,
-			reports_cost: false,
+			reported_cost: None,
 		},
 		enabled: true,
 		catalog_provider_slug: None,
@@ -182,7 +189,7 @@ pub async fn test_provider_inline(State(state): State<Arc<JobState>>, auth: Auth
 			api_key: req.api_key,
 			extra_headers,
 			timeout: None,
-			reports_cost: false,
+			reported_cost: None,
 		},
 		enabled: true,
 		catalog_provider_slug: None,
