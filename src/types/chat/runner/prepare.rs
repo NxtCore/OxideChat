@@ -160,7 +160,7 @@ async fn select_fork(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, user_mess
 pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req: &StreamRequest) -> Result<PreparedTurn, TurnError> {
 	let db = &state.db;
 
-	Chat::find_by_id_and_user(db, &chat_id, &user.id)
+	let chat = Chat::find_by_id_and_user(db, &chat_id, &user.id)
 		.await
 		.map_err(internal("Failed to fetch chat"))?
 		.ok_or_else(|| TurnError::new("not_found", "Chat not found"))?;
@@ -197,6 +197,7 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		user,
 		chat_id: &chat_id,
 		req,
+		chat_sampling: &chat.sampling,
 		model: &model,
 		user_config: user_config.as_ref(),
 		system_config: system_config.as_ref(),

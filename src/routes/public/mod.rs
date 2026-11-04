@@ -18,7 +18,7 @@ pub mod workspaces;
 use crate::types::JobState;
 use axum::{
 	Router,
-	routing::{delete, get, patch, post},
+	routing::{delete, get, patch, post, put},
 };
 use std::sync::Arc;
 
@@ -38,6 +38,7 @@ pub fn router() -> Router<Arc<JobState>> {
 		// Chats
 		.route("/api/v1/chats", get(chats::list_chats).post(chats::create_chat))
 		.route("/api/v1/chats/{id}", get(chats::get_chat).patch(chats::update_chat).delete(chats::delete_chat))
+		.route("/api/v1/chats/{id}/sampling", put(chats::update_chat_sampling))
 		// Messages
 		.route("/api/v1/chats/{chat_id}/messages", get(messages::list_messages).post(messages::send_message))
 		.route("/api/v1/chats/{chat_id}/stream", post(streaming::stream_completion))
