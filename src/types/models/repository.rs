@@ -565,10 +565,6 @@ impl ModelPricing {
 		value.and_then(Value::as_f64).and_then(Decimal::from_f64_retain)
 	}
 
-	fn millionths(tokens: i32, rate: Decimal) -> Decimal {
-		Decimal::from(tokens.max(0)) * rate / Decimal::from(1_000_000)
-	}
-
 	async fn rows(pool: &sqlx::PgPool, model_id: Option<&Uuid>) -> Result<Vec<ModelPricingRow>, sqlx::Error> {
 		sqlx::query_as::<_, ModelPricingRow>(
 			r#"
@@ -587,8 +583,15 @@ impl ModelPricing {
 	/// The catalog's input and output price for a provider's model, in USD per million tokens.
 	/// `provider_model_id` is the stored `provider/model` ID.
 	pub async fn catalog_rates(catalog: &Catalog, provider_name: &str, kind: &ProviderKind, provider_model_id: &str) -> (Option<Decimal>, Option<Decimal>) {
+		Self::rates(Self::catalog_price(catalog, provider_name, kind, provider_model_id).await.as_ref())
+	}
+
+	async fn catalog_price(catalog: &Catalog, provider_name: &str, kind: &ProviderKind, provider_model_id: &str) -> Option<omniference::catalog::ModelPricing> {
 		let native_model_id = provider_model_id.split_once('/').map_or(provider_model_id, |(_, id)| id);
-		let pricing = catalog.catalog_pricing(&crate::ai::catalog_provider(provider_name, kind), native_model_id).await;
+		catalog.catalog_pricing(&crate::ai::catalog_provider(provider_name, kind), native_model_id).await
+	}
+
+	fn rates(pricing: Option<&omniference::catalog::ModelPricing>) -> (Option<Decimal>, Option<Decimal>) {
 		match pricing {
 			Some(pricing) => (Decimal::from_f64(pricing.input), Decimal::from_f64(pricing.output)),
 			None => (None, None),
@@ -596,10 +599,15 @@ impl ModelPricing {
 	}
 
 	async fn from_row(catalog: &Catalog, row: ModelPricingRow) -> Self {
-		let (reported_input, reported_output) = Self::catalog_rates(catalog, &row.provider_name, &row.provider_kind, &row.provider_model_id).await;
+		let catalog_price = Self::catalog_price(catalog, &row.provider_name, &row.provider_kind, &row.provider_model_id).await;
+		let (reported_input, reported_output) = Self::rates(catalog_price.as_ref());
 		let override_rate = |key: &str| row.override_pricing.as_ref().and_then(|value| Self::decimal_from_json(value.get(key)));
 		let effective_input = override_rate("input").or(reported_input).unwrap_or(Decimal::ZERO);
 		let effective_output = override_rate("output").or(reported_output).unwrap_or(Decimal::ZERO);
+		let manual_price = row
+			.override_pricing
+			.as_ref()
+			.and_then(|value| omniference::catalog::ModelPricing::deserialize(value).ok());
 		Self {
 			model_id: row.model_id,
 			reported_input,
@@ -607,6 +615,7 @@ impl ModelPricing {
 			override_pricing: row.override_pricing,
 			effective_input,
 			effective_output,
+			pricing: manual_price.or(catalog_price),
 		}
 	}
 
@@ -726,18 +735,19 @@ impl ModelPricing {
 	}
 
 	async fn usage_cost(pool: &sqlx::PgPool, model_id: &Uuid, input_tokens: i32, output_tokens: i32, reasoning_tokens: i32) -> Result<Option<Decimal>, sqlx::Error> {
-		let Some(pricing) = Self::effective(pool, model_id).await?.filter(Self::has_price) else {
+		let Some(pricing) = Self::effective(pool, model_id).await?.and_then(|pricing| pricing.pricing) else {
 			return Ok(None);
 		};
-		let input_cost = Self::millionths(input_tokens, pricing.effective_input);
-		let output_cost = if let Some(reasoning_rate) = pricing.reasoning_rate() {
-			let billed_reasoning_tokens = reasoning_tokens.max(0).min(output_tokens.max(0));
-			let visible_output_tokens = output_tokens.max(0) - billed_reasoning_tokens;
-			Self::millionths(visible_output_tokens, pricing.effective_output) + Self::millionths(billed_reasoning_tokens, reasoning_rate)
-		} else {
-			Self::millionths(output_tokens, pricing.effective_output)
+		let tokens = |count: i32| u32::try_from(count).unwrap_or(0);
+		let usage = omniference::catalog::UsageBreakdown {
+			input_tokens: tokens(input_tokens),
+			output_tokens: tokens(output_tokens),
+			reasoning_tokens: tokens(reasoning_tokens),
+			..Default::default()
 		};
-		Ok(Some(input_cost + output_cost))
+		Ok(omniference::catalog::compute_cost(Some(&pricing), &usage)
+			.ok()
+			.and_then(|cost| Decimal::from_f64(cost.total)))
 	}
 
 	/// Prices an estimate for a model; unpriced models estimate to zero.

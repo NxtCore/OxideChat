@@ -181,7 +181,8 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 	let omni_messages = get_omni_messages(db, messages, vision).await;
 	let mut ir = ChatRequestIR::default();
 	ir.model.alias = omni_model.id.clone();
-	ir.model.model_id = omni_model.id.clone();
+	let provider_prefix = format!("{}/", omni_model.provider_name.to_lowercase());
+	ir.model.model_id = omni_model.id.strip_prefix(&provider_prefix).unwrap_or(&omni_model.id).to_string();
 	ir.model.provider = provider;
 	ir.model.input_modalities = omni_model.input_modalities.clone();
 	ir.model.output_modalities = omni_model.output_modalities.clone();
@@ -189,6 +190,9 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 	ir.stream = true;
 	ir.metadata.insert("user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), inputs.chat_id.to_string());
+	ir.metadata.insert("oxide_user_id".to_string(), inputs.user.id.to_string());
+	ir.metadata.insert("oxide_model_id".to_string(), inputs.model.id.to_string());
+	ir.metadata.insert("oxide_request_type".to_string(), "chat".to_string());
 	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), inputs.chat_sampling, inputs.user_config, inputs.model);
 	ir.extra_body.clone_from(&inputs.chat_sampling.custom);
 	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, inputs.system_config);

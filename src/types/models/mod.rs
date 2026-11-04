@@ -60,6 +60,9 @@ pub struct ModelPricing {
 	pub override_pricing: Option<Value>,
 	pub effective_input: Decimal,
 	pub effective_output: Decimal,
+	/// The full price Omniference calculates costs with: the manual price, else the catalog's.
+	#[serde(skip)]
+	pub pricing: Option<omniference::catalog::ModelPricing>,
 }
 
 impl BaseType for Model {}
