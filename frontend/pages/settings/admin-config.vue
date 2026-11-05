@@ -69,7 +69,7 @@ const form = reactive({
 	enable_provider_selector: store.base?.enable_provider_selector ?? false,
 	allow_server_stdio_mcp: store.base?.allow_server_stdio_mcp ?? false,
 	default_model_id: store.base?.default_model_id ?? null,
-	language: store.base?.language ?? 'en',
+	language: store.base?.default_language ?? 'en',
 	default_theme: store.base?.default_theme ?? {theme: {}, light: {}, dark: {}},
 });
 
@@ -95,7 +95,11 @@ const settingsForm = useSettingsForm({
 	errorKey: 'settings.admin_config.save_error',
 	save: async () => {
 		await patchAdminConfig(form);
-		if (store.base) Object.assign(store.base, form);
+		if (store.base) {
+			const {language, ...rest} = form;
+			Object.assign(store.base, rest, {default_language: language});
+			store.applyLanguage();
+		}
 		themeStore.setDefaultTheme(form.default_theme);
 	},
 });

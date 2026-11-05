@@ -21,7 +21,7 @@
 ## Architecture
 
 - `src/main.rs` - Application entry point, sets up Axum server and database pool
-- `src/i18n.rs` - Global i18n translation service (singleton pattern)
+- `src/i18n.rs` - Global i18n translation service (singleton pattern); `load_current_user` runs each request in the user's language (`user_preferences.language`, else the installation default), which `translate` and `Language::current()` read, so `/base` returns that language and `default_language`
 - `src/jobs.rs` - Background job scheduler using tokio tasks
 - `src/types/` - Shared request/response DTOs and domain types
 - `src/tests/` - Unit tests organized by module (e.g., `i18n.rs`, `base.rs`)

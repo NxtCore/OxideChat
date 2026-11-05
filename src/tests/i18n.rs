@@ -39,4 +39,42 @@ mod tests {
 			assert!(json.contains("\"is_override\":false"));
 		}
 	}
+
+	mod user_language {
+		use crate::i18n::Language;
+		use crate::tests::support::{TestResult, create_user};
+		use crate::types::{UpdatePreferencesRequest, UserPreferences};
+		use sqlx::PgPool;
+
+		fn request(json: &str) -> serde_json::Result<UpdatePreferencesRequest> {
+			serde_json::from_str(json)
+		}
+
+		#[tokio::test]
+		async fn scope_sets_the_request_language() {
+			assert_eq!(Language::De.scope(async { Language::current() }).await, Language::De);
+		}
+
+		#[sqlx::test]
+		async fn language_is_stored_kept_and_cleared(pool: PgPool) -> TestResult {
+			let user_id = create_user(&pool).await?;
+			sqlx::query("INSERT INTO user_preferences (user_id) VALUES ($1)").bind(user_id).execute(&pool).await?;
+			assert_eq!(UserPreferences::language_for(&pool, &user_id).await?, None);
+
+			UserPreferences::upsert(&pool, &user_id, &request(r#"{"language": "de"}"#)?).await?;
+			assert_eq!(UserPreferences::language_for(&pool, &user_id).await?, Some(Language::De));
+
+			UserPreferences::upsert(&pool, &user_id, &request(r#"{"use_remend": false}"#)?).await?;
+			assert_eq!(UserPreferences::language_for(&pool, &user_id).await?, Some(Language::De));
+
+			UserPreferences::upsert(&pool, &user_id, &request(r#"{"language": null}"#)?).await?;
+			assert_eq!(UserPreferences::language_for(&pool, &user_id).await?, None);
+			Ok(())
+		}
+
+		#[test]
+		fn unknown_language_is_rejected() {
+			assert!(request(r#"{"language": "fr"}"#).is_err());
+		}
+	}
 }

@@ -1,4 +1,4 @@
-use crate::types::{JobState, RequestContext};
+use crate::types::{JobState, RequestContext, UserPreferences};
 use crate::utils::auth::get_current_user;
 use crate::utils::rate_limit;
 use crate::utils::response::{ErrorBuilder, ErrorCode};
@@ -15,7 +15,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 
 static TRUST_PROXY: LazyLock<bool> = LazyLock::new(|| std::env::var("TRUST_PROXY").is_ok_and(|value| value == "true"));
 
-/// Loads the session user once and makes it available to downstream handlers.
+/// Loads the session user once, makes it available to downstream handlers and runs them in the user's language.
 pub async fn load_current_user(
 	State(state): State<Arc<JobState>>,
 	cookies: Cookies,
@@ -23,8 +23,18 @@ pub async fn load_current_user(
 	next: Next,
 ) -> Response {
 	let user = get_current_user(&state.db, &cookies).await;
+	let language = match &user {
+		Some(user) => UserPreferences::language_for(&state.db, &user.id).await.unwrap_or_else(|e| {
+			tracing::warn!(error = %e, "failed to load user language");
+			None
+		}),
+		None => None,
+	};
 	request.extensions_mut().insert(RequestContext { user });
-	next.run(request).await
+	match language {
+		Some(language) => language.scope(next.run(request)).await,
+		None => next.run(request).await,
+	}
 }
 
 /// Returns the client IP, honoring `X-Forwarded-For` only when `TRUST_PROXY=true`.

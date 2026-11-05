@@ -3,7 +3,15 @@ import type { OAuthProvider } from "./OAuthProvider";
 import type { Role } from "./Role";
 import type { ThemeCssVars } from "./ThemeCssVars";
 
-export type Base = { i18n: any, language: string, needs_setup: boolean, oauth_providers: Array<OAuthProvider>, roles: Array<Role>, 
+export type Base = { i18n: any, 
+/**
+ * The language for this request: the user's own choice, else the installation default.
+ */
+language: string, 
+/**
+ * The installation's default language.
+ */
+default_language: string, needs_setup: boolean, oauth_providers: Array<OAuthProvider>, roles: Array<Role>, 
 /**
  * Whether the chat upstream-provider selector is enabled instance-wide.
  */

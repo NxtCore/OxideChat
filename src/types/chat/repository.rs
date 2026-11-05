@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::i18n::Language;
 
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
@@ -512,8 +513,8 @@ impl UserPreferences {
 			r#"
 			INSERT INTO user_preferences (user_id, default_model_key, favorite_model_keys,
 			                              streaming_animation, use_remend, theme_css_vars, custom_theme_urls,
-			                              default_provider_slug, default_tools)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			                              default_provider_slug, default_tools, language)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $12)
 			ON CONFLICT (user_id) DO UPDATE
 				SET default_model_key = CASE WHEN $10 THEN $2 ELSE user_preferences.default_model_key END,
 				    favorite_model_keys = CASE WHEN $3::jsonb = 'null'::jsonb THEN user_preferences.favorite_model_keys ELSE $3::jsonb END,
@@ -523,6 +524,7 @@ impl UserPreferences {
 				    custom_theme_urls = CASE WHEN $7::jsonb = 'null'::jsonb THEN user_preferences.custom_theme_urls ELSE $7::jsonb END,
 				    default_provider_slug = CASE WHEN $11 THEN $8 ELSE user_preferences.default_provider_slug END,
 				    default_tools = CASE WHEN $9::jsonb = 'null'::jsonb THEN user_preferences.default_tools ELSE $9::jsonb END,
+				    language = CASE WHEN $13 THEN $12 ELSE user_preferences.language END,
 				    updated_at = NOW()
 			RETURNING *
 			"#,
@@ -538,7 +540,22 @@ impl UserPreferences {
 		.bind(json_or_null(&prefs.default_tools))
 		.bind(prefs.default_model_key.is_some())
 		.bind(prefs.default_provider_slug.is_some())
+		.bind(prefs.language.flatten().map(|language| language.as_str()))
+		.bind(prefs.language.is_some())
 		.fetch_one(pool)
 		.await
+	}
+
+	/// The language a user picked, or `None` when they follow the installation default.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the query fails.
+	pub async fn language_for(pool: &PgPool, user_id: &Uuid) -> Result<Option<Language>, sqlx::Error> {
+		let language: Option<Option<String>> = sqlx::query_scalar("SELECT language FROM user_preferences WHERE user_id = $1")
+			.bind(user_id)
+			.fetch_optional(pool)
+			.await?;
+		Ok(language.flatten().as_deref().map(Language::from_str))
 	}
 }

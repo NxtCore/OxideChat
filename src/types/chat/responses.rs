@@ -4,6 +4,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::config::OAuthProvider;
+use crate::i18n::Language;
 use crate::types::models::Model;
 use super::{ChatSampling, CostDetails, Message, ReasoningDetails, RequestSettings, ThemeCssVars, ToolExecutionResponse, UsageDetails, UserPreferences};
 
@@ -168,6 +169,8 @@ pub struct PreferencesResponse {
 	pub use_remend: bool,
 	pub theme_css_vars: ThemeCssVars,
 	pub custom_theme_urls: Vec<String>,
+	/// The user's own language; `None` follows the installation default.
+	pub language: Option<Language>,
 }
 
 impl From<UserPreferences> for PreferencesResponse {
@@ -182,6 +185,7 @@ impl From<UserPreferences> for PreferencesResponse {
 			use_remend: p.use_remend,
 			theme_css_vars: serde_json::from_value(p.theme_css_vars).unwrap_or_default(),
 			custom_theme_urls: serde_json::from_value(p.custom_theme_urls).unwrap_or_default(),
+			language: p.language.as_deref().map(Language::from_str),
 		}
 	}
 }
@@ -198,6 +202,7 @@ impl Default for PreferencesResponse {
 			use_remend: true,
 			theme_css_vars: ThemeCssVars::default(),
 			custom_theme_urls: Vec::new(),
+			language: None,
 		}
 	}
 }

@@ -161,6 +161,7 @@ export const useMainStore = defineStore('main', {
 				if (user) {
 					this.auth.user = user;
 					this.preferences = user.preferences;
+					this.applyLanguage();
 					if (user.preferences) useThemeStore().initFromUserPreferences(user.preferences.custom_theme_urls, user.preferences.theme_css_vars);
 					this.auth.isAuthenticated = true;
 				}
@@ -225,7 +226,12 @@ export const useMainStore = defineStore('main', {
 			} finally {
 				this.auth.user = null;
 				this.auth.isAuthenticated = false;
+				this.preferences = null;
+				this.applyLanguage();
 			}
+		},
+		applyLanguage() {
+			if (this.base) this.base.language = this.preferences?.language ?? this.base.default_language;
 		},
 		async copyToClipboard(text: string) {
 			try {
