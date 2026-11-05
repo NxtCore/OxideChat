@@ -56,7 +56,7 @@
 - `src/types/page.rs` - `PageQuery` (`page`, `size`) and `Page<T>` (`has_more`, `items`) for paginated endpoints
 - `src/types/usage/` - Usage events, one per upstream request: web chat and the gateway both tag requests with `oxide_*` metadata (web chat: `oxide_user_id`, `oxide_model_id`, `oxide_request_type = chat`, and the step's budget reservation) and `OxideCostSink` records them from Omniference's cost record, also when a stream is dropped; request logs are only written for API-key requests. Web chat sends the provider's bare model ID like the gateway, which Omniference's catalog prices by
 - `src/types/user/sessions.rs` - A user's login sessions; the session ID is the login cookie's value, so clients only ever see `User::session_public_id` (its SHA-256 hash)
-- `src/config.rs` - `Config::apply_update` stores admin settings (flags, default model, language, default theme, OAuth credentials) in one transaction; `Config::oauth_settings` reports OAuth state without secrets, and saved OAuth values take priority over the `OAUTH_*` environment variables
+- `src/config.rs` - `Config::apply_update` stores admin settings (flags, default model, language, default theme, instance name and icon, OAuth credentials) in one transaction; the instance icon is an uploaded image whose ID is stored in config and served by the image route `/api/v1/images/{id}`, which skips the session check for that one image (PNG, JPEG, GIF or WebP only, checked against the bytes), `/api/v1/base` returns it as `instance: {name, icon_id}`, and the frontend reads it through `store.appName` / `store.appIcon`; `Config::oauth_settings` reports OAuth state without secrets, and saved OAuth values take priority over the `OAUTH_*` environment variables
 - `AuditLog::write` (`src/types/gateway/admin.rs`) writes an audit row in the caller's transaction and always redacts its metadata
 - `migrations/` - SQLx database migrations
 - `JobState` struct contains shared application state (database pool)
@@ -76,6 +76,7 @@
     - Request Types (structs with `Deserialize`)
     - Response Types (structs with `Serialize`)
     - Internal Types (DB row structs, helper functions)
+- Group related fields of a request or response into a nested object instead of prefixing flat field names: `instance: {name, icon_id}`, not `instance_name` and `instance_icon_id`; requests use the same shape as the response they update
 
 ### Tests Module (`src/tests/`)
 

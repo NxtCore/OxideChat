@@ -98,6 +98,15 @@ pub fn safe_image_mime(data: &[u8], declared_mime: &str) -> Option<&'static str>
 	if detected == declared { Some(declared) } else { None }
 }
 
+/// Whether a stored image exists and its bytes match an allowed image type.
+///
+/// # Errors
+///
+/// Returns an error if the image cannot be read.
+pub async fn is_safe_stored_image(db: &PgPool, id: Uuid) -> Result<bool, String> {
+	Ok(get_image(db, id).await?.is_some_and(|(data, mime_type)| safe_image_mime(&data, &mime_type).is_some()))
+}
+
 /// Retrieve an image by ID
 ///
 /// Returns (data, `mime_type`) or None if not found.

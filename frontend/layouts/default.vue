@@ -11,7 +11,7 @@
 		<ShadSidebarInset class="flex-1 flex flex-col min-w-0">
 			<header class="flex items-center gap-2 px-3 py-2 border-b border-border md:hidden shrink-0">
 				<ShadSidebarTrigger class="h-8 w-8" />
-				<span class="font-semibold text-sm">OxideChat</span>
+				<span class="font-semibold text-sm">{{ store.appName }}</span>
 			</header>
 			<div class="flex-1 min-h-0">
 				<slot />
@@ -33,15 +33,16 @@ import {useMainStore} from '@/stores';
 import {useChatStore} from '@/stores/chatStore';
 import 'vue-sonner/style.css';
 
+const store = useMainStore();
+
 useHead({
-	title: 'OxideChat',
-	link: [{rel: 'icon', type: 'image/svg+xml', href: '/light_transparent.svg'}],
+	title: () => store.appName,
+	link: () => [{rel: 'icon', href: store.appIcon}],
 	bodyAttrs: {
 		class: 'dark',
 	},
 });
 
-const store = useMainStore();
 const chatStore = useChatStore();
 const router = useRouter();
 const route = useRoute();

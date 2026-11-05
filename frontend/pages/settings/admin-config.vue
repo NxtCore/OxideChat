@@ -1,6 +1,23 @@
 <template>
 	<SettingsPage :title="store.getTranslation('settings.tabs.admin_config')" :description="store.getTranslation('settings.admin_config.description')" layout="form" :form="settingsForm">
 		<div class="rounded-lg border border-border bg-card p-6">
+			<SettingsRow :label="store.getTranslation('settings.admin_config.instance_name')" :hint="store.getTranslation('settings.admin_config.instance_name_hint')" stacked>
+				<ShadInput v-model="form.instance.name" :maxlength="64" placeholder="OxideChat" :disabled="!canEdit || settingsForm.saving" data-testid="config-instance-name" />
+			</SettingsRow>
+
+			<SettingsRow :label="store.getTranslation('settings.admin_config.instance_icon')" :hint="store.getTranslation('settings.admin_config.instance_icon_hint')" stacked>
+				<div class="flex items-center gap-3">
+					<img :src="form.instance.icon_id ? imageUrl(form.instance.icon_id) : '/light_transparent.svg'" alt="" class="h-10 w-10 rounded-md border border-border object-contain p-1" data-testid="config-instance-icon-preview" />
+					<input ref="iconInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" data-testid="config-instance-icon-input" @change="uploadIcon" />
+					<ShadButton variant="outline" size="sm" :disabled="!canEdit || settingsForm.saving || uploadingIcon" @click="iconInput?.click()">
+						{{ store.getTranslation('settings.admin_config.upload_icon') }}
+					</ShadButton>
+					<ShadButton v-if="form.instance.icon_id" variant="ghost" size="sm" :disabled="!canEdit || settingsForm.saving" data-testid="config-instance-icon-remove" @click="form.instance.icon_id = null">
+						{{ store.getTranslation('common.remove') }}
+					</ShadButton>
+				</div>
+			</SettingsRow>
+
 			<SettingsRow :label="store.getTranslation('settings.admin_config.provider_selector.label')" :hint="store.getTranslation('settings.admin_config.provider_selector.hint')">
 				<ShadSwitch v-model="form.enable_provider_selector" :disabled="!canEdit || settingsForm.saving" data-testid="config-provider-selector" />
 			</SettingsRow>
@@ -52,7 +69,7 @@
 
 <script setup lang="ts">
 import {ADMIN_CONFIG_EDIT} from '~/types/generated/permissions';
-import {computed, onMounted, reactive} from 'vue';
+import {computed, onMounted, reactive, ref} from 'vue';
 import {useMainStore} from '@/stores';
 import {useThemeStore} from '~/stores/theme';
 import {hasThemeVars, isSameTheme} from '~/lib/theme-utils';
@@ -71,7 +88,37 @@ const form = reactive({
 	default_model_id: store.base?.default_model_id ?? null,
 	language: store.base?.default_language ?? 'en',
 	default_theme: store.base?.default_theme ?? {theme: {}, light: {}, dark: {}},
+	instance: {
+		name: store.base?.instance.name ?? '',
+		icon_id: store.base?.instance.icon_id ?? null,
+	},
 });
+
+const iconInput = ref<HTMLInputElement | null>(null);
+const uploadingIcon = ref(false);
+
+async function uploadIcon(event: Event) {
+	const input = event.target as HTMLInputElement;
+	const file = input.files?.[0];
+	input.value = '';
+	if (!file) return;
+	uploadingIcon.value = true;
+	try {
+		const dataUri = await new Promise<string>((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => resolve(reader.result as string);
+			reader.onerror = () => reject(reader.error);
+			reader.readAsDataURL(file);
+		});
+		const response = await postImage(dataUri);
+		if (!response.ok) throw new Error(await response.text());
+		form.instance.icon_id = (await response.json()).id;
+	} catch (e: any) {
+		store.toast(store.getTranslation('settings.admin_config.upload_icon_error'), {type: 'error', description: errorMessage(e, '')});
+	} finally {
+		uploadingIcon.value = false;
+	}
+}
 
 const availableThemes = computed(() => themeStore.fetchedThemes.filter(theme => !theme.error));
 
@@ -97,7 +144,7 @@ const settingsForm = useSettingsForm({
 		await patchAdminConfig(form);
 		if (store.base) {
 			const {language, ...rest} = form;
-			Object.assign(store.base, rest, {default_language: language});
+			Object.assign(store.base, JSON.parse(JSON.stringify(rest)), {default_language: language});
 			store.applyLanguage();
 		}
 		themeStore.setDefaultTheme(form.default_theme);
