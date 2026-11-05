@@ -7,10 +7,19 @@ import {usePreferencesStore} from '~/stores/preferencesStore';
 import ThemeCard from '~/components/themes/ThemeCard.vue';
 import ImportThemeDialog from '~/components/themes/ImportThemeDialog.vue';
 import type {ThemePreference} from '~/lib/apply-theme';
+import type {Language} from '~/types/generated/Language';
 import {Sun, Moon, Monitor, Shuffle, Plus, RotateCcw, ExternalLink, Search, CheckCircle} from 'lucide-vue-next';
 
 const themeStore = useThemeStore();
 const mainStore = useMainStore();
+
+const DEFAULT_LANGUAGE = 'default';
+const languages: Language[] = ['en', 'de'];
+const language = ref<Language | null>(mainStore.preferences?.language ?? null);
+const languageChoice = computed({
+	get: () => language.value ?? DEFAULT_LANGUAGE,
+	set: (value: string) => (language.value = value === DEFAULT_LANGUAGE ? null : (value as Language)),
+});
 
 const searchQuery = ref('');
 const showImportDialog = ref(false);
@@ -31,8 +40,9 @@ const filteredCustomThemes = computed(() => {
 	return themeStore.customThemes.filter(t => t.name.toLowerCase().includes(searchQuery.value.toLowerCase()));
 });
 
-const settingsForm = useSettingsForm<ThemeSnapshot>({
+const settingsForm = useSettingsForm<ThemeSnapshot & {language: Language | null}>({
 	value: () => ({
+		language: language.value,
 		currentMode: themeStore.currentMode,
 		modePreference: themeStore.modePreference,
 		cssVars: themeStore.cssVars,
@@ -40,23 +50,26 @@ const settingsForm = useSettingsForm<ThemeSnapshot>({
 		customThemeUrls: themeStore.customThemeUrls,
 	}),
 	normalize: ({currentMode, ...rest}) => rest,
-	restore: saved => {
+	restore: ({language: savedLanguage, ...saved}) => {
+		language.value = savedLanguage;
 		const customThemesChanged = JSON.stringify(saved.customThemeUrls) !== JSON.stringify(themeStore.customThemeUrls);
 		themeStore.restoreSnapshot(saved);
 		if (customThemesChanged) themeStore.fetchAllThemes();
 	},
-	savedKey: 'settings.theme_saved',
+	savedKey: 'settings.appearance.saved',
 	errorKey: 'common.error',
 	save: async () => {
-		const saved = await usePreferencesStore().updatePreferences({theme_css_vars: themeStore.cssVars, custom_theme_urls: themeStore.customThemeUrls});
+		const saved = await usePreferencesStore().updatePreferences({theme_css_vars: themeStore.cssVars, custom_theme_urls: themeStore.customThemeUrls, language: language.value});
 		if (!saved) throw new Error();
+		mainStore.applyLanguage();
 	},
 });
 
 watch(
 	() => mainStore.preferences,
-	(_, previous) => {
+	(preferences, previous) => {
 		if (previous) return;
+		language.value = preferences?.language ?? null;
 		settingsForm.markSaved();
 		themeStore.fetchAllThemes();
 	}
@@ -70,6 +83,24 @@ onMounted(() => {
 <template>
 	<SettingsPage :title="mainStore.getTranslation('settings.appearance.title')" :description="mainStore.getTranslation('settings.appearance.description')" :form="settingsForm">
 		<div class="space-y-8">
+			<div class="space-y-4">
+				<div>
+					<h3 class="font-semibold text-foreground">{{ mainStore.getTranslation('settings.appearance.language') }}</h3>
+					<p class="mt-1 text-sm text-muted-foreground">{{ mainStore.getTranslation('settings.appearance.language_description') }}</p>
+				</div>
+				<ShadSelect v-model="languageChoice">
+					<ShadSelectTrigger class="w-full max-w-xs" data-testid="appearance-language">
+						<ShadSelectValue />
+					</ShadSelectTrigger>
+					<ShadSelectContent>
+						<ShadSelectItem :value="DEFAULT_LANGUAGE">{{ mainStore.getTranslation('settings.appearance.language_default') }}</ShadSelectItem>
+						<ShadSelectItem v-for="code in languages" :key="code" :value="code" :data-testid="`appearance-language-${code}`">
+							{{ mainStore.getTranslation(`settings.appearance.language_${code}`) }}
+						</ShadSelectItem>
+					</ShadSelectContent>
+				</ShadSelect>
+			</div>
+
 			<div class="space-y-4">
 				<div>
 					<h3 class="font-semibold text-foreground">{{ mainStore.getTranslation('settings.appearance.display_mode') }}</h3>

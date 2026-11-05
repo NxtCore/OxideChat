@@ -17,9 +17,14 @@ use crate::config::Config;
 /// Global i18n instance
 static I18N: OnceLock<I18n> = OnceLock::new();
 
+tokio::task_local! {
+	static REQUEST_LANGUAGE: Language;
+}
+
 /// Supported languages
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default, serde::Deserialize)]
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
 	#[default]
@@ -35,6 +40,17 @@ impl Language {
 			"de" | "german" | "deutsch" => Self::De,
 			_ => Self::En,
 		}
+	}
+
+	/// The language of the current request: the signed-in user's choice, else the installation default.
+	#[must_use]
+	pub fn current() -> Self {
+		REQUEST_LANGUAGE.try_with(|language| *language).unwrap_or_else(|_| Config::get().language())
+	}
+
+	/// Runs `future` with `language` as the current request language.
+	pub async fn scope<F: std::future::Future>(self, future: F) -> F::Output {
+		REQUEST_LANGUAGE.scope(self, future).await
 	}
 
 	/// Get the language code as a string
@@ -103,7 +119,6 @@ impl I18n {
 	///
 	/// # Arguments
 	/// * `key` - Dot-separated key path (e.g., "common.save")
-	/// * `language` - Target language
 	/// * `args` - Template variables to interpolate (e.g., `{name}` -> value)
 	///
 	/// # Returns
@@ -111,7 +126,7 @@ impl I18n {
 	#[must_use]
 	pub fn translate(&self, key: &str, args: &Option<HashMap<String, String>>) -> String {
 		let lock = self.translations.load();
-		let lang_key = Config::get().language().as_str();
+		let lang_key = Language::current().as_str();
 
 		let mut current: &Value = match lock.get(lang_key) {
 			Some(v) => v,

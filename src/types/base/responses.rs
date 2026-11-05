@@ -10,7 +10,10 @@ use uuid::Uuid;
 pub struct BaseResponse {
 	#[cfg_attr(test, ts(type = "any"))]
 	pub i18n: Arc<Value>,
+	/// The language for this request: the user's own choice, else the installation default.
 	pub language: String,
+	/// The installation's default language.
+	pub default_language: String,
 	pub needs_setup: bool,
 	pub oauth_providers: Vec<OAuthProvider>,
 	pub roles: Vec<Role>,

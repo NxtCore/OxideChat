@@ -37,7 +37,8 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 	let config = crate::config::Config::get();
 	json_ok(BaseResponse {
 		i18n: I18n::get().all(),
-		language: config.language().as_str().to_string(),
+		language: crate::i18n::Language::current().as_str().to_string(),
+		default_language: config.language().as_str().to_string(),
 		needs_setup,
 		oauth_providers: config.get_configured_oauth_providers(),
 		roles,

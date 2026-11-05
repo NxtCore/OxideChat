@@ -314,6 +314,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     custom_theme_urls JSONB DEFAULT '[]',
     default_provider_slug VARCHAR(255),
     default_tools JSONB DEFAULT '[]',
+    language VARCHAR(10),  -- NULL = installation default
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -1350,6 +1351,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.appearance.import_theme', 'Theme importieren'),
     ('de', 'settings.appearance.language', 'Sprache'),
     ('de', 'settings.appearance.language_de', 'Deutsch'),
+    ('de', 'settings.appearance.language_default', 'Installationsstandard'),
     ('de', 'settings.appearance.language_description', 'Wählen Sie Ihre bevorzugte Sprache'),
     ('de', 'settings.appearance.language_en', 'Englisch'),
     ('de', 'settings.appearance.loading_themes', 'Themes werden geladen...'),
@@ -1715,7 +1717,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.teams.use_global_default', 'Globalen Standard verwenden'),
     ('de', 'settings.theme_deleted', 'Theme gelöscht'),
     ('de', 'settings.theme_imported', 'Theme erfolgreich importiert'),
-    ('de', 'settings.theme_saved', 'Theme-Einstellungen gespeichert'),
+    ('de', 'settings.appearance.saved', 'Darstellung gespeichert'),
     ('de', 'settings.theme_url', 'Theme-URL'),
     ('de', 'settings.title', 'Einstellungen'),
     ('de', 'settings.tool_test.array_hint', 'Geben Sie Werte durch Kommas getrennt ein'),
@@ -2247,6 +2249,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.appearance.import_theme', 'Import Theme'),
     ('en', 'settings.appearance.language', 'Language'),
     ('en', 'settings.appearance.language_de', 'German'),
+    ('en', 'settings.appearance.language_default', 'Installation default'),
     ('en', 'settings.appearance.language_description', 'Select your preferred language'),
     ('en', 'settings.appearance.language_en', 'English'),
     ('en', 'settings.appearance.loading_themes', 'Loading themes...'),
@@ -2612,7 +2615,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.teams.use_global_default', 'Use global default'),
     ('en', 'settings.theme_deleted', 'Theme deleted'),
     ('en', 'settings.theme_imported', 'Theme imported successfully'),
-    ('en', 'settings.theme_saved', 'Theme preferences saved'),
+    ('en', 'settings.appearance.saved', 'Appearance settings saved'),
     ('en', 'settings.theme_url', 'Theme URL'),
     ('en', 'settings.title', 'Settings'),
     ('en', 'settings.tool_test.array_hint', 'Enter values separated by commas'),

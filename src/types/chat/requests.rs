@@ -116,6 +116,8 @@ pub struct UpdatePreferencesRequest {
 	pub use_remend: Option<bool>,
 	pub theme_css_vars: Option<ThemeCssVars>,
 	pub custom_theme_urls: Option<Vec<String>>,
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub language: Option<Option<Language>>,
 }
 
 #[derive(Debug, Deserialize)]

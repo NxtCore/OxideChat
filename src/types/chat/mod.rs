@@ -179,6 +179,7 @@ pub struct UserPreferences {
 	pub use_remend: bool,
 	pub theme_css_vars: serde_json::Value,
 	pub custom_theme_urls: serde_json::Value,
+	pub language: Option<String>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }
@@ -197,6 +198,7 @@ impl UserPreferences {
 			use_remend: true,
 			theme_css_vars: serde_json::json!({}),
 			custom_theme_urls: serde_json::json!([]),
+			language: None,
 			created_at: now,
 			updated_at: now,
 		}

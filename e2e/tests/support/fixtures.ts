@@ -16,12 +16,13 @@ type Translator = (key: string, args?: Record<string, string | number>) => strin
 
 type Fixtures = {
 	t: Translator;
+	tDe: Translator;
 	api: Api;
 	seed: Seed;
 	allowErrors: (...patterns: RegExp[]) => void;
 };
 
-type WorkerFixtures = {translations: Record<string, unknown>};
+type WorkerFixtures = {translations: Record<string, Record<string, unknown>>};
 
 export class Api {
 	constructor(readonly request: APIRequestContext) {}
@@ -90,12 +91,15 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 			const request = await playwright.request.newContext({baseURL: `http://localhost:${process.env.E2E_PORT ?? 3100}`});
 			const base = await (await request.get('/api/v1/base')).json();
 			await request.dispose();
-			await use(base.i18n.en);
+			await use(base.i18n);
 		},
 		{scope: 'worker'},
 	],
 	t: async ({translations}, use) => {
-		await use((key, args) => translate(translations, key, args));
+		await use((key, args) => translate(translations.en, key, args));
+	},
+	tDe: async ({translations}, use) => {
+		await use((key, args) => translate(translations.de, key, args));
 	},
 	api: async ({page}, use) => {
 		await use(new Api(page.request));
