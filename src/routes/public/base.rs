@@ -3,7 +3,7 @@
 //! Returns application base data including translations.
 
 use crate::i18n::I18n;
-use crate::types::{AppError, BaseResponse, JobState, RequestContext, Role, User, json_ok};
+use crate::types::{AppError, BaseResponse, InstanceResponse, JobState, RequestContext, Role, User, json_ok};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::extract::{Extension, State};
 use axum::response::{IntoResponse, Response};
@@ -46,5 +46,9 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
 		default_model_id: config.default_model_id(),
 		default_theme: config.default_theme(),
+		instance: InstanceResponse {
+			name: config.instance_name(),
+			icon_id: config.instance_icon_id(),
+		},
 	})
 }

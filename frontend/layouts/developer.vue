@@ -18,15 +18,16 @@ import {useHead} from 'nuxt/app';
 import {useMainStore} from '@/stores';
 import 'vue-sonner/style.css';
 
+const store = useMainStore();
+
 useHead({
-	title: 'OxideChat - Developer',
-	link: [{rel: 'icon', type: 'image/svg+xml', href: '/light_transparent.svg'}],
+	title: () => `${store.appName} - Developer`,
+	link: () => [{rel: 'icon', href: store.appIcon}],
 	bodyAttrs: {
 		class: 'dark', // Force dark mode for now as per preference
 	},
 });
 
-const store = useMainStore();
 const router = useRouter();
 const route = useRoute();
 

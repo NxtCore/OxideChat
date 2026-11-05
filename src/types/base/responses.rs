@@ -25,4 +25,15 @@ pub struct BaseResponse {
 	pub default_model_id: Option<Uuid>,
 	/// Theme for users who have not picked their own.
 	pub default_theme: ThemeCssVars,
+	/// Branding an admin set for this installation.
+	pub instance: InstanceResponse,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Instance"))]
+pub struct InstanceResponse {
+	/// Instance name; `None` means `OxideChat`.
+	pub name: Option<String>,
+	/// Image ID of the instance icon, served without a session at `/api/v1/images/{id}`; `None` means the default logo.
+	pub icon_id: Option<Uuid>,
 }

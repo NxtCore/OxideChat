@@ -1,6 +1,8 @@
 import {test, expect} from './support/fixtures';
 import {AUTH_FILES} from './support/constants';
 
+const ONE_PIXEL_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
 const SWITCHABLE_THEME = {theme: {}, light: {background: 'rgb(250, 250, 250)'}, dark: {background: 'rgb(10, 10, 10)'}};
 
 test.describe('admin configuration', () => {
@@ -17,6 +19,45 @@ test.describe('admin configuration', () => {
 		} finally {
 			await api.patch('/api/v1/admin/config', {language: 'en'});
 		}
+	});
+
+	test('a custom instance name and icon show up everywhere and the icon is public', async ({page, api, browser, baseURL}) => {
+		await page.goto('/settings/admin-config');
+		await page.getByTestId('config-instance-name').fill('Acme Chat');
+		await page.getByTestId('config-instance-icon-input').setInputFiles({name: 'icon.png', mimeType: 'image/png', buffer: ONE_PIXEL_PNG});
+		await expect(page.getByTestId('config-instance-icon-remove')).toBeVisible();
+		await page.getByTestId('settings-save-bar-save').click();
+		await expect(page.getByTestId('settings-save-bar')).toBeHidden();
+
+		try {
+			const base = await api.get('/api/v1/base');
+			expect(base.instance.name).toBe('Acme Chat');
+			expect(base.instance.icon_id).toBeTruthy();
+			await expect(page).toHaveTitle('Acme Chat - Settings');
+
+			await page.goto('/');
+			await expect(page.getByTestId('app-name')).toHaveText('Acme Chat');
+			await expect(page.getByTestId('app-icon')).toHaveAttribute('src', `/api/v1/images/${base.instance.icon_id}`);
+			await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', `/api/v1/images/${base.instance.icon_id}`);
+
+			const anonymous = await browser.newContext({baseURL, storageState: {cookies: [], origins: []}});
+			const icon = await anonymous.request.get(`/api/v1/images/${base.instance.icon_id}`);
+			expect(icon.status()).toBe(200);
+			expect(icon.headers()['content-type']).toBe('image/png');
+			const other = await api.post<{id: string}>('/api/v1/images', {data_uri: `data:image/png;base64,${ONE_PIXEL_PNG.toString('base64')}`});
+			expect((await anonymous.request.get(`/api/v1/images/${other.id}`)).status()).toBe(401);
+			await anonymous.close();
+		} finally {
+			await api.patch('/api/v1/admin/config', {instance: {name: null, icon_id: null}});
+		}
+
+		await page.reload();
+		await expect(page.getByTestId('app-name')).toHaveText('OxideChat');
+	});
+
+	test('an icon that is not an uploaded image is rejected', async ({api}) => {
+		await expect(api.patch('/api/v1/admin/config', {instance: {icon_id: crypto.randomUUID()}})).rejects.toThrow(/-> 400/);
+		expect((await api.get('/api/v1/base')).instance.icon_id).toBeNull();
 	});
 
 	test('a default theme reaches users without their own theme and can be cleared', async ({page, api, t}) => {

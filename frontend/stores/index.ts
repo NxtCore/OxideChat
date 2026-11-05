@@ -62,6 +62,13 @@ export const useMainStore = defineStore('main', {
 		isAdmin(): boolean {
 			return this.auth.user?.roles?.includes('admin') ?? false;
 		},
+		appName(): string {
+			return this.base?.instance.name || 'OxideChat';
+		},
+		appIcon(): string {
+			const id = this.base?.instance.icon_id;
+			return id ? imageUrl(id) : '/light_transparent.svg';
+		},
 	},
 	actions: {
 		hasPermission(permission: string): boolean {

@@ -128,8 +128,20 @@ pub struct UpdateGlobalConfigRequest {
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub default_model_id: Option<Option<Uuid>>,
 	pub language: Option<Language>,
+	pub instance: Option<UpdateInstanceRequest>,
 	#[serde(default)]
 	pub oauth: Vec<UpdateOAuthProviderRequest>,
+}
+
+/// Omitted fields stay unchanged; `null` restores the default.
+#[derive(Debug, Default, Deserialize)]
+pub struct UpdateInstanceRequest {
+	/// An empty name also restores `OxideChat`.
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub name: Option<Option<String>>,
+	/// An image uploaded through `POST /api/v1/images`.
+	#[serde(default, deserialize_with = "deserialize_nullable_field")]
+	pub icon_id: Option<Option<Uuid>>,
 }
 
 /// Omitted fields stay unchanged; `null` removes the stored value.

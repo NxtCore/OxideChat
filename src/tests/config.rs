@@ -55,6 +55,40 @@ mod tests {
 	}
 
 	#[test]
+	fn branding_update_tells_omitted_from_null() {
+		let request: UpdateGlobalConfigRequest = serde_json::from_str(r#"{"instance":{"name":"Acme Chat","icon_id":null}}"#).unwrap();
+		let instance = request.instance.unwrap();
+		assert_eq!(instance.name, Some(Some("Acme Chat".to_string())));
+		assert_eq!(instance.icon_id, Some(None));
+
+		let request: UpdateGlobalConfigRequest = serde_json::from_str(r#"{"instance":{}}"#).unwrap();
+		let instance = request.instance.unwrap();
+		assert_eq!(instance.name, None);
+		assert_eq!(instance.icon_id, None);
+		assert!(serde_json::from_str::<UpdateGlobalConfigRequest>("{}").unwrap().instance.is_none());
+	}
+
+	mod branding_icon {
+		use crate::utils::images::{is_safe_stored_image, store_image};
+		use sqlx::PgPool;
+		use uuid::Uuid;
+
+		const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
+		#[sqlx::test]
+		async fn only_stored_images_of_an_allowed_type_qualify(pool: PgPool) -> Result<(), String> {
+			let png = store_image(&pool, PNG, "image/png", None, Some("upload")).await?;
+			assert!(is_safe_stored_image(&pool, png.id).await?);
+
+			let svg = store_image(&pool, b"<svg xmlns=\"http://www.w3.org/2000/svg\"><script/></svg>", "image/png", None, Some("upload")).await?;
+			assert!(!is_safe_stored_image(&pool, svg.id).await?);
+
+			assert!(!is_safe_stored_image(&pool, Uuid::new_v4()).await?);
+			Ok(())
+		}
+	}
+
+	#[test]
 	fn oauth_settings_response_has_no_secret_field() {
 		let json = serde_json::to_value(OAuthSettingsResponse {
 			provider: OAuthProvider::Google,

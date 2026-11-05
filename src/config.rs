@@ -76,6 +76,10 @@ pub struct ConfigValues {
 	pub allow_server_stdio_mcp: bool,
 	/// Instance-wide default model. Applied when neither user nor team default is set.
 	pub default_model_id: Option<Uuid>,
+	/// Instance name shown instead of `OxideChat`.
+	pub instance_name: Option<String>,
+	/// Image shown as the favicon and app icon instead of the `OxideChat` logo.
+	pub instance_icon_id: Option<Uuid>,
 }
 
 impl Default for ConfigValues {
@@ -90,6 +94,8 @@ impl Default for ConfigValues {
 			enable_provider_selector: false,
 			allow_server_stdio_mcp: false,
 			default_model_id: None,
+			instance_name: None,
+			instance_icon_id: None,
 		}
 	}
 }
@@ -166,6 +172,18 @@ impl Config {
 	#[must_use]
 	pub fn default_model_id(&self) -> Option<Uuid> {
 		self.values.load().default_model_id
+	}
+
+	/// Get the instance name, if an admin set one.
+	#[must_use]
+	pub fn instance_name(&self) -> Option<String> {
+		self.values.load().instance_name.clone()
+	}
+
+	/// Get the image ID of the instance icon, if an admin set one.
+	#[must_use]
+	pub fn instance_icon_id(&self) -> Option<Uuid> {
+		self.values.load().instance_icon_id
 	}
 
 	/// Get current configuration values.
@@ -270,6 +288,11 @@ impl Config {
 		if let Some(language) = req.language {
 			Self::upsert_config(&mut **tx, "language", language.as_str()).await?;
 		}
+		if let Some(instance) = &req.instance {
+			Self::set_or_clear(tx, "instance_name", instance.name.as_ref()).await?;
+			let icon_id = instance.icon_id.map(|id| id.map(|id| id.to_string()));
+			Self::set_or_clear(tx, "instance_icon_id", icon_id.as_ref()).await?;
+		}
 		let default_model_id = req.default_model_id.map(|id| id.map(|id| id.to_string()));
 		Self::set_or_clear(tx, "default_model_id", default_model_id.as_ref()).await
 	}
@@ -335,6 +358,8 @@ impl Config {
 				"enable_provider_selector" => values.enable_provider_selector = row.value == "true",
 				"allow_server_stdio_mcp" => values.allow_server_stdio_mcp = row.value == "true",
 				"default_model_id" => values.default_model_id = Uuid::parse_str(&row.value).ok(),
+				"instance_name" => values.instance_name = Some(row.value),
+				"instance_icon_id" => values.instance_icon_id = Uuid::parse_str(&row.value).ok(),
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}
 		}
