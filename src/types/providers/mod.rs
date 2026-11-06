@@ -27,6 +27,8 @@ pub enum ProviderKind {
 	Anthropic,
 	Google,
 	Custom,
+	Cortecs,
+	Mistral,
 }
 
 impl ProviderKind {
@@ -39,6 +41,17 @@ impl ProviderKind {
 			Self::Google => OmniProviderKind::Google,
 			Self::Openrouter => OmniProviderKind::OpenRouter,
 			Self::Custom => OmniProviderKind::Custom("CUSTOM".to_string()),
+			Self::Cortecs | Self::Mistral => OmniProviderKind::OpenAI,
+		}
+	}
+
+	/// The models.dev provider slug for kinds that share another kind's adapter, so prices are looked up for that provider.
+	#[must_use]
+	pub fn catalog_slug(&self) -> Option<String> {
+		match self {
+			Self::Cortecs => Some("cortecs".to_string()),
+			Self::Mistral => Some("mistral".to_string()),
+			_ => None,
 		}
 	}
 }

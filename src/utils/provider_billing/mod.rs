@@ -95,7 +95,7 @@ pub async fn refresh_provider_billing(pool: &PgPool, provider: &Provider) -> Res
 					openrouter::fetch_key_metric(client()?, &key).await
 				}
 			}
-			ProviderKind::Openai | ProviderKind::Anthropic | ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom => Err(ProviderBillingError::Unsupported),
+			ProviderKind::Openai | ProviderKind::Anthropic | ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom | ProviderKind::Cortecs | ProviderKind::Mistral => Err(ProviderBillingError::Unsupported),
 		}
 	}
 	.await;

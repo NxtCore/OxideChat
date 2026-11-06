@@ -78,6 +78,7 @@
 			<div
 				v-for="item in displayProviders"
 				:key="item.id || item.kind + item.name"
+				:data-testid="`provider-card-${item.kind}`"
 				class="rounded-lg border border-border bg-card p-4 transition-all hover:border-border/80"
 			>
 				<div class="flex items-center justify-between gap-4">
@@ -169,6 +170,20 @@
 								<p class="text-xs text-muted-foreground">
 									{{ store.getTranslation('settings.providers.api_key_hint') }}
 								</p>
+							</div>
+
+							<div v-if="selectedProvider?.regions" class="space-y-2">
+								<ShadLabel>{{ store.getTranslation('settings.providers.region') }}</ShadLabel>
+								<ShadSelect v-model="configForm.baseUrl">
+									<ShadSelectTrigger class="w-full" data-testid="provider-region">
+										<ShadSelectValue />
+									</ShadSelectTrigger>
+									<ShadSelectContent>
+										<ShadSelectItem v-for="region in selectedProvider.regions" :key="region.key" :value="region.baseUrl">
+											{{ store.getTranslation(`settings.providers.region_${region.key}`) }}
+										</ShadSelectItem>
+									</ShadSelectContent>
+								</ShadSelect>
 							</div>
 
 							<div v-if="!selectedProvider?.isPreConfigured" class="space-y-2">
@@ -343,6 +358,8 @@ interface ProviderConfig {
 	defaultBaseUrl?: string;
 	isPreConfigured: boolean;
 	keyFormat?: string;
+	defaultReportedCost?: ProviderReportedCost;
+	regions?: {key: string; baseUrl: string}[];
 }
 
 const store = useMainStore();
@@ -549,6 +566,30 @@ const providers: ProviderConfig[] = [
 		isPreConfigured: true,
 		keyFormat: 'AIza',
 	},
+	{
+		kind: 'MISTRAL',
+		name: 'Mistral',
+		description: store.getTranslation('settings.providers.mistral_description'),
+		icon: iconsStore.getProviderIcon('mistral'),
+		brandColor: '#fff',
+		defaultBaseUrl: 'https://api.mistral.ai',
+		isPreConfigured: true,
+		regions: [
+			{key: 'global', baseUrl: 'https://api.mistral.ai'},
+			{key: 'eu', baseUrl: 'https://api.eu.mistral.ai'},
+			{key: 'us', baseUrl: 'https://api.us.mistral.ai'},
+		],
+	},
+	{
+		kind: 'CORTECS',
+		name: 'Cortecs',
+		description: store.getTranslation('settings.providers.cortecs_description'),
+		icon: iconsStore.getProviderIcon('cortecs'),
+		brandColor: '#fff',
+		defaultBaseUrl: 'https://api.cortecs.ai',
+		isPreConfigured: true,
+		defaultReportedCost: {unit: 'currency', currency: 'EUR', source: 'usage.cost', scale: '0.000001'},
+	},
 ];
 
 async function loadProviders() {
@@ -595,7 +636,7 @@ function openConfigDialog(item: any) {
 		configForm.apiKey = '';
 		configForm.baseUrl = item.template?.defaultBaseUrl || '';
 		configForm.isEnabled = true;
-		applyReportedCost(null);
+		applyReportedCost(item.template?.defaultReportedCost ?? null);
 		configForm.existingProvider = null;
 	}
 

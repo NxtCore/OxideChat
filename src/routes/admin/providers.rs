@@ -160,7 +160,7 @@ pub async fn test_provider(State(state): State<Arc<JobState>>, auth: AuthUser, P
 			reported_cost: None,
 		},
 		enabled: true,
-		catalog_provider_slug: None,
+		catalog_provider_slug: provider.kind.catalog_slug(),
 	};
 
 	let result = test_provider_connection(config).await.unwrap_or_else(|message| TestProviderResponse {
@@ -192,7 +192,7 @@ pub async fn test_provider_inline(State(state): State<Arc<JobState>>, auth: Auth
 			reported_cost: None,
 		},
 		enabled: true,
-		catalog_provider_slug: None,
+		catalog_provider_slug: req.kind.catalog_slug(),
 	};
 
 	let result = test_provider_connection(config).await.unwrap_or_else(|message| TestProviderResponse {

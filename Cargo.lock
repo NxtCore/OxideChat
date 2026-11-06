@@ -5111,3 +5111,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "omniference"
+version = "0.4.1"

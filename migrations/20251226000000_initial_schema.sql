@@ -125,7 +125,9 @@ DO $$ BEGIN
         'OPENROUTER',
         'ANTHROPIC',
         'GOOGLE',
-        'CUSTOM'
+        'CUSTOM',
+        'CORTECS',
+        'MISTRAL'
     );
 EXCEPTION
     WHEN duplicate_object THEN null;
@@ -1589,6 +1591,10 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.providers.api_key_hint', 'Ihr API-Schlüssel wird sicher gespeichert. Wenn zudem die Verschlüsselung konfiguriert ist, wird er zudem verschlüsselt'),
     ('de', 'settings.providers.api_key_placeholder', 'Geben Sie Ihren API-Schlüssel ein'),
     ('de', 'settings.providers.base_url', 'Basis-URL'),
+    ('de', 'settings.providers.region', 'Region'),
+    ('de', 'settings.providers.region_global', 'Global'),
+    ('de', 'settings.providers.region_eu', 'EU'),
+    ('de', 'settings.providers.region_us', 'USA'),
     ('de', 'settings.providers.billing.admin_key', 'OpenAI-Admin-API-Schluessel'),
     ('de', 'settings.providers.billing.admin_key_hint', 'Ein separater Organisations-Admin-Schluessel, der nur zum Lesen der Projektkosten verwendet wird.'),
     ('de', 'settings.providers.billing.credits_remaining', '{amount} Guthaben verbleibend'),
@@ -1638,6 +1644,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.providers.name', 'Anzeigename'),
     ('de', 'settings.providers.openai_description', 'Greift auf GPT-5.2, GPT-5.2-Codex und andere OpenAI-Modelle zu'),
     ('de', 'settings.providers.openrouter_description', 'Greift auf eine Vielzahl von Modellen über OpenRouter zu'),
+    ('de', 'settings.providers.cortecs_description', 'Europäische Inferenz für offene Modelle über Cortecs'),
+    ('de', 'settings.providers.mistral_description', 'Greift auf Mistral Large, Codestral und andere Mistral-Modelle zu'),
     ('de', 'settings.providers.save_error', 'Fehler beim Speichern der Anbieterkonfiguration'),
     ('de', 'settings.providers.save_success', 'Anbieterkonfiguration erfolgreich gespeichert'),
     ('de', 'settings.providers.syncing_provider', 'Synchronisiere Modelle'),
@@ -2487,6 +2495,10 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.providers.api_key_hint', 'Your API key is stored securely. If encryption is configured, it is encrypted at rest'),
     ('en', 'settings.providers.api_key_placeholder', 'Enter your API key'),
     ('en', 'settings.providers.base_url', 'Base URL'),
+    ('en', 'settings.providers.region', 'Region'),
+    ('en', 'settings.providers.region_global', 'Global'),
+    ('en', 'settings.providers.region_eu', 'EU'),
+    ('en', 'settings.providers.region_us', 'US'),
     ('en', 'settings.providers.billing.admin_key', 'OpenAI Admin API key'),
     ('en', 'settings.providers.billing.admin_key_hint', 'A separate organization Admin API key used only to read project costs.'),
     ('en', 'settings.providers.billing.credits_remaining', '{amount} credits remaining'),
@@ -2536,6 +2548,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.providers.name', 'Display Name'),
     ('en', 'settings.providers.openai_description', 'Access GPT-5.2, GPT-5.2-Codex and other OpenAI models'),
     ('en', 'settings.providers.openrouter_description', 'Access a wide variety of models through OpenRouter'),
+    ('en', 'settings.providers.cortecs_description', 'European inference for open models through Cortecs'),
+    ('en', 'settings.providers.mistral_description', 'Access Mistral Large, Codestral and other Mistral models'),
     ('en', 'settings.providers.save_error', 'Failed to save provider configuration'),
     ('en', 'settings.providers.save_success', 'Provider configuration saved successfully'),
     ('en', 'settings.providers.syncing_provider', 'Syncing models'),

@@ -149,7 +149,7 @@ impl Provider {
 		}).flatten();
 		let is_enabled = match row.provider_kind {
 			ProviderKind::Openrouter => row.credential.is_some() || row.has_provider_api_key,
-			ProviderKind::Openai | ProviderKind::Anthropic | ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom => false,
+			ProviderKind::Openai | ProviderKind::Anthropic | ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom | ProviderKind::Cortecs | ProviderKind::Mistral => false,
 		};
 		ProviderBillingOverviewResponse {
 			provider_id: row.provider_id,

@@ -25,6 +25,30 @@ test.describe('admin settings', () => {
 		await api.delete(`/api/v1/admin/providers/${created!.id}`);
 	});
 
+	test('Mistral and Cortecs have setup cards, and Cortecs reports its credit cost in EUR', async ({page, t}) => {
+		await page.goto('/settings/providers');
+		await page.getByTestId('provider-card-MISTRAL').getByRole('button').first().click();
+		await expect(page.getByRole('dialog').getByTestId('provider-region')).toContainText(t('settings.providers.region_global'));
+		await expect(page.getByRole('dialog').getByTestId('provider-reported-cost-source')).toHaveCount(0);
+		await page.getByRole('dialog').getByTestId('provider-region').click();
+		await page.getByRole('option', {name: t('settings.providers.region_eu')}).click();
+		await page.getByRole('dialog').locator('#api-key').fill('e2e-mistral-key');
+		let testedBody: {kind?: string; base_url?: string} = {};
+		await page.route('**/api/v1/admin/providers/test', route => {
+			testedBody = route.request().postDataJSON();
+			return route.fulfill({json: {success: true, models_found: 0, message: ''}});
+		});
+		await page.getByRole('dialog').getByTestId('provider-test').click();
+		await expect.poll(() => testedBody).toMatchObject({kind: 'MISTRAL', base_url: 'https://api.eu.mistral.ai'});
+		await page.keyboard.press('Escape');
+
+		await page.getByTestId('provider-card-CORTECS').getByRole('button').first().click();
+		const dialog = page.getByRole('dialog');
+		await expect(dialog.getByTestId('provider-reported-cost-currency')).toContainText('EUR');
+		await expect(dialog.getByTestId('provider-reported-cost-source')).toHaveValue('usage.cost');
+		await expect(dialog.getByTestId('provider-reported-cost-scale')).toHaveValue('0.000001');
+	});
+
 	test('the synced test model is listed on the models page', async ({page, t, seed}) => {
 		await page.goto('/settings/models');
 		await page.getByPlaceholder(t('settings.models.search')).fill(seed.model.displayName);

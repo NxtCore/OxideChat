@@ -40,7 +40,7 @@ pub async fn update_billing(State(state): State<Arc<JobState>>, auth: AuthUser, 
 	}
 	if matches!(
 		provider.kind,
-		ProviderKind::Openai | ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom | ProviderKind::Anthropic
+		ProviderKind::Openai | ProviderKind::Google | ProviderKind::OpenaiCompat | ProviderKind::Custom | ProviderKind::Cortecs | ProviderKind::Mistral | ProviderKind::Anthropic
 	) {
 		return Ok(ErrorBuilder::new(ErrorCode::BadRequest).details(serde_json::json!({"reason": "unsupported"})).build());
 	}

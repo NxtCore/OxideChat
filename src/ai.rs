@@ -105,7 +105,7 @@ pub fn catalog_provider(name: &str, kind: &ProviderKind) -> ProviderConfig {
 			reported_cost: None,
 		},
 		enabled: true,
-		catalog_provider_slug: None,
+		catalog_provider_slug: kind.catalog_slug(),
 	}
 }
 
@@ -153,7 +153,7 @@ pub fn provider_to_config(provider: &Provider) -> Result<ProviderConfig, crate::
 			reported_cost: None,
 		},
 		enabled: provider.is_enabled,
-		catalog_provider_slug: None,
+		catalog_provider_slug: provider.kind.catalog_slug(),
 	})
 }
 

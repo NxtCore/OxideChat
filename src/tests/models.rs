@@ -538,6 +538,16 @@ mod catalog_pricing {
 		Ok(catalog().catalog_pricing(&provider, "gpt-5").await.ok_or("gpt-5 has a models.dev price")?)
 	}
 
+	#[tokio::test]
+	async fn cortecs_and_mistral_use_their_own_models_dev_prices() -> TestResult {
+		let openai = catalog().catalog_pricing(&catalog_provider("OpenAI", &ProviderKind::Openai), "gpt-5.4").await.ok_or("openai gpt-5.4 price")?;
+		let cortecs = catalog().catalog_pricing(&catalog_provider("Cortecs", &ProviderKind::Cortecs), "gpt-5.4").await.ok_or("cortecs gpt-5.4 price")?;
+		assert_ne!(cortecs.input, openai.input);
+		let mistral = catalog().catalog_pricing(&catalog_provider("Mistral", &ProviderKind::Mistral), "codestral-latest").await;
+		assert!(mistral.is_some());
+		Ok(())
+	}
+
 	#[sqlx::test(migrations = "./migrations")]
 	async fn a_model_without_a_manual_price_reports_the_models_dev_price(pool: PgPool) -> TestResult {
 		let reference = models_dev_gpt5().await?;
