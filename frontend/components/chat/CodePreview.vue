@@ -31,8 +31,8 @@
 						<div class="flex items-center justify-between px-4 py-2 bg-muted border-b border-border">
 							<span class="text-xs font-mono text-muted-foreground uppercase">{{ language }}</span>
 							<ShadButton variant="ghost" size="sm" class="h-7 text-xs" @click="copyCode">
-								<Check v-if="copied" class="size-3.5 mr-1" />
-								<Copy v-else class="size-3.5 mr-1" />
+								<Check v-if="copied" class="size-3.5" />
+								<Copy v-else class="size-3.5" />
 								{{ copied ? store.getTranslation('chat.code_preview.copied') : store.getTranslation('chat.code_preview.copy') }}
 							</ShadButton>
 						</div>

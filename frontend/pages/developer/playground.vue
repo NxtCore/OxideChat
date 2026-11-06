@@ -21,7 +21,7 @@
 							<ShadTabsTrigger value="details" data-testid="playground-tab-details">{{ store.getTranslation('developer.playground.tab_details') }}</ShadTabsTrigger>
 						</ShadTabsList>
 						<ShadButton v-if="chat.messages.value.length" variant="ghost" size="sm" data-testid="playground-clear" @click="chat.clear">
-							<Eraser class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.playground.clear') }}
+							<Eraser class="h-3.5 w-3.5" />{{ store.getTranslation('developer.playground.clear') }}
 						</ShadButton>
 					</div>
 
@@ -42,7 +42,7 @@
 								<div v-if="message.error" class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-foreground" role="alert">
 									<span class="min-w-0 break-words">{{ message.error }}</span>
 									<ShadButton v-if="isLast(index) && !chat.running.value" variant="outline" size="sm" @click="regenerate">
-										<RotateCcw class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.playground.retry') }}
+										<RotateCcw class="h-3.5 w-3.5" />{{ store.getTranslation('developer.playground.retry') }}
 									</ShadButton>
 								</div>
 								<div v-if="message.metrics && (!chat.running.value || !isLast(index))" class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground" data-testid="playground-metrics">
@@ -66,10 +66,10 @@
 							<div class="mt-2 flex items-center justify-between gap-2">
 								<span class="text-xs text-muted-foreground">{{ missingHint || store.getTranslation('developer.playground.shortcut') }}</span>
 								<ShadButton v-if="!chat.running.value" :disabled="!canSend" data-testid="playground-send" @click="send">
-									<SendIcon class="mr-2 h-4 w-4" />{{ store.getTranslation('developer.playground.send') }}
+									<SendIcon class="h-4 w-4" />{{ store.getTranslation('developer.playground.send') }}
 								</ShadButton>
 								<ShadButton v-else variant="outline" data-testid="playground-stop" @click="chat.stop">
-									<Square class="mr-2 h-4 w-4" />{{ store.getTranslation('developer.playground.stop') }}
+									<Square class="h-4 w-4" />{{ store.getTranslation('developer.playground.stop') }}
 								</ShadButton>
 							</div>
 						</div>

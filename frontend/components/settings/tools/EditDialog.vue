@@ -168,7 +168,7 @@
 									@click="removeFunction(activeFunctionIdx)"
 									type="button"
 								>
-									<Trash2 class="h-3 w-3 mr-1" />
+									<Trash2 class="h-3 w-3" />
 									{{ store.getTranslation('settings.tools.remove') }}
 								</ShadButton>
 							</div>
@@ -179,13 +179,13 @@
 
 			<DialogFooter class="gap-2 sm:gap-0 pt-2">
 				<ShadButton v-if="tool && !isBuiltinTool" variant="destructive" size="sm" @click="deleteTool" :disabled="saving" class="mr-auto">
-					<Trash2 class="h-3 w-3 mr-1" />
+					<Trash2 class="h-3 w-3" />
 					{{ store.getTranslation('common.delete') }}
 				</ShadButton>
 				<div class="flex gap-2">
 					<ShadButton variant="outline" size="sm" @click="open = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton size="sm" @click="saveTool" :disabled="saving">
-						<Loader2 v-if="saving" class="h-3 w-3 animate-spin mr-1" />
+						<Loader2 v-if="saving" class="h-3 w-3 animate-spin" />
 						{{ store.getTranslation('common.save') }}
 					</ShadButton>
 				</div>

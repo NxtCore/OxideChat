@@ -119,8 +119,8 @@
 			<DialogFooter>
 				<ShadButton variant="outline" @click="open = false">{{ store.getTranslation('common.close') }}</ShadButton>
 				<ShadButton @click="runTest" :disabled="testing">
-					<Loader2 v-if="testing" class="h-4 w-4 animate-spin mr-2" />
-					<Play v-else class="h-4 w-4 mr-2" />
+					<Loader2 v-if="testing" class="h-4 w-4 animate-spin" />
+					<Play v-else class="h-4 w-4" />
 					{{ store.getTranslation('settings.tool_test.run_test') }}
 				</ShadButton>
 			</DialogFooter>

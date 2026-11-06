@@ -1,7 +1,7 @@
 <template>
 	<div class="flex flex-col h-full">
 		<ShadButton
-			class="mx-2 mb-4 flex items-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+			class="mx-2 mt-2 mb-4 flex items-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90"
 			@click="createNewChat"
 		>
 			<Plus class="h-4 w-4" />
@@ -24,8 +24,8 @@
 					/>
 				</template>
 
-				<template v-for="group in groupedChats" :key="group.label">
-					<div class="mb-2 mt-4 px-2 text-xs font-medium text-muted-foreground">
+				<template v-for="(group, index) in groupedChats" :key="group.label">
+					<div class="mb-2 px-2 text-xs font-medium text-muted-foreground" :class="{'mt-4': index > 0 || chatStore.pinnedChats.length > 0}">
 						{{ store.getTranslation('chat.list.' + group.label.replace(/\s+/g, '_').toLowerCase()) }}
 					</div>
 					<ChatListItem

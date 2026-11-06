@@ -37,7 +37,7 @@
 				<ShadSwitch :model-value="neverUsed" @update:model-value="setNeverUsed" />
 				<ShadLabel>{{ store.getTranslation('developer.admin.keys.never_used') }}</ShadLabel>
 				<ShadButton variant="outline" size="sm" class="ml-auto" @click="reload">
-					<RefreshCw class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('common.refresh') }}
+					<RefreshCw class="h-3.5 w-3.5" />{{ store.getTranslation('common.refresh') }}
 				</ShadButton>
 			</div>
 		</div>

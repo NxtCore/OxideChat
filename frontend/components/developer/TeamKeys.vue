@@ -5,8 +5,8 @@
 				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('developer.service.title') }}</h2>
 				<p class="text-sm text-muted-foreground">{{ store.getTranslation('developer.service.description') }}</p>
 			</div>
-			<ShadButton @click="createOpen = true">
-				<Plus class="mr-2 h-4 w-4" />
+			<ShadButton size="sm" @click="createOpen = true">
+				<Plus class="h-4 w-4" />
 				{{ store.getTranslation('developer.service.create') }}
 			</ShadButton>
 		</div>
@@ -49,17 +49,17 @@
 					<div v-if="!apiKey.revoked_at" class="flex flex-wrap items-center gap-2">
 						<template v-if="apiKey.service_account">
 							<ShadButton variant="outline" size="sm" @click="limitsTarget = apiKey">
-								<Gauge class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.limits') }}
+								<Gauge class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.limits') }}
 							</ShadButton>
 							<ShadButton variant="outline" size="sm" @click="budgetTarget = apiKey">
-								<Wallet class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.budget') }}
+								<Wallet class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.budget') }}
 							</ShadButton>
 							<ShadButton v-if="!apiKey.admin_disabled" variant="outline" size="sm" @click="rotateTarget = apiKey">
-								<RefreshCw class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rotate') }}
+								<RefreshCw class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rotate') }}
 							</ShadButton>
 						</template>
 						<ShadButton variant="outline" size="sm" class="text-destructive hover:text-destructive" @click="revokeTarget = apiKey">
-							<Ban class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.revoke') }}
+							<Ban class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.revoke') }}
 						</ShadButton>
 					</div>
 				</div>

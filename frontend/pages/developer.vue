@@ -1,17 +1,12 @@
 <template>
 	<div class="min-h-screen bg-background text-foreground selection:bg-primary/20 font-sans lg:flex lg:h-[calc(100dvh-3rem)] lg:min-h-0 lg:flex-col">
 		<div class="container mx-auto lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-			<div class="mb-6 lg:mb-8 lg:shrink-0">
-				<button
-					@click="goBack"
-					class="group mb-4 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-				>
-					<ArrowLeft class="h-4 w-4 transition-transform group-hover:-translate-x-1" />
-					<span>{{ store.getTranslation('developer.back') }}</span>
-				</button>
-				<h1 class="text-3xl font-bold tracking-tight text-foreground">{{ store.getTranslation('developer.title') }}</h1>
-				<p class="text-base text-muted-foreground">{{ store.getTranslation('developer.description') }}</p>
-			</div>
+			<AreaHeader
+				:title="store.getTranslation('developer.title')"
+				:description="store.getTranslation('developer.description')"
+				:back-label="store.getTranslation('developer.back')"
+				@back="goBack"
+			/>
 
 			<div class="grid w-full grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-4 lg:grid-rows-[minmax(0,1fr)] lg:gap-8">
 				<aside class="w-full shrink-0 lg:w-64 lg:overflow-y-auto lg:pr-2">
@@ -49,7 +44,7 @@
 
 <script setup lang="ts">
 import {ADMIN_DEVELOPER_VIEW} from '~/types/generated/permissions';
-import {ArrowLeft, KeyRound, BarChart3, ScrollText, Bot, FlaskConical, ShieldCheck} from 'lucide-vue-next';
+import {KeyRound, BarChart3, ScrollText, Bot, FlaskConical, ShieldCheck} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 definePageMeta({

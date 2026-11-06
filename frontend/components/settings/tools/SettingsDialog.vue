@@ -51,7 +51,7 @@
 			<DialogFooter>
 				<ShadButton variant="outline" @click="open = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 				<ShadButton @click="saveSettings" :disabled="saving">
-					<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
+					<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
 					{{ store.getTranslation('common.save') }}
 				</ShadButton>
 			</DialogFooter>

@@ -64,7 +64,7 @@
 
 						<div class="flex flex-col gap-4">
 							<ShadButton type="submit" class="w-full" :disabled="loading">
-								<Loader2 v-if="loading" class="mr-2 h-4 w-4 animate-spin" />
+								<Loader2 v-if="loading" class="h-4 w-4 animate-spin" />
 								{{ loading ? store.getTranslation('auth.register.submitting') : store.getTranslation('auth.register.submit') }}
 							</ShadButton>
 							<p class="text-center text-sm text-muted-foreground">

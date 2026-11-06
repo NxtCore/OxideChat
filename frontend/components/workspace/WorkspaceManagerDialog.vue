@@ -62,7 +62,7 @@
 					<div class="flex items-center gap-2">
 						<ShadInput v-model="newName" :placeholder="store.getTranslation('workspace.name_placeholder')" class="h-9" @keyup.enter="create" />
 						<ShadButton :disabled="!newName.trim() || creating" @click="create">
-							<Plus class="mr-1 h-4 w-4" />
+							<Plus class="h-4 w-4" />
 							{{ store.getTranslation('workspace.create') }}
 						</ShadButton>
 					</div>

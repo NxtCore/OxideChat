@@ -258,7 +258,7 @@
 				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="createOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton :disabled="saving || !createForm.name.trim()" @click="createTeam">
-						<Loader2 v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+						<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
 						{{ store.getTranslation('common.create') }}
 					</ShadButton>
 				</ShadDialogFooter>
@@ -274,7 +274,7 @@
 				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="deleteOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton variant="destructive" :disabled="saving" @click="deleteSelected">
-						<Loader2 v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+						<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
 						{{ store.getTranslation('common.delete') }}
 					</ShadButton>
 				</ShadDialogFooter>
