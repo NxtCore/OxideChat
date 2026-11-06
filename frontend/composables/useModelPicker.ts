@@ -3,7 +3,7 @@ import type {ModelList, PaginatedResponse, ProviderTab} from '~/types/chat';
 
 export type ModelFilter = 'all' | 'favorites' | string;
 
-export function useModelPicker<T = ModelList>(options: {endpoint?: string; providerEndpoint?: string} = {}) {
+export function useModelPicker<T = ModelList>(options: {endpoint?: string; providerEndpoint?: string; params?: Record<string, string>} = {}) {
 	const {$customFetch} = useNuxtApp();
 	const endpoint = options.endpoint ?? modelsPath;
 	const providerEndpoint = options.providerEndpoint ?? '/api/v1/providers';
@@ -24,6 +24,7 @@ export function useModelPicker<T = ModelList>(options: {endpoint?: string; provi
 
 	function buildParams(p: number): Record<string, string> {
 		const params: Record<string, string> = {
+			...options.params,
 			page: p.toString(),
 			size: pageSize.toString(),
 		};

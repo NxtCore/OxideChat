@@ -161,7 +161,7 @@ onMounted(() => {
 						<RotateCcw class="h-4 w-4" />
 					</ShadButton>
 					<ShadButton variant="outline" @click="showImportDialog = true">
-						<Plus class="h-4 w-4 mr-1" />
+						<Plus class="h-4 w-4" />
 						{{ mainStore.getTranslation('settings.appearance.import_theme') }}
 					</ShadButton>
 				</div>

@@ -22,7 +22,7 @@
 				<ShadInput v-model="toFilter" type="date" @change="reload" />
 			</div>
 			<div class="flex items-end justify-end">
-				<ShadButton variant="outline" size="sm" @click="reload"><RefreshCw class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('common.refresh') }}</ShadButton>
+				<ShadButton variant="outline" size="sm" @click="reload"><RefreshCw class="h-3.5 w-3.5" />{{ store.getTranslation('common.refresh') }}</ShadButton>
 			</div>
 		</div>
 

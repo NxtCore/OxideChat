@@ -5,8 +5,8 @@
 				<h2 class="text-lg font-semibold text-foreground">{{ store.getTranslation('developer.keys.title') }}</h2>
 				<p class="text-sm text-muted-foreground">{{ store.getTranslation('developer.keys.description') }}</p>
 			</div>
-			<ShadButton :disabled="!developer.teams.length" @click="createOpen = true">
-				<Plus class="mr-2 h-4 w-4" />
+			<ShadButton size="sm" :disabled="!developer.teams.length" @click="createOpen = true">
+				<Plus class="h-4 w-4" />
 				{{ store.getTranslation('developer.keys.create') }}
 			</ShadButton>
 		</div>
@@ -87,23 +87,23 @@
 						</div>
 						<ShadButton v-if="keyStatus(apiKey) === 'active' && apiKey.scopes.includes('inference:write')" as-child variant="outline" size="sm">
 							<NuxtLink :to="`/developer/playground?key=${apiKey.id}`">
-								<FlaskConical class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.try') }}
+								<FlaskConical class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.try') }}
 							</NuxtLink>
 						</ShadButton>
 						<ShadButton variant="outline" size="sm" @click="renameTarget = apiKey; renameValue = apiKey.name">
-							<Pencil class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rename') }}
+							<Pencil class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rename') }}
 						</ShadButton>
 						<ShadButton variant="outline" size="sm" @click="limitsTarget = apiKey">
-							<Gauge class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.limits') }}
+							<Gauge class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.limits') }}
 						</ShadButton>
 						<ShadButton variant="outline" size="sm" @click="budgetTarget = apiKey">
-							<Wallet class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.budget') }}
+							<Wallet class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.budget') }}
 						</ShadButton>
 						<ShadButton v-if="!apiKey.admin_disabled" variant="outline" size="sm" @click="rotateTarget = apiKey">
-							<RefreshCw class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rotate') }}
+							<RefreshCw class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.rotate') }}
 						</ShadButton>
 						<ShadButton variant="outline" size="sm" class="text-destructive hover:text-destructive" @click="revokeTarget = apiKey">
-							<Ban class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.revoke') }}
+							<Ban class="h-3.5 w-3.5" />{{ store.getTranslation('developer.keys.revoke') }}
 						</ShadButton>
 					</div>
 				</div>

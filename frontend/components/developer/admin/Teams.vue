@@ -34,7 +34,7 @@
 						</td>
 						<td class="px-4 py-3 text-right">
 							<ShadButton variant="outline" size="sm" :disabled="!canEditLimits" @click="limitsTarget = team">
-								<SlidersHorizontal class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('developer.admin.teams.edit_limits') }}
+								<SlidersHorizontal class="h-3.5 w-3.5" />{{ store.getTranslation('developer.admin.teams.edit_limits') }}
 							</ShadButton>
 						</td>
 					</tr>

@@ -425,7 +425,7 @@
 				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="createOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton :disabled="creating || !createForm.name.trim() || !createForm.amount" data-testid="budget-create-submit" @click="createBudget">
-						<Loader2 v-if="creating" class="mr-2 h-4 w-4 animate-spin" />
+						<Loader2 v-if="creating" class="h-4 w-4 animate-spin" />
 						{{ store.getTranslation('common.create') }}
 					</ShadButton>
 				</ShadDialogFooter>

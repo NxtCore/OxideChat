@@ -14,8 +14,8 @@
 					<p class="text-sm text-muted-foreground">{{ store.getTranslation('settings.providers.billing.local_tracked') }}</p>
 				</div>
 				<ShadButton variant="outline" size="sm" :disabled="isRefreshingBilling" @click="refreshAllBilling">
-					<Loader2 v-if="isRefreshingBilling" class="mr-2 h-4 w-4 animate-spin" />
-					<RotateCw v-else class="mr-2 h-4 w-4" />
+					<Loader2 v-if="isRefreshingBilling" class="h-4 w-4 animate-spin" />
+					<RotateCw v-else class="h-4 w-4" />
 					{{ store.getTranslation('settings.providers.billing.refresh') }}
 				</ShadButton>
 			</div>
@@ -267,7 +267,7 @@
 								</div>
 								<div class="flex flex-wrap gap-2">
 									<ShadButton variant="outline" :disabled="billingStore.states[configForm.existingProvider.id]?.loading" @click="testBillingAccess">
-										<RotateCw class="mr-2 h-4 w-4" />{{ store.getTranslation('settings.providers.billing.refresh') }}
+										<RotateCw class="h-4 w-4" />{{ store.getTranslation('settings.providers.billing.refresh') }}
 									</ShadButton>
 									<ShadButton v-if="billingForm.hasConnection" variant="destructive" @click="removeBilling">
 										{{ store.getTranslation('settings.providers.billing.remove') }}
@@ -318,7 +318,7 @@
 
 				<ShadDialogFooter class="gap-2 sm:gap-0">
 					<ShadButton v-if="configForm.existingProvider && activeProviderTab === 'settings'" variant="destructive" @click="deleteConfig" :disabled="saving" class="mr-auto">
-						<Trash2 class="h-4 w-4 mr-2" />
+						<Trash2 class="h-4 w-4" />
 						{{ store.getTranslation('common.delete') }}
 					</ShadButton>
 					<div class="flex flex-row gap-2">
@@ -326,7 +326,7 @@
 							{{ store.getTranslation('common.cancel') }}
 						</ShadButton>
 						<ShadButton v-if="activeProviderTab !== 'catalog'" @click="saveActiveTab" :disabled="saving || (activeProviderTab === 'billing' && !supportsUpstreamBilling)">
-							<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
+							<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
 							{{ store.getTranslation('common.save') }}
 						</ShadButton>
 					</div>

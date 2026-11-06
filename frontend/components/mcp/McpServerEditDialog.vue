@@ -31,12 +31,12 @@
 
 			<ShadDialogFooter class="gap-2 pt-2">
 				<ShadButton variant="destructive" size="sm" :disabled="saving" class="mr-auto" @click="remove">
-					<Trash2 class="h-3.5 w-3.5 mr-1" />
+					<Trash2 class="h-3.5 w-3.5" />
 					{{ store.getTranslation('common.delete') }}
 				</ShadButton>
 				<ShadButton variant="outline" size="sm" @click="$emit('update:open', false)">{{ store.getTranslation('common.cancel') }}</ShadButton>
 				<ShadButton size="sm" :disabled="!canSave || saving" @click="save">
-					<Loader2 v-if="saving" class="h-3.5 w-3.5 animate-spin mr-1" />
+					<Loader2 v-if="saving" class="h-3.5 w-3.5 animate-spin" />
 					{{ store.getTranslation('common.save') }}
 				</ShadButton>
 			</ShadDialogFooter>

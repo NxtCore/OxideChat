@@ -16,7 +16,7 @@
 					{{ store.getTranslation('settings.save_bar.reset') }}
 				</ShadButton>
 				<ShadButton size="sm" :disabled="form.saving" data-testid="settings-save-bar-save" @click="form.save()">
-					<Loader2 v-if="form.saving" class="mr-2 h-4 w-4 animate-spin" />
+					<Loader2 v-if="form.saving" class="h-4 w-4 animate-spin" />
 					{{ store.getTranslation('common.save') }}
 				</ShadButton>
 			</div>

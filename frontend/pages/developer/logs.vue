@@ -7,11 +7,11 @@
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
 				<ShadButton variant="outline" size="sm" :disabled="exporting" @click="exportLogs('csv')">
-					<Download class="mr-1.5 h-3.5 w-3.5" />
+					<Download class="h-3.5 w-3.5" />
 					{{ store.getTranslation('developer.logs.export_csv') }}
 				</ShadButton>
 				<ShadButton variant="outline" size="sm" :disabled="exporting" @click="exportLogs('json')">
-					<FileJson class="mr-1.5 h-3.5 w-3.5" />
+					<FileJson class="h-3.5 w-3.5" />
 					{{ store.getTranslation('developer.logs.export_json') }}
 				</ShadButton>
 			</div>
@@ -117,7 +117,7 @@
 					<span class="text-xs text-muted-foreground">{{ store.getTranslation('developer.logs.retention_hint') }}</span>
 				</div>
 				<ShadButton variant="outline" size="sm" @click="reload">
-					<RefreshCw class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('common.refresh') }}
+					<RefreshCw class="h-3.5 w-3.5" />{{ store.getTranslation('common.refresh') }}
 				</ShadButton>
 			</div>
 		</div>

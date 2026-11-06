@@ -10,7 +10,7 @@
 				<ShadInput v-model.number="threshold" type="number" min="1" max="100" @change="load" />
 			</div>
 			<div class="flex items-end justify-end">
-				<ShadButton variant="outline" size="sm" @click="load"><RefreshCw class="mr-1.5 h-3.5 w-3.5" />{{ store.getTranslation('common.refresh') }}</ShadButton>
+				<ShadButton variant="outline" size="sm" @click="load"><RefreshCw class="h-3.5 w-3.5" />{{ store.getTranslation('common.refresh') }}</ShadButton>
 			</div>
 		</div>
 

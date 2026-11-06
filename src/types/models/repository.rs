@@ -1,5 +1,5 @@
 use super::rows::{ModelDetailedRow, ModelListAdminRow, ModelListPublicRow, ModelPricingRow};
-use super::{Model, ModelDetailed, ModelListAdmin, ModelListPublic, ModelPricing, ModelSyncInput, ModelSyncSummary, ModelViewer};
+use super::{Model, ModelDetailed, ModelListAdmin, ModelListParams, ModelListPublic, ModelPricing, ModelSyncInput, ModelSyncSummary, ModelViewer};
 use crate::types::BaseType;
 use crate::types::PolicyResolver;
 use crate::types::UsageEventRecord;
@@ -235,9 +235,14 @@ impl Model {
 		PolicyResolver::can_use_model(pool, user_id, model_id).await
 	}
 
-	pub async fn list_for_admin(pool: &sqlx::PgPool, page: &PageQuery, search_query: Option<String>) -> Result<Page<ModelListAdmin>, sqlx::Error> {
+	/// Lists models for admins, filtered by search text, provider and output modality.
+	///
+	/// # Errors
+	/// Returns the database error when the query fails.
+	pub async fn list_for_admin(pool: &sqlx::PgPool, page: &PageQuery, params: &ModelListParams) -> Result<Page<ModelListAdmin>, sqlx::Error> {
 		let pagination = Self::pagination(page);
-		let search = search_query
+		let search = params
+			.query
 			.as_deref()
 			.map(str::trim)
 			.filter(|s| !s.is_empty())
@@ -272,12 +277,26 @@ impl Model {
 				OR m.display_name ILIKE $3 ESCAPE '\'
 				OR p.name ILIKE $3 ESCAPE '\'
 			)
+			AND ($4::UUID IS NULL OR p.id = $4)
+			AND (
+				$5::TEXT IS NULL
+				OR (
+					jsonb_array_length(COALESCE(sys_mc.output_modalities, m.output_modalities, '[]'::jsonb)) > 0
+					AND NOT EXISTS (
+						SELECT 1
+						FROM jsonb_array_elements_text(COALESCE(sys_mc.output_modalities, m.output_modalities, '[]'::jsonb)) AS modality(value)
+						WHERE LOWER(modality.value) <> LOWER($5)
+					)
+				)
+			)
 			ORDER BY m.display_name, p.name
 			LIMIT $1 OFFSET $2
 			"#,
 			pagination.limit,
 			pagination.offset,
 			search.as_deref(),
+			params.provider_id,
+			params.output_only.as_deref(),
 		)
 		.fetch_all(pool)
 		.await?;

@@ -12,7 +12,7 @@
 			<ShadDialogFooter>
 				<ShadButton variant="outline" @click="emit('update:open', false)">{{ store.getTranslation('common.cancel') }}</ShadButton>
 				<ShadButton :variant="destructive ? 'destructive' : 'default'" :disabled="busy" @click="emit('confirm', reason.trim())">
-					<Loader2 v-if="busy" class="mr-2 h-4 w-4 animate-spin" />
+					<Loader2 v-if="busy" class="h-4 w-4 animate-spin" />
 					{{ confirmLabel }}
 				</ShadButton>
 			</ShadDialogFooter>

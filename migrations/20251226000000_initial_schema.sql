@@ -3635,6 +3635,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.admin_config.title_model_hint', 'Ein kleines, günstiges Modell reicht. Leer lassen, um das Modell des Chats zu verwenden.'),
     ('en', 'settings.admin_config.title_model_chat', 'Model of the chat'),
     ('de', 'settings.admin_config.title_model_chat', 'Modell des Chats'),
+    ('en', 'settings.admin_config.title_model_reasoning_warning', 'This is a reasoning model. It thinks before answering, so titles are slower and cost more, and can be missing when the thinking uses up the reply. A small model without reasoning works best.'),
+    ('de', 'settings.admin_config.title_model_reasoning_warning', 'Dies ist ein Reasoning-Modell. Es denkt vor der Antwort nach, daher dauern Titel länger und kosten mehr und können fehlen, wenn das Nachdenken die Antwort aufbraucht. Ein kleines Modell ohne Reasoning eignet sich am besten.'),
     ('en', 'settings.admin_config.upload_icon', 'Upload icon'),
     ('de', 'settings.admin_config.upload_icon', 'Symbol hochladen'),
     ('en', 'settings.admin_config.upload_icon_error', 'Could not upload the icon'),

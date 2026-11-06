@@ -26,7 +26,7 @@
 
 		<ShadTooltip>
 			<ShadTooltipTrigger as-child>
-				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" @click="copyContent">
+				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" data-testid="message-action-copy" @click="copyContent">
 					<Check v-if="copied" class="h-3.5 w-3.5 text-success" />
 					<Copy v-else class="h-3.5 w-3.5" />
 				</ShadButton>
@@ -38,7 +38,7 @@
 
 		<ShadTooltip v-if="canRegenerate">
 			<ShadTooltipTrigger as-child>
-				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" @click="regenerate">
+				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" data-testid="message-action-regenerate" @click="regenerate">
 					<RefreshCw class="h-3.5 w-3.5" />
 				</ShadButton>
 			</ShadTooltipTrigger>
@@ -49,7 +49,7 @@
 
 		<ShadTooltip>
 			<ShadTooltipTrigger as-child>
-				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" @click="handleBranch">
+				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" data-testid="message-action-branch" @click="handleBranch">
 					<GitBranch class="h-3.5 w-3.5" />
 				</ShadButton>
 			</ShadTooltipTrigger>
@@ -58,14 +58,14 @@
 			</ShadTooltipContent>
 		</ShadTooltip>
 
-		<ShadPopover>
-			<ShadPopoverTrigger as-child>
-				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50">
+		<ShadTooltip>
+			<ShadTooltipTrigger as-child>
+				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" data-testid="message-action-info">
 					<Info class="h-3.5 w-3.5" />
 				</ShadButton>
-			</ShadPopoverTrigger>
+			</ShadTooltipTrigger>
 
-			<ShadPopoverContent class="w-64" align="start">
+			<ShadTooltipContent side="top" align="start" :side-offset="8" hide-arrow class="w-64 border bg-popover p-4 text-popover-foreground shadow-md text-wrap" data-testid="message-details">
 				<div class="space-y-3">
 					<h4 class="font-medium text-foreground text-sm">{{ store.getTranslation('chat.message_actions.details') }}</h4>
 
@@ -130,8 +130,8 @@
 						<span class="text-foreground">{{ formatTime(message.created_at) }}</span>
 					</div>
 				</div>
-			</ShadPopoverContent>
-		</ShadPopover>
+			</ShadTooltipContent>
+		</ShadTooltip>
 	</div>
 </template>
 

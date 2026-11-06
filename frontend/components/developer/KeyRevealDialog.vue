@@ -9,7 +9,7 @@
 				<div class="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3">
 					<code class="min-w-0 flex-1 break-all font-mono text-sm text-foreground" data-testid="revealed-token">{{ token }}</code>
 					<ShadButton variant="outline" size="sm" class="shrink-0" @click="copy">
-						<component :is="copied ? Check : Copy" class="mr-1.5 h-4 w-4" />
+						<component :is="copied ? Check : Copy" class="h-4 w-4" />
 						{{ store.getTranslation(copied ? 'common.copied' : 'developer.reveal.copy') }}
 					</ShadButton>
 				</div>

@@ -151,7 +151,7 @@
 				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="createOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton @click="submitCreate" :disabled="saving">
-						<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
+						<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
 						{{ store.getTranslation('common.create') }}
 					</ShadButton>
 				</ShadDialogFooter>
@@ -208,7 +208,7 @@
 				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="editOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton @click="submitEdit" :disabled="saving">
-						<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
+						<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
 						{{ store.getTranslation('common.save') }}
 					</ShadButton>
 				</ShadDialogFooter>
@@ -226,7 +226,7 @@
 				<ShadDialogFooter>
 					<ShadButton variant="outline" @click="deleteOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
 					<ShadButton variant="destructive" @click="submitDelete" :disabled="saving">
-						<Loader2 v-if="saving" class="h-4 w-4 animate-spin mr-2" />
+						<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
 						{{ store.getTranslation('common.delete') }}
 					</ShadButton>
 				</ShadDialogFooter>

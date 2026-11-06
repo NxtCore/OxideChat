@@ -142,7 +142,9 @@ const props = withDefaults(defineProps<{
 	disabled?: boolean;
 	placeholder?: string;
 	valueMode?: 'model_id' | 'uuid';
+	params?: Record<string, string>;
 }>(), {
+	params: undefined,
 	endpoint: modelsPath,
 	providerEndpoint: undefined,
 	selectedModelEndpoint: undefined,
@@ -153,6 +155,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
 	'update:modelValue': [value: string | null];
+	selected: [model: ModelList | null];
 }>();
 
 const store = useMainStore();
@@ -178,12 +181,13 @@ const {
 	onSearchInput: pickerOnSearch,
 	selectFilter: pickerSelectFilter,
 	init: pickerInit,
-} = useModelPicker({endpoint: props.endpoint, providerEndpoint: props.providerEndpoint});
+} = useModelPicker({endpoint: props.endpoint, providerEndpoint: props.providerEndpoint, params: props.params});
 
 const scrollContainer = ref<HTMLElement | null>(null);
 const sentinel = ref<HTMLElement | null>(null);
 let observer: IntersectionObserver | null = null;
 const selectedModel = ref<ModelList | null>(null);
+watch(selectedModel, model => emit('selected', model));
 
 watch(
 	() => props.modelValue,
@@ -211,14 +215,12 @@ watch(
 );
 
 watch(isOpen, async open => {
-	if (open) {
-		await pickerInit();
-		if (props.modelValue) selectedModel.value = pickerModels.value.find(model => modelValueFor(model) === props.modelValue) ?? selectedModel.value;
-		setupObserver();
-	} else {
-		teardownObserver();
-	}
+	if (!open) return;
+	await pickerInit();
+	if (props.modelValue) selectedModel.value = pickerModels.value.find(model => modelValueFor(model) === props.modelValue) ?? selectedModel.value;
 });
+
+watch(sentinel, setupObserver, {flush: 'post'});
 
 function setupObserver() {
 	teardownObserver();

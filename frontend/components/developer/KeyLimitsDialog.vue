@@ -46,14 +46,14 @@
 					</div>
 				</div>
 				<ShadButton variant="outline" size="sm" @click="addRule">
-					<Plus class="mr-1.5 h-4 w-4" />
+					<Plus class="h-4 w-4" />
 					{{ store.getTranslation('developer.limits.add') }}
 				</ShadButton>
 			</div>
 			<ShadDialogFooter>
 				<ShadButton variant="outline" @click="emit('update:open', false)">{{ store.getTranslation('common.cancel') }}</ShadButton>
 				<ShadButton :disabled="loading || saving" @click="save">
-					<Loader2 v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+					<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
 					{{ store.getTranslation('common.save') }}
 				</ShadButton>
 			</ShadDialogFooter>

@@ -67,8 +67,8 @@
 
 					<div class="flex items-center gap-2">
 						<ShadButton :disabled="!canSave || saving" @click="save">
-							<Plus v-if="!editingId" class="mr-1 h-4 w-4" />
-							<Check v-else class="mr-1 h-4 w-4" />
+							<Plus v-if="!editingId" class="h-4 w-4" />
+							<Check v-else class="h-4 w-4" />
 							{{ store.getTranslation('mcp.save') }}
 						</ShadButton>
 						<ShadButton v-if="editingId" variant="ghost" @click="resetForm">{{ store.getTranslation('mcp.cancel') }}</ShadButton>

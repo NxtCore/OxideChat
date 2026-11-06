@@ -11,7 +11,7 @@ const TITLE_PROMPT: &str =
 	"Write a short title of at most six words for this conversation, in the language of the user's message. Reply with the title only, without quotes.";
 const MAX_INPUT_CHARS: usize = 2000;
 const MAX_TITLE_CHARS: usize = 80;
-const TITLE_OUTPUT_TOKENS: u32 = 64;
+const TITLE_OUTPUT_TOKENS: u32 = 1024;
 
 /// The first exchange of a chat that still has no title.
 pub(crate) struct TitleJob {
@@ -88,8 +88,16 @@ fn usage_metadata(user_id: &Uuid, model_id: &Uuid, admission: &BudgetAdmission) 
 	metadata
 }
 
+fn title_or_warn(chat_id: &Uuid, raw: &str) -> Option<String> {
+	let title = clean_title(raw);
+	if title.is_none() {
+		tracing::warn!(%chat_id, "title model returned no text");
+	}
+	title
+}
+
 async fn save(job: &TitleJob, raw: &str) -> Option<String> {
-	let title = clean_title(raw)?;
+	let title = title_or_warn(&job.chat_id, raw)?;
 	match Chat::set_generated_title(&job.state.db, &job.chat_id, &title).await {
 		Ok(saved) => saved.then_some(title),
 		Err(error) => {

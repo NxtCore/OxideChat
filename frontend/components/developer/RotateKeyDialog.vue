@@ -18,7 +18,7 @@
 			<ShadDialogFooter>
 				<ShadButton variant="outline" @click="emit('update:open', false)">{{ store.getTranslation('common.cancel') }}</ShadButton>
 				<ShadButton :disabled="saving" @click="submit">
-					<Loader2 v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+					<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
 					{{ store.getTranslation('developer.rotate.submit') }}
 				</ShadButton>
 			</ShadDialogFooter>

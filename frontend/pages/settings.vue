@@ -1,22 +1,12 @@
 <template>
 	<div class="min-h-screen bg-background text-foreground selection:bg-primary/20 font-sans lg:flex lg:h-[calc(100dvh-3rem)] lg:min-h-0 lg:flex-col">
 		<div class="container mx-auto lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-			<div class="mb-8 lg:shrink-0">
-				<button
-					@click="goBack"
-					class="group flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors mb-4 px-3 py-2 rounded-lg"
-				>
-					<ArrowLeft class="h-4 w-4 transition-transform group-hover:-translate-x-1" />
-					<span>{{ store.getTranslation('settings.back') }}</span>
-				</button>
-
-				<h1 class="text-3xl font-bold tracking-tight text-foreground">
-					{{ store.getTranslation('settings.title') }}
-				</h1>
-				<p class="text-muted-foreground text-base">
-					{{ store.getTranslation('settings.description') }}
-				</p>
-			</div>
+			<AreaHeader
+				:title="store.getTranslation('settings.title')"
+				:description="store.getTranslation('settings.description')"
+				:back-label="store.getTranslation('settings.back')"
+				@back="goBack"
+			/>
 
 			<div class="grid w-full grid-cols-1 gap-8 lg:min-h-0 lg:flex-1 lg:grid-cols-4 lg:grid-rows-[minmax(0,1fr)]">
 				<aside class="w-full shrink-0 lg:w-64 lg:overflow-y-auto lg:pr-2">
@@ -49,7 +39,7 @@
 
 <script setup lang="ts">
 import {ADMIN_ANALYTICS_VIEW, ADMIN_BUDGETS_VIEW, ADMIN_CONFIG_VIEW, ADMIN_DEVELOPER_VIEW, ADMIN_I18N_VIEW, ADMIN_PROVIDERS_VIEW, ADMIN_TEAMS_VIEW, ADMIN_TOOLS_VIEW, ADMIN_USERS_VIEW, SETTINGS_APPEARANCE_EDIT, SETTINGS_SESSIONS_VIEW} from '~/types/generated/permissions';
-import {Activity, User, ArrowLeft, Cpu, Bot, Package, Palette, Users, Network, CreditCard, BarChart3, SlidersHorizontal, ShieldCheck, Languages, MonitorSmartphone} from 'lucide-vue-next';
+import {Activity, User, Cpu, Bot, Package, Palette, Users, Network, CreditCard, BarChart3, SlidersHorizontal, ShieldCheck, Languages, MonitorSmartphone} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 definePageMeta({
