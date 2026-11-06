@@ -68,6 +68,16 @@ mod tests {
 		assert!(serde_json::from_str::<UpdateGlobalConfigRequest>("{}").unwrap().instance.is_none());
 	}
 
+	#[test]
+	fn title_generation_update_is_read_whole() {
+		let request: UpdateGlobalConfigRequest = serde_json::from_str(r#"{"title_generation":{"enabled":true,"model_id":null}}"#).unwrap();
+		let title = request.title_generation.unwrap();
+		assert!(title.enabled);
+		assert_eq!(title.model_id, None);
+		assert!(serde_json::from_str::<UpdateGlobalConfigRequest>("{}").unwrap().title_generation.is_none());
+		assert!(!ConfigValues::default().title_generation.enabled);
+	}
+
 	mod branding_icon {
 		use crate::utils::images::{is_safe_stored_image, store_image};
 		use sqlx::PgPool;

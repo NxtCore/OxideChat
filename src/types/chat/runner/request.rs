@@ -163,12 +163,12 @@ async fn resolve_tools(db: &PgPool, user_id: Uuid, enabled_tool_ids: &[String]) 
 	}
 }
 
-async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Message>) -> Result<ChatRequestIR, TurnError> {
-	let req = inputs.req;
+/// Starts a streaming request for a model key with the model and provider filled in.
+pub(super) async fn model_request(model_key: &str) -> Result<(ChatRequestIR, bool), TurnError> {
 	let engine = ai::get();
 
-	let Some(omni_model) = engine.get_model(&req.model_key).await else {
-		let msg = format!("Model '{}' not found", req.model_key);
+	let Some(omni_model) = engine.get_model(model_key).await else {
+		let msg = format!("Model '{model_key}' not found");
 		return Err(TurnError::new("model_not_found", msg));
 	};
 
@@ -178,16 +178,21 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 	};
 
 	let vision = omni_model.input_modalities.iter().any(|m| matches!(m, omniference::types::Modality::Image));
-	let omni_messages = get_omni_messages(db, messages, vision).await;
 	let mut ir = ChatRequestIR::default();
 	ir.model.alias = omni_model.id.clone();
 	let provider_prefix = format!("{}/", omni_model.provider_name.to_lowercase());
 	ir.model.model_id = omni_model.id.strip_prefix(&provider_prefix).unwrap_or(&omni_model.id).to_string();
 	ir.model.provider = provider;
-	ir.model.input_modalities = omni_model.input_modalities.clone();
-	ir.model.output_modalities = omni_model.output_modalities.clone();
-	ir.messages = omni_messages;
+	ir.model.input_modalities = omni_model.input_modalities;
+	ir.model.output_modalities = omni_model.output_modalities;
 	ir.stream = true;
+	Ok((ir, vision))
+}
+
+async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Message>) -> Result<ChatRequestIR, TurnError> {
+	let req = inputs.req;
+	let (mut ir, vision) = model_request(&req.model_key).await?;
+	ir.messages = get_omni_messages(db, messages, vision).await;
 	ir.metadata.insert("user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), inputs.chat_id.to_string());
 	ir.metadata.insert("oxide_user_id".to_string(), inputs.user.id.to_string());

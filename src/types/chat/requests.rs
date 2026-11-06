@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
 
-use super::ThemeCssVars;
+use crate::types::{ThemeCssVars, TitleGeneration};
 use crate::config::OAuthProvider;
 use crate::i18n::Language;
 
@@ -129,6 +129,7 @@ pub struct UpdateGlobalConfigRequest {
 	pub default_model_id: Option<Option<Uuid>>,
 	pub language: Option<Language>,
 	pub instance: Option<UpdateInstanceRequest>,
+	pub title_generation: Option<TitleGeneration>,
 	#[serde(default)]
 	pub oauth: Vec<UpdateOAuthProviderRequest>,
 }

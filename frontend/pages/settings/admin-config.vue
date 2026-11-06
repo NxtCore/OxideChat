@@ -37,6 +37,26 @@
 				/>
 			</SettingsRow>
 
+			<SettingsRow :label="store.getTranslation('settings.admin_config.title_generation')" :hint="store.getTranslation('settings.admin_config.title_generation_hint')">
+				<ShadSwitch v-model="form.title_generation.enabled" :disabled="!canEdit || settingsForm.saving" data-testid="config-title-generation" />
+			</SettingsRow>
+
+			<SettingsRow
+				v-if="form.title_generation.enabled"
+				:label="store.getTranslation('settings.admin_config.title_model')"
+				:hint="store.getTranslation('settings.admin_config.title_model_hint')"
+				stacked
+			>
+				<DefaultModelPicker
+					v-model="form.title_generation.model_id"
+					:disabled="!canEdit || settingsForm.saving"
+					:endpoint="adminModelsPath"
+					:selected-model-endpoint="adminModelsPath"
+					value-mode="uuid"
+					:placeholder="store.getTranslation('settings.admin_config.title_model_chat')"
+				/>
+			</SettingsRow>
+
 			<SettingsRow :label="store.getTranslation('settings.appearance.language')" :hint="store.getTranslation('settings.admin_config.language_hint')" stacked>
 				<ShadSelect v-model="form.language" :disabled="!canEdit || settingsForm.saving">
 					<ShadSelectTrigger data-testid="config-language">
@@ -91,6 +111,10 @@ const form = reactive({
 	instance: {
 		name: store.base?.instance.name ?? '',
 		icon_id: store.base?.instance.icon_id ?? null,
+	},
+	title_generation: {
+		enabled: store.base?.title_generation.enabled ?? false,
+		model_id: store.base?.title_generation.model_id ?? null,
 	},
 });
 

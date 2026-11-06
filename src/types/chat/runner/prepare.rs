@@ -56,6 +56,7 @@ pub struct PreparedTurn {
 	pub(crate) reasoning_effort: Option<String>,
 	pub(crate) reasoning_budget_tokens: Option<u32>,
 	pub(crate) request_settings: RequestSettings,
+	pub(crate) needs_title: bool,
 }
 
 fn internal(message: &'static str) -> impl FnOnce(sqlx::Error) -> TurnError {
@@ -222,5 +223,6 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		reasoning_effort: req.reasoning_effort.clone(),
 		reasoning_budget_tokens: req.reasoning_budget_tokens,
 		request_settings,
+		needs_title: chat.title.is_none(),
 	})
 }
