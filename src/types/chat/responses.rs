@@ -299,4 +299,8 @@ pub enum StreamData {
 	Done {
 		message: ChatMessageResponse,
 	},
+	/// Sent after `done` when the chat got a generated title.
+	Title {
+		title: String,
+	},
 }

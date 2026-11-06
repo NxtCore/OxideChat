@@ -3,6 +3,7 @@ import type { Instance } from "./Instance";
 import type { OAuthProvider } from "./OAuthProvider";
 import type { Role } from "./Role";
 import type { ThemeCssVars } from "./ThemeCssVars";
+import type { TitleGeneration } from "./TitleGeneration";
 
 export type Base = { i18n: any, 
 /**
@@ -32,4 +33,8 @@ default_theme: ThemeCssVars,
 /**
  * Branding an admin set for this installation.
  */
-instance: Instance, };
+instance: Instance, 
+/**
+ * Whether chats get a generated title after their first reply.
+ */
+title_generation: TitleGeneration, };

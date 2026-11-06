@@ -84,6 +84,7 @@ mod agent {
 			reasoning_effort: None,
 			reasoning_budget_tokens: None,
 			request_settings: RequestSettings::default(),
+			needs_title: false,
 		};
 		AgentRun::new(Arc::clone(&fixture.state), turn, Instant::now())
 	}
@@ -418,5 +419,22 @@ mod prepare {
 		let error = rejection(&setup, &req).await?;
 		assert!(error.contains("Original message not found"), "{error}");
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod title {
+	use crate::types::chat::runner::title::clean_title;
+
+	#[test]
+	fn keeps_the_first_line_without_quotes_or_markdown() {
+		assert_eq!(clean_title("\n  \"Rust lifetimes explained.\"\nmore"), Some("Rust lifetimes explained".to_string()));
+		assert_eq!(clean_title("## **Trip to Lisbon**"), Some("Trip to Lisbon".to_string()));
+	}
+
+	#[test]
+	fn empty_replies_give_no_title_and_long_ones_are_cut() {
+		assert_eq!(clean_title("  \n \"\" "), None);
+		assert_eq!(clean_title(&"a".repeat(200)).map(|title| title.chars().count()), Some(80));
 	}
 }

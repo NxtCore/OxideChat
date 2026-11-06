@@ -150,4 +150,16 @@ mod storage {
 		assert_eq!(reloaded.sampling.0, ChatSampling::default());
 		Ok(())
 	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_generated_title_never_replaces_an_existing_one(pool: PgPool) -> TestResult {
+		let user_id = insert_user(&pool, "titles").await?;
+		let chat = Chat::create(&pool, &user_id, None, None).await?;
+		assert!(Chat::set_generated_title(&pool, &chat.id, "Generated").await?);
+		assert!(!Chat::set_generated_title(&pool, &chat.id, "Second").await?);
+		let reloaded = Chat::find_by_id_and_user(&pool, &chat.id, &user_id).await?.ok_or("chat missing")?;
+		assert_eq!(reloaded.title.as_deref(), Some("Generated"));
+		assert_eq!(reloaded.updated_at, chat.updated_at);
+		Ok(())
+	}
 }

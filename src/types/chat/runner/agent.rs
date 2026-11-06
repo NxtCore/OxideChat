@@ -1,5 +1,6 @@
 use super::history::tool_message_name;
 use super::prepare::PreparedTurn;
+use super::title::{TitleJob, first_user_text, generate_title};
 use super::tools::{execute_tool_by_name, get_client_tool_info};
 use crate::ai;
 use crate::types::{
@@ -66,6 +67,7 @@ pub(crate) struct AgentRun {
 	reasoning_effort: Option<String>,
 	reasoning_budget_tokens: Option<u32>,
 	request_settings: RequestSettings,
+	needs_title: bool,
 	start_time: Instant,
 	base_ir: ChatRequestIR,
 	current_messages: Vec<OmniMessage>,
@@ -149,6 +151,7 @@ impl AgentRun {
 			reasoning_effort: turn.reasoning_effort,
 			reasoning_budget_tokens: turn.reasoning_budget_tokens,
 			request_settings: turn.request_settings,
+			needs_title: turn.needs_title,
 			start_time,
 			base_ir,
 			current_messages,
@@ -205,6 +208,21 @@ impl AgentRun {
 	pub(crate) async fn save_partial(&mut self) -> Option<StreamData> {
 		let produced = !self.full_content.is_empty() || !self.all_tool_executions.is_empty() || !self.step.content.is_empty();
 		if produced { Some(self.finalize_turn().await) } else { None }
+	}
+
+	/// The title request for a chat that had no title before this turn, once the turn produced an answer.
+	pub(crate) fn title_job(&self) -> Option<TitleJob> {
+		if !self.needs_title || self.full_content.is_empty() {
+			return None;
+		}
+		Some(TitleJob {
+			state: Arc::clone(&self.state),
+			user_id: self.user_id,
+			chat_id: self.chat_id,
+			chat_model_id: self.model_id,
+			question: first_user_text(&self.current_messages),
+			answer: self.full_content.clone(),
+		})
 	}
 
 	fn chat_failed(&self, error: &impl std::fmt::Display) -> StreamData {
@@ -528,7 +546,14 @@ pub fn stream_turn(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant
 					StreamEvent::Done => match run.finish_iteration().await {
 						Finish::Continue => continue 'agentic_loop,
 						Finish::Stop(event) => {
+							let finished = matches!(event, StreamData::Done { .. });
 							yield sse(event);
+							if finished
+								&& let Some(job) = run.title_job()
+								&& let Ok(Some(title)) = tokio::spawn(generate_title(job)).await
+							{
+								yield sse(StreamData::Title { title });
+							}
 							break 'agentic_loop;
 						}
 					},

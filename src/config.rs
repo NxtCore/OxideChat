@@ -6,7 +6,7 @@
 //! - Supports reloading configuration at runtime
 
 use crate::i18n::Language;
-use crate::types::{OAuthSettingsResponse, ThemeCssVars, UpdateGlobalConfigRequest};
+use crate::types::{OAuthSettingsResponse, ThemeCssVars, TitleGeneration, UpdateGlobalConfigRequest};
 use crate::utils::encryption::{decrypt_api_key, encrypt_secret_value};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
@@ -80,6 +80,8 @@ pub struct ConfigValues {
 	pub instance_name: Option<String>,
 	/// Image shown as the favicon and app icon instead of the `OxideChat` logo.
 	pub instance_icon_id: Option<Uuid>,
+	/// Generated chat titles; off by default.
+	pub title_generation: TitleGeneration,
 }
 
 impl Default for ConfigValues {
@@ -96,6 +98,7 @@ impl Default for ConfigValues {
 			default_model_id: None,
 			instance_name: None,
 			instance_icon_id: None,
+			title_generation: TitleGeneration::default(),
 		}
 	}
 }
@@ -186,6 +189,12 @@ impl Config {
 		self.values.load().instance_icon_id
 	}
 
+	/// Get the chat title generation setting.
+	#[must_use]
+	pub fn title_generation(&self) -> TitleGeneration {
+		self.values.load().title_generation
+	}
+
 	/// Get current configuration values.
 	#[must_use]
 	pub fn values(&self) -> std::sync::Arc<ConfigValues> {
@@ -264,6 +273,7 @@ impl Config {
 	pub async fn apply_update(&self, pool: &PgPool, req: &UpdateGlobalConfigRequest) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
 		Self::store_settings(&mut tx, req).await?;
+		Self::store_title_generation(&mut tx, req.title_generation.as_ref()).await?;
 		for update in &req.oauth {
 			let prefix = format!("oauth_{}", update.provider.as_str().to_lowercase());
 			Self::set_or_clear(&mut tx, &format!("{prefix}_client_id"), update.client_id.as_ref()).await?;
@@ -295,6 +305,14 @@ impl Config {
 		}
 		let default_model_id = req.default_model_id.map(|id| id.map(|id| id.to_string()));
 		Self::set_or_clear(tx, "default_model_id", default_model_id.as_ref()).await
+	}
+
+	async fn store_title_generation(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, title: Option<&TitleGeneration>) -> Result<(), sqlx::Error> {
+		let Some(title) = title else {
+			return Ok(());
+		};
+		Self::upsert_config(&mut **tx, "title_generation_enabled", if title.enabled { "true" } else { "false" }).await?;
+		Self::set_or_clear(tx, "title_model_id", Some(&title.model_id.map(|id| id.to_string()))).await
 	}
 
 	async fn set_or_clear(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, key: &str, value: Option<&Option<String>>) -> Result<(), sqlx::Error> {
@@ -360,6 +378,8 @@ impl Config {
 				"default_model_id" => values.default_model_id = Uuid::parse_str(&row.value).ok(),
 				"instance_name" => values.instance_name = Some(row.value),
 				"instance_icon_id" => values.instance_icon_id = Uuid::parse_str(&row.value).ok(),
+				"title_generation_enabled" => values.title_generation.enabled = row.value == "true",
+				"title_model_id" => values.title_generation.model_id = Uuid::parse_str(&row.value).ok(),
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}
 		}

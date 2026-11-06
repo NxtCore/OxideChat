@@ -1,6 +1,6 @@
 use crate::config::OAuthProvider;
 use crate::types::{Role, ThemeCssVars};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -27,6 +27,17 @@ pub struct BaseResponse {
 	pub default_theme: ThemeCssVars,
 	/// Branding an admin set for this installation.
 	pub instance: InstanceResponse,
+	/// Whether chats get a generated title after their first reply.
+	pub title_generation: TitleGeneration,
+}
+
+/// Admin setting for generated chat titles; the admin PATCH takes the same shape.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct TitleGeneration {
+	pub enabled: bool,
+	/// Model that writes the title; `None` uses the chat's model.
+	pub model_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize)]

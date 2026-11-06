@@ -184,6 +184,11 @@ export function useChatStream() {
 					.catch(() => {});
 				break;
 			}
+			case 'title': {
+				const chat = chatStore.chats.find(c => c.id === chatId);
+				if (chat) chat.title = data.title;
+				break;
+			}
 			case 'error':
 				useMainStore().toast(data.message, {type: 'error'});
 				console.error('Stream error:', data.code, data.message);

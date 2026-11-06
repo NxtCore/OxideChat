@@ -216,6 +216,19 @@ impl Chat {
 		.await
 	}
 
+	/// Sets a generated title unless the chat got one meanwhile, without moving the chat in the list.
+	///
+	/// # Errors
+	/// Returns an error if the update fails.
+	pub async fn set_generated_title(pool: &PgPool, id: &Uuid, title: &str) -> Result<bool, sqlx::Error> {
+		let result = sqlx::query("UPDATE chats SET title = $2 WHERE id = $1 AND title IS NULL")
+			.bind(id)
+			.bind(title)
+			.execute(pool)
+			.await?;
+		Ok(result.rows_affected() > 0)
+	}
+
 	/// Replaces the chat's sampling options without changing its position in the chat list.
 	///
 	/// # Errors

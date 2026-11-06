@@ -174,4 +174,24 @@ test.describe('chat navigation', () => {
 		await toggle.click();
 		await expect(newChat).toBeVisible();
 	});
+
+	test('the first reply gives an untitled chat a generated title', async ({page, t, api, seed}) => {
+		await page.goto('/settings/admin-config');
+		await page.getByTestId('config-title-generation').click();
+		await page.getByTestId('settings-save-bar-save').click();
+		await expect(page.getByTestId('settings-save-bar')).toBeHidden();
+		try {
+			expect((await api.get('/api/v1/base')).title_generation.enabled).toBe(true);
+			await page.goto('/');
+			await pickModel(page, t, seed.model.displayName);
+			await send(page, 'Suggest a name for a pet turtle in one word.');
+			await expectReplyCount(page, 1);
+			const chatId = page.url().split('/chats/')[1];
+			await expect.poll(async () => (await api.get(`/api/v1/chats/${chatId}`)).chat.title, {timeout: 60_000}).toBeTruthy();
+			const {title} = (await api.get(`/api/v1/chats/${chatId}`)).chat;
+			await expect(page.locator('[data-active="true"]')).toContainText(title);
+		} finally {
+			await api.patch('/api/v1/admin/config', {title_generation: {enabled: false, model_id: null}});
+		}
+	});
 });
