@@ -88,7 +88,7 @@ fn build_extra_settings(base: Option<&Value>, reasoning_effort: Option<Option<&s
 pub async fn list_models(State(state): State<Arc<JobState>>, auth: AuthUser, Query(page): Query<PageQuery>, Query(params): Query<ModelListParams>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_PROVIDERS_VIEW).await?;
 
-	let models = Model::list_for_admin(&state.db, &page, params.query).await?;
+	let models = Model::list_for_admin(&state.db, &page, &params).await?;
 
 	Ok(ResponseBuilder::new(ResponseBody::Json(models)).build())
 }

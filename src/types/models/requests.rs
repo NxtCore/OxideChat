@@ -2,11 +2,13 @@ use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct ModelListParams {
 	pub query: Option<String>,
 	pub is_favorite: Option<bool>,
 	pub provider_id: Option<Uuid>,
+	/// Only models whose every output modality is this one, e.g. `text`.
+	pub output_only: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

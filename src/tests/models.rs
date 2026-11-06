@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
 	use crate::tests::support::paged;
-	use crate::types::models::{Model, ModelSyncInput, ModelViewer};
+	use crate::types::models::{Model, ModelListParams, ModelSyncInput, ModelViewer};
 	use crate::types::models_configs::ModelConfig;
 	use crate::types::teams::Team;
 	use serde_json::json;
@@ -149,17 +149,43 @@ mod tests {
 		create_model(&pool, provider_id, "slash", r"slash\name", true).await;
 		create_model(&pool, provider_id, "slash-decoy", "slash-name", true).await;
 
-		let percent = Model::list_for_admin(&pool, &paged(1, 10), Some("100%".to_string())).await.unwrap();
+		let percent = Model::list_for_admin(&pool, &paged(1, 10), &search("100%")).await.unwrap();
 		assert_eq!(percent.items.len(), 1);
 		assert_eq!(percent.items[0].display_name, "100% Real");
 
-		let underscore = Model::list_for_admin(&pool, &paged(1, 10), Some("under_".to_string())).await.unwrap();
+		let underscore = Model::list_for_admin(&pool, &paged(1, 10), &search("under_")).await.unwrap();
 		assert_eq!(underscore.items.len(), 1);
 		assert_eq!(underscore.items[0].display_name, "under_score");
 
-		let slash = Model::list_for_admin(&pool, &paged(1, 10), Some(r"slash\".to_string())).await.unwrap();
+		let slash = Model::list_for_admin(&pool, &paged(1, 10), &search(r"slash\")).await.unwrap();
 		assert_eq!(slash.items.len(), 1);
 		assert_eq!(slash.items[0].display_name, r"slash\name");
+	}
+
+	fn search(query: &str) -> ModelListParams {
+		ModelListParams { query: Some(query.to_string()), ..ModelListParams::default() }
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn admin_list_filters_by_provider_and_output(pool: PgPool) {
+		let first = create_provider(&pool, "First Provider", true).await;
+		let second = create_provider(&pool, "Second Provider", true).await;
+		create_model(&pool, first, "text-a", "Text A", true).await;
+		let image = create_model(&pool, first, "image-a", "Image A", true).await;
+		create_model(&pool, second, "text-b", "Text B", true).await;
+		sqlx::query("UPDATE models SET output_modalities = '[\"text\", \"image\"]' WHERE id = $1")
+			.bind(image)
+			.execute(&pool)
+			.await
+			.unwrap();
+
+		let by_provider = ModelListParams { provider_id: Some(first), ..ModelListParams::default() };
+		let names: Vec<String> = Model::list_for_admin(&pool, &paged(1, 10), &by_provider).await.unwrap().items.into_iter().map(|m| m.display_name).collect();
+		assert_eq!(names, ["Image A", "Text A"]);
+
+		let text_only = ModelListParams { output_only: Some("text".to_string()), ..ModelListParams::default() };
+		let names: Vec<String> = Model::list_for_admin(&pool, &paged(1, 10), &text_only).await.unwrap().items.into_iter().map(|m| m.display_name).collect();
+		assert_eq!(names, ["Text A", "Text B"]);
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
@@ -169,11 +195,11 @@ mod tests {
 		create_model(&pool, provider_id, "page-b", "Page B", true).await;
 		create_model(&pool, provider_id, "page-c", "Page C", true).await;
 
-		let first = Model::list_for_admin(&pool, &paged(1, 2), None).await.unwrap();
+		let first = Model::list_for_admin(&pool, &paged(1, 2), &ModelListParams::default()).await.unwrap();
 		assert_eq!(first.items.len(), 2);
 		assert!(first.has_more);
 
-		let second = Model::list_for_admin(&pool, &paged(2, 2), None).await.unwrap();
+		let second = Model::list_for_admin(&pool, &paged(2, 2), &ModelListParams::default()).await.unwrap();
 		assert_eq!(second.items.len(), 1);
 		assert!(!second.has_more);
 	}

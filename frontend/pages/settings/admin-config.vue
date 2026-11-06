@@ -54,7 +54,13 @@
 					:selected-model-endpoint="adminModelsPath"
 					value-mode="uuid"
 					:placeholder="store.getTranslation('settings.admin_config.title_model_chat')"
+					:params="{output_only: 'text'}"
+					@selected="titleModel = $event"
 				/>
+				<div v-if="titleModelReasons" class="mt-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-foreground" role="alert" data-testid="config-title-model-reasoning-warning">
+					<AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+					<span>{{ store.getTranslation('settings.admin_config.title_model_reasoning_warning') }}</span>
+				</div>
 			</SettingsRow>
 
 			<SettingsRow :label="store.getTranslation('settings.appearance.language')" :hint="store.getTranslation('settings.admin_config.language_hint')" stacked>
@@ -94,6 +100,8 @@ import {useMainStore} from '@/stores';
 import {useThemeStore} from '~/stores/theme';
 import {hasThemeVars, isSameTheme} from '~/lib/theme-utils';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
+import {AlertTriangle} from 'lucide-vue-next';
+import type {ModelList} from '~/types/chat';
 
 const NO_THEME = 'none';
 const CUSTOM_THEME = 'custom';
@@ -117,6 +125,9 @@ const form = reactive({
 		model_id: store.base?.title_generation.model_id ?? null,
 	},
 });
+
+const titleModel = ref<ModelList | null>(null);
+const titleModelReasons = computed(() => !!form.title_generation.model_id && !!titleModel.value?.capabilities.some(capability => capability.startsWith('REASONING')));
 
 const iconInput = ref<HTMLInputElement | null>(null);
 const uploadingIcon = ref(false);
