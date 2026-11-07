@@ -18,7 +18,7 @@ fn registration_error(error: sqlx::Error) -> AppError {
 		return AppError::database(error);
 	}
 	match error.as_database_error().and_then(|database_error| database_error.constraint()) {
-		Some("users_email_key") => ErrorCode::EmailTaken.into(),
+		Some("users_email_key" | "users_email_lower_key") => ErrorCode::EmailTaken.into(),
 		Some("users_username_key") => ErrorCode::UsernameTaken.into(),
 		_ => ErrorCode::EmailOrUsernameTaken.into(),
 	}
@@ -137,7 +137,7 @@ pub async fn logout(State(state): State<Arc<JobState>>, cookies: Cookies) -> Res
 		User::delete_session(&state.db, &session_id).await.map_err(AppError::database)?;
 	}
 
-	cookies.remove(Cookie::from(SESSION_COOKIE_NAME));
+	cookies.remove(Cookie::build(SESSION_COOKIE_NAME).path("/").into());
 
 	AuditLog::log(&state.db, LogEvent::UserLogout, user_id, Some(EntityType::Session), session_id_to_log);
 

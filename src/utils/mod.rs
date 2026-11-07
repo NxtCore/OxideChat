@@ -6,6 +6,7 @@ pub mod images;
 pub mod login_limit;
 pub mod oauth;
 pub mod omniference_cost;
+pub mod outbound;
 pub mod provider_billing;
 pub mod providers;
 pub mod rate_limit;

@@ -6,6 +6,7 @@ pub mod gateway;
 pub mod i18n;
 pub mod mcp;
 pub mod models;
+pub mod oauth_providers;
 pub mod provider_billing;
 pub mod providers;
 pub mod teams;
@@ -100,6 +101,9 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/models/{id}/provider-options", get(catalog::list_provider_options))
 		.route("/api/v1/admin/models/{id}/provider-options/refresh", post(catalog::refresh_provider_options))
 		// Admin Config
-		.route("/api/v1/admin/config", get(config::get_admin_config).patch(config::update_global_config))
+		.route("/api/v1/admin/config", patch(config::update_global_config))
 		.route("/api/v1/config", get(config::get_global_config))
+		.route("/api/v1/admin/oauth-providers", get(oauth_providers::list_oauth_providers).post(oauth_providers::create_oauth_provider))
+		.route("/api/v1/admin/oauth-providers/presets", get(oauth_providers::list_oauth_presets))
+		.route("/api/v1/admin/oauth-providers/{id}", put(oauth_providers::update_oauth_provider).delete(oauth_providers::delete_oauth_provider))
 }

@@ -4,6 +4,7 @@ const port = Number(process.env.E2E_PORT ?? 3100);
 const backendPort = Number(process.env.E2E_BACKEND_PORT ?? 3101);
 const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? 3102);
 const mockPort = Number(process.env.MOCK_LLM_PORT ?? 3103);
+const idpPort = Number(process.env.MOCK_IDP_PORT ?? 3104);
 
 export default defineConfig({
 	testDir: './tests',
@@ -35,6 +36,12 @@ export default defineConfig({
 		{
 			command: 'bun scripts/mock-llm.mjs',
 			url: `http://127.0.0.1:${mockPort}/health`,
+			reuseExistingServer: false,
+			stdout: 'ignore',
+		},
+		{
+			command: 'bun scripts/mock-idp.mjs',
+			url: `http://127.0.0.1:${idpPort}/health`,
 			reuseExistingServer: false,
 			stdout: 'ignore',
 		},

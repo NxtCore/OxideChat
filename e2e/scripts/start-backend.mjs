@@ -48,10 +48,7 @@ const child = spawn(binary, [], {
 		BASE_URL: `http://localhost:${process.env.E2E_PORT ?? 3100}`,
 		OXIDECHAT_DATA_DIR: dataDir,
 		ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-		OAUTH_GOOGLE_CLIENT_ID: '',
-		OAUTH_GOOGLE_CLIENT_SECRET: '',
-		OAUTH_DISCORD_CLIENT_ID: '',
-		OAUTH_DISCORD_CLIENT_SECRET: '',
+		OIDC_ALLOW_PRIVATE_HOSTS: 'true',
 		RUST_LOG: process.env.RUST_LOG ?? 'warn',
 	},
 });

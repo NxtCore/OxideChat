@@ -14,7 +14,7 @@ impl User {
 	}
 
 	pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as("SELECT * FROM users WHERE email = $1").bind(email).fetch_optional(pool).await
+		sqlx::query_as("SELECT * FROM users WHERE lower(email) = lower($1)").bind(email).fetch_optional(pool).await
 	}
 
 	pub async fn find_by_session(pool: &PgPool, session_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
@@ -35,13 +35,13 @@ impl User {
 
 	pub async fn email_exists(pool: &PgPool, email: &str, exclude_id: Option<&Uuid>) -> Result<bool, sqlx::Error> {
 		let count: CountRow = if let Some(exclude) = exclude_id {
-			sqlx::query_as("SELECT COUNT(*) as count FROM users WHERE email = $1 AND id != $2")
+			sqlx::query_as("SELECT COUNT(*) as count FROM users WHERE lower(email) = lower($1) AND id != $2")
 				.bind(email)
 				.bind(exclude)
 				.fetch_one(pool)
 				.await?
 		} else {
-			sqlx::query_as("SELECT COUNT(*) as count FROM users WHERE email = $1")
+			sqlx::query_as("SELECT COUNT(*) as count FROM users WHERE lower(email) = lower($1)")
 				.bind(email)
 				.fetch_one(pool)
 				.await?

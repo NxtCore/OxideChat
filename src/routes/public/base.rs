@@ -3,6 +3,7 @@
 //! Returns application base data including translations.
 
 use crate::i18n::I18n;
+use crate::types::oauth::OAuthProvider;
 use crate::types::{AppError, BaseResponse, InstanceResponse, JobState, RequestContext, Role, User, json_ok};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::extract::{Extension, State};
@@ -40,7 +41,7 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 		language: crate::i18n::Language::current().as_str().to_string(),
 		default_language: config.language().as_str().to_string(),
 		needs_setup,
-		oauth_providers: config.get_configured_oauth_providers(),
+		oauth_providers: OAuthProvider::list_enabled(&state.db).await.map_err(AppError::database)?.iter().map(OAuthProvider::to_public).collect(),
 		roles,
 		enable_provider_selector: config.enable_provider_selector(),
 		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),

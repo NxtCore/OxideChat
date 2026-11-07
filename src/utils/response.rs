@@ -95,7 +95,6 @@ pub enum ErrorCode {
 	PasswordNoSpecial,
 	SetupRequired,
 	SetupCompleted,
-	InvalidProvider,
 	ProviderNotConfigured,
 	DefaultWorkspaceDelete,
 	ApiKeyNameInvalid,
@@ -169,7 +168,6 @@ impl ErrorCode {
 			| Self::PasswordNoSpecial
 			| Self::SetupRequired
 			| Self::SetupCompleted
-			| Self::InvalidProvider
 			| Self::ProviderNotConfigured
 			| Self::DefaultWorkspaceDelete
 			| Self::ApiKeyNameInvalid
@@ -217,7 +215,6 @@ impl ErrorCode {
 			Self::PasswordNoSpecial => "auth.errors.password_no_special",
 			Self::SetupRequired => "auth.errors.setup_required",
 			Self::SetupCompleted => "auth.errors.setup_completed",
-			Self::InvalidProvider => "auth.errors.oauth_provider_invalid",
 			Self::ProviderNotConfigured => "auth.errors.oauth_provider_disabled",
 			Self::DefaultWorkspaceDelete => "workspace.cannot_delete_default",
 			Self::ApiKeyNameInvalid => "developer.errors.name_invalid",
@@ -283,7 +280,6 @@ impl ErrorCode {
 			Self::PasswordNoSpecial => "password_no_special",
 			Self::SetupRequired => "setup_required",
 			Self::SetupCompleted => "setup_completed",
-			Self::InvalidProvider => "invalid_provider",
 			Self::ProviderNotConfigured => "provider_not_configured",
 			Self::DefaultWorkspaceDelete => "default_workspace_delete",
 			Self::ApiKeyNameInvalid => "api_key_name_invalid",

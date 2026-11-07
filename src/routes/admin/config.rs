@@ -4,10 +4,10 @@
 
 use crate::config::Config;
 use crate::logging::{AuditLog, LogEvent};
-use crate::types::consts::{ADMIN_CONFIG_EDIT, ADMIN_CONFIG_VIEW};
+use crate::types::consts::{ADMIN_CONFIG_EDIT};
 use crate::utils::images::is_safe_stored_image;
 use crate::utils::response::ErrorCode;
-use crate::types::{AdminConfigResponse, AppError, AuthUser, GlobalConfigResponse, JobState, MAX_INSTANCE_NAME_CHARS, UpdateGlobalConfigRequest, json_ok};
+use crate::types::{AppError, AuthUser, GlobalConfigResponse, JobState, MAX_INSTANCE_NAME_CHARS, UpdateGlobalConfigRequest, json_ok};
 use axum::{Json, extract::State, response::Response};
 use std::sync::Arc;
 
@@ -21,16 +21,6 @@ pub async fn get_global_config(_: AuthUser) -> Result<Response, AppError> {
 		enable_provider_selector: config.enable_provider_selector(),
 		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
 		default_model_id: config.default_model_id(),
-	})
-}
-
-/// GET /api/v1/admin/config
-///
-/// Settings only admins may read. Secrets are never returned.
-pub async fn get_admin_config(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_CONFIG_VIEW).await?;
-	json_ok(AdminConfigResponse {
-		oauth: Config::get().oauth_settings(),
 	})
 }
 
