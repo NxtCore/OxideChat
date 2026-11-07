@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::config::OAuthProvider;
 use crate::i18n::Language;
 use crate::types::models::Model;
 use super::{ChatSampling, CostDetails, Message, ReasoningDetails, RequestSettings, ThemeCssVars, ToolExecutionResponse, UsageDetails, UserPreferences};
@@ -215,23 +214,6 @@ pub struct GlobalConfigResponse {
 	pub enable_provider_selector: bool,
 	pub allow_server_stdio_mcp: bool,
 	pub default_model_id: Option<Uuid>,
-}
-
-#[derive(Debug, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub struct AdminConfigResponse {
-	pub oauth: Vec<OAuthSettingsResponse>,
-}
-
-#[derive(Debug, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub struct OAuthSettingsResponse {
-	pub provider: OAuthProvider,
-	pub client_id: Option<String>,
-	pub has_client_secret: bool,
-	pub env_configured: bool,
-	pub configured: bool,
-	pub callback_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

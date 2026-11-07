@@ -11,6 +11,7 @@ real LLM provider with a cheap model.
 | 3101 | Backend binary (`target/debug/OxideChat`) | `scripts/start-backend.mjs` |
 | 3102 | Nuxt production build | `scripts/start-frontend.mjs` |
 | 3103 | Local stand-in provider, used only when no API key is configured | `scripts/mock-llm.mjs` |
+| 3104 | Local stand-in sign-in provider (OIDC discovery, authorize, token, userinfo) | `scripts/mock-idp.mjs` |
 
 Every run drops and recreates the `oxidechat_e2e` database, so the first test walks through the real
 first-run setup page. The backend never touches the database from `.env`: the start script overrides all

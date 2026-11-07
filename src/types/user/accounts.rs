@@ -91,6 +91,40 @@ impl User {
 		}
 	}
 
+	/// Links a provider identity to this user.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the insert fails.
+	pub async fn link_identity(&self, pool: &PgPool, info: &OAuthUserInfo) -> Result<(), sqlx::Error> {
+		sqlx::query(
+			"INSERT INTO user_identities (user_id, provider, provider_user_id, provider_data)
+			 VALUES ($1, $2, $3, $4)",
+		)
+		.bind(self.id)
+		.bind(&info.provider)
+		.bind(&info.provider_user_id)
+		.bind(&info.raw_data)
+		.execute(pool)
+		.await?;
+		Ok(())
+	}
+
+	/// Returns `base`, or `base` with the lowest free number appended when the name is taken.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when a lookup fails.
+	pub async fn unique_username(pool: &PgPool, base: &str) -> Result<String, sqlx::Error> {
+		let mut candidate = base.to_string();
+		let mut number = 0u64;
+		while Self::username_exists(pool, &candidate, None).await? {
+			number += 1;
+			candidate = format!("{base}{number}");
+		}
+		Ok(candidate)
+	}
+
 	/// Creates a user from an OAuth login, grants the `user` role and links the identity.
 	///
 	/// # Errors

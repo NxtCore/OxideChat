@@ -63,6 +63,10 @@ pub enum LogEvent {
 	OAuthLoginSuccess,
 	OAuthLoginFailed,
 	OAuthAccountCreated,
+	OAuthAccountLinked,
+	OAuthProviderCreated,
+	OAuthProviderUpdated,
+	OAuthProviderDeleted,
 }
 
 impl LogEvent {
@@ -86,6 +90,10 @@ impl LogEvent {
 			Self::OAuthLoginSuccess => "oauth_login_success",
 			Self::OAuthLoginFailed => "oauth_login_failed",
 			Self::OAuthAccountCreated => "oauth_account_created",
+			Self::OAuthAccountLinked => "oauth_account_linked",
+			Self::OAuthProviderCreated => "oauth_provider_created",
+			Self::OAuthProviderUpdated => "oauth_provider_updated",
+			Self::OAuthProviderDeleted => "oauth_provider_deleted",
 		}
 	}
 }

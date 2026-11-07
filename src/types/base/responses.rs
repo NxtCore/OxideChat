@@ -1,4 +1,4 @@
-use crate::config::OAuthProvider;
+use crate::types::oauth::PublicOAuthProvider;
 use crate::types::{Role, ThemeCssVars};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,7 +15,7 @@ pub struct BaseResponse {
 	/// The installation's default language.
 	pub default_language: String,
 	pub needs_setup: bool,
-	pub oauth_providers: Vec<OAuthProvider>,
+	pub oauth_providers: Vec<PublicOAuthProvider>,
 	pub roles: Vec<Role>,
 	/// Whether the chat upstream-provider selector is enabled instance-wide.
 	pub enable_provider_selector: bool,

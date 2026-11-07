@@ -2,7 +2,6 @@ use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
 
 use crate::types::{ThemeCssVars, TitleGeneration};
-use crate::config::OAuthProvider;
 use crate::i18n::Language;
 
 /// Distinguishes an absent field (`None`) from an explicit JSON `null` (`Some(None)`),
@@ -130,8 +129,6 @@ pub struct UpdateGlobalConfigRequest {
 	pub language: Option<Language>,
 	pub instance: Option<UpdateInstanceRequest>,
 	pub title_generation: Option<TitleGeneration>,
-	#[serde(default)]
-	pub oauth: Vec<UpdateOAuthProviderRequest>,
 }
 
 /// Omitted fields stay unchanged; `null` restores the default.
@@ -143,16 +140,6 @@ pub struct UpdateInstanceRequest {
 	/// An image uploaded through `POST /api/v1/images`.
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub icon_id: Option<Option<Uuid>>,
-}
-
-/// Omitted fields stay unchanged; `null` removes the stored value.
-#[derive(Debug, Deserialize)]
-pub struct UpdateOAuthProviderRequest {
-	pub provider: OAuthProvider,
-	#[serde(default, deserialize_with = "deserialize_nullable_field")]
-	pub client_id: Option<Option<String>>,
-	#[serde(default, deserialize_with = "deserialize_nullable_field")]
-	pub client_secret: Option<Option<String>>,
 }
 
 #[derive(Debug, Deserialize)]

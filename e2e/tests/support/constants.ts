@@ -1,5 +1,7 @@
 export const MOCK_LLM_URL = `http://127.0.0.1:${process.env.MOCK_LLM_PORT ?? 3103}`;
 
+export const MOCK_IDP_URL = `http://127.0.0.1:${process.env.MOCK_IDP_PORT ?? 3104}`;
+
 export const MOCK_LLM_KEY = 'mock-key';
 
 export const MOCK_PRICING = {input: 10, output: 20};

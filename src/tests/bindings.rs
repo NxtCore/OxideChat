@@ -3,6 +3,7 @@ mod tests {
 	use crate::types::permissions::ALL;
 	use crate::types::models::{ModelListAdmin, ModelListPublic, ProviderTab};
 	use crate::types::catalog::ModelProviderOptions;
+	use crate::types::oauth::{OAuthPresetResponse, OAuthProviderResponse, PublicOAuthProvider, SaveOAuthProviderRequest};
 	use crate::types::providers::{ProviderBillingOverviewResponse, ProviderResponse, TestProviderResponse, UpdateProviderBillingRequest};
 	use crate::types::teams::TeamRole;
 	use crate::types::user::{SessionResponse, UserListResponse};
@@ -25,7 +26,6 @@ mod tests {
 			($($ty:ty),* $(,)?) => { $(<$ty as TS>::export_all(&cfg)?;)* };
 		}
 		export!(
-			AdminConfigResponse,
 			crate::types::exchange_rates::ExchangeRate,
 			ChatSampling,
 			SessionResponse,
@@ -33,6 +33,10 @@ mod tests {
 			TranslationsResponse,
 			AnalyticsDayModelRow,
 			BaseResponse,
+			OAuthProviderResponse,
+			OAuthPresetResponse,
+			SaveOAuthProviderRequest,
+			PublicOAuthProvider,
 			GlobalConfigResponse,
 			ModelProviderOptions,
 			ProviderResponse,
