@@ -102,7 +102,7 @@ export function useChatStream() {
 			case 'user_message_saved':
 				if (userMsg) {
 					Object.assign(userMsg, data.message);
-					userMsg.client_id = data.message.id;
+					userMsg.client_id = userMessageId ?? data.message.id;
 				}
 				break;
 			case 'text_delta':

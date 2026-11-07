@@ -3,7 +3,6 @@ import localizedFormat from 'dayjs/plugin/localizedFormat';
 import dayjs from 'dayjs';
 import 'dayjs/locale/de';
 import type {Base, Role, UserPreferences, UserResponse as User} from '~/types/chat';
-import type {OAuthProvider} from '~/types/generated/OAuthProvider';
 import {useThemeStore} from './theme';
 
 dayjs.extend(localizedFormat);
@@ -156,9 +155,6 @@ export const useMainStore = defineStore('main', {
 		},
 		retryBoot() {
 			_retryNow = true;
-		},
-		isOAuthEnabled(provider: string): boolean {
-			return this.base?.oauth_providers.includes(provider.toUpperCase() as OAuthProvider) ?? false;
 		},
 		async getMe() {
 			this.auth.loading = true;

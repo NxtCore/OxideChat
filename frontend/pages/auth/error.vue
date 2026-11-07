@@ -11,10 +11,6 @@
 				</ShadCardHeader>
 				<ShadCardContent>
 					<div class="flex flex-col gap-4">
-						<div v-if="errorCode === 'oauth_email_conflict'" class="rounded-lg bg-muted p-4 text-sm">
-							<p class="text-muted-foreground">{{ store.getTranslation('auth.errors.oauth_email_conflict_help') }}</p>
-						</div>
-
 						<div class="flex flex-col gap-2">
 							<ShadButton @click="navigateTo('/auth/login')" class="w-full">
 								{{ store.getTranslation('auth.errors.back_to_login') }}
@@ -45,9 +41,10 @@ const errorCode = computed(() => {
 // Map error codes to i18n keys for titles
 const errorTitle = computed(() => {
 	const titleKeys: Record<string, string> = {
-		oauth_email_conflict: 'auth.errors.oauth_email_conflict_title',
 		oauth_state_mismatch: 'auth.errors.oauth_state_mismatch_title',
 		oauth_token_error: 'auth.errors.oauth_token_error_title',
+		oauth_email_not_verified: 'auth.errors.oauth_email_not_verified_title',
+		oauth_registration_closed: 'auth.errors.oauth_registration_closed_title',
 		oauth_user_info_error: 'auth.errors.oauth_user_info_error_title',
 		unknown: 'auth.errors.unknown_error_title',
 	};
@@ -57,9 +54,10 @@ const errorTitle = computed(() => {
 // Map error codes to i18n keys for descriptions
 const errorDescription = computed(() => {
 	const descKeys: Record<string, string> = {
-		oauth_email_conflict: 'auth.errors.oauth_email_conflict',
 		oauth_state_mismatch: 'auth.errors.oauth_state_mismatch',
 		oauth_token_error: 'auth.errors.oauth_token_error',
+		oauth_email_not_verified: 'auth.errors.oauth_email_not_verified',
+		oauth_registration_closed: 'auth.errors.oauth_registration_closed',
 		oauth_user_info_error: 'auth.errors.oauth_user_info_error',
 		unknown: 'auth.errors.unknown_error',
 	};
