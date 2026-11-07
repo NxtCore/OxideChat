@@ -129,8 +129,9 @@ impl User {
 	///
 	/// # Errors
 	///
-	/// Returns a database error when any write fails.
+	/// Returns a database error when any write fails; nothing is stored then.
 	pub async fn create_from_oauth(pool: &PgPool, email: &str, username: &str, info: &OAuthUserInfo) -> Result<Self, sqlx::Error> {
+		let mut tx = pool.begin().await?;
 		let user: Self = sqlx::query_as(
 			"INSERT INTO users (email, username, auth_method)
 			 VALUES ($1, $2, 'oauth')
@@ -138,9 +139,12 @@ impl User {
 		)
 		.bind(email)
 		.bind(username)
-		.fetch_one(pool)
+		.fetch_one(&mut *tx)
 		.await?;
-		user.assign_role(pool, "user").await?;
+		sqlx::query("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name = 'user'")
+			.bind(user.id)
+			.execute(&mut *tx)
+			.await?;
 		sqlx::query(
 			"INSERT INTO user_identities (user_id, provider, provider_user_id, provider_data)
 			 VALUES ($1, $2, $3, $4)",
@@ -149,8 +153,9 @@ impl User {
 		.bind(&info.provider)
 		.bind(&info.provider_user_id)
 		.bind(&info.raw_data)
-		.execute(pool)
+		.execute(&mut *tx)
 		.await?;
+		tx.commit().await?;
 		Ok(user)
 	}
 }

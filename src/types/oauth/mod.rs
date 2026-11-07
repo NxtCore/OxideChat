@@ -15,7 +15,6 @@ pub struct OAuthState {
 	pub csrf_token: String,
 	pub pkce_verifier: String,
 	pub provider_slug: String,
-	pub redirect_after: Option<String>,
 }
 
 #[derive(Debug, Clone)]

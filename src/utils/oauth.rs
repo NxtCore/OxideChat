@@ -73,7 +73,6 @@ pub fn generate_auth_url(provider: &OAuthProvider) -> Result<(String, OAuthState
 		csrf_token: csrf_token.secret().clone(),
 		pkce_verifier: pkce_verifier.secret().clone(),
 		provider_slug: provider.slug.clone(),
-		redirect_after: None,
 	};
 	Ok((url.to_string(), state))
 }

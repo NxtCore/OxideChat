@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::OAuthUserInfo;
+use crate::utils::auth::validate_email;
+
+const MAX_SUBJECT_LENGTH: usize = 255;
 
 // ============================================================================
 // Request and Response Types
@@ -63,12 +66,12 @@ impl OAuthUserInfo {
 	/// Returns `None` when the profile has no subject, since the account cannot be identified then.
 	#[must_use]
 	pub fn from_profile(provider: &str, mapping: &ClaimMapping, profile: &Value) -> Option<Self> {
-		let provider_user_id = claim_string(profile, &mapping.subject)?;
+		let provider_user_id = claim_string(profile, &mapping.subject).filter(|id| id.chars().count() <= MAX_SUBJECT_LENGTH)?;
 		Some(Self {
 			provider: provider.to_string(),
 			raw_data: serde_json::json!({ "sub": provider_user_id }),
 			provider_user_id,
-			email: claim_string(profile, &mapping.email),
+			email: claim_string(profile, &mapping.email).filter(|email| validate_email(email)),
 			email_verified: claim_bool(profile, &mapping.email_verified),
 			username: claim_string(profile, &mapping.name),
 		})

@@ -87,7 +87,7 @@ pub async fn oauth_callback(
 		tracing::warn!("[OAUTH] Invalid state for provider {}", provider.slug);
 		log_failure(&state, None);
 	})?;
-	cookies.remove(Cookie::from(OAUTH_STATE_COOKIE));
+	cookies.remove(Cookie::build(OAUTH_STATE_COOKIE).path("/").into());
 
 	let Some(code) = params.code.as_deref().filter(|_| params.error.is_none()) else {
 		log_failure(&state, None);
@@ -113,7 +113,7 @@ pub async fn oauth_callback(
 				AppError::database(e)
 			})?;
 			log_success(&state, &user, kind);
-			Ok(Redirect::temporary(oauth_state.redirect_after.as_deref().unwrap_or("/")).into_response())
+			Ok(Redirect::temporary("/").into_response())
 		}
 		Err(SignInError::Database(e)) => {
 			tracing::error!("[OAUTH] Failed to sign in: {e}");

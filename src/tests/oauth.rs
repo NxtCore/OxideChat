@@ -46,8 +46,16 @@ mod tests {
 		}
 
 		#[test]
+		fn malformed_emails_are_ignored() {
+			let info = OAuthUserInfo::from_profile("p", &ClaimMapping::default(), &json!({"sub":"1","email":"not-an-email"})).unwrap();
+
+			assert_eq!(info.email, None);
+		}
+
+		#[test]
 		fn a_profile_without_subject_is_refused() {
 			assert!(OAuthUserInfo::from_profile("p", &ClaimMapping::default(), &json!({"email":"user@example.com"})).is_none());
+			assert!(OAuthUserInfo::from_profile("p", &ClaimMapping::default(), &json!({"sub":"x".repeat(256)})).is_none());
 			assert!(OAuthUserInfo::from_profile("p", &ClaimMapping::default(), &json!({"sub":"  "})).is_none());
 		}
 
@@ -72,11 +80,25 @@ mod tests {
 		fn public_addresses_are_allowed() {
 			assert!(allowed("8.8.8.8", false));
 			assert!(allowed("2606:4700:4700::1111", false));
+			assert!(allowed("64:ff9b::808:808", false));
+			assert!(allowed("2002:808:808::", false));
 		}
 
 		#[test]
 		fn metadata_and_link_local_addresses_are_never_allowed() {
-			for ip in ["169.254.169.254", "fe80::1", "::ffff:169.254.169.254", "0.0.0.0", "224.0.0.1"] {
+			for ip in [
+				"169.254.169.254",
+				"fe80::1",
+				"::ffff:169.254.169.254",
+				"0.0.0.0",
+				"0.1.2.3",
+				"224.0.0.1",
+				"240.0.0.1",
+				"64:ff9b::a9fe:a9fe",
+				"2002:a9fe:a9fe::",
+				"::169.254.169.254",
+				"2001:0:4136:e378::1",
+			] {
 				assert!(!allowed(ip, false), "{ip}");
 				assert!(!allowed(ip, true), "{ip}");
 			}
@@ -84,7 +106,21 @@ mod tests {
 
 		#[test]
 		fn private_addresses_need_the_opt_in() {
-			for ip in ["127.0.0.1", "10.0.0.5", "172.16.0.1", "192.168.1.1", "100.64.0.1", "::1", "fd00::1", "::ffff:10.0.0.1"] {
+			for ip in [
+				"127.0.0.1",
+				"10.0.0.5",
+				"172.16.0.1",
+				"192.168.1.1",
+				"100.64.0.1",
+				"192.0.0.8",
+				"198.18.0.1",
+				"::1",
+				"fd00::1",
+				"::ffff:10.0.0.1",
+				"::127.0.0.1",
+				"2002:7f00:1::",
+				"64:ff9b::a00:5",
+			] {
 				assert!(!allowed(ip, false), "{ip}");
 				assert!(allowed(ip, true), "{ip}");
 			}
@@ -128,6 +164,14 @@ mod tests {
 			assert!(without_secret.is_valid(false));
 			assert!(!bad_slug.is_valid(true));
 			assert!(bad_slug.is_valid(false));
+		}
+
+		#[test]
+		fn icons_longer_than_the_column_are_refused() {
+			let mut req = request(VALID);
+			req.icon = Some("i".repeat(51));
+
+			assert!(!req.is_valid(true));
 		}
 
 		#[test]
@@ -309,6 +353,43 @@ mod tests {
 			let (user, _) = sign_in(&pool, &provider, &info(&provider, "1", "other@example.com", Some(true))).await?;
 
 			assert_eq!(user.username, "Sam1");
+			Ok(())
+		}
+
+		#[sqlx::test]
+		async fn emails_link_regardless_of_case(pool: PgPool) -> TestResult {
+			let owner = crate::tests::support::insert_user(&pool, "sam").await?;
+			let provider = provider(&pool, request("keycloak")).await?;
+			let (user, kind) = sign_in(&pool, &provider, &info(&provider, "1", "Sam@Example.COM", Some(true))).await?;
+
+			assert_eq!(kind, SignInKind::Linked);
+			assert_eq!(user.id, owner);
+			Ok(())
+		}
+
+		#[sqlx::test]
+		async fn display_names_become_valid_usernames(pool: PgPool) -> TestResult {
+			let provider = provider(&pool, request("keycloak")).await?;
+			let mut spaced = info(&provider, "1", "a@example.com", Some(true));
+			spaced.username = Some(format!("Sam Smith! {}", "x".repeat(60)));
+			let mut symbols = info(&provider, "2", "b@example.com", Some(true));
+			symbols.username = Some("!!".to_string());
+			let (user, _) = sign_in(&pool, &provider, &spaced).await?;
+			let (other, _) = sign_in(&pool, &provider, &symbols).await?;
+
+			assert!(user.username.starts_with("SamSmithx"));
+			assert!(crate::utils::auth::validate_username(&user.username).is_ok());
+			assert_eq!(other.username, "user_2");
+			Ok(())
+		}
+
+		#[sqlx::test]
+		async fn a_second_account_cannot_differ_only_in_email_case(pool: PgPool) -> TestResult {
+			crate::tests::support::insert_user(&pool, "sam").await?;
+
+			assert!(crate::types::User::email_exists(&pool, "SAM@example.com", None).await?);
+			let duplicate = crate::types::User::create(&pool, "SAM@example.com", "sam2", "hash").await;
+			assert!(duplicate.is_err_and(|error| crate::types::error::is_unique_violation(&error)));
 			Ok(())
 		}
 	}

@@ -57,7 +57,8 @@ impl SaveOAuthProviderRequest {
 	pub fn is_valid(&self, creating: bool) -> bool {
 		let name_length = self.name.trim().chars().count();
 		let has_secret = self.client_secret.as_deref().is_some_and(|secret| !secret.is_empty());
-		(1..=100).contains(&name_length) && !self.client_id.trim().is_empty() && (!creating || (is_valid_slug(&self.slug) && has_secret))
+		let icon_fits = self.icon.as_deref().is_none_or(|icon| icon.chars().count() <= 50);
+		(1..=100).contains(&name_length) && icon_fits && !self.client_id.trim().is_empty() && (!creating || (is_valid_slug(&self.slug) && has_secret))
 	}
 }
 
