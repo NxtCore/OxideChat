@@ -236,6 +236,7 @@ const {
 	canLoadMore: pickerCanLoadMore,
 	loadMore: pickerLoadMore,
 	onSearchInput: pickerOnSearch,
+	clearSearch: pickerClearSearch,
 	selectFilter: pickerSelectFilter,
 	init: pickerInit,
 } = useModelPicker();
@@ -246,12 +247,19 @@ let observer: IntersectionObserver | null = null;
 
 const activeChatId = computed(() => chatStore.activeChat?.id);
 
+let pickerLoaded = false;
+watch(() => modelStore.models, () => (pickerLoaded = false));
+
 watch(isOpen, async (open) => {
 	if (open) {
-		await pickerInit();
+		if (!pickerLoaded) {
+			pickerLoaded = true;
+			await pickerInit();
+		}
 		setupObserver();
 	} else {
 		teardownObserver();
+		if (pickerClearSearch()) pickerLoaded = false;
 	}
 });
 

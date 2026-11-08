@@ -35,6 +35,7 @@ export const useMainStore = defineStore('main', {
 		settingsReturnPath: string;
 		preferences: UserPreferences | null;
 		auth: AuthState;
+		lastUserId: string | null;
 	} => {
 		return {
 			breadcrumbs: [],
@@ -44,6 +45,7 @@ export const useMainStore = defineStore('main', {
 			lastBootError: null,
 			settingsReturnPath: '/',
 			preferences: null,
+			lastUserId: null,
 			auth: {
 				user: null,
 				isAuthenticated: false,
@@ -161,13 +163,7 @@ export const useMainStore = defineStore('main', {
 			try {
 				const {$customFetch} = useNuxtApp();
 				const user = await $customFetch<User>('/api/v1/users/@me');
-				if (user) {
-					this.auth.user = user;
-					this.preferences = user.preferences;
-					this.applyLanguage();
-					if (user.preferences) useThemeStore().initFromUserPreferences(user.preferences.custom_theme_urls, user.preferences.theme_css_vars);
-					this.auth.isAuthenticated = true;
-				}
+				if (user) this.setUser(user);
 			} catch (e: any) {
 				if (isServerUnreachable(e)) {
 					// Propagate so checkAuth keeps the boot screen rather than redirecting to login
@@ -179,6 +175,15 @@ export const useMainStore = defineStore('main', {
 				this.auth.loading = false;
 			}
 		},
+		setUser(user: User) {
+			if (this.lastUserId && this.lastUserId !== user.id) this.resetUserData();
+			this.lastUserId = user.id;
+			this.auth.user = user;
+			this.preferences = user.preferences;
+			this.applyLanguage();
+			if (user.preferences) useThemeStore().initFromUserPreferences(user.preferences.custom_theme_urls, user.preferences.theme_css_vars);
+			this.auth.isAuthenticated = true;
+		},
 		async setup(email: string, username: string, password: string) {
 			const {$customFetch} = useNuxtApp();
 			const chatStore = useChatStore();
@@ -187,8 +192,7 @@ export const useMainStore = defineStore('main', {
 				body: {email, username, password},
 			});
 			if (response) {
-				this.auth.user = response.user;
-				this.auth.isAuthenticated = true;
+				this.setUser(response.user);
 				await this.getBaseData();
 				await chatStore.init();
 			}
@@ -201,8 +205,7 @@ export const useMainStore = defineStore('main', {
 				body: {email, username, password},
 			});
 			if (response) {
-				this.auth.user = response.user;
-				this.auth.isAuthenticated = true;
+				this.setUser(response.user);
 			}
 			return response;
 		},
@@ -214,8 +217,7 @@ export const useMainStore = defineStore('main', {
 				body: {email, password},
 			});
 			if (response) {
-				this.auth.user = response.user;
-				this.auth.isAuthenticated = true;
+				this.setUser(response.user);
 				await chatStore.init();
 			}
 			return response;
@@ -230,8 +232,16 @@ export const useMainStore = defineStore('main', {
 				this.auth.user = null;
 				this.auth.isAuthenticated = false;
 				this.preferences = null;
+				this.resetUserData();
 				this.applyLanguage();
 			}
+		},
+		resetUserData() {
+			clearInflight();
+			useDeveloperStore().$reset();
+			usePreferencesStore().$reset();
+			useBudgetStore().$reset();
+			useModelStore().$reset();
 		},
 		applyLanguage() {
 			if (this.base) this.base.language = this.preferences?.language ?? this.base.default_language;

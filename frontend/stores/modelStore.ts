@@ -7,6 +7,7 @@ export const useModelStore = defineStore('model', {
 		models: [] as ModelList[],
 		selectedModel: null as ModelList | null,
 		modelsLoading: false,
+		stale: false,
 		contextTokens: 0,
 		reasoningEffort: null as string | null,
 		reasoningBudget: null as number | null,
@@ -104,6 +105,7 @@ export const useModelStore = defineStore('model', {
 				const {$customFetch} = useNuxtApp();
 				const models = await $customFetch<PaginatedResponse<ModelList>>('/api/v1/models?size=100');
 				this.models = models.items;
+				this.stale = false;
 
 				if (!this.selectedModel && this.models.length > 0) {
 					await this.resetComposerToDefaults();
@@ -245,26 +247,6 @@ export const useModelStore = defineStore('model', {
 
 		setContextTokens(tokens: number) {
 			this.contextTokens = tokens;
-		},
-
-		async hydrateComposerFromMessages(messages: ChatMessage[]) {
-			const source = messages.findLast(m => m.role === 'assistant') ?? messages.findLast(m => m.role === 'user');
-			if (!source) return;
-
-			const settings = source.request_settings ?? {};
-			const modelKey = source.model_key ?? settings.model_key ?? null;
-			if (modelKey) {
-				const model = await this.findModelByKey(modelKey);
-				if (model && model.id !== this.selectedModel?.id) {
-					this.setSelectedModel(model);
-				}
-			}
-
-			this.reasoningEffort = source.reasoning_details?.effort ?? null;
-			this.reasoningBudget = source.reasoning_details?.budget_tokens ?? null;
-			this.selectedProviderSlug = settings.provider_slug ?? null;
-			this.providerRoutingMode = settings.provider_routing_mode === 'lock' ? 'lock' : 'prefer';
-			this.enabledTools = Array.isArray(settings.enabled_tools) ? [...settings.enabled_tools] : [];
 		},
 	},
 });

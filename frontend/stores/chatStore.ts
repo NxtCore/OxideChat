@@ -289,23 +289,25 @@ export const useChatStore = defineStore('chat', {
 		async init() {
 			const workspaceStore = useWorkspaceStore();
 			const modelStore = useModelStore();
-			const preferencesStore = usePreferencesStore();
 			this.initialized = false;
 			workspaceStore.restoreActive();
-			await Promise.all([workspaceStore.fetchWorkspaces(), preferencesStore.fetchPreferences(), preferencesStore.fetchUserMcpServers()]);
+			const restoredWorkspaceId = workspaceStore.activeWorkspaceId;
+			await Promise.all([
+				workspaceStore.fetchWorkspaces(),
+				this.fetchChats({workspace_id: restoredWorkspaceId || undefined}),
+				modelStore.fetchModels(),
+			]);
 			workspaceStore.clearActiveIfMissing();
-			await this.fetchChats({workspace_id: workspaceStore.activeWorkspaceId || undefined});
+			if (restoredWorkspaceId && !workspaceStore.activeWorkspaceId) await this.fetchChats();
 			workspaceStore.applyWorkspaceAccent();
-			await modelStore.fetchModels();
 			if (!this.activeChat) await modelStore.resetComposerToDefaults();
 			this.initialized = true;
 		},
 
 		async refreshSharedData() {
 			const modelStore = useModelStore();
-			const preferencesStore = usePreferencesStore();
-			await Promise.all([preferencesStore.fetchPreferences(), preferencesStore.fetchUserMcpServers()]);
-			await modelStore.fetchModels();
+			if (!modelStore.stale) return;
+			await Promise.all([usePreferencesStore().fetchPreferences(), modelStore.fetchModels()]);
 			if (!this.activeChat) await modelStore.resetComposerToDefaults();
 		},
 	},

@@ -286,15 +286,11 @@ watch(searchRaw, val => {
 	}, 300);
 });
 
-watch([roleFilter, teamFilter, page], () => {
-	loadUsers();
-});
+watch([search, roleFilter, teamFilter, page], () => loadUsers());
 
-watch(search, () => {
-	loadUsers();
-});
-
+let usersRequest = 0;
 async function loadUsers() {
+	const request = ++usersRequest;
 	loading.value = true;
 	try {
 		const params: Record<string, string | number> = {page: page.value};
@@ -303,13 +299,14 @@ async function loadUsers() {
 		if (teamFilter.value) params.team_id = teamFilter.value;
 
 		const result = await adminUsers(params);
+		if (request !== usersRequest) return;
 		users.value = result.items ?? [];
 		hasMore.value = result.has_more ?? false;
 	} catch (e: any) {
 		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
 		store.toast(store.getTranslation('settings.admin_users.load_error'), {type: 'error', description: errorMessage});
 	} finally {
-		loading.value = false;
+		if (request === usersRequest) loading.value = false;
 	}
 }
 
@@ -403,8 +400,5 @@ async function submitDelete() {
 	}
 }
 
-onMounted(async () => {
-	await loadTeams();
-	await loadUsers();
-});
+onMounted(() => Promise.all([loadTeams(), loadUsers()]));
 </script>
