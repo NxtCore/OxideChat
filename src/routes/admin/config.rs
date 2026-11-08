@@ -19,7 +19,6 @@ pub async fn get_global_config(_: AuthUser) -> Result<Response, AppError> {
 	json_ok(GlobalConfigResponse {
 		default_theme: config.default_theme(),
 		enable_provider_selector: config.enable_provider_selector(),
-		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
 		default_model_id: config.default_model_id(),
 	})
 }
@@ -58,7 +57,6 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, auth: Auth
 	json_ok(GlobalConfigResponse {
 		default_theme: config.default_theme(),
 		enable_provider_selector: config.enable_provider_selector(),
-		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
 		default_model_id: config.default_model_id(),
 	})
 }

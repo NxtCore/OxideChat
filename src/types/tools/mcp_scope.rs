@@ -1,5 +1,4 @@
-use super::{CreateMcpServerRequest, McpHttpConfig, McpServer, McpServerResponse, McpStdioConfig, UpdateMcpServerRequest};
-use crate::config::Config;
+use super::{CreateMcpServerRequest, McpHttpConfig, McpServer, McpServerResponse, UpdateMcpServerRequest};
 use crate::types::AppError;
 use crate::utils::response::ErrorCode;
 use crate::utils::tools::mcp::{McpUrlPolicy, is_remote_mcp_url_syntax_allowed, validate_remote_mcp_url};
@@ -19,16 +18,6 @@ fn normalize_remote_transport(transport: &str) -> Option<&'static str> {
 }
 
 fn normalize_admin_transport(transport: &str, connection_config: &serde_json::Value) -> Result<&'static str, ErrorCode> {
-	if transport.eq_ignore_ascii_case("stdio") {
-		if !Config::get().allow_server_stdio_mcp() {
-			return Err(ErrorCode::Forbidden);
-		}
-		let ok = serde_json::from_value::<McpStdioConfig>(connection_config.clone())
-			.map(|c| !c.command.trim().is_empty())
-			.unwrap_or(false);
-		return if ok { Ok("stdio") } else { Err(ErrorCode::ValidationFailed) };
-	}
-
 	let admin_url_ok = serde_json::from_value::<McpHttpConfig>(connection_config.clone())
 		.map(|c| is_remote_mcp_url_syntax_allowed(&c.url, McpUrlPolicy::TrustedAdmin))
 		.unwrap_or(false);
@@ -76,8 +65,8 @@ impl McpScope {
 	///
 	/// # Errors
 	///
-	/// Returns a validation error for a bad name, transport or config, `Forbidden` for a
-	/// disabled stdio transport, `AlreadyExists` for a duplicate name, or a database error.
+	/// Returns a validation error for a bad name, transport or config, `AlreadyExists` for a
+	/// duplicate name, or a database error.
 	pub async fn create(&self, pool: &sqlx::PgPool, req: &CreateMcpServerRequest) -> Result<McpServerResponse, AppError> {
 		if req.name.trim().is_empty() {
 			return Err(ErrorCode::ValidationFailed.into());

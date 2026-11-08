@@ -19,10 +19,6 @@ default_language: string, needs_setup: boolean, oauth_providers: Array<OAuthProv
  */
 enable_provider_selector: boolean, 
 /**
- * Whether admins may register server-side stdio MCP servers.
- */
-allow_server_stdio_mcp: boolean, 
-/**
  * Instance-wide default model ID.
  */
 default_model_id: string | null, 

@@ -81,14 +81,9 @@
 							<ShadSelect v-model="mcpConfig.transport">
 								<ShadSelectTrigger><ShadSelectValue /></ShadSelectTrigger>
 								<ShadSelectContent>
-									<ShadSelectItem value="stdio">{{ store.getTranslation('settings.tools.stdio') }}</ShadSelectItem>
 									<ShadSelectItem value="sse">{{ store.getTranslation('settings.tools.sse') }}</ShadSelectItem>
 								</ShadSelectContent>
 							</ShadSelect>
-							<template v-if="mcpConfig.transport === 'stdio'">
-								<Input v-model="mcpConfig.command" :placeholder="store.getTranslation('settings.tools.command_placeholder')" />
-								<Input v-model="mcpConfig.args" :placeholder="store.getTranslation('settings.tools.args_placeholder')" />
-							</template>
 						<template v-if="mcpConfig.transport === 'sse'">
 							<Input v-model="mcpConfig.url" :placeholder="store.getTranslation('settings.tools.url_placeholder')" />
 							<HeaderEditor v-model="mcpConfig.headers_json" />
@@ -264,9 +259,7 @@ const wasmConfig = reactive({
 });
 
 const mcpConfig = reactive({
-	transport: 'stdio',
-	command: '',
-	args: '',
+	transport: 'sse',
 	url: '',
 	headers_json: '{}',
 	tool_name: '',
@@ -332,9 +325,7 @@ function fillEditForm(tool: Tool) {
 	}
 	if (tool.source_kind === 'MCP' && tool.source_config) {
 		Object.assign(mcpConfig, {
-			transport: tool.source_config.transport || 'stdio',
-			command: tool.source_config.command || '',
-			args: (tool.source_config.args || []).join(', '),
+			transport: 'sse',
 			url: tool.source_config.url || '',
 			headers_json: JSON.stringify(tool.source_config.headers || {}, null, 2),
 			tool_name: tool.source_config.tool_name || '',
@@ -364,17 +355,6 @@ function buildSourceConfig(): any {
 		case 'WASM':
 			return {wasm_blob_id: wasmConfig.blob_id, entrypoint: wasmConfig.entrypoint || 'execute'};
 		case 'MCP':
-			if (mcpConfig.transport === 'stdio') {
-				return {
-					transport: 'stdio',
-					command: mcpConfig.command,
-					args: mcpConfig.args
-						.split(',')
-						.map(s => s.trim())
-						.filter(Boolean),
-					tool_name: mcpConfig.tool_name,
-				};
-			}
 			return {
 				transport: 'sse',
 				url: mcpConfig.url,

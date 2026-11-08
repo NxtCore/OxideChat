@@ -22,10 +22,6 @@
 				<ShadSwitch v-model="form.enable_provider_selector" :disabled="!canEdit || settingsForm.saving" data-testid="config-provider-selector" />
 			</SettingsRow>
 
-			<SettingsRow :label="store.getTranslation('admin.tools.mcp.allow_stdio')" :hint="store.getTranslation('admin.tools.mcp.allow_stdio_hint')" warning>
-				<ShadSwitch v-model="form.allow_server_stdio_mcp" :disabled="!canEdit || settingsForm.saving" data-testid="config-allow-stdio" />
-			</SettingsRow>
-
 			<SettingsRow :label="store.getTranslation('settings.admin.default_model')" :hint="store.getTranslation('settings.admin.default_model_hint')" stacked>
 				<DefaultModelPicker
 					v-model="form.default_model_id"
@@ -112,7 +108,6 @@ const canEdit = computed(() => store.hasPermission(ADMIN_CONFIG_EDIT));
 
 const form = reactive({
 	enable_provider_selector: store.base?.enable_provider_selector ?? false,
-	allow_server_stdio_mcp: store.base?.allow_server_stdio_mcp ?? false,
 	default_model_id: store.base?.default_model_id ?? null,
 	language: store.base?.default_language ?? 'en',
 	default_theme: store.base?.default_theme ?? {theme: {}, light: {}, dark: {}},

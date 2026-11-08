@@ -124,7 +124,7 @@ pub async fn sync_provider_models_once(state: &super::JobState) {
 
 /// Periodically close idle pooled MCP clients and refresh system server health.
 ///
-/// Reaping frees idle `stdio` subprocesses and stale remote connections while
+/// Reaping frees stale remote connections while
 /// still letting a single chat reuse one client across its tool calls.
 async fn mcp_maintenance_job(state: Arc<super::JobState>) {
 	println!("[JOBS] MCP maintenance job started");

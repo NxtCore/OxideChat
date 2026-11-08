@@ -19,8 +19,6 @@ pub struct BaseResponse {
 	pub roles: Vec<Role>,
 	/// Whether the chat upstream-provider selector is enabled instance-wide.
 	pub enable_provider_selector: bool,
-	/// Whether admins may register server-side stdio MCP servers.
-	pub allow_server_stdio_mcp: bool,
 	/// Instance-wide default model ID.
 	pub default_model_id: Option<Uuid>,
 	/// Theme for users who have not picked their own.
