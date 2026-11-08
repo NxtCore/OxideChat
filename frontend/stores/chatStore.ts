@@ -1,6 +1,7 @@
 import {defineStore} from 'pinia';
 import {useWorkspaceStore} from './workspaceStore';
 import {useModelStore} from './modelStore';
+import {usePreferencesStore} from './preferencesStore';
 import type {Chat, ChatSampling, ChatMessage, ChatWithMessages, CreateChatRequest, UpdateChatRequest, ChatListParams, PaginatedResponse} from '~/types/chat';
 
 interface ChatState {
@@ -306,7 +307,7 @@ export const useChatStore = defineStore('chat', {
 		async refreshSharedData() {
 			const modelStore = useModelStore();
 			if (!modelStore.stale) return;
-			await modelStore.fetchModels();
+			await Promise.all([usePreferencesStore().fetchPreferences(), modelStore.fetchModels()]);
 			if (!this.activeChat) await modelStore.resetComposerToDefaults();
 		},
 	},

@@ -97,6 +97,7 @@ test('main views do not repeat or refetch /api/v1 requests', async ({page, t, se
 		);
 	});
 	await step('nav / after admin edit', () => navigate(page, '/'));
+	await step('nav /developer/keys after admin edit', () => navigate(page, '/developer/keys'));
 	await step('cold /settings/profile', () => page.goto('/settings/profile').then(() => undefined));
 	await step('cold /developer/keys', () => page.goto('/developer/keys').then(() => undefined));
 
@@ -121,6 +122,8 @@ test('main views do not repeat or refetch /api/v1 requests', async ({page, t, se
 	expect(requestsOf('nav /').filter(r => sharedData.test(r)), 'returning to chat reuses the store').toEqual([]);
 	expect(requestsOf('nav chat').filter(r => sharedData.test(r)), 'returning to chat reuses the store').toEqual([]);
 	expect(requestsOf('nav / after admin edit'), 'an admin model change refreshes the chat models').toContain('GET /api/v1/models?size=100');
+	expect(requestsOf('nav / after admin edit'), 'an admin change refreshes the effective default model').toContain('GET /api/v1/users/@me/preferences');
+	expect(requestsOf('nav /developer/keys after admin edit'), 'an admin change refreshes developer data').toContain('GET /api/v1/developer/keys');
 	expect(requestsOf('reopen model picker'), 'reopening the model picker reuses its list').toEqual([]);
 	for (const label of ['nav /developer/logs', 'nav /developer/playground', 'back to /developer/keys']) {
 		expect(requestsOf(label).filter(r => /\/developer\/(teams|keys|team-keys)$/.test(r)), label).toEqual([]);

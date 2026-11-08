@@ -1,5 +1,5 @@
 import {test, expect} from './support/fixtures';
-import {MEMBER} from './support/constants';
+import {ADMIN, MEMBER} from './support/constants';
 import {uniqueName} from './support/gateway';
 
 test.describe('authentication', () => {
@@ -37,6 +37,31 @@ test.describe('authentication', () => {
 
 		await page.goto('/settings/profile');
 		await expect(page).toHaveURL(/\/auth\/login/);
+	});
+
+	test('logging in as someone else without a reload does not reuse the previous user\'s data', async ({page, t}) => {
+		const login = async (user: {email: string; password: string}) => {
+			await page.getByLabel(t('auth.login.email')).fill(user.email);
+			await page.getByLabel(t('auth.login.password')).fill(user.password);
+			const budget = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/me/budget');
+			await page.getByRole('button', {name: t('auth.login.submit')}).click();
+			await expect(page).not.toHaveURL(/\/auth\//);
+			await budget;
+		};
+		const cachedUserData = () =>
+			page.evaluate(() => {
+				const state = (document.querySelector('#__nuxt') as any).__vue_app__.config.globalProperties.$pinia.state.value;
+				return {budget: state.budget.myStatus, tools: state.preferences.userTools.length, mcpServers: state.preferences.userMcpServers.length, models: state.model.models.length, keys: state.developer.keys.length};
+			});
+
+		await page.goto('/auth/login');
+		await login(MEMBER);
+		await page.getByText(MEMBER.username).first().click();
+		await page.getByText(t('sidebar.logout')).click();
+		await expect(page).toHaveURL(/\/auth\/login/);
+		expect(await cachedUserData()).toEqual({budget: null, tools: 0, mcpServers: 0, models: 0, keys: 0});
+
+		await login(ADMIN);
 	});
 
 	test('a visitor can register a new account', async ({page, t}) => {

@@ -27,6 +27,15 @@ export const usePreferencesStore = defineStore('preferences', {
 			});
 		},
 
+		async fetchPreferences() {
+			try {
+				const {$customFetch} = useNuxtApp();
+				useMainStore().preferences = await $customFetch<UserPreferences>('/api/v1/users/@me/preferences');
+			} catch (e) {
+				console.error('Failed to fetch preferences:', e);
+			}
+		},
+
 		async fetchUserMcpServers() {
 			try {
 				const {$customFetch} = useNuxtApp();

@@ -36,6 +36,7 @@ export const useMainStore = defineStore('main', {
 		settingsReturnPath: string;
 		preferences: UserPreferences | null;
 		auth: AuthState;
+		lastUserId: string | null;
 	} => {
 		return {
 			breadcrumbs: [],
@@ -45,6 +46,7 @@ export const useMainStore = defineStore('main', {
 			lastBootError: null,
 			settingsReturnPath: '/',
 			preferences: null,
+			lastUserId: null,
 			auth: {
 				user: null,
 				isAuthenticated: false,
@@ -178,6 +180,8 @@ export const useMainStore = defineStore('main', {
 			}
 		},
 		setUser(user: User) {
+			if (this.lastUserId && this.lastUserId !== user.id) this.resetUserData();
+			this.lastUserId = user.id;
 			this.auth.user = user;
 			this.preferences = user.preferences;
 			this.applyLanguage();
@@ -232,9 +236,16 @@ export const useMainStore = defineStore('main', {
 				this.auth.user = null;
 				this.auth.isAuthenticated = false;
 				this.preferences = null;
-				useDeveloperStore().$reset();
+				this.resetUserData();
 				this.applyLanguage();
 			}
+		},
+		resetUserData() {
+			clearInflight();
+			useDeveloperStore().$reset();
+			usePreferencesStore().$reset();
+			useBudgetStore().$reset();
+			useModelStore().$reset();
 		},
 		applyLanguage() {
 			if (this.base) this.base.language = this.preferences?.language ?? this.base.default_language;

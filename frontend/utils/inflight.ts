@@ -5,8 +5,14 @@ export function inflight(key: string, load: () => Promise<unknown>): Promise<voi
 	if (!request) {
 		request = load()
 			.then(() => undefined)
-			.finally(() => pending.delete(key));
+			.finally(() => {
+				if (pending.get(key) === request) pending.delete(key);
+			});
 		pending.set(key, request);
 	}
 	return request;
+}
+
+export function clearInflight() {
+	pending.clear();
 }
