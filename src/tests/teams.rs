@@ -55,6 +55,25 @@ mod tests {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn current_user_response_carries_the_team_default_model(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
+		let default_id = Team::default_id(&pool).await?;
+		let user_id = create_user(&pool, "effective_default").await;
+		Team::ensure_default_membership(&pool, &user_id).await?;
+		let provider_id = create_provider(&pool, "effective_default_provider").await;
+		let model_id = create_model(&pool, provider_id, "team-default-model").await;
+		sqlx::query("UPDATE teams SET default_model_id = $1 WHERE id = $2")
+			.bind(model_id)
+			.bind(default_id)
+			.execute(&pool)
+			.await?;
+
+		let user = crate::types::user::User::find_by_id(&pool, &user_id).await?.ok_or("user exists")?;
+		let response = user.to_response(&pool).await?;
+		assert_eq!(response.preferences.effective_default_model_key.as_deref(), Some("team-default-model"));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn team_member_replacement_updates_members(pool: PgPool) {
 		let user_a = create_user(&pool, "member-a").await;
 		let user_b = create_user(&pool, "member-b").await;

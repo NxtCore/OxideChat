@@ -262,10 +262,10 @@ function applyDefaults() {
 
 onMounted(() => {
 	developer
-		.load()
+		.ensureLoaded()
 		.then(applyDefaults)
 		.catch(() => {});
-	developer.loadModels().catch(() => {});
+	developer.ensureModels().catch(() => {});
 });
 
 onBeforeUnmount(chat.stop);

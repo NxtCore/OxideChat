@@ -132,6 +132,7 @@
 ## Frontend
 - Use Tailwind classes for styling
 - Use `useMainStore()` for global state management
+- Shared data (chat models, tools and MCP servers, the user's budget, developer teams and keys) is loaded once and served from its store; remounts and navigation must not refetch it. A successful write through `$customFetch` marks the affected cache stale (`STALE_AFTER_WRITE` in `frontend/plugins/fetch.ts`), and the next consumer reloads it; `/users/@me` already carries preferences including `effective_default_model_key`. `e2e/tests/request-audit.spec.ts` fails on duplicate or needless refetches
 - Use Shadcn UI for components (shad-vue)
 - All ShadCN components are prefixed with `Shad`, e.g., `ShadButton` or `ShadSelect`, they are auto injected
 - Use the store.getTranslation() function for translations, always use them, no static strings

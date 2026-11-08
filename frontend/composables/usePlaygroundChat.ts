@@ -1,3 +1,5 @@
+import {useBudgetStore} from '~/stores/budgetStore';
+
 export interface PlaygroundMetrics {
 	requestId: string | null;
 	ttftMs: number | null;
@@ -121,6 +123,7 @@ export function usePlaygroundChat(settings: PlaygroundSettings, failureText: () 
 			metrics.totalMs = Math.round(performance.now() - startedAt);
 			running.value = false;
 			controller = null;
+			useBudgetStore().myStatusStale = true;
 		}
 	}
 

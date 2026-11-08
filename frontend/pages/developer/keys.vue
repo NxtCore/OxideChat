@@ -220,6 +220,6 @@ async function revoke() {
 
 onMounted(() => {
 	reload();
-	budgetStore.fetchMyBudget().catch(() => {});
+	budgetStore.ensureMyBudget().catch(() => {});
 });
 </script>

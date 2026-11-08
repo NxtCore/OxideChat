@@ -202,5 +202,8 @@ function load() {
 	developer.loadModels().catch(() => {});
 }
 
-onMounted(load);
+onMounted(() => {
+	developer.ensureLoaded().catch(() => {});
+	developer.ensureModels().catch(() => {});
+});
 </script>

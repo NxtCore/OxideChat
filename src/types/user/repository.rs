@@ -147,7 +147,8 @@ impl User {
 		let roles = self.roles(pool).await?;
 		let teams = Team::summaries_for_user(pool, &self.id).await?;
 		let permissions = self.permissions(pool).await?;
-		let preferences = self.preferences(pool).await?;
+		let mut preferences = PreferencesResponse::from(self.preferences(pool).await?);
+		preferences.effective_default_model_key = Team::resolve_default_model_key(pool, &self.id, preferences.default_model_key.clone()).await;
 		Ok(UserResponse {
 			id: self.id,
 			email: self.email.clone(),
@@ -156,7 +157,7 @@ impl User {
 			roles,
 			teams,
 			permissions,
-			preferences: PreferencesResponse::from(preferences),
+			preferences,
 			created_at: self.created_at,
 		})
 	}

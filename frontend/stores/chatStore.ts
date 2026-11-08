@@ -1,7 +1,6 @@
 import {defineStore} from 'pinia';
 import {useWorkspaceStore} from './workspaceStore';
 import {useModelStore} from './modelStore';
-import {usePreferencesStore} from './preferencesStore';
 import type {Chat, ChatSampling, ChatMessage, ChatWithMessages, CreateChatRequest, UpdateChatRequest, ChatListParams, PaginatedResponse} from '~/types/chat';
 
 interface ChatState {
@@ -289,22 +288,24 @@ export const useChatStore = defineStore('chat', {
 		async init() {
 			const workspaceStore = useWorkspaceStore();
 			const modelStore = useModelStore();
-			const preferencesStore = usePreferencesStore();
 			this.initialized = false;
 			workspaceStore.restoreActive();
-			await Promise.all([workspaceStore.fetchWorkspaces(), preferencesStore.fetchPreferences(), preferencesStore.fetchUserMcpServers()]);
+			const restoredWorkspaceId = workspaceStore.activeWorkspaceId;
+			await Promise.all([
+				workspaceStore.fetchWorkspaces(),
+				this.fetchChats({workspace_id: restoredWorkspaceId || undefined}),
+				modelStore.fetchModels(),
+			]);
 			workspaceStore.clearActiveIfMissing();
-			await this.fetchChats({workspace_id: workspaceStore.activeWorkspaceId || undefined});
+			if (restoredWorkspaceId && !workspaceStore.activeWorkspaceId) await this.fetchChats();
 			workspaceStore.applyWorkspaceAccent();
-			await modelStore.fetchModels();
 			if (!this.activeChat) await modelStore.resetComposerToDefaults();
 			this.initialized = true;
 		},
 
 		async refreshSharedData() {
 			const modelStore = useModelStore();
-			const preferencesStore = usePreferencesStore();
-			await Promise.all([preferencesStore.fetchPreferences(), preferencesStore.fetchUserMcpServers()]);
+			if (!modelStore.stale) return;
 			await modelStore.fetchModels();
 			if (!this.activeChat) await modelStore.resetComposerToDefaults();
 		},

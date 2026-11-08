@@ -342,7 +342,7 @@ async function exportLogs(format: 'csv' | 'json') {
 
 onMounted(async () => {
 	await Promise.all([
-		developer.load().catch(() => {}),
+		developer.ensureLoaded().catch(() => {}),
 		developer
 			.getRequestLogRetention()
 			.then(days => {

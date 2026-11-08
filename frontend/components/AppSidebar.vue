@@ -138,7 +138,7 @@ async function handleLogout() {
 
 onMounted(() => {
 	if (store.auth.isAuthenticated) {
-		budgetStore.fetchMyBudget().catch(() => {});
+		budgetStore.ensureMyBudget().catch(() => {});
 	}
 });
 </script>

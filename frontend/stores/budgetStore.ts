@@ -17,6 +17,7 @@ import type {PaginatedResponse} from '~/types/chat';
 export const useBudgetStore = defineStore('budget', {
 	state: () => ({
 		myStatus: null as UserBudgetStatus | null,
+		myStatusStale: false,
 		budgets: [] as Budget[],
 		analytics: {
 			byModel: [] as AnalyticsRow[],
@@ -61,7 +62,11 @@ export const useBudgetStore = defineStore('budget', {
 		async fetchMyBudget() {
 			const {$customFetch} = useNuxtApp();
 			this.myStatus = await $customFetch<UserBudgetStatus>('/api/v1/me/budget');
+			this.myStatusStale = false;
 			return this.myStatus;
+		},
+		async ensureMyBudget() {
+			if (!this.myStatus || this.myStatusStale) await this.fetchMyBudget();
 		},
 		async fetchBudgets() {
 			const {$customFetch} = useNuxtApp();

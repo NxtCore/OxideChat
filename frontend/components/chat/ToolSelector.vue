@@ -210,7 +210,18 @@ interface Head {
 	selectedCount: number;
 }
 
-const availableTools = ref<ToolItem[]>([]);
+const availableTools = computed<ToolItem[]>(() =>
+	preferencesStore.userTools.map((tool: any) => ({
+		id: tool.id,
+		name: tool.name,
+		display_name: tool.display_name,
+		description: tool.description,
+		source_kind: tool.source_kind || 'HTTP',
+		mcp_server_id: tool.mcp_server_id ?? null,
+		mcp_server_name: tool.mcp_server_name ?? null,
+		functions: tool.functions,
+	}))
+);
 const expandedState = ref<Record<string, boolean>>({});
 
 const hasToolSupport = computed(() => modelStore.selectedModel?.capabilities.includes('TOOLS'));
@@ -373,38 +384,12 @@ async function saveAsDefaults() {
 	await preferencesStore.updatePreferences({default_tools: [...modelStore.enabledTools]});
 }
 
-async function loadTools() {
-	try {
-		const fetchedTools = await userTools();
-		if (Array.isArray(fetchedTools)) {
-			availableTools.value = fetchedTools.map((tool: any) => ({
-				id: tool.id,
-				name: tool.name,
-				display_name: tool.display_name,
-				description: tool.description,
-				source_kind: tool.source_kind || 'HTTP',
-				mcp_server_id: tool.mcp_server_id ?? null,
-				mcp_server_name: tool.mcp_server_name ?? null,
-				functions: tool.functions,
-			}));
-		}
-		if (!preferencesStore.userMcpServers || preferencesStore.userMcpServers.length === 0) {
-			await preferencesStore.fetchUserMcpServers();
-		}
-	} catch (error) {
-		console.error('Failed to load tools:', error);
-	}
-}
-
 watch(
 	() => preferencesStore.mcpManagerOpen,
 	(isOpen, wasOpen) => {
-		if (wasOpen && !isOpen) {
-			loadTools();
-			preferencesStore.fetchUserMcpServers();
-		}
+		if (wasOpen && !isOpen) preferencesStore.ensureTools();
 	}
 );
 
-onMounted(loadTools);
+onMounted(() => preferencesStore.ensureTools());
 </script>
