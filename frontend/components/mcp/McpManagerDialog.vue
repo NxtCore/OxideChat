@@ -84,12 +84,14 @@ import {ref, reactive, computed, watch} from 'vue';
 import {Activity, Check, Pencil, Trash2, Plus, RefreshCw} from 'lucide-vue-next';
 import HeaderEditor from '@/components/settings/HeaderEditor.vue';
 import {useMainStore} from '@/stores';
+import {usePreferencesStore} from '@/stores/preferencesStore';
 import type {McpServer} from '~/types/chat';
 
 const props = defineProps<{open: boolean; admin?: boolean}>();
 const emit = defineEmits<{(e: 'update:open', value: boolean): void; (e: 'changed'): void}>();
 
 const store = useMainStore();
+const preferencesStore = usePreferencesStore();
 
 const stdioAllowed = computed(() => store.base?.allow_server_stdio_mcp ?? false);
 
@@ -124,6 +126,11 @@ watch(
 );
 
 async function load() {
+	if (!props.admin) {
+		await preferencesStore.ensureTools();
+		servers.value = preferencesStore.userMcpServers;
+		return;
+	}
 	try {
 		const result = await mcpServers(props.admin);
 		servers.value = (result as McpServer[]) ?? [];

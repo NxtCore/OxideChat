@@ -92,6 +92,13 @@ export function useModelPicker<T = ModelList>(options: {endpoint?: string; provi
 		}, 300);
 	}
 
+	function clearSearch(): boolean {
+		if (debounceTimer) clearTimeout(debounceTimer);
+		if (!searchQuery.value) return false;
+		searchQuery.value = '';
+		return true;
+	}
+
 	function selectFilter(filter: ModelFilter) {
 		if (selectedFilter.value === filter) return;
 		selectedFilter.value = filter;
@@ -115,6 +122,7 @@ export function useModelPicker<T = ModelList>(options: {endpoint?: string; provi
 		loadInitial,
 		loadMore,
 		onSearchInput,
+		clearSearch,
 		selectFilter,
 		init,
 	};

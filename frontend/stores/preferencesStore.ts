@@ -15,14 +15,16 @@ export const usePreferencesStore = defineStore('preferences', {
 	actions: {
 		async ensureTools() {
 			if (this.toolsLoaded && !this.toolsStale) return;
-			this.toolsStale = false;
-			try {
-				const [tools] = await Promise.all([userTools(), this.fetchUserMcpServers()]);
-				this.userTools = Array.isArray(tools) ? (tools as Tool[]) : [];
-				this.toolsLoaded = true;
-			} catch (e) {
-				console.error('Failed to load tools:', e);
-			}
+			await inflight('tools', async () => {
+				try {
+					const [tools] = await Promise.all([userTools(), this.fetchUserMcpServers()]);
+					this.userTools = Array.isArray(tools) ? (tools as Tool[]) : [];
+					this.toolsLoaded = true;
+					this.toolsStale = false;
+				} catch (e) {
+					console.error('Failed to load tools:', e);
+				}
+			});
 		},
 
 		async fetchUserMcpServers() {

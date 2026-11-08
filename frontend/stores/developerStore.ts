@@ -60,10 +60,10 @@ export const useDeveloperStore = defineStore('developer', {
 			}
 		},
 		async ensureLoaded() {
-			if (!this.loaded) await this.load();
+			if (!this.loaded) await inflight('developer', () => this.load());
 		},
 		async ensureModels() {
-			if (!this.modelsLoaded) await this.loadModels();
+			if (!this.modelsLoaded) await inflight('developer-models', () => this.loadModels());
 		},
 		async loadModels() {
 			const {$customFetch} = useNuxtApp();

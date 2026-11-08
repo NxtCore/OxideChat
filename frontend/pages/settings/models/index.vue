@@ -83,22 +83,24 @@ onMounted(async () => {
 	await loadModels();
 });
 
+const query = ref('');
 watch(search, newVal => {
 	clearTimeout(debounceTimer);
 	debounceTimer = setTimeout(() => {
+		query.value = newVal;
 		page.value = 1;
-		loadModels();
 	}, 750);
 });
 
-watch(page, (newVal, oldVal) => {
-	loadModels();
-});
+watch([query, page], () => loadModels());
 
+let modelsRequest = 0;
 async function loadModels() {
+	const request = ++modelsRequest;
 	loading.value = true;
 	try {
-		const res = await adminModels({page: page.value.toString(), size: size.value.toString(), query: search.value});
+		const res = await adminModels({page: page.value.toString(), size: size.value.toString(), query: query.value});
+		if (request !== modelsRequest) return;
 		if (res) {
 			hasMore.value = res.has_more;
 			models.value = res.items;
@@ -107,7 +109,7 @@ async function loadModels() {
 		console.error(e);
 		store.toast(store.getTranslation('settings.models.load_error'), {type: 'error'});
 	} finally {
-		loading.value = false;
+		if (request === modelsRequest) loading.value = false;
 	}
 }
 

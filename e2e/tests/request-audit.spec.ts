@@ -73,6 +73,12 @@ test('main views do not repeat or refetch /api/v1 requests', async ({page, t, se
 	await step('switch to first chat again', () => navigate(page, firstChat));
 	const afterSwitches = all.length;
 
+	const modelPicker = page.locator('button[aria-haspopup="dialog"]').filter({has: page.locator('svg[class*="chevron-down"]')}).first();
+	await step('open model picker', () => modelPicker.click());
+	await page.keyboard.press('Escape');
+	await step('reopen model picker', () => modelPicker.click());
+	await page.keyboard.press('Escape');
+
 	await step('reload chat', () => page.reload().then(() => undefined));
 	await step('nav /settings/profile', () => navigate(page, '/settings/profile'));
 	await step('nav /settings/models', () => navigate(page, '/settings/models'));
@@ -80,6 +86,7 @@ test('main views do not repeat or refetch /api/v1 requests', async ({page, t, se
 	await step('nav /developer/keys', () => navigate(page, '/developer/keys'));
 	await step('nav /developer/logs', () => navigate(page, '/developer/logs'));
 	await step('nav /developer/playground', () => navigate(page, '/developer/playground'));
+	await step('back to /developer/keys', () => navigate(page, '/developer/keys'));
 	await step('nav /', () => navigate(page, '/'));
 	await step('nav chat', () => navigate(page, firstChat));
 	await step('admin edit in settings', async () => {
@@ -114,7 +121,8 @@ test('main views do not repeat or refetch /api/v1 requests', async ({page, t, se
 	expect(requestsOf('nav /').filter(r => sharedData.test(r)), 'returning to chat reuses the store').toEqual([]);
 	expect(requestsOf('nav chat').filter(r => sharedData.test(r)), 'returning to chat reuses the store').toEqual([]);
 	expect(requestsOf('nav / after admin edit'), 'an admin model change refreshes the chat models').toContain('GET /api/v1/models?size=100');
-	for (const label of ['nav /developer/logs', 'nav /developer/playground']) {
+	expect(requestsOf('reopen model picker'), 'reopening the model picker reuses its list').toEqual([]);
+	for (const label of ['nav /developer/logs', 'nav /developer/playground', 'back to /developer/keys']) {
 		expect(requestsOf(label).filter(r => /\/developer\/(teams|keys|team-keys)$/.test(r)), label).toEqual([]);
 	}
 });

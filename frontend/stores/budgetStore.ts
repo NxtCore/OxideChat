@@ -66,7 +66,7 @@ export const useBudgetStore = defineStore('budget', {
 			return this.myStatus;
 		},
 		async ensureMyBudget() {
-			if (!this.myStatus || this.myStatusStale) await this.fetchMyBudget();
+			if (!this.myStatus || this.myStatusStale) await inflight('my-budget', () => this.fetchMyBudget());
 		},
 		async fetchBudgets() {
 			const {$customFetch} = useNuxtApp();
