@@ -1,8 +1,7 @@
 //! User-owned MCP server management routes.
 //!
 //! Any authenticated user may register, discover, and remove their own remote
-//! (Streamable HTTP) MCP servers. Server-side `stdio` transports are rejected
-//! for user-owned servers — those are reserved for admins.
+//! (Streamable HTTP) MCP servers.
 
 use crate::types::tools::*;
 use crate::types::{AppError, AuthUser, JobState, json_ok};

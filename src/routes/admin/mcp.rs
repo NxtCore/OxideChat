@@ -1,9 +1,8 @@
 //! Admin (global/system) MCP server management routes.
 //!
-//! Admins manage `owner_id IS NULL` MCP servers available to all users. Both
-//! remote (SSE / Streamable-HTTP) and server-side `stdio` transports are
-//! supported; `stdio` is gated behind the `allow_server_stdio_mcp` instance flag
-//! because it runs arbitrary commands on the `OxideChat` host.
+//! Admins manage `owner_id IS NULL` MCP servers available to all users over
+//! Streamable HTTP. Server-side `stdio` servers are not supported until they
+//! can run in a sandbox.
 
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;

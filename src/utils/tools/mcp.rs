@@ -1,19 +1,16 @@
 //! MCP (Model Context Protocol) client for external tool servers.
 //!
-//! Supports the stdio transport and the Streamable HTTP transport (MCP
-//! 2025-03-26+) for connecting to MCP servers.
+//! Supports the Streamable HTTP transport (MCP 2025-03-26+). Server-side
+//! `stdio` servers are not supported until they can run in a sandbox.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::lookup_host;
-use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use super::executor::ToolError;
@@ -76,66 +73,6 @@ struct McpContent {
 trait McpTransport: Send + Sync {
 	async fn send(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError>;
 	async fn close(&self) -> Result<(), ToolError>;
-}
-
-struct StdioTransport {
-	child: Arc<Mutex<Child>>,
-	request_id: AtomicU64,
-}
-
-impl StdioTransport {
-	pub async fn new(command: &str, args: &[String], env: &HashMap<String, String>) -> Result<Self, ToolError> {
-		let mut cmd = Command::new(command);
-		cmd.args(args).envs(env.iter()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
-
-		let child = cmd.spawn().map_err(|e| ToolError::McpError(format!("Failed to spawn MCP server: {e}")))?;
-
-		Ok(Self {
-			child: Arc::new(Mutex::new(child)),
-			request_id: AtomicU64::new(1),
-		})
-	}
-}
-
-#[async_trait]
-impl McpTransport for StdioTransport {
-	async fn send(&self, mut request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError> {
-		let mut child = self.child.lock().await;
-
-		request.id = self.request_id.fetch_add(1, Ordering::Relaxed);
-
-		let stdin = child.stdin.as_mut().ok_or_else(|| ToolError::McpError("No stdin available".to_string()))?;
-
-		let request_str = serde_json::to_string(&request).map_err(|e| ToolError::McpError(format!("Failed to serialize request: {e}")))?;
-
-		stdin
-			.write_all(request_str.as_bytes())
-			.await
-			.map_err(|e| ToolError::McpError(format!("Failed to write to stdin: {e}")))?;
-		stdin
-			.write_all(b"\n")
-			.await
-			.map_err(|e| ToolError::McpError(format!("Failed to write newline: {e}")))?;
-		stdin.flush().await.map_err(|e| ToolError::McpError(format!("Failed to flush stdin: {e}")))?;
-
-		let stdout = child.stdout.as_mut().ok_or_else(|| ToolError::McpError("No stdout available".to_string()))?;
-		let mut reader = BufReader::new(stdout);
-		let mut response_line = String::new();
-		reader
-			.read_line(&mut response_line)
-			.await
-			.map_err(|e| ToolError::McpError(format!("Failed to read response: {e}")))?;
-
-		let response: JsonRpcResponse = serde_json::from_str(&response_line).map_err(|e| ToolError::McpError(format!("Failed to parse response: {e}")))?;
-
-		Ok(response)
-	}
-
-	async fn close(&self) -> Result<(), ToolError> {
-		let mut child = self.child.lock().await;
-		child.kill().await.map_err(|e| ToolError::McpError(format!("Failed to kill MCP server: {e}")))?;
-		Ok(())
-	}
 }
 
 /// MCP protocol version advertised on initialize and on every subsequent request.
@@ -421,16 +358,6 @@ pub struct McpClient {
 }
 
 impl McpClient {
-	/// Create a new MCP client with stdio transport
-	pub async fn new_stdio(command: &str, args: &[String], env: &HashMap<String, String>) -> Result<Self, ToolError> {
-		let transport = StdioTransport::new(command, args, env).await?;
-		let client = Self {
-			transport: Box::new(transport),
-		};
-		client.initialize().await?;
-		Ok(client)
-	}
-
 	/// Create a new MCP client with the Streamable HTTP transport.
 	///
 	/// The host is resolved and validated once here and the HTTP client is

@@ -212,7 +212,6 @@ impl Default for PreferencesResponse {
 pub struct GlobalConfigResponse {
 	pub default_theme: ThemeCssVars,
 	pub enable_provider_selector: bool,
-	pub allow_server_stdio_mcp: bool,
 	pub default_model_id: Option<Uuid>,
 }
 

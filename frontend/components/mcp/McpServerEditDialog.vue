@@ -15,18 +15,11 @@
 					</ShadSelectTrigger>
 					<ShadSelectContent>
 						<ShadSelectItem value="http">{{ store.getTranslation('mcp.transport_http') }}</ShadSelectItem>
-						<ShadSelectItem v-if="stdioAllowed" value="stdio">{{ store.getTranslation('mcp.transport_stdio') }}</ShadSelectItem>
 					</ShadSelectContent>
 				</ShadSelect>
 
-				<template v-if="form.transport === 'stdio'">
-					<ShadInput v-model="form.command" :placeholder="store.getTranslation('mcp.command')" class="h-9 font-mono text-xs" />
-					<ShadTextarea v-model="form.args" :placeholder="store.getTranslation('mcp.args')" rows="2" class="font-mono text-xs" />
-				</template>
-				<template v-else>
-					<ShadInput v-model="form.url" :placeholder="store.getTranslation('mcp.url_placeholder')" class="h-9" />
-					<HeaderEditor v-model="form.headers" />
-				</template>
+				<ShadInput v-model="form.url" :placeholder="store.getTranslation('mcp.url_placeholder')" class="h-9" />
+				<HeaderEditor v-model="form.headers" />
 			</div>
 
 			<ShadDialogFooter class="gap-2 pt-2">
@@ -57,20 +50,16 @@ const emit = defineEmits<{(e: 'update:open', value: boolean): void; (e: 'changed
 const store = useMainStore();
 
 const saving = ref(false);
-const stdioAllowed = computed(() => store.base?.allow_server_stdio_mcp ?? false);
 
 const form = reactive({
 	name: '',
 	transport: 'http',
 	url: '',
 	headers: '',
-	command: '',
-	args: '',
 });
 
 const canSave = computed(() => {
 	if (form.name.trim() === '') return false;
-	if (form.transport === 'stdio') return form.command.trim() !== '';
 	return form.url.trim() !== '';
 });
 
@@ -90,29 +79,13 @@ watch(
 
 function populateForm(server: McpServer) {
 	form.name = server.name;
-	form.transport = server.transport;
-	if (server.transport === 'stdio') {
-		form.command = server.connection_config?.command ?? '';
-		form.args = (server.connection_config?.args ?? []).join('\n');
-		form.url = '';
-		form.headers = '';
-	} else {
-		form.url = server.connection_config?.url ?? '';
-		const rawHeaders = server.connection_config?.headers;
-		form.headers = rawHeaders && Object.keys(rawHeaders).length > 0 ? JSON.stringify(rawHeaders, null, 2) : '';
-		form.command = '';
-		form.args = '';
-	}
+	form.transport = 'http';
+	form.url = server.connection_config?.url ?? '';
+	const rawHeaders = server.connection_config?.headers;
+	form.headers = rawHeaders && Object.keys(rawHeaders).length > 0 ? JSON.stringify(rawHeaders, null, 2) : '';
 }
 
 function buildConnectionConfig(): Record<string, any> {
-	if (form.transport === 'stdio') {
-		const args = form.args
-			.split('\n')
-			.map(a => a.trim())
-			.filter(Boolean);
-		return {command: form.command.trim(), args, env: {}};
-	}
 	let headers: Record<string, string> = {};
 	if (form.headers.trim()) {
 		try {

@@ -144,15 +144,6 @@ pub struct BuiltinSourceConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpStdioConfig {
-	pub command: String,
-	#[serde(default)]
-	pub args: Vec<String>,
-	#[serde(default)]
-	pub env: std::collections::HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpHttpConfig {
 	pub url: String,
 	#[serde(default)]

@@ -250,6 +250,22 @@ mod tests {
 		Ok(())
 	}
 
+	#[sqlx::test(migrations = "./migrations")]
+	async fn stdio_servers_are_refused_on_create_and_connect(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
+		let stdio_config = serde_json::json!({ "command": "echo", "args": ["hi"], "env": {} });
+		let request = crate::types::tools::CreateMcpServerRequest {
+			name: "stdio_sys".to_string(),
+			transport: "stdio".to_string(),
+			connection_config: stdio_config.clone(),
+			is_enabled: true,
+		};
+		assert!(crate::types::tools::McpScope::System.create(&pool, &request).await.is_err());
+
+		let legacy = McpServer::create(&pool, None, "legacy_stdio", "stdio", &stdio_config, true).await?;
+		assert!(legacy.connect().await.is_err());
+		Ok(())
+	}
+
 	#[tokio::test]
 	async fn pending_client_tool_results_are_user_scoped() {
 		let pending = ClientToolPending::new();

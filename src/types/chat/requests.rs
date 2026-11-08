@@ -123,7 +123,6 @@ pub struct UpdatePreferencesRequest {
 pub struct UpdateGlobalConfigRequest {
 	pub default_theme: Option<ThemeCssVars>,
 	pub enable_provider_selector: Option<bool>,
-	pub allow_server_stdio_mcp: Option<bool>,
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub default_model_id: Option<Option<Uuid>>,
 	pub language: Option<Language>,

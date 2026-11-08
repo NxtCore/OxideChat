@@ -1,4 +1,4 @@
-use super::{McpDiscoveryResponse, McpHttpConfig, McpServer, McpServerResponse, McpSourceConfig, McpStdioConfig, Tool};
+use super::{McpDiscoveryResponse, McpHttpConfig, McpServer, McpServerResponse, McpSourceConfig, Tool};
 use crate::types::AppError;
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use crate::utils::encryption::{decrypt_object_values, encrypt_object_values};
@@ -226,11 +226,6 @@ impl McpServer {
 					McpUrlPolicy::TrustedAdmin
 				};
 				McpClient::new_http(config.url, config.headers, url_policy).await
-			}
-			"stdio" => {
-				let config: McpStdioConfig =
-					serde_json::from_value(self.connection_config.clone()).map_err(|e| ToolError::McpError(format!("Invalid stdio config: {e}")))?;
-				McpClient::new_stdio(&config.command, &config.args, &config.env).await
 			}
 			other => Err(ToolError::McpError(format!("Unsupported MCP transport: {other}"))),
 		}

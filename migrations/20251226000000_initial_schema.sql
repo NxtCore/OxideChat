@@ -93,7 +93,6 @@ CREATE TABLE IF NOT EXISTS app_config (
 INSERT INTO app_config (key, value) VALUES
     ('language', 'en'),
     ('allow_user_providers', 'false'),
-    ('allow_server_stdio_mcp', 'false'),
     ('default_theme', '{}'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
@@ -475,14 +474,14 @@ WHERE user_id IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tool_settings_user_tool_not_null ON user_tool_settings(user_id, tool_id)
 WHERE user_id IS NOT NULL;
 
--- MCP Servers - for MCP tool sources (supports stdio and SSE transports)
+-- MCP Servers - for MCP tool sources (Streamable HTTP transport)
 CREATE TABLE IF NOT EXISTS mcp_servers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
 
     name VARCHAR(100) NOT NULL,
-    transport VARCHAR(50) NOT NULL,  -- 'stdio' or 'sse'
-    connection_config JSONB NOT NULL,  -- {command, args} for stdio, {url, headers} for SSE
+    transport VARCHAR(50) NOT NULL,  -- 'http'
+    connection_config JSONB NOT NULL,  -- {url, headers}
 
     is_enabled BOOLEAN DEFAULT true,
     last_health_check TIMESTAMPTZ,
@@ -954,8 +953,6 @@ CREATE INDEX IF NOT EXISTS idx_tool_functions_name ON tool_functions(tool_id, na
 
 -- Translations
 INSERT INTO i18n_translations (language, key_path, value) VALUES
-    ('de', 'admin.tools.mcp.allow_stdio', 'Serverseitige stdio-MCP-Server erlauben'),
-    ('de', 'admin.tools.mcp.allow_stdio_hint', 'Wenn aktiviert, führen globale stdio-MCP-Server beliebige Befehle auf dem OxideChat-Host aus. Nur auf vertrauenswürdigen Einzelinstanzen aktivieren.'),
     ('de', 'auth.errors.back_to_login', 'Zurück zur Anmeldung'),
     ('de', 'auth.errors.email_or_username_taken', 'E-Mail oder Benutzername bereits vergeben'),
     ('de', 'auth.errors.email_taken', 'Diese E-Mail-Adresse ist bereits registriert'),
@@ -1218,9 +1215,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'guild.components.dialog_calendar.time.label', 'Uhrzeit'),
     ('de', 'guild.components.dialog_calendar.time.select', 'Uhrzeit auswählen'),
     ('de', 'mcp.add', 'Server hinzufügen'),
-    ('de', 'mcp.args', 'Argumente (eines pro Zeile)'),
     ('de', 'mcp.cancel', 'Abbrechen'),
-    ('de', 'mcp.command', 'Befehl'),
     ('de', 'mcp.create_failed', 'Der MCP-Server konnte nicht erstellt werden.'),
     ('de', 'mcp.delete', 'Löschen'),
     ('de', 'mcp.delete_failed', 'Der MCP-Server konnte nicht gelöscht werden.'),
@@ -1248,7 +1243,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'mcp.tool_selector.manage', 'MCP-Server verwalten…'),
     ('de', 'mcp.transport', 'Transport'),
     ('de', 'mcp.transport_http', 'Streamable HTTP'),
-    ('de', 'mcp.transport_stdio', 'stdio (serverseitig)'),
     ('de', 'mcp.update_failed', 'Der MCP-Server konnte nicht aktualisiert werden.'),
     ('de', 'mcp.url', 'Server-URL'),
     ('de', 'mcp.url_placeholder', 'https://example.com/mcp'),
@@ -1756,8 +1750,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.tool_test.test', 'Testen'),
     ('de', 'settings.tool_test.view_output', 'Ausgabe anzeigen'),
     ('de', 'settings.tools.add', 'Tool hinzufügen'),
-    ('de', 'settings.tools.args_placeholder', 'Argumente (kommagetrennt)'),
-    ('de', 'settings.tools.command_placeholder', 'Befehl (z.B. npx)'),
     ('de', 'settings.tools.configure', 'Konfigurieren'),
     ('de', 'settings.tools.configured', 'Konfiguriert'),
     ('de', 'settings.tools.create', 'Tool erstellen'),
@@ -1805,7 +1797,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.tools.soon', 'Bald'),
     ('de', 'settings.tools.source', 'Quelle'),
     ('de', 'settings.tools.sse', 'SSE (HTTP)'),
-    ('de', 'settings.tools.stdio', 'Stdio (Lokaler Prozess)'),
     ('de', 'settings.tools.system_prompt', 'System-Prompt-Einschub'),
     ('de', 'settings.tools.system_prompt_hint', 'Wird dem System-Prompt vorangestellt, sobald dieses Tool für eine Anfrage aktiviert ist. Damit steuern Sie, wie das Modell das Tool verwendet.'),
     ('de', 'settings.tools.system_prompt_placeholder', 'Zusätzliche Systemanweisungen, wenn dieses Tool aktiv ist'),
@@ -1851,8 +1842,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'workspace.save', 'Speichern'),
     ('de', 'workspace.set_default', 'Als Standard festlegen'),
     ('de', 'workspace.update_failed', 'Arbeitsbereich konnte nicht aktualisiert werden.'),
-    ('en', 'admin.tools.mcp.allow_stdio', 'Allow server-side stdio MCP servers'),
-    ('en', 'admin.tools.mcp.allow_stdio_hint', 'When enabled, global stdio MCP servers run arbitrary commands on the OxideChat host. Only enable on trusted, single-tenant instances.'),
     ('en', 'auth.errors.back_to_login', 'Back to Login'),
     ('en', 'auth.errors.email_or_username_taken', 'Email or username already taken'),
     ('en', 'auth.errors.email_taken', 'This email is already registered'),
@@ -2115,9 +2104,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'guild.components.dialog_calendar.time.label', 'Time'),
     ('en', 'guild.components.dialog_calendar.time.select', 'Select Time'),
     ('en', 'mcp.add', 'Add server'),
-    ('en', 'mcp.args', 'Arguments (one per line)'),
     ('en', 'mcp.cancel', 'Cancel'),
-    ('en', 'mcp.command', 'Command'),
     ('en', 'mcp.create_failed', 'Could not create the MCP server.'),
     ('en', 'mcp.delete', 'Delete'),
     ('en', 'mcp.delete_failed', 'Could not delete the MCP server.'),
@@ -2145,7 +2132,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'mcp.tool_selector.manage', 'Manage MCP servers…'),
     ('en', 'mcp.transport', 'Transport'),
     ('en', 'mcp.transport_http', 'Streamable HTTP'),
-    ('en', 'mcp.transport_stdio', 'stdio (server-side)'),
     ('en', 'mcp.update_failed', 'Could not update the MCP server.'),
     ('en', 'mcp.url', 'Server URL'),
     ('en', 'mcp.url_placeholder', 'https://example.com/mcp'),
@@ -2653,8 +2639,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.tool_test.test', 'Test'),
     ('en', 'settings.tool_test.view_output', 'View output'),
     ('en', 'settings.tools.add', 'Add Tool'),
-    ('en', 'settings.tools.args_placeholder', 'Arguments (comma-separated)'),
-    ('en', 'settings.tools.command_placeholder', 'Command (e.g. npx)'),
     ('en', 'settings.tools.configure', 'Configure'),
     ('en', 'settings.tools.configured', 'Configured'),
     ('en', 'settings.tools.create', 'Create Tool'),
@@ -2702,7 +2686,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.tools.soon', 'Soon'),
     ('en', 'settings.tools.source', 'Source'),
     ('en', 'settings.tools.sse', 'SSE (HTTP)'),
-    ('en', 'settings.tools.stdio', 'Stdio (Local Process)'),
     ('en', 'settings.tools.system_prompt', 'System prompt injection'),
     ('en', 'settings.tools.system_prompt_hint', 'Prepended to the system prompt whenever this tool is enabled for a request. Use it to guide how the model uses the tool.'),
     ('en', 'settings.tools.system_prompt_placeholder', 'Extra system instructions added when this tool is active'),

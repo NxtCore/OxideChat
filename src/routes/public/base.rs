@@ -44,7 +44,6 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 		oauth_providers: OAuthProvider::list_enabled(&state.db).await.map_err(AppError::database)?.iter().map(OAuthProvider::to_public).collect(),
 		roles,
 		enable_provider_selector: config.enable_provider_selector(),
-		allow_server_stdio_mcp: config.allow_server_stdio_mcp(),
 		default_model_id: config.default_model_id(),
 		default_theme: config.default_theme(),
 		instance: InstanceResponse {

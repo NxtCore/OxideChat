@@ -30,9 +30,6 @@ pub struct ConfigValues {
 	/// When enabled, the chat UI exposes a per-message upstream-provider selector
 	/// (`OpenRouter` provider routing). Off by default.
 	pub enable_provider_selector: bool,
-	/// When enabled, admins may register global MCP servers that run over
-	/// server-side `stdio` (arbitrary commands on the host). Off by default.
-	pub allow_server_stdio_mcp: bool,
 	/// Instance-wide default model. Applied when neither user nor team default is set.
 	pub default_model_id: Option<Uuid>,
 	/// Instance name shown instead of `OxideChat`.
@@ -49,7 +46,6 @@ impl Default for ConfigValues {
 			language: Language::En,
 			default_theme: ThemeCssVars::default(),
 			enable_provider_selector: false,
-			allow_server_stdio_mcp: false,
 			default_model_id: None,
 			instance_name: None,
 			instance_icon_id: None,
@@ -120,12 +116,6 @@ impl Config {
 		self.values.load().enable_provider_selector
 	}
 
-	/// Whether admins may register server-side `stdio` MCP servers.
-	#[must_use]
-	pub fn allow_server_stdio_mcp(&self) -> bool {
-		self.values.load().allow_server_stdio_mcp
-	}
-
 	/// Get the instance-wide default model ID, if configured.
 	#[must_use]
 	pub fn default_model_id(&self) -> Option<Uuid> {
@@ -170,9 +160,6 @@ impl Config {
 		}
 		if let Some(value) = req.enable_provider_selector {
 			Self::upsert_config(&mut **tx, "enable_provider_selector", if value { "true" } else { "false" }).await?;
-		}
-		if let Some(value) = req.allow_server_stdio_mcp {
-			Self::upsert_config(&mut **tx, "allow_server_stdio_mcp", if value { "true" } else { "false" }).await?;
 		}
 		if let Some(language) = req.language {
 			Self::upsert_config(&mut **tx, "language", language.as_str()).await?;
@@ -236,7 +223,6 @@ impl Config {
 					}
 				}
 				"enable_provider_selector" => values.enable_provider_selector = row.value == "true",
-				"allow_server_stdio_mcp" => values.allow_server_stdio_mcp = row.value == "true",
 				"default_model_id" => values.default_model_id = Uuid::parse_str(&row.value).ok(),
 				"instance_name" => values.instance_name = Some(row.value),
 				"instance_icon_id" => values.instance_icon_id = Uuid::parse_str(&row.value).ok(),
