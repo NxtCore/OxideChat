@@ -11,6 +11,7 @@ pub mod provider_billing;
 pub mod providers;
 pub mod teams;
 pub mod tools;
+pub mod upstream_providers;
 pub mod users;
 
 use crate::types::JobState;
@@ -102,8 +103,8 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/models/{id}/provider-options/refresh", post(catalog::refresh_provider_options))
 		// Admin Config
 		.route("/api/v1/admin/config", patch(config::update_global_config))
-		.route("/api/v1/admin/upstream-providers", get(config::list_upstream_providers))
-		.route("/api/v1/admin/upstream-providers/sync", post(config::sync_upstream_providers))
+		.route("/api/v1/admin/upstream-providers", get(upstream_providers::list_upstream_providers))
+		.route("/api/v1/admin/upstream-providers/sync", post(upstream_providers::sync_upstream_providers))
 		.route("/api/v1/config", get(config::get_global_config))
 		.route("/api/v1/admin/oauth-providers", get(oauth_providers::list_oauth_providers).post(oauth_providers::create_oauth_provider))
 		.route("/api/v1/admin/oauth-providers/presets", get(oauth_providers::list_oauth_presets))
