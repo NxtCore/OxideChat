@@ -1,11 +1,14 @@
 import {defineStore} from 'pinia';
 import {useMainStore} from './index';
 import type {ChatMessage, ModelList, PaginatedResponse} from '~/types/chat';
+import type {ComposerModel} from '~/types/presets';
+import {usePresetStore} from './presetStore';
 
 export const useModelStore = defineStore('model', {
 	state: () => ({
 		models: [] as ModelList[],
-		selectedModel: null as ModelList | null,
+		selectedModel: null as ComposerModel | null,
+		presetFallbackNotice: null as string | null,
 		modelsLoading: false,
 		stale: false,
 		contextTokens: 0,
@@ -92,11 +95,12 @@ export const useModelStore = defineStore('model', {
 		async resetComposerToDefaults() {
 			const prefs = useMainStore().preferences;
 			const key = prefs?.effective_default_model_key;
-			const model = key ? await this.findModelByKey(key) : (this.models[0] ?? null);
+			const model = (key ? await this.findModelByKey(key) : null) ?? this.models[0] ?? null;
+			this.presetFallbackNotice = null;
 			this.setSelectedModel(model);
 			this.selectedProviderSlug = prefs?.default_provider_slug ?? null;
 			this.providerRoutingMode = 'prefer';
-			this.enabledTools = prefs?.default_tools ? [...prefs.default_tools] : [];
+			this.enabledTools = model?.preset ? [...model.preset.tool_ids] : prefs?.default_tools ? [...prefs.default_tools] : [];
 		},
 
 		async fetchModels() {
@@ -117,7 +121,8 @@ export const useModelStore = defineStore('model', {
 			}
 		},
 
-		async findModelByKey(modelKey: string): Promise<ModelList | null> {
+		async findModelByKey(modelKey: string): Promise<ComposerModel | null> {
+			if (isPresetKey(modelKey)) return usePresetStore().modelForKey(modelKey);
 			let model = this.models.find(m => m.model_id === modelKey) ?? null;
 			if (model) return model;
 
@@ -152,8 +157,19 @@ export const useModelStore = defineStore('model', {
 
 			const settings = source.request_settings ?? {};
 			const modelKey = source.model_key ?? settings.model_key ?? null;
+			this.presetFallbackNotice = null;
 			if (modelKey) {
-				const model = await this.findModelByKey(modelKey);
+				let model = await this.findModelByKey(modelKey);
+				if (!model && isPresetKey(modelKey)) {
+					const base = source.model_id ? (this.models.find(m => m.id === source.model_id) ?? null) : null;
+					if (base) {
+						model = base;
+					} else {
+						await this.resetComposerToDefaults();
+						model = this.selectedModel;
+					}
+					this.presetFallbackNotice = model?.display_name ?? null;
+				}
 				if (model && model.id !== this.selectedModel?.id) {
 					this.setSelectedModel(model);
 				}
@@ -171,9 +187,10 @@ export const useModelStore = defineStore('model', {
 			if (mode) this.providerRoutingMode = mode;
 		},
 
-		setSelectedModel(model: ModelList | null) {
+		setSelectedModel(model: ComposerModel | null) {
 			const modelChanged = this.selectedModel?.id !== model?.id;
 			this.selectedModel = model;
+			if (modelChanged && model?.preset) this.enabledTools = [...model.preset.tool_ids];
 
 			if (modelChanged) {
 				const prefs = useMainStore().preferences;
@@ -193,7 +210,11 @@ export const useModelStore = defineStore('model', {
 			const hasNone = model.capabilities.some(c => c === 'REASONING_EFFORT_NONE');
 			const hasReasoningCap = model.capabilities.some(c => c === 'REASONING' || c.startsWith('REASONING_'));
 
-			if (!hasReasoningCap) {
+			const presetReasoning = model.preset?.reasoning;
+			if (hasReasoningCap && (presetReasoning?.effort || presetReasoning?.budget_tokens)) {
+				this.reasoningEffort = presetReasoning.effort ?? null;
+				this.reasoningBudget = presetReasoning.budget_tokens ?? null;
+			} else if (!hasReasoningCap) {
 				this.reasoningEffort = null;
 				this.reasoningBudget = null;
 			} else if (!hasNone) {
@@ -237,6 +258,7 @@ export const useModelStore = defineStore('model', {
 		},
 
 		toggleTool(toolName: string) {
+			if (this.selectedModel?.preset?.tools_locked) return;
 			const index = this.enabledTools.indexOf(toolName);
 			if (index === -1) {
 				this.enabledTools.push(toolName);

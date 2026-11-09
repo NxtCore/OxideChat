@@ -107,6 +107,11 @@ pub enum ErrorCode {
 	RequestLogRetentionInvalid,
 	GatewayAdminReasonInvalid,
 	ChatSamplingInvalid,
+	PresetSlugInvalid,
+	PresetInvalid,
+	PresetBaseModelInvalid,
+	PresetToolsInvalid,
+	ProviderNameReserved,
 
 	// 401 Unauthorized
 	NotAuthenticated,
@@ -137,6 +142,7 @@ pub enum ErrorCode {
 	ApiKeyRevoked,
 	ApiKeyRuleDuplicate,
 	ApiKeyAdminDisabled,
+	PresetSlugTaken,
 
 	// 429 Too Many Requests
 	RateLimited,
@@ -180,6 +186,11 @@ impl ErrorCode {
 			| Self::RequestLogRetentionInvalid
 			| Self::GatewayAdminReasonInvalid
 			| Self::ChatSamplingInvalid
+			| Self::PresetSlugInvalid
+			| Self::PresetInvalid
+			| Self::PresetBaseModelInvalid
+			| Self::PresetToolsInvalid
+			| Self::ProviderNameReserved
 			=> StatusCode::BAD_REQUEST,
 
 			Self::NotAuthenticated
@@ -190,7 +201,7 @@ impl ErrorCode {
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
 			Self::Forbidden | Self::InsufficientPermissions | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden => StatusCode::FORBIDDEN,
 			Self::NotFound | Self::UserNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
-			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled => StatusCode::CONFLICT,
+			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled | Self::PresetSlugTaken => StatusCode::CONFLICT,
 			Self::RateLimited | Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -227,6 +238,11 @@ impl ErrorCode {
 			Self::RequestLogRetentionInvalid => "developer.errors.retention_invalid",
 			Self::GatewayAdminReasonInvalid => "developer.admin.errors.reason_invalid",
 			Self::ChatSamplingInvalid => "chat.errors.sampling_invalid",
+			Self::PresetSlugInvalid => "presets.errors.slug_invalid",
+			Self::PresetInvalid => "presets.errors.invalid",
+			Self::PresetBaseModelInvalid => "presets.errors.base_model_invalid",
+			Self::PresetToolsInvalid => "presets.errors.tools_invalid",
+			Self::ProviderNameReserved => "settings.providers.errors.name_reserved",
 
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
 			Self::InvalidCredentials => "auth.errors.invalid_credentials",
@@ -253,6 +269,7 @@ impl ErrorCode {
 			Self::ApiKeyRevoked => "developer.errors.key_revoked",
 			Self::ApiKeyRuleDuplicate => "developer.errors.rule_duplicate",
 			Self::ApiKeyAdminDisabled => "developer.errors.key_admin_disabled",
+			Self::PresetSlugTaken => "presets.errors.slug_taken",
 
 			Self::RateLimited => "errors.rate_limited",
 			Self::TooManyRequests => "errors.too_many_requests",
@@ -292,6 +309,11 @@ impl ErrorCode {
 			Self::RequestLogRetentionInvalid => "request_log_retention_invalid",
 			Self::GatewayAdminReasonInvalid => "gateway_admin_reason_invalid",
 			Self::ChatSamplingInvalid => "chat_sampling_invalid",
+			Self::PresetSlugInvalid => "preset_slug_invalid",
+			Self::PresetInvalid => "preset_invalid",
+			Self::PresetBaseModelInvalid => "preset_base_model_invalid",
+			Self::PresetToolsInvalid => "preset_tools_invalid",
+			Self::ProviderNameReserved => "provider_name_reserved",
 
 			Self::NotAuthenticated => "not_authenticated",
 			Self::InvalidCredentials => "invalid_credentials",
@@ -318,6 +340,7 @@ impl ErrorCode {
 			Self::ApiKeyRevoked => "api_key_revoked",
 			Self::ApiKeyRuleDuplicate => "api_key_rule_duplicate",
 			Self::ApiKeyAdminDisabled => "api_key_admin_disabled",
+			Self::PresetSlugTaken => "preset_slug_taken",
 
 			Self::RateLimited => "rate_limited",
 			Self::TooManyRequests => "too_many_requests",

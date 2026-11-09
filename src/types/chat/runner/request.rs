@@ -3,7 +3,7 @@ use super::prepare::TurnError;
 use crate::ai;
 use crate::types::models::Model;
 use crate::types::models_configs::ModelConfig;
-use crate::types::{ChatSampling, Message, StreamRequest, Tool, ToolFunction, User};
+use crate::types::{ChatSampling, Message, PRESET_METADATA_KEY, Preset, PresetReasoning, PresetSampling, StreamRequest, Tool, ToolFunction, User};
 use omniference::Sampling;
 use omniference::types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec};
 use sqlx::PgPool;
@@ -16,8 +16,10 @@ pub(super) struct RequestInputs<'a> {
 	pub req: &'a StreamRequest,
 	pub chat_sampling: &'a ChatSampling,
 	pub model: &'a Model,
-	pub user_config: Option<&'a ModelConfig>,
+	pub preset: Option<&'a Preset>,
 	pub system_config: Option<&'a ModelConfig>,
+	/// The tools this turn may call: the request's, or the preset's when it locks them.
+	pub enabled_tools: &'a [String],
 	/// The upstream provider the user picked, already checked against what they may use.
 	pub provider_slug: Option<&'a str>,
 }
@@ -30,9 +32,9 @@ pub(super) struct RequestInputs<'a> {
 /// - `{{date}}` — current UTC date (YYYY-MM-DD)
 /// - `{{time}}` — current UTC time (HH:MM)
 /// - `{{datetime}}` — current UTC date and time (YYYY-MM-DD HH:MM)
-/// - `{{model_name}}` — display name of the model being used
-/// - `{{model_id}}` — the model's identifier string
-fn interpolate_system_prompt(template: &str, user: &User, model: &Model) -> String {
+/// - `{{model_name}}` — display name of the model or preset being used
+/// - `{{model_id}}` — the model's or preset's identifier string
+fn interpolate_system_prompt(template: &str, user: &User, model_name: &str, model_id: &str) -> String {
 	let now = chrono::Utc::now();
 	template
 		.replace("{{user_name}}", &user.username)
@@ -40,24 +42,46 @@ fn interpolate_system_prompt(template: &str, user: &User, model: &Model) -> Stri
 		.replace("{{date}}", &now.format("%Y-%m-%d").to_string())
 		.replace("{{time}}", &now.format("%H:%M").to_string())
 		.replace("{{datetime}}", &now.format("%Y-%m-%d %H:%M").to_string())
-		.replace("{{model_name}}", &model.display_name)
-		.replace("{{model_id}}", &model.model_id)
+		.replace("{{model_name}}", model_name)
+		.replace("{{model_id}}", model_id)
+}
+
+/// The sampling sources of one request, from highest to lowest priority.
+pub(crate) struct SamplingLayers<'a> {
+	/// Options sent with the request.
+	pub request: Option<&'a Sampling>,
+	/// Options the user saved on the chat.
+	pub chat: &'a ChatSampling,
+	/// Defaults of the preset the request was made with.
+	pub preset: Option<&'a PresetSampling>,
+	/// The admin's configuration of the model.
+	pub config: Option<&'a ModelConfig>,
+	/// The model's own limits.
+	pub model: &'a Model,
 }
 
 /// Merge sampling options with priority order:
 /// 1. Request-level (highest priority)
 /// 2. Chat-level options the user saved on the chat
-/// 3. `model_configs` (user preferences)
-/// 4. models table (defaults)
-pub(crate) fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, chat_sampling: &ChatSampling, model_config: Option<&ModelConfig>, model: &Model) -> Sampling {
-	let config_sampling: Option<Sampling> = model_config.and_then(|mc| serde_json::from_value(mc.sampling.0.clone()).ok());
-	let chat_sampling = chat_sampling.to_sampling();
+/// 3. The preset's defaults
+/// 4. The admin's model configuration
+/// 5. models table (defaults)
+pub(crate) fn merge_sampling_with_priority(layers: &SamplingLayers<'_>) -> Sampling {
+	let request_sampling = layers.request;
+	let model_config = layers.config;
+	let model = layers.model;
+	let config_sampling: Option<Sampling> = model_config
+		.and_then(|mc| serde_json::from_value::<PresetSampling>(mc.sampling.0.clone()).ok())
+		.map(|sampling| sampling.to_sampling());
+	let preset_sampling: Option<Sampling> = layers.preset.map(PresetSampling::to_sampling);
+	let chat_sampling = layers.chat.to_sampling();
 
 	macro_rules! priority_field {
 		($field:ident) => {
 			request_sampling
 				.and_then(|s| s.$field.clone())
 				.or_else(|| chat_sampling.$field.clone())
+				.or_else(|| preset_sampling.as_ref().and_then(|s| s.$field.clone()))
 				.or_else(|| config_sampling.as_ref().and_then(|s| s.$field.clone()))
 		};
 	}
@@ -69,6 +93,7 @@ pub(crate) fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, 
 		max_tokens: request_sampling
 			.and_then(|s| s.max_tokens)
 			.or(chat_sampling.max_tokens)
+			.or_else(|| preset_sampling.as_ref().and_then(|s| s.max_tokens))
 			.or_else(|| config_sampling.as_ref().and_then(|s| s.max_tokens))
 			.or_else(|| model_config.and_then(|mc| mc.max_output_tokens.map(|t| t as u32)))
 			.or_else(|| model.max_tokens.map(|tokens| tokens as u32)),
@@ -77,6 +102,7 @@ pub(crate) fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, 
 		stop: request_sampling
 			.map(|s| s.stop.clone())
 			.filter(|v| !v.is_empty())
+			.or_else(|| preset_sampling.as_ref().map(|s| s.stop.clone()).filter(|v| !v.is_empty()))
 			.or_else(|| config_sampling.as_ref().map(|s| s.stop.clone()).filter(|v| !v.is_empty()))
 			.unwrap_or_default(),
 		parallel_tool_calls: priority_field!(parallel_tool_calls),
@@ -89,10 +115,12 @@ pub(crate) fn merge_sampling_with_priority(request_sampling: Option<&Sampling>, 
 
 /// Merge reasoning config with priority order:
 /// 1. Request-level (highest priority)
-/// 2. `model_configs` `extra_settings`
+/// 2. The preset's defaults
+/// 3. `model_configs` `extra_settings`
 fn merge_reasoning_with_priority(
 	request_effort: Option<&String>,
 	request_budget: Option<u32>,
+	preset: Option<&PresetReasoning>,
 	model_config: Option<&ModelConfig>,
 ) -> Option<omniference::types::ReasoningConfig> {
 	let config_effort: Option<String> = model_config
@@ -105,8 +133,8 @@ fn merge_reasoning_with_priority(
 		.and_then(serde_json::Value::as_u64)
 		.map(|n| n as u32);
 
-	let effort = request_effort.cloned().or(config_effort);
-	let budget = request_budget.or(config_budget);
+	let effort = request_effort.cloned().or_else(|| preset.and_then(|p| p.effort.clone())).or(config_effort);
+	let budget = request_budget.or_else(|| preset.and_then(|p| p.budget_tokens)).or(config_budget);
 
 	if effort.is_some() || budget.is_some() {
 		Some(omniference::types::ReasoningConfig {
@@ -193,16 +221,30 @@ pub(super) async fn model_request(model_key: &str) -> Result<(ChatRequestIR, boo
 
 async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Message>) -> Result<ChatRequestIR, TurnError> {
 	let req = inputs.req;
-	let (mut ir, vision) = model_request(&req.model_key).await?;
+	let (mut ir, vision) = model_request(&inputs.model.model_id).await?;
 	ir.messages = get_omni_messages(db, messages, vision).await;
 	ir.metadata.insert("user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), inputs.chat_id.to_string());
 	ir.metadata.insert("oxide_user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("oxide_model_id".to_string(), inputs.model.id.to_string());
 	ir.metadata.insert("oxide_request_type".to_string(), "chat".to_string());
-	ir.sampling = merge_sampling_with_priority(req.sampling.as_ref(), inputs.chat_sampling, inputs.user_config, inputs.model);
+	if let Some(preset) = inputs.preset {
+		ir.metadata.insert(PRESET_METADATA_KEY.to_string(), preset.id.to_string());
+	}
+	ir.sampling = merge_sampling_with_priority(&SamplingLayers {
+		request: req.sampling.as_ref(),
+		chat: inputs.chat_sampling,
+		preset: inputs.preset.map(|preset| &preset.sampling.0),
+		config: inputs.system_config,
+		model: inputs.model,
+	});
 	ir.extra_body.clone_from(&inputs.chat_sampling.custom);
-	ir.reasoning = merge_reasoning_with_priority(req.reasoning_effort.as_ref(), req.reasoning_budget_tokens, inputs.system_config);
+	ir.reasoning = merge_reasoning_with_priority(
+		req.reasoning_effort.as_ref(),
+		req.reasoning_budget_tokens,
+		inputs.preset.map(|preset| &preset.reasoning.0),
+		inputs.system_config,
+	);
 	Ok(ir)
 }
 
@@ -225,20 +267,27 @@ fn apply_provider_routing(ir: &mut ChatRequestIR, inputs: &RequestInputs<'_>) {
 
 async fn apply_tools_and_system_prompt(db: &PgPool, inputs: &RequestInputs<'_>, ir: &mut ChatRequestIR) {
 	let mut tool_system_prompts: Vec<String> = Vec::new();
-	if let Some(ref enabled_tool_ids) = inputs.req.tools_enabled {
-		let (specs, choice, prompts) = resolve_tools(db, inputs.user.id, enabled_tool_ids).await;
-		if !specs.is_empty() {
-			ir.tools = specs;
-			ir.tool_choice = choice;
-			tool_system_prompts = prompts;
-		}
+	let (specs, choice, prompts) = resolve_tools(db, inputs.user.id, inputs.enabled_tools).await;
+	if !specs.is_empty() {
+		ir.tools = specs;
+		ir.tool_choice = choice;
+		tool_system_prompts = prompts;
 	}
 
-	let mut system_segments: Vec<String> = Vec::new();
-	let system_prompt_text = inputs.system_config.and_then(|mc| mc.system_prompt.as_deref()).unwrap_or("");
-	if !system_prompt_text.is_empty() {
-		system_segments.push(interpolate_system_prompt(system_prompt_text, inputs.user, inputs.model));
-	}
+	let (model_name, model_id) = match inputs.preset {
+		Some(preset) => (preset.name.clone(), preset.key()),
+		None => (inputs.model.display_name.clone(), inputs.model.model_id.clone()),
+	};
+	let prompts = [
+		inputs.system_config.and_then(|mc| mc.system_prompt.as_deref()),
+		inputs.preset.and_then(|preset| preset.system_prompt.as_deref()),
+	];
+	let mut system_segments: Vec<String> = prompts
+		.into_iter()
+		.flatten()
+		.filter(|prompt| !prompt.trim().is_empty())
+		.map(|prompt| interpolate_system_prompt(prompt, inputs.user, &model_name, &model_id))
+		.collect();
 	system_segments.extend(tool_system_prompts);
 	if !system_segments.is_empty() {
 		ir.messages.insert(

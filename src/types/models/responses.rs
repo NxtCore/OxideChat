@@ -11,7 +11,7 @@ pub struct ProviderTab {
 	pub name: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ModelList"))]
 pub struct ModelListPublic {
 	pub id: Uuid,

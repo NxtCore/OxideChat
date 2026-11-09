@@ -1,10 +1,11 @@
-use super::rows::{ModelDetailedRow, ModelListAdminRow, ModelListPublicRow, ModelPricingRow};
+use super::rows::{ModelAccessRow, ModelDetailedRow, ModelListAdminRow, ModelListPublicRow, ModelPricingRow};
 use super::{Model, ModelDetailed, ModelListAdmin, ModelListParams, ModelListPublic, ModelPricing, ModelSyncInput, ModelSyncSummary, ModelViewer};
 use crate::types::BaseType;
 use crate::types::PolicyResolver;
 use crate::types::UsageEventRecord;
 use crate::types::{Page, PageQuery};
 use crate::types::models::ProviderTab;
+use crate::types::presets::is_reserved_model_id;
 use crate::types::providers::{ProviderKind, ProviderModelResponse};
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde_json::Value;
@@ -211,6 +212,57 @@ impl Model {
 		let items = rows.into_iter().take(pagination.page_size).map(ModelListPublic::from).collect();
 
 		Ok(Page { has_more, items })
+	}
+
+	/// Enabled models among `ids`, as `user_id` would see them in the picker, each with whether
+	/// the user may use it.
+	///
+	/// # Errors
+	/// Returns the database error when the query fails.
+	pub async fn list_public_for_user_by_ids(pool: &sqlx::PgPool, user_id: &Uuid, ids: &[Uuid]) -> Result<Vec<(ModelListPublic, bool)>, sqlx::Error> {
+		if ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		let rows = sqlx::query_as::<_, ModelAccessRow>(
+			r#"
+			SELECT
+				m.id,
+				m.model_id,
+				m.display_name,
+				COALESCE(user_mc.capabilities, sys_mc.capabilities, m.capabilities, '[]'::jsonb) AS capabilities,
+				COALESCE(user_mc.input_modalities, sys_mc.input_modalities, m.input_modalities, '[]'::jsonb) AS input_modalities,
+				COALESCE(user_mc.output_modalities, sys_mc.output_modalities, m.output_modalities, '[]'::jsonb) AS output_modalities,
+				COALESCE(user_mc.context_length, sys_mc.context_length, m.context_length) AS context_length,
+				COALESCE(user_mc.max_output_tokens, sys_mc.max_output_tokens, m.max_tokens) AS max_tokens,
+				COALESCE(m.is_enabled, false) AS is_enabled,
+				p.id AS provider_id,
+				p.name AS provider_name,
+				p.kind AS provider_kind,
+				COALESCE(user_mc.icon, sys_mc.icon) AS icon,
+				COALESCE(user_mc.is_favorite, false) AS is_favorite,
+				EXISTS (
+					SELECT 1
+					FROM team_members tm
+					INNER JOIN teams t ON t.id = tm.team_id
+					LEFT JOIN team_model_access tma_model ON tma_model.team_id = t.id AND tma_model.model_id = m.id
+					LEFT JOIN team_model_access tma_provider ON tma_provider.team_id = t.id AND tma_provider.provider_id = p.id
+					WHERE tm.user_id = $1
+					  AND (t.allow_all_models = true OR tma_model.id IS NOT NULL OR tma_provider.id IS NOT NULL)
+				) AS allowed
+			FROM models m
+			JOIN providers p ON m.provider_id = p.id
+			LEFT JOIN model_configs sys_mc ON sys_mc.model_id = m.id AND sys_mc.owner_id IS NULL
+			LEFT JOIN model_configs user_mc ON user_mc.model_id = m.id AND user_mc.owner_id = $1
+			WHERE m.id = ANY($2)
+			  AND COALESCE(m.is_enabled, false) = TRUE
+			  AND COALESCE(p.is_enabled, false) = TRUE
+			"#,
+		)
+		.bind(user_id)
+		.bind(ids)
+		.fetch_all(pool)
+		.await?;
+		Ok(rows.into_iter().map(|row| (ModelListPublic::from(row.model), row.allowed)).collect())
 	}
 
 	pub async fn list_providers_for_user(pool: &sqlx::PgPool, viewer: ModelViewer<'_>) -> Result<Vec<ProviderTab>, sqlx::Error> {
@@ -432,6 +484,7 @@ impl Model {
 	}
 
 	pub async fn sync_provider_models(pool: &sqlx::PgPool, provider_id: &Uuid, discovered: &[ModelSyncInput]) -> Result<ModelSyncSummary, sqlx::Error> {
+		let discovered = Self::outside_reserved_namespace(discovered);
 		let mut transaction = pool.begin().await?;
 		let existing = Self::list_raw_by_provider(&mut transaction, provider_id).await?;
 		let existing_map: BTreeMap<_, _> = existing.iter().map(|model| (model.model_id.as_str(), model)).collect();
@@ -441,7 +494,7 @@ impl Model {
 		let mut to_update = Vec::with_capacity(discovered.len());
 		let mut to_disable = Vec::with_capacity(existing.len());
 
-		for model in discovered {
+		for &model in &discovered {
 			if existing_map.contains_key(model.model_id.as_str()) {
 				to_update.push(model);
 			} else {
@@ -461,6 +514,19 @@ impl Model {
 		transaction.commit().await?;
 
 		Ok(ModelSyncSummary { added, updated, removed })
+	}
+
+	fn outside_reserved_namespace(discovered: &[ModelSyncInput]) -> Vec<&ModelSyncInput> {
+		discovered
+			.iter()
+			.filter(|model| {
+				let reserved = is_reserved_model_id(&model.model_id);
+				if reserved {
+					tracing::warn!(model_id = %model.model_id, "skipping synced model in the reserved preset namespace");
+				}
+				!reserved
+			})
+			.collect()
 	}
 
 	async fn list_raw_by_provider(connection: &mut sqlx::PgConnection, provider_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {

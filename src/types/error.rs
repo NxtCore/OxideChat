@@ -1,6 +1,6 @@
 //! Handler error type shared by all routes.
 
-use crate::types::{GatewayAdminError, GatewayKeyError, RequestLogScopeError};
+use crate::types::{GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::response::{IntoResponse, Response};
@@ -26,6 +26,9 @@ pub enum AppError {
 	/// A gateway administration failure.
 	#[error(transparent)]
 	GatewayAdmin(#[from] GatewayAdminError),
+	/// A preset could not be saved or found.
+	#[error(transparent)]
+	Preset(#[from] PresetError),
 }
 
 /// Returns true when the database rejected a statement because of a unique constraint.
@@ -65,6 +68,7 @@ impl AppError {
 			Self::DatabaseCode(_) => ErrorCode::DatabaseError,
 			Self::GatewayKey(error) => key_error_code(error),
 			Self::GatewayAdmin(error) => admin_error_code(error),
+			Self::Preset(error) => preset_error_code(error),
 		}
 	}
 }
@@ -125,5 +129,17 @@ fn admin_error_code(error: &GatewayAdminError) -> ErrorCode {
 		GatewayAdminError::InvalidConcurrency => ErrorCode::ApiKeyConcurrencyInvalid,
 		GatewayAdminError::InvalidQuery => ErrorCode::ValidationFailed,
 		GatewayAdminError::Database(_) => ErrorCode::DatabaseError,
+	}
+}
+
+fn preset_error_code(error: &PresetError) -> ErrorCode {
+	match error {
+		PresetError::InvalidSlug => ErrorCode::PresetSlugInvalid,
+		PresetError::SlugTaken => ErrorCode::PresetSlugTaken,
+		PresetError::Invalid => ErrorCode::PresetInvalid,
+		PresetError::BaseModelNotAllowed => ErrorCode::PresetBaseModelInvalid,
+		PresetError::ToolsNotAllowed => ErrorCode::PresetToolsInvalid,
+		PresetError::NotFound => ErrorCode::NotFound,
+		PresetError::Database(_) => ErrorCode::InternalError,
 	}
 }

@@ -2,6 +2,17 @@
 	<div class="p-0">
 		<div class="mx-auto max-w-4xl">
 			<div
+				v-if="modelStore.presetFallbackNotice"
+				data-testid="preset-fallback-notice"
+				class="mb-2 flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
+			>
+				<Info class="h-3.5 w-3.5 shrink-0" />
+				<span class="flex-1">{{ store.getTranslation('presets.fallback_notice', {model: modelStore.presetFallbackNotice}) }}</span>
+				<button class="rounded p-0.5 hover:bg-accent" :aria-label="store.getTranslation('presets.dismiss')" @click="modelStore.presetFallbackNotice = null">
+					<X class="h-3.5 w-3.5" />
+				</button>
+			</div>
+			<div
 				data-testid="chat-composer"
 				class="relative flex flex-col rounded-2xl border bg-card shadow-sm transition-colors"
 				:class="isDragging ? 'border-primary ring-2 ring-primary/30' : 'border-border'"
@@ -45,6 +56,7 @@
 						</button>
 						<input ref="fileInputRef" type="file" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
 						<ModelSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
+						<ChatPresetMenu />
 						<ReasoningSelector
 							v-if="modelStore.hasConfigurableReasoningCapability(modelStore.selectedModel)"
 							class="border-none! bg-transparent! shadow-none! hover:bg-muted/50"
@@ -76,7 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import {ArrowUp, Loader2, X, ImageIcon} from 'lucide-vue-next';
+import {ArrowUp, Loader2, X, ImageIcon, Info} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
@@ -87,6 +99,7 @@ import ContextLimitIndicator from './ContextLimitIndicator.vue';
 import ToolSelector from './ToolSelector.vue';
 import ProviderSelector from './ProviderSelector.vue';
 import SamplingSelector from './SamplingSelector.vue';
+import ChatPresetMenu from './ChatPresetMenu.vue';
 import McpManagerDialog from '../mcp/McpManagerDialog.vue';
 
 const emit = defineEmits<{send: (content: string, parts?: any[]) => void}>();

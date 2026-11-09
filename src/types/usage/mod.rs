@@ -27,6 +27,7 @@ pub struct UsageEventRecord<'a> {
 	pub team_id: Option<Uuid>,
 	pub api_key_id: Option<Uuid>,
 	pub model_id: &'a Uuid,
+	pub preset_id: Option<Uuid>,
 	pub provider_id: &'a Uuid,
 	pub request_type: &'a str,
 	pub input_tokens: i32,

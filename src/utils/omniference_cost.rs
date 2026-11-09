@@ -1,6 +1,6 @@
 use crate::types::models::Model;
 use crate::types::{
-	BUDGET_RESERVATION_METADATA_KEY, Budget, BudgetLedger, GatewayLimitBackend, GatewayLimiter, JobState, PUBLIC_MODEL_METADATA_KEY, REQUEST_ID_METADATA_KEY, RESERVATION_METADATA_KEY,
+	BUDGET_RESERVATION_METADATA_KEY, Budget, PRESET_METADATA_KEY, BudgetLedger, GatewayLimitBackend, GatewayLimiter, JobState, PUBLIC_MODEL_METADATA_KEY, REQUEST_ID_METADATA_KEY, RESERVATION_METADATA_KEY,
 	RequestLog, RequestLogContext, RequestLogErrorCategory, RequestLogRecord, RequestLogStatus, STARTED_AT_METADATA_KEY, STREAMING_METADATA_KEY, UsageEvent, UsageEventRecord,
 };
 use chrono::{DateTime, Utc};
@@ -64,6 +64,7 @@ impl OxideCostSink {
 			team_id,
 			api_key_id,
 			model_id: &model.id,
+			preset_id: metadata_uuid(record, PRESET_METADATA_KEY),
 			provider_id: &model.provider_id,
 			request_type: record.metadata.get("oxide_request_type").map_or("gateway", String::as_str),
 			input_tokens,

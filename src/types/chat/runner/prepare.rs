@@ -1,10 +1,11 @@
 use super::request::{RequestInputs, build_request};
 use crate::types::models::Model;
 use crate::types::providers::ProviderKind;
-use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
+use crate::types::models_configs::ModelConfig;
 use crate::i18n::I18n;
+use crate::types::presets::preset_slug;
 use crate::types::{
-	BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
+	BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
 	StreamingUserMessageCreate, TokenEstimate, UsageDetails, User,
 };
 use axum::response::{
@@ -68,10 +69,35 @@ fn internal(message: &'static str) -> impl FnOnce(sqlx::Error) -> TurnError {
 	}
 }
 
-async fn prompt_bytes(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, system_config: Option<&ModelConfig>) -> Result<u64, TurnError> {
+async fn prompt_bytes(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, system_config: Option<&ModelConfig>, preset: Option<&Preset>) -> Result<u64, TurnError> {
 	let history_bytes = Message::active_prompt_bytes(db, chat_id).await.map_err(internal("Failed to check budget status"))?;
 	let system_bytes = system_config.and_then(|config| config.system_prompt.as_deref()).map_or(0, str::len);
-	Ok(history_bytes.saturating_add(req.content.len() as u64).saturating_add(system_bytes as u64))
+	let preset_bytes = preset.and_then(|preset| preset.system_prompt.as_deref()).map_or(0, str::len);
+	Ok(history_bytes
+		.saturating_add(req.content.len() as u64)
+		.saturating_add(system_bytes as u64)
+		.saturating_add(preset_bytes as u64))
+}
+
+/// The model a key names: a provider model, or the base model of a preset the user can see.
+async fn resolve_model(db: &PgPool, user_id: &Uuid, key: &str) -> Result<(Model, Option<Preset>), TurnError> {
+	let not_found = || TurnError::new("not_found", "Model not found");
+	let Some(slug) = preset_slug(key) else {
+		let model = Model::find_by_model_id(db, key).await.map_err(internal("Failed to fetch model"))?.ok_or_else(not_found)?;
+		return Ok((model, None));
+	};
+	let preset = Preset::find_visible_by_slug(db, user_id, slug)
+		.await
+		.map_err(internal("Failed to fetch preset"))?
+		.filter(|preset| preset.is_enabled)
+		.ok_or_else(|| TurnError::new("not_found", I18n::get().translate("presets.errors.not_found", &None)))?;
+	let model = match preset.base_model_id {
+		Some(id) => Model::find_by_id(db, &id).await.map_err(internal("Failed to fetch model"))?,
+		None => None,
+	}
+	.filter(|model| model.is_enabled)
+	.ok_or_else(|| TurnError::new("not_found", I18n::get().translate("presets.errors.base_model_unavailable", &None)))?;
+	Ok((model, Some(preset)))
 }
 
 fn output_estimate(model: &Model) -> u64 {
@@ -198,10 +224,7 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		.map_err(internal("Failed to fetch chat"))?
 		.ok_or_else(|| TurnError::new("not_found", "Chat not found"))?;
 
-	let model = Model::find_by_model_id(db, &req.model_key)
-		.await
-		.map_err(internal("Failed to fetch model"))?
-		.ok_or_else(|| TurnError::new("not_found", "Model not found"))?;
+	let (model, preset) = resolve_model(db, &user.id, &req.model_key).await?;
 
 	if !Model::can_user_use_model(db, &user.id, &model.id).await.map_err(internal("Failed to check model access"))? {
 		return Err(TurnError::new("model_not_allowed", "Model not available for this user"));
@@ -209,20 +232,19 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 
 	let provider_slug = picked_provider(db, &user.id, &model, req).await?;
 
-	let user_config = ModelConfig::find_for_user_by_stable_key(db, ModelConfigViewer { user_id: &user.id }, &req.model_key)
-		.await
-		.ok()
-		.flatten();
-	let system_config = ModelConfig::find_system_by_stable_key(db, &req.model_key).await.ok().flatten();
+	let system_config = ModelConfig::find_system_by_stable_key(db, &model.model_id).await.ok().flatten();
 
-	let bytes = prompt_bytes(db, &chat_id, req, system_config.as_ref()).await?;
+	let bytes = prompt_bytes(db, &chat_id, req, system_config.as_ref(), preset.as_ref()).await?;
 	let budget = admit(state, user.id, &model, bytes).await?;
 
 	let request_settings = RequestSettings {
 		model_key: Some(req.model_key.clone()),
 		provider_slug: req.provider_slug.as_ref().map(|slug| slug.trim().to_string()).filter(|slug| !slug.is_empty()),
 		provider_routing_mode: Some(req.provider_routing_mode.clone().unwrap_or_else(|| "prefer".to_string())),
-		enabled_tools: req.tools_enabled.clone().unwrap_or_default(),
+		enabled_tools: match &preset {
+			Some(preset) if preset.tools_locked => preset.tool_ids.iter().map(Uuid::to_string).collect(),
+			_ => req.tools_enabled.clone().unwrap_or_default(),
+		},
 	};
 
 	let user_message = store_user_message(db, &chat_id, &model.id, req, &request_settings).await?;
@@ -234,8 +256,9 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		req,
 		chat_sampling: &chat.sampling,
 		model: &model,
-		user_config: user_config.as_ref(),
+		preset: preset.as_ref(),
 		system_config: system_config.as_ref(),
+		enabled_tools: &request_settings.enabled_tools,
 		provider_slug: provider_slug.as_deref(),
 	};
 	let ir = build_request(db, &inputs, messages).await?;

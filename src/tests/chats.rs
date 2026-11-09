@@ -65,7 +65,7 @@ mod sampling {
 #[cfg(test)]
 mod merge {
 	use crate::types::ChatSampling;
-	use crate::types::chat::runner::request::merge_sampling_with_priority;
+	use crate::types::chat::runner::request::{SamplingLayers, merge_sampling_with_priority};
 	use crate::types::models::Model;
 	use serde_json::json;
 	use sqlx::types::Json;
@@ -91,7 +91,14 @@ mod merge {
 	fn chat_values_apply_below_request_values() -> Result<(), serde_json::Error> {
 		let chat: ChatSampling = serde_json::from_value(json!({"temperature": 0.3, "top_p": 0.9, "max_tokens": 200, "seed": 7}))?;
 		let request: omniference::Sampling = serde_json::from_value(json!({"temperature": 1.1, "stop": []}))?;
-		let merged = merge_sampling_with_priority(Some(&request), &chat, None, &model(Some(4096)));
+		let model = model(Some(4096));
+		let merged = merge_sampling_with_priority(&SamplingLayers {
+			request: Some(&request),
+			chat: &chat,
+			preset: None,
+			config: None,
+			model: &model,
+		});
 		assert_eq!(merged.temperature, Some(1.1));
 		assert_eq!(merged.top_p, Some(0.9));
 		assert_eq!(merged.max_tokens, Some(200));
@@ -101,7 +108,15 @@ mod merge {
 
 	#[test]
 	fn an_empty_chat_keeps_the_model_defaults() {
-		let merged = merge_sampling_with_priority(None, &ChatSampling::default(), None, &model(Some(4096)));
+		let model = model(Some(4096));
+		let chat = ChatSampling::default();
+		let merged = merge_sampling_with_priority(&SamplingLayers {
+			request: None,
+			chat: &chat,
+			preset: None,
+			config: None,
+			model: &model,
+		});
 		assert_eq!(merged.max_tokens, Some(4096));
 		assert_eq!(merged.temperature, None);
 	}

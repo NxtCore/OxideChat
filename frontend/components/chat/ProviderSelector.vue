@@ -460,15 +460,16 @@ function selectOption(opt: ProviderOption) {
 async function loadOptions() {
 	const model = modelStore.selectedModel;
 	if (!model) return;
-	if (loadedModelId.value === model.id && options.value.length > 0) return;
+	const modelId = baseModelId(model);
+	if (loadedModelId.value === modelId && options.value.length > 0) return;
 
 	loading.value = true;
 	parentUnavailable.value = false;
 	try {
-		const res = await modelProviderOptions<ProviderOptionsResponse>(model.id);
+		const res = await modelProviderOptions<ProviderOptionsResponse>(modelId);
 		options.value = res.options ?? [];
 		parentUnavailable.value = res.availability_state === 'USER_UNAVAILABLE';
-		loadedModelId.value = model.id;
+		loadedModelId.value = modelId;
 		const picked = modelStore.selectedProviderSlug;
 		if (picked && options.value.length > 0 && !options.value.some(o => o.provider_slug === picked)) modelStore.setProviderSelection(null);
 	} catch (error) {

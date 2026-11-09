@@ -42,6 +42,13 @@ pub(super) struct ModelListPublicRow {
 }
 
 #[derive(sqlx::FromRow)]
+pub(super) struct ModelAccessRow {
+	#[sqlx(flatten)]
+	pub model: ModelListPublicRow,
+	pub allowed: bool,
+}
+
+#[derive(sqlx::FromRow)]
 pub(super) struct ModelListAdminRow {
 	pub id: Uuid,
 	pub model_id: String,

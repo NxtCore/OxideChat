@@ -52,38 +52,16 @@
 				<ShadLabel>
 					{{ store.getTranslation('settings.models.editor.change_icon') }}
 				</ShadLabel>
-				<div class="space-y-3">
-					<div class="flex items-center gap-3">
-						<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-muted overflow-hidden border border-border">
-							<img v-if="form.icon" :src="form.icon" class="h-full w-full object-cover" alt="Model icon" />
-							<Bot v-else class="h-6 w-6 text-muted-foreground" />
-						</div>
-						<div class="flex gap-2">
-							<ShadButton variant="outline" size="sm" class="gap-1.5" @click="iconInputRef?.click()">
-								<Upload class="h-3.5 w-3.5" />
-								{{ store.getTranslation('settings.models.editor.upload') }}
-							</ShadButton>
-							<ShadButton v-if="form.icon" variant="ghost" size="sm" class="gap-1.5 text-destructive" @click="form.icon = ''">
-								<Trash2 class="h-3.5 w-3.5" />
-								{{ store.getTranslation('common.remove') }}
-							</ShadButton>
-						</div>
-						<input ref="iconInputRef" type="file" accept="image/*" class="hidden" @change="handleIconUpload" />
-					</div>
-					<div class="space-y-1.5">
-						<ShadLabel for="icon-url">
-							{{ store.getTranslation('settings.models.editor.icon_url') }}
-						</ShadLabel>
-						<ShadInput id="icon-url" v-model="form.icon" type="url" :placeholder="store.getTranslation('settings.models.editor.icon_url_placeholder')" />
-					</div>
-				</div>
+				<ImagePicker v-model="form.icon" test-id="model-icon">
+					<template #fallback><Bot class="h-1/2 w-1/2 text-muted-foreground" /></template>
+				</ImagePicker>
 			</div>
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-import {Bot, Copy, Trash2, Upload} from 'lucide-vue-next';
+import {Bot, Copy} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 const props = defineProps<{
@@ -92,23 +70,9 @@ const props = defineProps<{
 }>();
 
 const store = useMainStore();
-const iconInputRef = ref<HTMLInputElement | null>(null);
 
 function copyModelId() {
 	navigator.clipboard.writeText(props.model.model_id);
 	store.toast(store.getTranslation('common.copied'), {type: 'success'});
-}
-
-function handleIconUpload(event: Event) {
-	const target = event.target as HTMLInputElement;
-	const file = target.files?.[0];
-	if (!file) return;
-
-	const reader = new FileReader();
-	reader.onload = e => {
-		props.form.icon = e.target?.result as string;
-	};
-	reader.readAsDataURL(file);
-	target.value = '';
 }
 </script>

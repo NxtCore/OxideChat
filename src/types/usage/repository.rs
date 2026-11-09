@@ -45,9 +45,9 @@ impl UsageEvent {
 			r#"
 			INSERT INTO usage_events (
 				user_id, team_id, api_key_id, model_id, provider_id, request_type,
-				input_tokens, output_tokens, reasoning_tokens, cost_total
+				input_tokens, output_tokens, reasoning_tokens, cost_total, preset_id
 			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING id, user_id, team_id, api_key_id, model_id, provider_id, request_type,
 			          input_tokens, output_tokens, reasoning_tokens, cost_total, created_at
 			"#,
@@ -62,6 +62,7 @@ impl UsageEvent {
 		.bind(params.output_tokens)
 		.bind(params.reasoning_tokens)
 		.bind(params.cost_total)
+		.bind(params.preset_id)
 		.fetch_one(executor)
 		.await
 	}
