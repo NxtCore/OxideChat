@@ -60,7 +60,7 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, auth: Auth
 /// The routing provider kinds the installation uses, each with the upstream providers it can send requests to,
 /// offered when editing a provider allowlist on the installation settings or on a team.
 pub async fn list_upstream_providers(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
-	if auth.require(&state.db, ADMIN_CONFIG_VIEW).await.is_err() {
+	if !auth.check_permission(&state.db, ADMIN_CONFIG_VIEW).await? {
 		auth.require(&state.db, ADMIN_TEAMS_VIEW).await?;
 	}
 	json_ok(UpstreamGatewayResponse::load_all(&state.db).await?)

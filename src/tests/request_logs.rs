@@ -716,7 +716,7 @@ mod http {
 	use uuid::Uuid;
 
 	async fn router(pool: PgPool) -> (Router, Arc<JobState>) {
-		crate::config::Config::init(&pool).await;
+		crate::config::Config::init(&pool).await.expect("config loads");
 		crate::i18n::I18n::init(&pool).await;
 		let state = job_state(pool);
 		(crate::routes::build_router(Arc::clone(&state)), state)
@@ -1131,7 +1131,7 @@ mod unlogged_failures {
 	use uuid::Uuid;
 
 	async fn context(pool: &PgPool) -> TestResult<(Uuid, GatewayAuthContext)> {
-		crate::config::Config::init(pool).await;
+		crate::config::Config::init(pool).await?;
 		crate::i18n::I18n::init(pool).await;
 		let user_id = create_user(pool).await?;
 		let team_id = create_team(pool, user_id, "Failure Team", true).await?;

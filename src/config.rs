@@ -73,20 +73,29 @@ impl Config {
 	/// Call this once at startup after database connection is established.
 	///
 	/// Later calls are ignored; the first initialization wins.
-	pub async fn init(pool: &PgPool) {
-		let values = Self::load_from_db(pool).await;
+	///
+	/// # Errors
+	/// Returns an error when the configuration cannot be read or a stored setting is invalid.
+	pub async fn init(pool: &PgPool) -> Result<(), sqlx::Error> {
+		let values = Self::load_from_db(pool).await?;
 		let instance = Self {
 			values: ArcSwap::new(Arc::new(values)),
 		};
 		let _ = CONFIG.set(instance);
+		Ok(())
 	}
 
 	/// Reload configuration from the database.
 	///
 	/// Use this when configuration has been modified via admin endpoints.
-	pub async fn reload(&self, pool: &PgPool) {
-		let values = Self::load_from_db(pool).await;
+	///
+	/// # Errors
+	/// Returns an error when the configuration cannot be read or a stored setting is invalid; the
+	/// previous configuration stays active then.
+	pub async fn reload(&self, pool: &PgPool) -> Result<(), sqlx::Error> {
+		let values = Self::load_from_db(pool).await?;
 		self.values.store(Arc::new(values));
+		Ok(())
 	}
 
 	/// Get the global config instance.
@@ -148,8 +157,7 @@ impl Config {
 		Self::store_settings(&mut tx, req).await?;
 		Self::store_title_generation(&mut tx, req.title_generation.as_ref()).await?;
 		tx.commit().await?;
-		self.reload(pool).await;
-		Ok(())
+		self.reload(pool).await
 	}
 
 	async fn store_settings(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, req: &UpdateGlobalConfigRequest) -> Result<(), sqlx::Error> {
@@ -214,8 +222,8 @@ impl Config {
 
 	/// Load configuration from database.
 	#[allow(clippy::cognitive_complexity)]
-	async fn load_from_db(pool: &PgPool) -> ConfigValues {
-		let rows: Vec<ConfigRow> = sqlx::query_as("SELECT key, value FROM app_config").fetch_all(pool).await.unwrap_or_default();
+	async fn load_from_db(pool: &PgPool) -> Result<ConfigValues, sqlx::Error> {
+		let rows: Vec<ConfigRow> = sqlx::query_as("SELECT key, value FROM app_config").fetch_all(pool).await?;
 
 		let mut values = ConfigValues::default();
 
@@ -228,7 +236,9 @@ impl Config {
 					}
 				}
 				"enable_provider_selector" => values.provider_routing.selector_enabled = row.value == "true",
-				"allowed_upstream_providers" => values.provider_routing.allowed_providers = serde_json::from_str(&row.value).unwrap_or_default(),
+				"allowed_upstream_providers" => {
+					values.provider_routing.allowed_providers = serde_json::from_str(&row.value).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+				}
 				"default_model_id" => values.default_model_id = Uuid::parse_str(&row.value).ok(),
 				"instance_name" => values.instance_name = Some(row.value),
 				"instance_icon_id" => values.instance_icon_id = Uuid::parse_str(&row.value).ok(),
@@ -238,6 +248,6 @@ impl Config {
 			}
 		}
 
-		values
+		Ok(values)
 	}
 }

@@ -846,7 +846,7 @@ mod http {
 	const MODELS_PATH: &str = "/openai/v1/models";
 
 	async fn router(pool: PgPool) -> TestResult<(Router, Arc<JobState>)> {
-		crate::config::Config::init(&pool).await;
+		crate::config::Config::init(&pool).await?;
 		crate::i18n::I18n::init(&pool).await;
 		let state = job_state(pool);
 		Ok((crate::routes::build_router(Arc::clone(&state)), state))

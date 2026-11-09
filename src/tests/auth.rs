@@ -203,7 +203,7 @@ mod tests {
 
 		#[sqlx::test(migrations = "./migrations")]
 		async fn auth_route_returns_429_after_the_per_ip_limit(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-			crate::config::Config::init(&pool).await;
+			crate::config::Config::init(&pool).await?;
 			crate::i18n::I18n::init(&pool).await;
 			let state = crate::tests::gateway::support::job_state(pool);
 			let router = crate::routes::build_router(state);

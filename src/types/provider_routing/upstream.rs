@@ -92,7 +92,12 @@ async fn endpoint_providers(pool: &PgPool, kind: &ProviderKind) -> Result<Vec<Up
 }
 
 /// Syncs one routing provider through its kind's source; `false` when it could not be reached. Kinds without a source are skipped.
-async fn sync_one(pool: &PgPool, provider: &Provider) -> Result<bool, sqlx::Error> {
+/// Syncs the upstream providers of one routing provider; `false` when it could not be reached, which keeps the
+/// previous snapshot.
+///
+/// # Errors
+/// Returns an error when storing the snapshot fails.
+pub async fn sync_one(pool: &PgPool, provider: &Provider) -> Result<bool, sqlx::Error> {
 	let result = match source_provider(provider) {
 		Ok(credentials) => match sources::sync(&provider.kind, &credentials).await {
 			Some(result) => result,

@@ -23,3 +23,7 @@ export function withAllowlist(lists: ProviderAllowlists, kind: ProviderKind, slu
 export function emptyAllowlistError(lists: ProviderAllowlists): string | null {
 	return Object.values(lists).some(slugs => !slugs?.length) ? 'settings.provider_allowlist.empty' : null;
 }
+
+export function slugWithin(within: string[], slug: string): boolean {
+	return within.some(allowed => slug === allowed || slug.startsWith(`${allowed}/`));
+}

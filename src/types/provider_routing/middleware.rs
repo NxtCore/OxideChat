@@ -62,11 +62,8 @@ fn not_allowed(error: &ProviderRoutingError) -> AdapterError {
 		ProviderRoutingError::NotAllowed(_) => "chat.errors.provider_not_allowed",
 		ProviderRoutingError::NoneAllowed => "chat.errors.no_provider_allowed",
 	};
-	AdapterError::Provider {
+	AdapterError::Forbidden {
 		code: "provider_not_allowed".to_string(),
 		message: I18n::get().translate(key, &None),
-		http_status: Some(403),
-		error_type: Some("permission_error".to_string()),
-		param: None,
 	}
 }

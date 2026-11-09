@@ -1,16 +1,19 @@
 import {test, expect} from './support/fixtures';
 import {uniqueName} from './support/gateway';
-import {MOCK_LLM_KEY, MOCK_LLM_URL} from './support/constants';
+import {MEMBER, MOCK_LLM_KEY, MOCK_LLM_URL} from './support/constants';
 
 test.describe('provider routing', () => {
 	test('admins sync a gateway and pick its providers from the list', async ({page, api, t}) => {
 		const before = (await api.get('/api/v1/config')).provider_routing;
 		const provider = await api.post('/api/v1/admin/providers', {kind: 'OPENROUTER', name: uniqueName('Router'), base_url: MOCK_LLM_URL, api_key: MOCK_LLM_KEY});
+		const syncedAt = async () => (await api.get('/api/v1/admin/upstream-providers')).find((gateway: {kind: string}) => gateway.kind === 'OPENROUTER')?.synced_at ?? null;
 		try {
 			await api.patch('/api/v1/admin/config', {provider_routing: {...before, allowed_providers: {}}});
+			const previous = await syncedAt();
 			await page.goto('/settings/admin-config');
-			await expect(page.getByTestId('config-allowed-providers-openrouter-synced')).toHaveText(t('settings.provider_allowlist.not_synced'));
+			await expect(page.getByTestId('config-allowed-providers-openrouter-synced')).toBeVisible();
 			await page.getByTestId('config-allowed-providers-openrouter-sync').click();
+			await expect.poll(syncedAt).not.toBe(previous);
 			await expect(page.getByTestId('config-allowed-providers-openrouter-synced')).not.toHaveText(t('settings.provider_allowlist.not_synced'));
 
 			await page.getByTestId('config-allowed-providers-openrouter-restrict').click();
@@ -76,6 +79,39 @@ test.describe('provider routing', () => {
 			await expect(page.getByTestId('team-allowed-providers-openrouter-option-azure').getByRole('checkbox')).not.toBeChecked();
 		} finally {
 			await api.patch('/api/v1/admin/config', {provider_routing: before});
+		}
+	});
+
+	test('a team selector override applies right after logging in', async ({browser, baseURL, api, seed, t}) => {
+		const before = (await api.get('/api/v1/config')).provider_routing;
+		const team = await api.post('/api/v1/admin/teams', {name: uniqueName('SelectorTeam'), member_ids: [seed.memberId]});
+		const visitor = await browser.newContext({baseURL, storageState: {cookies: [], origins: []}});
+		const page = await visitor.newPage();
+		const selectorEnabled = () =>
+			page.evaluate(() => (document.querySelector('#__nuxt') as any).__vue_app__.config.globalProperties.$pinia.state.value.main.base?.chat_provider_selector?.enabled ?? null);
+		try {
+			await api.patch('/api/v1/admin/config', {provider_routing: {...before, selector_enabled: false}});
+			await api.put(`/api/v1/admin/teams/${team.id}`, {
+				name: team.name,
+				description: null,
+				allow_all_models: true,
+				default_model_id: null,
+				members: [{user_id: seed.memberId, role: 'member'}],
+				provider_ids: [],
+				model_ids: [],
+				provider_routing: {selector_enabled: true, allowed_providers: {}},
+			});
+			await page.goto('/auth/login');
+			await page.getByLabel(t('auth.login.email')).fill(MEMBER.email);
+			expect(await selectorEnabled()).toBe(false);
+			await page.getByLabel(t('auth.login.password')).fill(MEMBER.password);
+			await page.getByRole('button', {name: t('auth.login.submit')}).click();
+			await expect(page).not.toHaveURL(/\/auth\//);
+			await expect.poll(selectorEnabled).toBe(true);
+		} finally {
+			await visitor.close();
+			await api.patch('/api/v1/admin/config', {provider_routing: before});
+			await api.delete(`/api/v1/admin/teams/${team.id}`);
 		}
 	});
 

@@ -78,6 +78,15 @@ mod tests {
 		}
 
 		#[test]
+		fn variants_narrow_in_both_directions_across_teams() {
+			let narrowed = EffectiveProviderRouting::combine(&installation(false, Some(&["deepinfra", "azure"])), &[team(None, Some(&["deepinfra/fp8"]))]);
+			assert_eq!(narrowed.allowed_providers.get(&ROUTER), Some(&slugs(&["deepinfra/fp8"])));
+			let teams = [team(None, Some(&["deepinfra", "openai"])), team(None, Some(&["deepinfra"]))];
+			let reversed = EffectiveProviderRouting::combine(&installation(false, Some(&["deepinfra/fp8", "openai/turbo"])), &teams);
+			assert_eq!(reversed.allowed_providers.get(&ROUTER), Some(&slugs(&["deepinfra/fp8"])));
+		}
+
+		#[test]
 		fn a_team_cannot_widen_the_installation_list() {
 			let effective = EffectiveProviderRouting::combine(&installation(false, Some(&["azure"])), &[team(None, Some(&["openai"]))]);
 			assert_eq!(effective.allowed_providers, lists(Some(&[])));
@@ -249,7 +258,7 @@ mod tests {
 
 		#[sqlx::test(migrations = "./migrations")]
 		async fn a_user_gets_the_most_restrictive_of_their_teams(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-			Config::init(&pool).await;
+			Config::init(&pool).await?;
 			let user = insert_user(&pool, "routing_member").await?;
 			let first = create_team(&pool, "Routing A", (Some(true), Some(&["azure", "openai"]))).await?;
 			let second = create_team(&pool, "Routing B", (None, Some(&["openai", "together"]))).await?;
@@ -288,7 +297,7 @@ mod tests {
 
 		#[sqlx::test(migrations = "./migrations")]
 		async fn an_unsynced_gateway_lists_its_endpoint_options(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-			Config::init(&pool).await;
+			Config::init(&pool).await?;
 			let provider: Uuid =
 				sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, is_enabled) VALUES ('OPENROUTER', 'Unreachable router', 'http://127.0.0.1:9', true) RETURNING id")
 					.fetch_one(&pool)
@@ -313,7 +322,7 @@ mod tests {
 
 		#[sqlx::test(migrations = "./migrations")]
 		async fn without_routing_providers_no_gateway_is_listed(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-			Config::init(&pool).await;
+			Config::init(&pool).await?;
 			assert!(crate::types::UpstreamGatewayResponse::load_all(&pool).await?.is_empty());
 			Ok(())
 		}
@@ -368,7 +377,7 @@ mod tests {
 
 		#[sqlx::test(migrations = "./migrations")]
 		async fn the_middleware_restricts_routed_requests_to_the_subjects_allowlist(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-			Config::init(&pool).await;
+			Config::init(&pool).await?;
 			crate::i18n::I18n::init(&pool).await;
 			let user = insert_user(&pool, "routing_middleware").await?;
 			let team = create_team(&pool, "Routing middleware", (None, Some(&["azure", "openai"]))).await?;
@@ -386,14 +395,17 @@ mod tests {
 				..Default::default()
 			};
 			let error = run_middleware(&pool, &[("oxide_model_id", model), ("oxide_user_id", user)], Some(refused)).await.err().ok_or("expected a refusal")?;
-			let adapter = error.downcast::<omniference::adapter::AdapterError>()?;
-			assert!(matches!(adapter, omniference::adapter::AdapterError::Provider { http_status: Some(403), .. }));
+			use omniference::skins::SkinErrorHandler;
+			let response = omniference::skins::OpenAIErrorHandler.handle_inference_error(&omniference::adapter::InferenceError::from_handler_error(error));
+			assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+			let body: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 10_000).await?)?;
+			assert_eq!(body["error"]["code"], "provider_not_allowed");
 			Ok(())
 		}
 
 		#[sqlx::test(migrations = "./migrations")]
 		async fn the_middleware_leaves_direct_providers_alone(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-			Config::init(&pool).await;
+			Config::init(&pool).await?;
 			let user = insert_user(&pool, "routing_direct").await?;
 			let team = create_team(&pool, "Routing direct", (None, Some(&["azure"]))).await?;
 			join(&pool, team.id, user).await?;
@@ -433,7 +445,7 @@ mod tests {
 
 		#[sqlx::test(migrations = "./migrations")]
 		async fn a_sync_stores_the_providers(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-			Config::init(&pool).await;
+			Config::init(&pool).await?;
 			crate::utils::encryption::init_for_test([0x42; 32])?;
 			let base_url = fake_openrouter().await?;
 			openrouter_provider(&pool, &base_url).await?;
@@ -453,7 +465,7 @@ mod tests {
 
 		#[sqlx::test(migrations = "./migrations")]
 		async fn a_failed_sync_keeps_the_previous_snapshot(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-			Config::init(&pool).await;
+			Config::init(&pool).await?;
 			crate::utils::encryption::init_for_test([0x42; 32])?;
 			let base_url = fake_openrouter().await?;
 			let provider = openrouter_provider(&pool, &base_url).await?;

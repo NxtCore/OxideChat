@@ -11,6 +11,7 @@ pub mod sources;
 mod upstream;
 
 pub use middleware::ProviderRoutingMiddleware;
+pub use upstream::sync_one as sync_upstream_providers;
 
 use crate::types::providers::ProviderKind;
 use omniference::types::ProviderRouting;
@@ -150,6 +151,18 @@ fn slug_matches(allowed: &str, requested: &str) -> bool {
 	requested.get(..allowed.len()).is_some_and(|base| base.eq_ignore_ascii_case(allowed)) && requested[allowed.len()..].starts_with('/')
 }
 
+/// The slugs both allowlists allow, keeping the narrower slug when one is a variant of the other.
+fn intersect(left: &[String], right: &[String]) -> Vec<String> {
+	let mut slugs: Vec<String> = left
+		.iter()
+		.flat_map(|a| right.iter().map(move |b| (a, b)))
+		.filter_map(|(a, b)| if slug_matches(a, b) { Some(b.clone()) } else { slug_matches(b, a).then(|| a.clone()) })
+		.collect();
+	slugs.sort_unstable();
+	slugs.dedup();
+	slugs
+}
+
 impl ProviderRoutingSettings {
 	/// The same settings with normalized allowlists, or `None` when one is invalid.
 	#[must_use]
@@ -188,7 +201,7 @@ impl EffectiveProviderRouting {
 		for (kind, list) in teams.iter().flat_map(|team| &team.allowed_providers) {
 			allowed_providers
 				.entry(kind.clone())
-				.and_modify(|allowed| allowed.retain(|slug| list.contains(slug)))
+				.and_modify(|allowed| *allowed = intersect(allowed, list))
 				.or_insert_with(|| list.clone());
 		}
 		Self { selector_enabled, allowed_providers }

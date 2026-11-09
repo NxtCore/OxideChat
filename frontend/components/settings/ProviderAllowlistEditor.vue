@@ -122,8 +122,7 @@ onMounted(() =>
 		try {
 			loadedGateways.value = await upstreamProviders<UpstreamGatewayResponse>();
 		} catch (error) {
-			console.error('Failed to load upstream providers:', error);
-			loadedGateways.value = [];
+			store.toast(errorMessage(error, store.getTranslation('settings.provider_allowlist.load_error')), {type: 'error'});
 		}
 	}),
 );

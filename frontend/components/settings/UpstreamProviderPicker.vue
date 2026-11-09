@@ -70,7 +70,7 @@ const query = ref('');
 const restricted = computed(() => props.modelValue !== null);
 
 const options = computed(() => {
-	const offered = props.within ? props.providers.filter(provider => props.within?.includes(provider.slug)) : props.providers;
+	const offered = props.within ? props.providers.filter(provider => slugWithin(props.within ?? [], provider.slug)) : props.providers;
 	const listed = new Set(offered.map(provider => provider.slug));
 	const extra = [...new Set([...(props.modelValue ?? []), ...(props.within ?? [])])].filter(slug => !listed.has(slug));
 	const all: UpstreamProviderResponse[] = [...offered, ...extra.map(slug => ({slug, name: null, headquarters: null, datacenters: []}))];
@@ -85,7 +85,7 @@ const visibleOptions = computed(() => {
 
 const customSlug = computed(() => {
 	const slug = query.value.trim().toLowerCase();
-	if (!/^[a-z0-9\-_./]{1,64}$/.test(slug) || props.within) return null;
+	if (!/^[a-z0-9\-_./]{1,64}$/.test(slug) || (props.within && !slugWithin(props.within, slug))) return null;
 	return options.value.some(option => option.slug === slug) ? null : slug;
 });
 

@@ -214,6 +214,7 @@ export const useMainStore = defineStore('main', {
 			});
 			if (response) {
 				this.setUser(response.user);
+				await this.refreshChatProviderSelector();
 			}
 			return response;
 		},
@@ -226,7 +227,7 @@ export const useMainStore = defineStore('main', {
 			});
 			if (response) {
 				this.setUser(response.user);
-				await chatStore.init();
+				await Promise.all([chatStore.init(), this.refreshChatProviderSelector()]);
 			}
 			return response;
 		},

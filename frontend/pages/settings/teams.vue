@@ -550,11 +550,17 @@ async function saveTeam() {
 		model_ids: form.model_ids,
 		provider_routing: form.provider_routing,
 	});
+	const wasMember = isOwnTeam(selectedTeam.value);
+	const isMember = isOwnTeam(updated);
 	const selectorChanged = selectedTeam.value.provider_routing.selector_enabled !== updated.provider_routing.selector_enabled;
-	if (selectorChanged && updated.members.some(member => member.id === store.user?.id)) store.refreshChatProviderSelector();
+	if (wasMember !== isMember || (isMember && selectorChanged)) store.refreshChatProviderSelector();
 	selectedTeam.value = updated;
 	applySelected(updated);
 	await loadTeams();
+}
+
+function isOwnTeam(team: TeamDetailed) {
+	return team.members.some(member => member.id === store.user?.id);
 }
 
 async function deleteSelected() {
@@ -562,6 +568,7 @@ async function deleteSelected() {
 	saving.value = true;
 	try {
 		await deleteAdminTeam(selectedTeam.value.id);
+		if (isOwnTeam(selectedTeam.value)) store.refreshChatProviderSelector();
 		store.toast(store.getTranslation('settings.teams.delete_success'), {type: 'success'});
 		deleteOpen.value = false;
 		selectedTeam.value = null;
