@@ -98,6 +98,17 @@ impl Model {
 		Ok(rows.into_iter().collect())
 	}
 
+	/// The kind of the provider serving a model, or `None` when the model does not exist.
+	///
+	/// # Errors
+	/// Returns an error when the database query fails.
+	pub async fn provider_kind(pool: &sqlx::PgPool, model_id: &Uuid) -> Result<Option<ProviderKind>, sqlx::Error> {
+		sqlx::query_scalar("SELECT p.kind FROM models m JOIN providers p ON p.id = m.provider_id WHERE m.id = $1")
+			.bind(model_id)
+			.fetch_optional(pool)
+			.await
+	}
+
 	pub async fn find_by_model_id(pool: &sqlx::PgPool, model_id: &str) -> Result<Option<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Model>(
 			r#"

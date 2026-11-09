@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
 
-use crate::types::{ThemeCssVars, TitleGeneration};
+use crate::types::{ProviderRoutingSettings, ThemeCssVars, TitleGeneration};
 use crate::i18n::Language;
 
 /// Distinguishes an absent field (`None`) from an explicit JSON `null` (`Some(None)`),
@@ -122,7 +122,7 @@ pub struct UpdatePreferencesRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateGlobalConfigRequest {
 	pub default_theme: Option<ThemeCssVars>,
-	pub enable_provider_selector: Option<bool>,
+	pub provider_routing: Option<ProviderRoutingSettings>,
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub default_model_id: Option<Option<Uuid>>,
 	pub language: Option<Language>,
@@ -178,7 +178,7 @@ pub struct StreamRequest {
 	#[serde(default)]
 	pub skip_user_message: bool,
 	pub regenerate_from_message_id: Option<String>,
-	/// Upstream-provider slug the user picked in the chat provider selector (`OpenRouter` only).
+	/// Upstream-provider slug the user picked in the chat provider selector, for provider kinds that route upstream.
 	/// Empty/None means automatic routing.
 	pub provider_slug: Option<String>,
 	/// How the picked provider is applied: `"prefer"` (order, fallbacks on) or `"lock"`

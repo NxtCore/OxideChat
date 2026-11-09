@@ -5,6 +5,7 @@ use super::{
 use crate::types::{Page, PageQuery};
 use crate::logging::AuditLog;
 use crate::types::{AUDIT_TEAM_TARGET, AuditEntry, BaseType, Budget, EVENT_TEAM_MEMBER_ROLE_UPDATED, EVENT_TEAM_MODELS_UPDATED};
+use sqlx::types::Json;
 use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -228,7 +229,8 @@ impl Team {
 		let updated = sqlx::query_as::<_, Self>(
 			r#"
 			UPDATE teams
-			SET name = $2, description = $3, allow_all_models = $4, default_model_id = $5, updated_at = NOW()
+			SET name = $2, description = $3, allow_all_models = $4, default_model_id = $5,
+				provider_selector_enabled = $6, allowed_upstream_providers = $7, updated_at = NOW()
 			WHERE id = $1
 			RETURNING *
 			"#,
@@ -238,6 +240,8 @@ impl Team {
 		.bind(req.description.as_deref().filter(|s| !s.trim().is_empty()))
 		.bind(req.allow_all_models)
 		.bind(req.default_model_id)
+		.bind(req.provider_routing.selector_enabled)
+		.bind(Json(&req.provider_routing.allowed_providers))
 		.fetch_one(&mut *tx)
 		.await?;
 
@@ -495,6 +499,7 @@ impl Team {
 			default_model_id: self.default_model_id,
 			members: self.members(pool).await?,
 			model_access: self.model_access(pool).await?,
+			provider_routing: self.provider_routing(),
 			created_at: self.created_at,
 			updated_at: self.updated_at,
 		})

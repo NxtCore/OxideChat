@@ -7,6 +7,7 @@ name = "OxideChat"
 version = "0.2.0"
 dependencies = [
  "aes-gcm",
+ "anyhow",
  "arc-swap",
  "argon2",
  "async-stream",
@@ -2169,9 +2170,7 @@ dependencies = [
 
 [[package]]
 name = "omniference"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e705a571aa40f56e200d1924ff1293f36611438d0309a8f4f50af22fac1d8cdf"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5111,7 +5110,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "omniference"
-version = "0.4.1"

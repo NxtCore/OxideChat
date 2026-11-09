@@ -6,7 +6,7 @@
 //! - Supports reloading configuration at runtime
 
 use crate::i18n::Language;
-use crate::types::{ThemeCssVars, TitleGeneration, UpdateGlobalConfigRequest};
+use crate::types::{ProviderRoutingSettings, ThemeCssVars, TitleGeneration, UpdateGlobalConfigRequest};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
@@ -27,9 +27,8 @@ struct ConfigRow {
 pub struct ConfigValues {
 	pub language: Language,
 	pub default_theme: ThemeCssVars,
-	/// When enabled, the chat UI exposes a per-message upstream-provider selector
-	/// (`OpenRouter` provider routing). Off by default.
-	pub enable_provider_selector: bool,
+	/// Chat provider selector and upstream provider allowlist; teams may override both.
+	pub provider_routing: ProviderRoutingSettings,
 	/// Instance-wide default model. Applied when neither user nor team default is set.
 	pub default_model_id: Option<Uuid>,
 	/// Instance name shown instead of `OxideChat`.
@@ -45,7 +44,7 @@ impl Default for ConfigValues {
 		Self {
 			language: Language::En,
 			default_theme: ThemeCssVars::default(),
-			enable_provider_selector: false,
+			provider_routing: ProviderRoutingSettings::default(),
 			default_model_id: None,
 			instance_name: None,
 			instance_icon_id: None,
@@ -110,10 +109,10 @@ impl Config {
 		self.values.load().default_theme.clone()
 	}
 
-	/// Whether the chat provider selector is enabled instance-wide.
+	/// Get the installation's upstream provider routing settings.
 	#[must_use]
-	pub fn enable_provider_selector(&self) -> bool {
-		self.values.load().enable_provider_selector
+	pub fn provider_routing(&self) -> ProviderRoutingSettings {
+		self.values.load().provider_routing.clone()
 	}
 
 	/// Get the instance-wide default model ID, if configured.
@@ -158,8 +157,14 @@ impl Config {
 			let json = serde_json::to_string(theme).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
 			Self::upsert_config(&mut **tx, "default_theme", &json).await?;
 		}
-		if let Some(value) = req.enable_provider_selector {
-			Self::upsert_config(&mut **tx, "enable_provider_selector", if value { "true" } else { "false" }).await?;
+		if let Some(routing) = &req.provider_routing {
+			Self::upsert_config(&mut **tx, "enable_provider_selector", if routing.selector_enabled { "true" } else { "false" }).await?;
+			let allowed = Some(&routing.allowed_providers)
+				.filter(|lists| !lists.is_empty())
+				.map(serde_json::to_string)
+				.transpose()
+				.map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+			Self::set_or_clear(tx, "allowed_upstream_providers", Some(&allowed)).await?;
 		}
 		if let Some(language) = req.language {
 			Self::upsert_config(&mut **tx, "language", language.as_str()).await?;
@@ -222,7 +227,8 @@ impl Config {
 						values.default_theme = theme;
 					}
 				}
-				"enable_provider_selector" => values.enable_provider_selector = row.value == "true",
+				"enable_provider_selector" => values.provider_routing.selector_enabled = row.value == "true",
+				"allowed_upstream_providers" => values.provider_routing.allowed_providers = serde_json::from_str(&row.value).unwrap_or_default(),
 				"default_model_id" => values.default_model_id = Uuid::parse_str(&row.value).ok(),
 				"instance_name" => values.instance_name = Some(row.value),
 				"instance_icon_id" => values.instance_icon_id = Uuid::parse_str(&row.value).ok(),

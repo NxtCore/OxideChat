@@ -2,11 +2,10 @@
 //!
 //! Public endpoint for listing available AI models.
 
-use crate::config::Config;
 use crate::types::catalog::{AvailabilityState, GatewayCatalogModel};
 use crate::types::models::{Model, ModelListParams, ModelViewer};
 use crate::types::models_configs::ModelConfig;
-use crate::types::{AppError, AuthUser, Budget, BudgetSubject, JobState, PageQuery, json_ok};
+use crate::types::{AppError, AuthUser, Budget, BudgetSubject, EffectiveProviderRouting, JobState, PageQuery, json_ok};
 use crate::utils::providers::sync_endpoint_options;
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::Json;
@@ -53,13 +52,14 @@ pub async fn list_models(State(state): State<Arc<JobState>>, user: AuthUser, Que
 
 /// GET /api/v1/models/:id/provider-options
 ///
-/// Upstream provider options for a runnable model, used by the chat provider selector. Gated on
-/// the instance-wide `enable_provider_selector` setting. Endpoints are fetched lazily on first
-/// open (when nothing is stored yet and the parent catalog model is available), mirroring the
-/// admin endpoint but available to any authenticated user.
+/// Upstream provider options for a runnable model, used by the chat provider selector. Only users who
+/// get the selector may call it, and only the upstream providers they may use are listed. Endpoints are
+/// fetched lazily on first open (when nothing is stored yet and the parent catalog model is available),
+/// mirroring the admin endpoint but available to any authenticated user.
 #[allow(clippy::cognitive_complexity)]
 pub async fn get_provider_options(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
-	if !Config::get().enable_provider_selector() {
+	let routing = EffectiveProviderRouting::for_user(&state.db, &user.id).await?;
+	if !routing.selector_enabled {
 		return Err(ErrorCode::InsufficientPermissions.into());
 	}
 
@@ -78,6 +78,11 @@ pub async fn get_provider_options(State(state): State<Arc<JobState>>, user: Auth
 		}
 	}
 
+	if let Some(kind) = Model::provider_kind(&state.db, &id).await? {
+		options
+			.options
+			.retain(|option| option.provider_slug.as_deref().map_or(!routing.is_restricted(&kind), |slug| routing.allows(&kind, slug)));
+	}
 	json_ok(options)
 }
 

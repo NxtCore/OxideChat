@@ -131,6 +131,14 @@ export const useMainStore = defineStore('main', {
 				}
 			}
 		},
+		async refreshChatProviderSelector() {
+			try {
+				const base = await useNuxtApp().$customFetch<Base>('/api/v1/base');
+				if (this.base && base) this.base.chat_provider_selector = base.chat_provider_selector;
+			} catch (e: any) {
+				console.error('Failed to refresh the provider selector:', e?.toString());
+			}
+		},
 		async _pollUntilHealthy() {
 			let delay = 1000;
 			const maxDelay = 10000;

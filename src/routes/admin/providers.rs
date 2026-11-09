@@ -4,7 +4,7 @@
 
 use crate::ai::{parse_extra_headers, reload_providers};
 use crate::types::consts::{ADMIN_PROVIDERS_EDIT, ADMIN_PROVIDERS_VIEW};
-use crate::types::{AppError, AuthUser, JobState};
+use crate::types::{AppError, AuthUser, JobState, UpstreamGatewayResponse};
 use crate::types::models::Model;
 use crate::types::providers::{
 	CreateProviderRequest, Provider, ProviderResponse, SyncProviderResponse, TestProviderRequest, TestProviderResponse, UpdateProviderRequest,
@@ -217,6 +217,13 @@ pub async fn sync_provider(State(state): State<Arc<JobState>>, auth: AuthUser, P
 		models_removed: 0,
 		message,
 	});
+
+	if response.success
+		&& provider.kind.routes_upstream()
+		&& let Err(error) = UpstreamGatewayResponse::sync_all(&state.db).await
+	{
+		tracing::warn!(provider_id = %id, %error, "upstream provider sync after model sync failed");
+	}
 
 	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())
 }

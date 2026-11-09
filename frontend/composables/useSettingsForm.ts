@@ -9,6 +9,7 @@ export interface SettingsFormOptions<T> {
 	errorKey: string;
 	normalize?: (value: T) => unknown;
 	canEdit?: () => boolean;
+	validate?: () => string | null;
 }
 
 export function useSettingsForm<T>(options: SettingsFormOptions<T>) {
@@ -35,6 +36,11 @@ export function useSettingsForm<T>(options: SettingsFormOptions<T>) {
 
 	async function save(): Promise<boolean> {
 		if (saving.value || !isDirty.value) return false;
+		const invalid = options.validate?.();
+		if (invalid) {
+			store.toast(store.getTranslation(options.errorKey), {type: 'error', description: store.getTranslation(invalid)});
+			return false;
+		}
 		saving.value = true;
 		try {
 			await options.save();

@@ -140,6 +140,7 @@ mod tests {
 			members,
 			provider_ids: Vec::new(),
 			model_ids,
+			provider_routing: Default::default(),
 		}
 	}
 

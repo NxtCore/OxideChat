@@ -19,7 +19,11 @@
 			</SettingsRow>
 
 			<SettingsRow :label="store.getTranslation('settings.admin_config.provider_selector.label')" :hint="store.getTranslation('settings.admin_config.provider_selector.hint')">
-				<ShadSwitch v-model="form.enable_provider_selector" :disabled="!canEdit || settingsForm.saving" data-testid="config-provider-selector" />
+				<ShadSwitch v-model="form.provider_routing.selector_enabled" :disabled="!canEdit || settingsForm.saving" data-testid="config-provider-selector" />
+			</SettingsRow>
+
+			<SettingsRow :label="store.getTranslation('settings.admin_config.allowed_providers.label')" :hint="store.getTranslation('settings.admin_config.allowed_providers.hint')" stacked>
+				<ProviderAllowlistEditor v-model="form.provider_routing.allowed_providers" :disabled="!canEdit || settingsForm.saving" :can-sync="canEdit" test-id="config-allowed-providers" />
 			</SettingsRow>
 
 			<SettingsRow :label="store.getTranslation('settings.admin.default_model')" :hint="store.getTranslation('settings.admin.default_model_hint')" stacked>
@@ -96,6 +100,7 @@ import {useMainStore} from '@/stores';
 import {useThemeStore} from '~/stores/theme';
 import {hasThemeVars, isSameTheme} from '~/lib/theme-utils';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
+import ProviderAllowlistEditor from '~/components/settings/ProviderAllowlistEditor.vue';
 import {AlertTriangle} from 'lucide-vue-next';
 import type {ModelList} from '~/types/chat';
 
@@ -107,7 +112,10 @@ const themeStore = useThemeStore();
 const canEdit = computed(() => store.hasPermission(ADMIN_CONFIG_EDIT));
 
 const form = reactive({
-	enable_provider_selector: store.base?.enable_provider_selector ?? false,
+	provider_routing: {
+		selector_enabled: store.base?.provider_routing.selector_enabled ?? false,
+		allowed_providers: copyAllowlists(store.base?.provider_routing.allowed_providers),
+	},
 	default_model_id: store.base?.default_model_id ?? null,
 	language: store.base?.default_language ?? 'en',
 	default_theme: store.base?.default_theme ?? {theme: {}, light: {}, dark: {}},
@@ -168,10 +176,13 @@ const settingsForm = useSettingsForm({
 	value: () => form,
 	restore: saved => Object.assign(form, saved),
 	canEdit: () => canEdit.value,
+	validate: () => emptyAllowlistError(form.provider_routing.allowed_providers),
 	savedKey: 'settings.admin_config.save_success',
 	errorKey: 'settings.admin_config.save_error',
 	save: async () => {
+		const selectorChanged = store.base?.provider_routing.selector_enabled !== form.provider_routing.selector_enabled;
 		await patchAdminConfig(form);
+		if (selectorChanged) store.refreshChatProviderSelector();
 		if (store.base) {
 			const {language, ...rest} = form;
 			Object.assign(store.base, JSON.parse(JSON.stringify(rest)), {default_language: language});

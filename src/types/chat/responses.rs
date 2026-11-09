@@ -4,6 +4,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::i18n::Language;
+use crate::types::ProviderRoutingSettings;
 use crate::types::models::Model;
 use super::{ChatSampling, CostDetails, Message, ReasoningDetails, RequestSettings, ThemeCssVars, ToolExecutionResponse, UsageDetails, UserPreferences};
 
@@ -211,7 +212,7 @@ impl Default for PreferencesResponse {
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "GlobalConfig"))]
 pub struct GlobalConfigResponse {
 	pub default_theme: ThemeCssVars,
-	pub enable_provider_selector: bool,
+	pub provider_routing: ProviderRoutingSettings,
 	pub default_model_id: Option<Uuid>,
 }
 

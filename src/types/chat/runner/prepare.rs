@@ -1,8 +1,10 @@
 use super::request::{RequestInputs, build_request};
 use crate::types::models::Model;
+use crate::types::providers::ProviderKind;
 use crate::types::models_configs::{ModelConfig, ModelConfigViewer};
+use crate::i18n::I18n;
 use crate::types::{
-	BudgetAdmission, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
+	BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
 	StreamingUserMessageCreate, TokenEstimate, UsageDetails, User,
 };
 use axum::response::{
@@ -159,6 +161,31 @@ async fn select_fork(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, user_mess
 	}
 }
 
+/// The upstream provider the user picked for a routing provider kind, if they get the selector.
+///
+/// A pick the user's teams do not allow refuses the turn; for other provider kinds, or without the
+/// selector, the pick is ignored.
+async fn picked_provider(db: &PgPool, user_id: &Uuid, model: &Model, req: &StreamRequest) -> Result<Option<String>, TurnError> {
+	let Some(slug) = req.provider_slug.as_deref().map(str::trim).filter(|slug| !slug.is_empty()) else {
+		return Ok(None);
+	};
+	let Some(kind) = Model::provider_kind(db, &model.id)
+		.await
+		.map_err(internal("Failed to fetch model"))?
+		.filter(ProviderKind::routes_upstream)
+	else {
+		return Ok(None);
+	};
+	let routing = EffectiveProviderRouting::for_user(db, user_id).await.map_err(internal("Failed to check provider access"))?;
+	if !routing.selector_enabled {
+		return Ok(None);
+	}
+	if !routing.allows(&kind, slug) {
+		return Err(TurnError::new("provider_not_allowed", I18n::get().translate("chat.errors.provider_not_allowed", &None)));
+	}
+	Ok(Some(slug.to_string()))
+}
+
 /// Checks access and budget, stores the user message, picks the fork and builds the model request.
 ///
 /// # Errors
@@ -179,6 +206,8 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 	if !Model::can_user_use_model(db, &user.id, &model.id).await.map_err(internal("Failed to check model access"))? {
 		return Err(TurnError::new("model_not_allowed", "Model not available for this user"));
 	}
+
+	let provider_slug = picked_provider(db, &user.id, &model, req).await?;
 
 	let user_config = ModelConfig::find_for_user_by_stable_key(db, ModelConfigViewer { user_id: &user.id }, &req.model_key)
 		.await
@@ -207,6 +236,7 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		model: &model,
 		user_config: user_config.as_ref(),
 		system_config: system_config.as_ref(),
+		provider_slug: provider_slug.as_deref(),
 	};
 	let ir = build_request(db, &inputs, messages).await?;
 
