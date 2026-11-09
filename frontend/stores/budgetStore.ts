@@ -14,10 +14,22 @@ import type {
 } from '~/types/budgets';
 import type {PaginatedResponse} from '~/types/chat';
 
+const PINNED_BUDGET_KEY = 'oxide-budget-pinned';
+
+function loadBudgetPinned(): boolean {
+	if (typeof window === 'undefined') return false;
+	try {
+		return localStorage.getItem(PINNED_BUDGET_KEY) === 'true';
+	} catch {
+		return false;
+	}
+}
+
 export const useBudgetStore = defineStore('budget', {
 	state: () => ({
 		myStatus: null as UserBudgetStatus | null,
 		myStatusStale: false,
+		pinned: loadBudgetPinned(),
 		budgets: [] as Budget[],
 		analytics: {
 			byModel: [] as AnalyticsRow[],
@@ -59,6 +71,12 @@ export const useBudgetStore = defineStore('budget', {
 		},
 	},
 	actions: {
+		togglePinned() {
+			this.pinned = !this.pinned;
+			try {
+				localStorage.setItem(PINNED_BUDGET_KEY, String(this.pinned));
+			} catch {}
+		},
 		async fetchMyBudget() {
 			const {$customFetch} = useNuxtApp();
 			this.myStatus = await $customFetch<UserBudgetStatus>('/api/v1/me/budget');

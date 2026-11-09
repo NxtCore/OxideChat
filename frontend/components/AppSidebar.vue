@@ -14,9 +14,14 @@
 		</ShadSidebarContent>
 
 		<ShadSidebarFooter class="border-t border-sidebar-border p-4">
+			<SidebarBudgetMeter
+				v-if="budgetStore.pinned && budgetStore.myStatus?.budgets.length"
+				class="px-2 pb-1 group-data-[collapsible=icon]:hidden"
+				data-testid="pinned-budget"
+			/>
 			<ShadDropdownMenu>
 				<ShadDropdownMenuTrigger as-child>
-					<ShadSidebarMenuButton size="lg" class="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+					<ShadSidebarMenuButton size="lg" data-testid="user-menu-trigger" class="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
 						<ShadAvatar class="h-8 w-8">
 							<ShadAvatarFallback class="bg-primary text-primary-foreground">
 								{{ userInitials }}
@@ -67,23 +72,9 @@
 						</ShadDropdownMenuSubContent>
 					</ShadDropdownMenuSub>
 
-					<template v-if="budgetStore.myStatus?.budgets.length">
+					<template v-if="budgetStore.myStatus?.budgets.length && !budgetStore.pinned">
 						<ShadDropdownMenuSeparator class="bg-border" />
-						<div class="px-2 py-2">
-							<div class="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
-								<span>{{ store.getTranslation('settings.tabs.budgets') }}</span>
-								<span :class="budgetStore.highestUsagePercent >= 90 ? 'text-destructive' : ''">
-									{{ store.getTranslation('sidebar.budget.remaining', {amount: formatMoney(budgetStore.lowestRemaining ?? 0)}) }}
-								</span>
-							</div>
-							<div class="h-1.5 rounded-full bg-muted">
-								<div
-									class="h-1.5 rounded-full transition-all"
-									:class="budgetStore.highestUsagePercent >= 90 ? 'bg-destructive' : 'bg-primary'"
-									:style="{width: `${budgetStore.highestUsagePercent}%`}"
-								/>
-							</div>
-						</div>
+						<SidebarBudgetMeter class="px-2 py-2" />
 					</template>
 
 					<ShadDropdownMenuSeparator class="bg-border" />
