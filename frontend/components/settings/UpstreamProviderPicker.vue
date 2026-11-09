@@ -31,9 +31,6 @@
 							{{ option.name || option.slug }}
 							<span v-if="option.name && option.name.toLowerCase() !== option.slug" class="ml-1 text-xs text-muted-foreground">{{ option.slug }}</span>
 						</span>
-						<span v-if="!option.reachable" class="shrink-0 text-xs text-destructive" :data-testid="`${testId}-option-${option.slug}-blocked`">
-							{{ store.getTranslation('settings.provider_allowlist.blocked') }}
-						</span>
 						<span v-if="location(option)" class="shrink-0 text-xs text-muted-foreground">{{ location(option) }}</span>
 					</label>
 					<button
@@ -76,7 +73,7 @@ const options = computed(() => {
 	const offered = props.within ? props.providers.filter(provider => props.within?.includes(provider.slug)) : props.providers;
 	const listed = new Set(offered.map(provider => provider.slug));
 	const extra = [...new Set([...(props.modelValue ?? []), ...(props.within ?? [])])].filter(slug => !listed.has(slug));
-	const all: UpstreamProviderResponse[] = [...offered, ...extra.map(slug => ({slug, name: null, headquarters: null, datacenters: [], reachable: true}))];
+	const all: UpstreamProviderResponse[] = [...offered, ...extra.map(slug => ({slug, name: null, headquarters: null, datacenters: []}))];
 	return all.sort((a, b) => (a.name || a.slug).localeCompare(b.name || b.slug));
 });
 

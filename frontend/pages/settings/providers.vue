@@ -922,13 +922,7 @@ async function deleteConfig() {
 	}
 }
 
-const route = useRoute();
-
-onMounted(async () => {
-	await Promise.allSettled([loadProviders(), billingStore.fetchBillingOverviews(), loadExchangeRates()]);
-	const linked = displayProviders.value.find(item => item.isConfigured && item.id === route.query.provider);
-	if (!linked) return;
-	openConfigDialog(linked);
-	if (route.query.tab === 'billing') activeProviderTab.value = 'billing';
+onMounted(() => {
+	Promise.all([loadProviders(), billingStore.fetchBillingOverviews(), loadExchangeRates()]);
 });
 </script>

@@ -89,7 +89,6 @@ mod tests {
 			UpdateWorkspaceRequest,
 			UpstreamProviderResponse,
 			UpstreamGatewayResponse,
-			UpstreamGuardrail,
 			UpstreamSyncResponse,
 			UserBudgetOverviewResponse,
 			UserBudgetStatus,

@@ -11,9 +11,4 @@ headquarters: string | null,
 /**
  * ISO country codes of the provider's datacenters, when the routing provider reports them.
  */
-datacenters: Array<string>, 
-/**
- * `false` when the routing provider's own restrictions on our key (such as an `OpenRouter` guardrail)
- * keep requests from reaching this provider.
- */
-reachable: boolean, };
+datacenters: Array<string>, };

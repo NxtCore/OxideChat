@@ -574,8 +574,7 @@ CREATE INDEX IF NOT EXISTS idx_gateway_catalog_models_provider ON gateway_catalo
 -- Upstream providers of routing provider kinds (e.g. OpenRouter), synced by provider_routing::sources
 CREATE TABLE IF NOT EXISTS upstream_gateways (
     kind provider_kind PRIMARY KEY,
-    synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    guardrail JSONB NOT NULL DEFAULT '{"status": "not_checked"}'
+    synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS upstream_providers (
@@ -1286,17 +1285,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.provider_allowlist.synced_at', 'Zuletzt synchronisiert: {time}'),
     ('de', 'settings.provider_allowlist.not_synced', 'Noch nicht synchronisiert. Angezeigt werden Anbieter aus den synchronisierten Modellen.'),
     ('de', 'settings.provider_allowlist.sync_failed', '{gateway} war nicht erreichbar. Die bisherige Liste bleibt erhalten.'),
-    ('de', 'settings.provider_allowlist.blocked', 'Durch Guardrail gesperrt'),
     ('de', 'settings.provider_allowlist.location', 'Sitz {headquarters} · Rechenzentren {datacenters}'),
-    ('de', 'settings.provider_allowlist.guardrail.not_checked', 'Einschränkungen des Keys werden für diesen Anbieter nicht geprüft.'),
-    ('de', 'settings.provider_allowlist.guardrail.needs_management_key', 'Optional: {gateway} zeigt die Guardrail eines Keys nur einem Management-Key. Hinterlege einen am {gateway}-Anbieter unter „Abrechnung“, damit hier steht, welche Upstream-Anbieter dein Key nutzen darf. Die Anbieterliste funktioniert auch ohne.'),
-    ('de', 'settings.provider_allowlist.guardrail.add_management_key', 'Management-Key hinterlegen'),
-    ('de', 'settings.provider_allowlist.guardrail.none', 'Für den Key gilt keine Guardrail.'),
-    ('de', 'settings.provider_allowlist.guardrail.key_not_found', 'Der Key wurde im Konto nicht gefunden, daher ist seine Guardrail unbekannt.'),
-    ('de', 'settings.provider_allowlist.guardrail.unavailable', 'Die Guardrail konnte nicht gelesen werden.'),
-    ('de', 'settings.provider_allowlist.guardrail.assigned', 'Für den Key gilt die Guardrail „{name}“.'),
-    ('de', 'settings.provider_allowlist.guardrail.regions', 'Datenregionen: {regions}.'),
-    ('de', 'settings.provider_allowlist.guardrail.apply', 'Anbieter der Guardrail übernehmen'),
     ('de', 'settings.provider_allowlist.empty', 'Füge mindestens einen Anbieter hinzu oder schalte die Einschränkung aus.'),
     ('de', 'settings.admin_config.provider_selector.label', 'Chat-Anbieterauswahl'),
     ('de', 'settings.admin_users.cannot_modify_self', 'Sie können Ihr eigenes Konto nicht bearbeiten'),
@@ -1662,7 +1651,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.providers.billing.local_only', 'OxideChat erfasst lokale Ausgaben. Fuer diesen Anbieter gibt es keine unterstuetzte Upstream-Abrechnungsintegration.'),
     ('de', 'settings.providers.billing.local_tracked', 'Von OxideChat erfasst'),
     ('de', 'settings.providers.billing.management_key', 'OpenRouter-Management-Schluessel (optional)'),
-    ('de', 'settings.providers.billing.management_key_hint', 'Ein Management-Schlüssel zeigt kontoweite Guthaben und Ausgaben und die Guardrail des Inferenzschlüssels bei den Upstream-Anbietern. Ohne diesen werden Daten des Inferenzschlüssels verwendet.'),
+    ('de', 'settings.providers.billing.management_key_hint', 'Ein Management-Schluessel zeigt kontoweite Guthaben und Ausgaben. Ohne diesen werden Daten des Inferenzschluessels verwendet.'),
     ('de', 'settings.providers.billing.never_updated', 'Noch nicht aktualisiert'),
     ('de', 'settings.providers.billing.over_threshold', 'Schwellenwert um {amount} ueberschritten'),
     ('de', 'settings.providers.billing.period', 'Zeitraum'),
@@ -2211,17 +2200,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.provider_allowlist.synced_at', 'Last synced {time}'),
     ('en', 'settings.provider_allowlist.not_synced', 'Not synced yet. Showing providers from the synced models.'),
     ('en', 'settings.provider_allowlist.sync_failed', '{gateway} could not be reached. The previous list is kept.'),
-    ('en', 'settings.provider_allowlist.blocked', 'Blocked by guardrail'),
     ('en', 'settings.provider_allowlist.location', 'HQ {headquarters} · Datacenters {datacenters}'),
-    ('en', 'settings.provider_allowlist.guardrail.not_checked', 'Restrictions on the key are not checked for this provider.'),
-    ('en', 'settings.provider_allowlist.guardrail.needs_management_key', 'Optional: {gateway} only shows a key''s guardrail to a management key. Add one to the {gateway} provider under Billing to see here which upstream providers your key may use. The provider list works without it.'),
-    ('en', 'settings.provider_allowlist.guardrail.add_management_key', 'Add a management key'),
-    ('en', 'settings.provider_allowlist.guardrail.none', 'The key has no guardrail.'),
-    ('en', 'settings.provider_allowlist.guardrail.key_not_found', 'The key was not found in the account, so its guardrail is unknown.'),
-    ('en', 'settings.provider_allowlist.guardrail.unavailable', 'The guardrail could not be read.'),
-    ('en', 'settings.provider_allowlist.guardrail.assigned', 'The key is limited by the guardrail "{name}".'),
-    ('en', 'settings.provider_allowlist.guardrail.regions', 'Data regions: {regions}.'),
-    ('en', 'settings.provider_allowlist.guardrail.apply', 'Use the guardrail''s providers'),
     ('en', 'settings.provider_allowlist.empty', 'Add at least one provider, or turn the restriction off.'),
     ('en', 'settings.admin_config.provider_selector.label', 'Chat provider selector'),
     ('en', 'settings.admin_users.cannot_modify_self', 'You cannot modify your own account'),
@@ -2587,7 +2566,7 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.providers.billing.local_only', 'OxideChat tracks local spend. This provider does not have a supported upstream billing integration.'),
     ('en', 'settings.providers.billing.local_tracked', 'OxideChat tracked'),
     ('en', 'settings.providers.billing.management_key', 'OpenRouter management key (optional)'),
-    ('en', 'settings.providers.billing.management_key_hint', 'Use an account management key for account-wide purchased and used credits, and to read the guardrail that limits the inference key''s upstream providers. Without one, the inference key reports key-level usage.'),
+    ('en', 'settings.providers.billing.management_key_hint', 'Use an account management key for account-wide purchased and used credits. Without one, the inference key reports key-level usage.'),
     ('en', 'settings.providers.billing.never_updated', 'Not refreshed yet'),
     ('en', 'settings.providers.billing.over_threshold', 'Over threshold by {amount}'),
     ('en', 'settings.providers.billing.period', 'Period'),

@@ -13,7 +13,6 @@
 			>
 				<ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground transition-transform" :class="{'rotate-90': isOpen(gateway.kind)}" />
 				<span class="flex-1 text-sm font-medium">{{ gatewayName(gateway.kind) }}</span>
-				<ShieldCheck v-if="gateway.guardrail.status === 'assigned'" class="h-4 w-4 text-muted-foreground" />
 				<ShadBadge :variant="modelValue[gateway.kind] ? 'default' : 'secondary'" :data-testid="`${testId}-gateway-${slug(gateway.kind)}-status`">
 					{{ status(gateway.kind) }}
 				</ShadBadge>
@@ -45,38 +44,6 @@
 						{{ store.getTranslation('settings.provider_allowlist.sync') }}
 					</ShadButton>
 				</div>
-				<div
-					v-if="gateway.guardrail.status === 'needs_management_key'"
-					class="space-y-2 rounded-md border border-border bg-muted/40 p-3 text-xs"
-					:data-testid="`${testId}-${slug(gateway.kind)}-management-key`"
-				>
-					<p class="flex gap-2 text-muted-foreground">
-						<KeyRound class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-						<span>{{ store.getTranslation('settings.provider_allowlist.guardrail.needs_management_key', {gateway: gatewayName(gateway.kind)}) }}</span>
-					</p>
-					<NuxtLink
-						v-if="canSync && gateway.provider_id"
-						:to="`/settings/providers?provider=${gateway.provider_id}&tab=billing`"
-						class="inline-block pl-5 font-medium text-primary underline-offset-4 hover:underline"
-						:data-testid="`${testId}-${slug(gateway.kind)}-management-key-link`"
-					>
-						{{ store.getTranslation('settings.provider_allowlist.guardrail.add_management_key') }}
-					</NuxtLink>
-				</div>
-				<p v-else-if="gateway.synced_at" class="text-xs text-muted-foreground" :data-testid="`${testId}-${slug(gateway.kind)}-guardrail`">{{ guardrailText(gateway) }}</p>
-				<div class="text-xs">
-					<div v-if="gateway.guardrail.status === 'assigned' && guardrailSlugs(gateway).length">
-						<ShadButton
-							variant="outline"
-							size="sm"
-							:disabled="disabled"
-							:data-testid="`${testId}-${slug(gateway.kind)}-apply-guardrail`"
-							@click="emit('update:modelValue', withAllowlist(modelValue, gateway.kind, guardrailSlugs(gateway)))"
-						>
-							{{ store.getTranslation('settings.provider_allowlist.guardrail.apply') }}
-						</ShadButton>
-					</div>
-				</div>
 				<UpstreamProviderPicker
 					:model-value="modelValue[gateway.kind] ?? null"
 					:providers="gateway.providers"
@@ -91,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import {ChevronRight, KeyRound, RefreshCw, ShieldCheck} from 'lucide-vue-next';
+import {ChevronRight, RefreshCw} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import type {ProviderKind} from '~/types/generated/ProviderKind';
 import type {UpstreamGatewayResponse} from '~/types/generated/UpstreamGatewayResponse';
@@ -113,7 +80,7 @@ const gateways = computed<UpstreamGatewayResponse[]>(() => {
 	const list = [...(loadedGateways.value ?? [])];
 	const kinds = new Set([...Object.keys(props.modelValue), ...Object.keys(props.within ?? {})] as ProviderKind[]);
 	for (const kind of kinds) {
-		if (!list.some(gateway => gateway.kind === kind)) list.push({kind, provider_id: null, synced_at: null, guardrail: {status: 'not_checked'}, providers: []});
+		if (!list.some(gateway => gateway.kind === kind)) list.push({kind, provider_id: null, synced_at: null, providers: []});
 	}
 	return list.sort((a, b) => gatewayName(a.kind).localeCompare(gatewayName(b.kind)));
 });
@@ -136,19 +103,6 @@ function status(kind: ProviderKind) {
 	return store.getTranslation('settings.provider_allowlist.count_allowed', {count: allowed.length});
 }
 
-function guardrailText(gateway: UpstreamGatewayResponse) {
-	const guardrail = gateway.guardrail;
-	if (guardrail.status !== 'assigned') return store.getTranslation(`settings.provider_allowlist.guardrail.${guardrail.status}`);
-	const text = store.getTranslation('settings.provider_allowlist.guardrail.assigned', {name: guardrail.name ?? '?'});
-	if (!guardrail.allowed_data_regions.length) return text;
-	return `${text} ${store.getTranslation('settings.provider_allowlist.guardrail.regions', {regions: guardrail.allowed_data_regions.join(', ')})}`;
-}
-
-function guardrailSlugs(gateway: UpstreamGatewayResponse) {
-	const within = props.within?.[gateway.kind];
-	return gateway.providers.filter(provider => provider.reachable && (!within || within.includes(provider.slug))).map(provider => provider.slug);
-}
-
 async function sync() {
 	syncing.value = true;
 	try {
@@ -162,10 +116,8 @@ async function sync() {
 	}
 }
 
-const autoSynced = useState('upstream-auto-synced', () => false);
-
-onMounted(async () => {
-	await inflight('upstream-gateways', async () => {
+onMounted(() =>
+	inflight('upstream-gateways', async () => {
 		if (loadedGateways.value) return;
 		try {
 			loadedGateways.value = await upstreamProviders<UpstreamGatewayResponse>();
@@ -173,11 +125,6 @@ onMounted(async () => {
 			console.error('Failed to load upstream providers:', error);
 			loadedGateways.value = [];
 		}
-	});
-	const neverSynced = loadedGateways.value?.some(gateway => gateway.provider_id && !gateway.synced_at);
-	if (props.canSync && neverSynced && !autoSynced.value) {
-		autoSynced.value = true;
-		await inflight('upstream-auto-sync', sync);
-	}
-});
+	}),
+);
 </script>

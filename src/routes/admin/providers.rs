@@ -218,11 +218,13 @@ pub async fn sync_provider(State(state): State<Arc<JobState>>, auth: AuthUser, P
 		message,
 	});
 
-	if response.success
-		&& provider.kind.routes_upstream()
-		&& let Err(error) = UpstreamGatewayResponse::sync_all(&state.db).await
-	{
-		tracing::warn!(provider_id = %id, %error, "upstream provider sync after model sync failed");
+	if response.success && provider.kind.routes_upstream() {
+		let state = Arc::clone(&state);
+		tokio::spawn(async move {
+			if let Err(error) = UpstreamGatewayResponse::sync_all(&state.db).await {
+				tracing::warn!(provider_id = %id, %error, "upstream provider sync after model sync failed");
+			}
+		});
 	}
 
 	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())

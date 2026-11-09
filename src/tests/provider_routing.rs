@@ -212,86 +212,6 @@ mod tests {
 		}
 	}
 
-	mod guardrail {
-		use super::*;
-		use crate::types::UpstreamGuardrail;
-		use crate::types::provider_routing::sources::openrouter::{guardrail_for, own_key_hash};
-		use omniference::catalog::{OpenRouterApiKey, OpenRouterGuardrail, OpenRouterKeyAssignment};
-		use sha2::{Digest, Sha256};
-
-		fn api_key(hash: &str, label: &str) -> OpenRouterApiKey {
-			OpenRouterApiKey {
-				hash: hash.to_string(),
-				label: Some(label.to_string()),
-				..Default::default()
-			}
-		}
-
-		fn assigned(allowed: Option<&[&str]>, ignored: &[&str]) -> UpstreamGuardrail {
-			UpstreamGuardrail::Assigned {
-				name: Some("EU only".to_string()),
-				allowed_providers: allowed.map(slugs),
-				ignored_providers: slugs(ignored),
-				allowed_data_regions: Vec::new(),
-			}
-		}
-
-		#[test]
-		fn a_guardrail_permits_its_allowed_providers_and_their_variants() {
-			let guardrail = assigned(Some(&["mistral", "deepinfra"]), &["deepinfra/fp4"]);
-			assert!(guardrail.permits("Mistral"));
-			assert!(guardrail.permits("deepinfra/fp8"));
-			assert!(!guardrail.permits("deepinfra/fp4"));
-			assert!(!guardrail.permits("azure"));
-			assert!(assigned(None, &["azure"]).permits("mistral"));
-			assert!(!assigned(None, &["azure"]).permits("azure"));
-			assert!(UpstreamGuardrail::None.permits("azure"));
-		}
-
-		#[test]
-		fn the_own_key_is_found_by_its_sha256_before_its_label() {
-			let digest = format!("{:x}", Sha256::digest(b"sk-or-test"));
-			let keys = [api_key("other", "sk-or-...test"), api_key(&digest, "renamed")];
-			assert_eq!(own_key_hash("sk-or-test", Some("sk-or-...test"), &keys), Some(digest));
-		}
-
-		#[test]
-		fn the_own_key_falls_back_to_a_unique_label() {
-			let keys = [api_key("a", "sk-or-...test"), api_key("b", "sk-or-...else")];
-			assert_eq!(own_key_hash("sk-or-test", Some("sk-or-...test"), &keys), Some("a".to_string()));
-			let ambiguous = [api_key("a", "sk-or-...test"), api_key("b", "sk-or-...test")];
-			assert_eq!(own_key_hash("sk-or-test", Some("sk-or-...test"), &ambiguous), None);
-			assert_eq!(own_key_hash("sk-or-test", None, &keys), None);
-		}
-
-		#[test]
-		fn the_assigned_guardrail_is_read_with_lowercased_slugs() {
-			let assignments = [OpenRouterKeyAssignment {
-				key_hash: "ABC".to_string(),
-				guardrail_id: "g1".to_string(),
-				..Default::default()
-			}];
-			let guardrails = [OpenRouterGuardrail {
-				id: "g1".to_string(),
-				name: Some("EU only".to_string()),
-				allowed_providers: Some(slugs(&["Mistral"])),
-				ignored_providers: None,
-				allowed_data_regions: Some(slugs(&["europe"])),
-			}];
-			assert_eq!(
-				guardrail_for("abc", &assignments, &guardrails),
-				UpstreamGuardrail::Assigned {
-					name: Some("EU only".to_string()),
-					allowed_providers: Some(slugs(&["mistral"])),
-					ignored_providers: Vec::new(),
-					allowed_data_regions: slugs(&["europe"]),
-				}
-			);
-			assert_eq!(guardrail_for("other", &assignments, &guardrails), UpstreamGuardrail::None);
-			assert_eq!(guardrail_for("abc", &assignments, &[]), UpstreamGuardrail::Unavailable);
-		}
-	}
-
 	mod database {
 		use super::*;
 		use crate::config::Config;
@@ -386,9 +306,8 @@ mod tests {
 			assert_eq!(gateways.len(), 1);
 			assert_eq!(gateways[0].kind, ROUTER);
 			assert!(gateways[0].synced_at.is_none());
-			assert!(gateways[0].providers.iter().all(|provider| provider.reachable));
 			let listed: Vec<&str> = gateways[0].providers.iter().map(|provider| provider.slug.as_str()).collect();
-			assert_eq!(listed, ["azure", "deepinfra"]);
+			assert_eq!(listed, ["azure", "deepinfra", "deepinfra/fp8"]);
 			Ok(())
 		}
 
@@ -486,90 +405,49 @@ mod tests {
 		}
 
 		async fn fake_openrouter() -> Result<String, std::io::Error> {
-			use axum::extract::Query;
-			use axum::routing::get;
 			use serde_json::json;
-			use std::collections::HashMap;
-			type Params = Query<HashMap<String, String>>;
-			fn first_page(params: &HashMap<String, String>, data: serde_json::Value) -> axum::Json<serde_json::Value> {
-				let first = params.get("offset").is_none_or(|offset| offset == "0");
-				axum::Json(json!({"data": if first { data } else { json!([]) }, "total_count": 1}))
-			}
-			let hash = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(b"sk-or-test"));
-			let key_hash = hash.clone();
-			let router = axum::Router::new()
-				.route(
-					"/v1/providers",
-					get(|| async {
-						axum::Json(json!({"data": [
-							{"name": "Azure", "slug": "azure", "headquarters": "US", "datacenters": ["US", "SE"]},
-							{"name": "Mistral", "slug": "Mistral", "headquarters": "FR", "datacenters": ["FR"]}
-						]}))
-					}),
-				)
-				.route("/v1/key", get(|| async { axum::Json(json!({"data": {"label": "sk-or-...test"}})) }))
-				.route("/v1/keys", get(move |Query(params): Params| async move { first_page(&params, json!([{"hash": hash, "label": "sk-or-...test", "name": "OxideChat"}])) }))
-				.route(
-					"/v1/guardrails/assignments/keys",
-					get(move |Query(params): Params| async move { first_page(&params, json!([{"key_hash": key_hash, "guardrail_id": "g1"}])) }),
-				)
-				.route(
-					"/v1/guardrails",
-					get(|Query(params): Params| async move {
-						first_page(&params, json!([{"id": "g1", "name": "EU only", "allowed_providers": ["mistral"], "ignored_providers": null, "allowed_data_regions": ["europe"]}]))
-					}),
-				);
+			let router = axum::Router::new().route(
+				"/v1/providers",
+				axum::routing::get(|| async {
+					axum::Json(json!({"data": [
+						{"name": "Azure", "slug": "azure", "headquarters": "US", "datacenters": ["US", "SE"]},
+						{"name": "Mistral", "slug": "Mistral", "headquarters": "FR", "datacenters": null}
+					]}))
+				}),
+			);
 			let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
 			let address = listener.local_addr()?;
 			tokio::spawn(async move { axum::serve(listener, router).await });
 			Ok(format!("http://{address}"))
 		}
 
-		async fn openrouter_provider(pool: &PgPool, base_url: &str, management_key: Option<&str>) -> Result<Uuid, Box<dyn std::error::Error>> {
+		async fn openrouter_provider(pool: &PgPool, base_url: &str) -> Result<Uuid, Box<dyn std::error::Error>> {
 			let api_key = crate::utils::encryption::encrypt_api_key("sk-or-test")?;
-			let provider: Uuid = sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, api_key, is_enabled) VALUES ('OPENROUTER', 'Router', $1, $2, true) RETURNING id")
+			let provider = sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, api_key, is_enabled) VALUES ('OPENROUTER', 'Router', $1, $2, true) RETURNING id")
 				.bind(base_url)
 				.bind(api_key)
 				.fetch_one(pool)
 				.await?;
-			if let Some(management_key) = management_key {
-				let encrypted = crate::utils::encryption::encrypt_api_key(management_key)?;
-				crate::types::providers::Provider::upsert_billing_connection_for_admin(pool, &provider, Some(&encrypted)).await?;
-			}
 			Ok(provider)
 		}
 
 		#[sqlx::test(migrations = "./migrations")]
-		async fn a_sync_stores_the_providers_and_the_keys_guardrail(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
+		async fn a_sync_stores_the_providers(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
 			Config::init(&pool).await;
 			crate::utils::encryption::init_for_test([0x42; 32])?;
 			let base_url = fake_openrouter().await?;
-			openrouter_provider(&pool, &base_url, Some("sk-or-management")).await?;
+			openrouter_provider(&pool, &base_url).await?;
 
 			let synced = crate::types::UpstreamGatewayResponse::sync_all(&pool).await?;
 			assert!(synced.failed.is_empty());
 			let gateway = &synced.gateways[0];
 			assert!(gateway.synced_at.is_some());
-			assert!(matches!(&gateway.guardrail, crate::types::UpstreamGuardrail::Assigned { name: Some(name), .. } if name == "EU only"));
-			let listed: Vec<(&str, bool, Vec<String>)> = gateway.providers.iter().map(|provider| (provider.slug.as_str(), provider.reachable, provider.datacenters.clone())).collect();
-			assert_eq!(listed, [("azure", false, slugs(&["US", "SE"])), ("mistral", true, slugs(&["FR"]))]);
+			assert!(gateway.provider_id.is_some());
+			let listed: Vec<(&str, Vec<String>)> = gateway.providers.iter().map(|provider| (provider.slug.as_str(), provider.datacenters.clone())).collect();
+			assert_eq!(listed, [("azure", slugs(&["US", "SE"])), ("mistral", Vec::new())]);
 
 			let reloaded = crate::types::UpstreamGatewayResponse::load_all(&pool).await?;
 			assert_eq!(reloaded[0].providers, gateway.providers);
-			Ok(())
-		}
-
-		#[sqlx::test(migrations = "./migrations")]
-		async fn without_a_management_key_the_sync_asks_for_one(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-			Config::init(&pool).await;
-			crate::utils::encryption::init_for_test([0x42; 32])?;
-			let base_url = fake_openrouter().await?;
-			openrouter_provider(&pool, &base_url, None).await?;
-
-			let synced = crate::types::UpstreamGatewayResponse::sync_all(&pool).await?;
-			assert_eq!(synced.gateways[0].guardrail, crate::types::UpstreamGuardrail::NeedsManagementKey);
-			assert!(synced.gateways[0].provider_id.is_some());
-			assert!(synced.gateways[0].providers.iter().all(|provider| provider.reachable));
 			Ok(())
 		}
 
@@ -578,7 +456,7 @@ mod tests {
 			Config::init(&pool).await;
 			crate::utils::encryption::init_for_test([0x42; 32])?;
 			let base_url = fake_openrouter().await?;
-			let provider = openrouter_provider(&pool, &base_url, None).await?;
+			let provider = openrouter_provider(&pool, &base_url).await?;
 			crate::types::UpstreamGatewayResponse::sync_all(&pool).await?;
 			sqlx::query("UPDATE providers SET base_url = 'http://127.0.0.1:9' WHERE id = $1").bind(provider).execute(&pool).await?;
 

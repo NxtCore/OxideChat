@@ -70,36 +70,6 @@ pub struct UpstreamProviderResponse {
 	pub headquarters: Option<String>,
 	/// ISO country codes of the provider's datacenters, when the routing provider reports them.
 	pub datacenters: Vec<String>,
-	/// `false` when the routing provider's own restrictions on our key (such as an `OpenRouter` guardrail)
-	/// keep requests from reaching this provider.
-	pub reachable: bool,
-}
-
-/// Restrictions the routing provider itself puts on the key `OxideChat` uses, as found by the last sync.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub enum UpstreamGuardrail {
-	/// The routing provider has no such restrictions, or the providers were not synced yet.
-	#[default]
-	NotChecked,
-	/// The routing provider only shows the restrictions to an account-level management key, and none is stored.
-	NeedsManagementKey,
-	/// The key has no guardrail.
-	None,
-	/// The key could not be found among the account's keys, so its guardrail is unknown.
-	KeyNotFound,
-	/// The guardrail could not be read.
-	Unavailable,
-	/// The key is assigned to this guardrail.
-	Assigned {
-		name: Option<String>,
-		/// Providers the key may use; `None` allows every provider.
-		allowed_providers: Option<Vec<String>>,
-		ignored_providers: Vec<String>,
-		/// Data regions requests must go through, such as `europe`.
-		allowed_data_regions: Vec<String>,
-	},
 }
 
 /// A routing provider kind with the upstream providers it can send requests to.
@@ -114,7 +84,6 @@ pub struct UpstreamGatewayResponse {
 	/// model endpoint options instead.
 	#[cfg_attr(test, ts(type = "string | null"))]
 	pub synced_at: Option<chrono::DateTime<chrono::Utc>>,
-	pub guardrail: UpstreamGuardrail,
 	pub providers: Vec<UpstreamProviderResponse>,
 }
 
@@ -125,20 +94,6 @@ pub struct UpstreamSyncResponse {
 	pub gateways: Vec<UpstreamGatewayResponse>,
 	/// Kinds whose routing provider could not be reached; they keep their previous snapshot.
 	pub failed: Vec<ProviderKind>,
-}
-
-impl UpstreamGuardrail {
-	/// Whether the guardrail lets requests reach the upstream provider `slug`.
-	#[must_use]
-	pub fn permits(&self, slug: &str) -> bool {
-		match self {
-			Self::Assigned { allowed_providers, ignored_providers, .. } => {
-				allowed_providers.as_ref().is_none_or(|allowed| allowed.iter().any(|allowed| slug_matches(allowed, slug)))
-					&& !ignored_providers.iter().any(|ignored| slug_matches(ignored, slug))
-			}
-			_ => true,
-		}
-	}
 }
 
 // ---------------------------------------------------------------------------

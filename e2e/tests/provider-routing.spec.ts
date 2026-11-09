@@ -9,12 +9,9 @@ test.describe('provider routing', () => {
 		try {
 			await api.patch('/api/v1/admin/config', {provider_routing: {...before, allowed_providers: {}}});
 			await page.goto('/settings/admin-config');
-			await expect(page.getByTestId('config-allowed-providers-openrouter-synced')).not.toHaveText(t('settings.provider_allowlist.not_synced'));
+			await expect(page.getByTestId('config-allowed-providers-openrouter-synced')).toHaveText(t('settings.provider_allowlist.not_synced'));
 			await page.getByTestId('config-allowed-providers-openrouter-sync').click();
-			await expect(page.getByTestId('config-allowed-providers-openrouter-management-key')).toContainText(
-				t('settings.provider_allowlist.guardrail.needs_management_key', {gateway: 'OpenRouter'}),
-			);
-			await expect(page.getByTestId('config-allowed-providers-openrouter-management-key-link')).toHaveAttribute('href', `/settings/providers?provider=${provider.id}&tab=billing`);
+			await expect(page.getByTestId('config-allowed-providers-openrouter-synced')).not.toHaveText(t('settings.provider_allowlist.not_synced'));
 
 			await page.getByTestId('config-allowed-providers-openrouter-restrict').click();
 			await expect(page.getByTestId('config-allowed-providers-openrouter-empty')).toBeVisible();
@@ -27,9 +24,6 @@ test.describe('provider routing', () => {
 			await page.getByTestId('settings-save-bar-save').click();
 			await expect(page.getByTestId('settings-save-bar')).toBeHidden();
 			expect((await api.get('/api/v1/config')).provider_routing.allowed_providers).toEqual({OPENROUTER: ['azure', 'mistral']});
-
-			await page.getByTestId('config-allowed-providers-openrouter-management-key-link').click();
-			await expect(page.locator('#billing-key')).toBeVisible();
 		} finally {
 			await api.patch('/api/v1/admin/config', {provider_routing: before});
 			await api.delete(`/api/v1/admin/providers/${provider.id}`);
