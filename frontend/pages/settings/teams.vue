@@ -74,6 +74,7 @@
 					<ShadTabsList>
 						<ShadTabsTrigger value="members">{{ store.getTranslation('settings.teams.members') }}</ShadTabsTrigger>
 						<ShadTabsTrigger value="models">{{ store.getTranslation('settings.teams.models') }}</ShadTabsTrigger>
+						<ShadTabsTrigger value="routing" data-testid="team-tab-routing">{{ store.getTranslation('settings.teams.provider_routing') }}</ShadTabsTrigger>
 					</ShadTabsList>
 
 					<!-- Members -->
@@ -223,6 +224,29 @@
 						</div>
 						</template>
 					</ShadTabsContent>
+
+					<!-- Provider routing -->
+					<ShadTabsContent value="routing" class="mt-4 rounded-lg border border-border bg-card">
+						<div class="border-b border-border p-3 space-y-1.5">
+							<ShadLabel>{{ store.getTranslation('settings.teams.provider_selector.label') }}</ShadLabel>
+							<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.provider_selector.hint') }}</p>
+							<ShadSelect v-model="selectorMode" :disabled="!canEdit">
+								<ShadSelectTrigger class="w-64" data-testid="team-provider-selector">
+									<ShadSelectValue />
+								</ShadSelectTrigger>
+								<ShadSelectContent>
+									<ShadSelectItem value="inherit">{{ store.getTranslation('settings.teams.provider_selector.inherit') }}</ShadSelectItem>
+									<ShadSelectItem value="on">{{ store.getTranslation('settings.teams.provider_selector.on') }}</ShadSelectItem>
+									<ShadSelectItem value="off">{{ store.getTranslation('settings.teams.provider_selector.off') }}</ShadSelectItem>
+								</ShadSelectContent>
+							</ShadSelect>
+						</div>
+						<div class="p-3 space-y-1.5">
+							<ShadLabel>{{ store.getTranslation('settings.admin_config.allowed_providers.label') }}</ShadLabel>
+							<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.teams.allowed_providers.hint') }}</p>
+							<ProviderAllowlistEditor v-model="form.provider_routing.allowed_providers" :within="store.base?.provider_routing.allowed_providers ?? null" :disabled="!canEdit" :can-sync="store.hasPermission(ADMIN_CONFIG_EDIT)" test-id="team-allowed-providers" />
+						</div>
+					</ShadTabsContent>
 				</ShadTabs>
 			</div>
 
@@ -284,13 +308,15 @@
 </template>
 
 <script setup lang="ts">
-import {ADMIN_TEAMS_EDIT} from '~/types/generated/permissions';
+import {ADMIN_CONFIG_EDIT, ADMIN_TEAMS_EDIT} from '~/types/generated/permissions';
 import {computed, onMounted, onUnmounted, reactive, ref, watch} from 'vue';
 import {Bot, Loader2, Network, Plus, Search, Trash2, Users} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
 import {sanitizeSvg} from '@/composables/useMarkdown';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
+import ProviderAllowlistEditor from '~/components/settings/ProviderAllowlistEditor.vue';
+import type {TeamProviderRouting} from '~/types/generated/TeamProviderRouting';
 import type {ProviderResponse as ProviderListItem, ModelListAdmin, TeamDetailed, TeamList, TeamRole, UserListResponse} from '~/types/chat';
 
 const store = useMainStore();
@@ -317,6 +343,7 @@ const form = reactive({
 	member_roles: {} as Record<string, TeamRole>,
 	provider_ids: [] as string[],
 	model_ids: [] as string[],
+	provider_routing: {selector_enabled: null, allowed_providers: {}} as TeamProviderRouting,
 });
 const createForm = reactive({name: '', description: '', allow_all_models: false});
 
@@ -334,10 +361,22 @@ const settingsForm = useSettingsForm({
 		members: [...value.member_ids].sort().map(id => `${id}:${value.member_roles[id] ?? 'member'}`),
 		provider_ids: [...value.provider_ids].sort(),
 		model_ids: [...value.model_ids].sort(),
+		provider_routing: {
+			selector_enabled: value.provider_routing.selector_enabled,
+			allowed_providers: copyAllowlists(value.provider_routing.allowed_providers),
+		},
 	}),
+	validate: () => emptyAllowlistError(form.provider_routing.allowed_providers),
 	savedKey: 'settings.teams.save_success',
 	errorKey: 'settings.teams.save_error',
 	save: saveTeam,
+});
+
+const selectorMode = computed({
+	get: () => (form.provider_routing.selector_enabled === null ? 'inherit' : form.provider_routing.selector_enabled ? 'on' : 'off'),
+	set: (mode: string) => {
+		form.provider_routing.selector_enabled = mode === 'inherit' ? null : mode === 'on';
+	},
 });
 
 const filteredUsers = computed(() => {
@@ -411,6 +450,10 @@ function applySelected(team: TeamDetailed) {
 	form.member_roles = Object.fromEntries(team.members.map(member => [member.id, member.role]));
 	form.provider_ids = [...team.model_access.provider_ids];
 	form.model_ids = [...team.model_access.model_ids];
+	form.provider_routing = {
+		selector_enabled: team.provider_routing.selector_enabled,
+		allowed_providers: copyAllowlists(team.provider_routing.allowed_providers),
+	};
 }
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -505,10 +548,19 @@ async function saveTeam() {
 		members: form.member_ids.map(id => ({user_id: id, role: form.member_roles[id] ?? 'member'})),
 		provider_ids: form.provider_ids,
 		model_ids: form.model_ids,
+		provider_routing: form.provider_routing,
 	});
+	const wasMember = isOwnTeam(selectedTeam.value);
+	const isMember = isOwnTeam(updated);
+	const selectorChanged = selectedTeam.value.provider_routing.selector_enabled !== updated.provider_routing.selector_enabled;
+	if (wasMember !== isMember || (isMember && selectorChanged)) store.refreshChatProviderSelector();
 	selectedTeam.value = updated;
 	applySelected(updated);
 	await loadTeams();
+}
+
+function isOwnTeam(team: TeamDetailed) {
+	return team.members.some(member => member.id === store.user?.id);
 }
 
 async function deleteSelected() {
@@ -516,6 +568,7 @@ async function deleteSelected() {
 	saving.value = true;
 	try {
 		await deleteAdminTeam(selectedTeam.value.id);
+		if (isOwnTeam(selectedTeam.value)) store.refreshChatProviderSelector();
 		store.toast(store.getTranslation('settings.teams.delete_success'), {type: 'success'});
 		deleteOpen.value = false;
 		selectedTeam.value = null;

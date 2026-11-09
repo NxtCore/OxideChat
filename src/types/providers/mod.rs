@@ -16,7 +16,7 @@ use rust_decimal::Decimal;
 pub use requests::*;
 pub use responses::*;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type)]
 #[sqlx(type_name = "provider_kind", rename_all = "SCREAMING_SNAKE_CASE")]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -32,6 +32,17 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
+	/// Kinds that route each request to one of several upstream providers. Their requests honour the provider
+	/// selector and the admins' upstream provider allowlists through `ChatRequestIR::provider_routing`, which
+	/// Omniference's adapter for the kind maps onto the provider's own routing fields.
+	pub const UPSTREAM_ROUTING: &[Self] = &[Self::Openrouter];
+
+	/// Whether requests to this kind can be routed to a chosen upstream provider.
+	#[must_use]
+	pub fn routes_upstream(&self) -> bool {
+		Self::UPSTREAM_ROUTING.contains(self)
+	}
+
 	#[must_use]
 	pub fn to_omni_kind(&self) -> OmniProviderKind {
 		match self {

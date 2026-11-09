@@ -355,7 +355,9 @@ const detailOpt = computed<ProviderOption | null>(() => {
 const autoDetails = computed(() => sortedOptions.value[0] ?? null);
 
 const isVisible = computed(() => {
-	return (store.base?.enable_provider_selector ?? false) && modelStore.selectedModel?.provider?.kind === 'OPENROUTER';
+	const selector = store.base?.chat_provider_selector;
+	const kind = modelStore.selectedModel?.provider?.kind;
+	return !!selector?.enabled && !!kind && selector.provider_kinds.includes(kind);
 });
 
 const selectedLabel = computed(() => {
@@ -467,6 +469,8 @@ async function loadOptions() {
 		options.value = res.options ?? [];
 		parentUnavailable.value = res.availability_state === 'USER_UNAVAILABLE';
 		loadedModelId.value = model.id;
+		const picked = modelStore.selectedProviderSlug;
+		if (picked && options.value.length > 0 && !options.value.some(o => o.provider_slug === picked)) modelStore.setProviderSelection(null);
 	} catch (error) {
 		console.error('Failed to load provider options:', error);
 		options.value = [];

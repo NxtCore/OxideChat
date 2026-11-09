@@ -15,7 +15,7 @@ use arc_swap::ArcSwap;
 use sqlx::PgPool;
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::types::JobState;
+use crate::types::{JobState, ProviderRoutingMiddleware};
 use crate::types::models::ModelPricing;
 use crate::types::providers::{Provider, ProviderKind};
 use crate::utils::encryption::decrypt_api_key;
@@ -24,13 +24,15 @@ use crate::utils::omniference_cost::OxideCostQueue;
 /// Someone kill me for this name please
 pub static OF_ENGINE: std::sync::OnceLock<ArcSwap<OmniferenceEngine>> = std::sync::OnceLock::new();
 static OF_COST_QUEUE: std::sync::OnceLock<Arc<OxideCostQueue>> = std::sync::OnceLock::new();
+static OF_PROVIDER_ROUTING: std::sync::OnceLock<Arc<ProviderRoutingMiddleware>> = std::sync::OnceLock::new();
 static BUILT_IN_CATALOG: std::sync::OnceLock<Arc<Catalog>> = std::sync::OnceLock::new();
 
 /// Initialize the AI engine with providers from the database
 pub async fn init(state: &Arc<JobState>) {
 	let pool = &state.db;
 	let cost_sink = Arc::clone(OF_COST_QUEUE.get_or_init(|| OxideCostQueue::spawn(Arc::clone(state))));
-	let (engine, provider_count) = build_engine(pool, cost_sink).await;
+	let routing = Arc::clone(OF_PROVIDER_ROUTING.get_or_init(|| Arc::new(ProviderRoutingMiddleware::new(Arc::clone(state)))));
+	let (engine, provider_count) = build_engine(pool, cost_sink, routing).await;
 
 	let _ = OF_ENGINE.set(ArcSwap::from_pointee(engine));
 	println!("[AI] Engine initialized with {} system providers", provider_count);
@@ -46,8 +48,9 @@ fn reported_cost_config(provider: &Provider, usd_per_unit: &std::collections::Ha
 }
 
 /// Builds an engine with every enabled system provider registered and returns it with the provider count.
-async fn build_engine(pool: &PgPool, cost_sink: Arc<OxideCostQueue>) -> (OmniferenceEngine, usize) {
+async fn build_engine(pool: &PgPool, cost_sink: Arc<OxideCostQueue>, routing: Arc<ProviderRoutingMiddleware>) -> (OmniferenceEngine, usize) {
 	let mut engine = OmniferenceEngine::with_cost_sink(cost_sink);
+	engine.service().add_middleware(routing);
 	let providers = Provider::list_enabled_system(pool).await.unwrap_or_default();
 	let usd_per_unit = crate::types::exchange_rates::ExchangeRate::usd_per_unit_map(pool).await.unwrap_or_default();
 
@@ -127,11 +130,11 @@ pub async fn shutdown() {
 /// Call this after a provider is created, updated or deleted so the next request uses the
 /// stored configuration. Discovery runs before the swap, so in-flight requests are not blocked.
 pub async fn reload_providers(pool: &PgPool) {
-	let (Some(cost_sink), Some(engine_arc)) = (OF_COST_QUEUE.get().map(Arc::clone), OF_ENGINE.get()) else {
+	let (Some(cost_sink), Some(routing), Some(engine_arc)) = (OF_COST_QUEUE.get().map(Arc::clone), OF_PROVIDER_ROUTING.get().map(Arc::clone), OF_ENGINE.get()) else {
 		tracing::error!("cannot reload providers before the AI engine is initialized");
 		return;
 	};
-	let (new_engine, provider_count) = build_engine(pool, cost_sink).await;
+	let (new_engine, provider_count) = build_engine(pool, cost_sink, routing).await;
 	engine_arc.store(Arc::new(new_engine));
 	load_pricing_overrides(pool, &engine_arc.load()).await;
 	println!("[AI] Reloaded {} providers", provider_count);

@@ -4,7 +4,8 @@
 
 use crate::i18n::I18n;
 use crate::types::oauth::OAuthProvider;
-use crate::types::{AppError, BaseResponse, InstanceResponse, JobState, RequestContext, Role, User, json_ok};
+use crate::types::providers::ProviderKind;
+use crate::types::{AppError, BaseResponse, ChatProviderSelectorResponse, EffectiveProviderRouting, InstanceResponse, JobState, RequestContext, Role, User, json_ok};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::extract::{Extension, State};
 use axum::response::{IntoResponse, Response};
@@ -27,6 +28,11 @@ pub async fn health() -> impl IntoResponse {
 pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestContext { user }): Extension<RequestContext>) -> Result<Response, AppError> {
 	let needs_setup = !User::any_exist(&state.db).await.map_err(AppError::database)?;
 
+	let selector_enabled = match &user {
+		Some(user) => EffectiveProviderRouting::for_user(&state.db, &user.id).await.map_err(AppError::database)?.selector_enabled,
+		None => EffectiveProviderRouting::installation().selector_enabled,
+	};
+
 	let roles = match user {
 		Some(_) => Role::list_all(&state.db).await.unwrap_or_else(|e| {
 			tracing::warn!(error = %e, "failed to list roles");
@@ -43,7 +49,11 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 		needs_setup,
 		oauth_providers: OAuthProvider::list_enabled(&state.db).await.map_err(AppError::database)?.iter().map(OAuthProvider::to_public).collect(),
 		roles,
-		enable_provider_selector: config.enable_provider_selector(),
+		provider_routing: config.provider_routing(),
+		chat_provider_selector: ChatProviderSelectorResponse {
+			enabled: selector_enabled,
+			provider_kinds: ProviderKind::UPSTREAM_ROUTING.to_vec(),
+		},
 		default_model_id: config.default_model_id(),
 		default_theme: config.default_theme(),
 		instance: InstanceResponse {

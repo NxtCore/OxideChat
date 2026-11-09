@@ -477,7 +477,7 @@ mod tests {
 	#[sqlx::test(migrations = "./migrations")]
 	async fn patch_model_icon_validation_rejects_xss_and_accepts_benign_svg(pool: PgPool) {
 		use axum::http::StatusCode;
-		crate::config::Config::init(&pool).await;
+		crate::config::Config::init(&pool).await.expect("config loads");
 		crate::i18n::I18n::init(&pool).await;
 		let user_id = create_user(&pool, "icon-admin").await;
 		sqlx::query("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name = 'admin'")

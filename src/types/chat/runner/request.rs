@@ -18,6 +18,8 @@ pub(super) struct RequestInputs<'a> {
 	pub model: &'a Model,
 	pub user_config: Option<&'a ModelConfig>,
 	pub system_config: Option<&'a ModelConfig>,
+	/// The upstream provider the user picked, already checked against what they may use.
+	pub provider_slug: Option<&'a str>,
 }
 
 /// Interpolate `{{variable}}` placeholders in a system prompt string.
@@ -204,22 +206,21 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 	Ok(ir)
 }
 
-fn apply_provider_routing(ir: &mut ChatRequestIR, req: &StreamRequest) {
-	if crate::config::Config::get().enable_provider_selector()
-		&& let Some(slug) = req.provider_slug.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty())
-			&& ir.model.provider.endpoint.kind == omniference::types::ProviderKind::OpenRouter {
-				ir.provider_routing = Some(match req.provider_routing_mode.as_deref() {
-					Some("lock") => omniference::types::ProviderRouting {
-						only: Some(vec![slug.to_string()]),
-						allow_fallbacks: Some(false),
-						..Default::default()
-					},
-					_ => omniference::types::ProviderRouting {
-						order: Some(vec![slug.to_string()]),
-						..Default::default()
-					},
-				});
-			}
+fn apply_provider_routing(ir: &mut ChatRequestIR, inputs: &RequestInputs<'_>) {
+	let Some(slug) = inputs.provider_slug else {
+		return;
+	};
+	ir.provider_routing = Some(match inputs.req.provider_routing_mode.as_deref() {
+		Some("lock") => omniference::types::ProviderRouting {
+			only: Some(vec![slug.to_string()]),
+			allow_fallbacks: Some(false),
+			..Default::default()
+		},
+		_ => omniference::types::ProviderRouting {
+			order: Some(vec![slug.to_string()]),
+			..Default::default()
+		},
+	});
 }
 
 async fn apply_tools_and_system_prompt(db: &PgPool, inputs: &RequestInputs<'_>, ir: &mut ChatRequestIR) {
@@ -253,7 +254,7 @@ async fn apply_tools_and_system_prompt(db: &PgPool, inputs: &RequestInputs<'_>, 
 
 pub(super) async fn build_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Message>) -> Result<ChatRequestIR, TurnError> {
 	let mut ir = base_request(db, inputs, messages).await?;
-	apply_provider_routing(&mut ir, inputs.req);
+	apply_provider_routing(&mut ir, inputs);
 	apply_tools_and_system_prompt(db, inputs, &mut ir).await;
 	Ok(ir)
 }

@@ -4,7 +4,7 @@
 
 use crate::config::Config;
 use crate::logging::{AuditLog, LogEvent};
-use crate::types::consts::{ADMIN_CONFIG_EDIT};
+use crate::types::consts::ADMIN_CONFIG_EDIT;
 use crate::utils::images::is_safe_stored_image;
 use crate::utils::response::ErrorCode;
 use crate::types::{AppError, AuthUser, GlobalConfigResponse, JobState, MAX_INSTANCE_NAME_CHARS, UpdateGlobalConfigRequest, json_ok};
@@ -18,7 +18,7 @@ pub async fn get_global_config(_: AuthUser) -> Result<Response, AppError> {
 	let config = Config::get();
 	json_ok(GlobalConfigResponse {
 		default_theme: config.default_theme(),
-		enable_provider_selector: config.enable_provider_selector(),
+		provider_routing: config.provider_routing(),
 		default_model_id: config.default_model_id(),
 	})
 }
@@ -26,7 +26,7 @@ pub async fn get_global_config(_: AuthUser) -> Result<Response, AppError> {
 /// PATCH /api/v1/admin/config
 ///
 /// Update global configuration (admin only).
-pub async fn update_global_config(State(state): State<Arc<JobState>>, auth: AuthUser, Json(req): Json<UpdateGlobalConfigRequest>) -> Result<Response, AppError> {
+pub async fn update_global_config(State(state): State<Arc<JobState>>, auth: AuthUser, Json(mut req): Json<UpdateGlobalConfigRequest>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_CONFIG_EDIT).await?;
 	let instance = req.instance.as_ref();
 	if instance.and_then(|i| i.name.as_ref()).and_then(Option::as_deref).is_some_and(|name| name.trim().chars().count() > MAX_INSTANCE_NAME_CHARS) {
@@ -40,13 +40,17 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, auth: Auth
 		return Err(ErrorCode::BadRequest.into());
 	}
 
+	if let Some(routing) = &req.provider_routing {
+		req.provider_routing = Some(routing.normalized().ok_or(ErrorCode::ValidationFailed)?);
+	}
+
 	Config::get().apply_update(&state.db, &req).await?;
 	AuditLog::log(&state.db, LogEvent::ConfigUpdated, Some(auth.id), None, None);
 
 	let config = Config::get();
 	json_ok(GlobalConfigResponse {
 		default_theme: config.default_theme(),
-		enable_provider_selector: config.enable_provider_selector(),
+		provider_routing: config.provider_routing(),
 		default_model_id: config.default_model_id(),
 	})
 }

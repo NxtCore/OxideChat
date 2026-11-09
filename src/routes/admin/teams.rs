@@ -68,12 +68,13 @@ pub async fn update_team(State(state): State<Arc<JobState>>, auth: AuthUser, Pat
 	json_ok(response)
 }
 
-pub async fn save_team(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<SaveTeamRequest>) -> Result<Response, AppError> {
+pub async fn save_team(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(mut req): Json<SaveTeamRequest>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_TEAMS_EDIT).await?;
 
 	if req.name.trim().is_empty() {
 		return Err(ErrorCode::ValidationFailed.into());
 	}
+	req.provider_routing = req.provider_routing.normalized().ok_or(ErrorCode::ValidationFailed)?;
 
 	let team = Team::find_by_id(&state.db, &id)
 		.await

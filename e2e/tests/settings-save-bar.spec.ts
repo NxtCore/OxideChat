@@ -13,18 +13,18 @@ test.describe('settings save bar', () => {
 
 		await toggle.click();
 		await expect(bar).toBeVisible();
-		expect((await api.get('/api/v1/config')).enable_provider_selector).toBe(before.enable_provider_selector);
+		expect((await api.get('/api/v1/config')).provider_routing.selector_enabled).toBe(before.provider_routing.selector_enabled);
 
 		await page.getByTestId('settings-save-bar-reset').click();
 		await expect(bar).toBeHidden();
-		await expect(toggle).toHaveAttribute('data-state', before.enable_provider_selector ? 'checked' : 'unchecked');
+		await expect(toggle).toHaveAttribute('data-state', before.provider_routing.selector_enabled ? 'checked' : 'unchecked');
 
 		await toggle.click();
 		await page.getByTestId('settings-save-bar-save').click();
 		await expect(bar).toBeHidden();
-		expect((await api.get('/api/v1/config')).enable_provider_selector).toBe(!before.enable_provider_selector);
+		expect((await api.get('/api/v1/config')).provider_routing.selector_enabled).toBe(!before.provider_routing.selector_enabled);
 
-		await api.patch('/api/v1/admin/config', {enable_provider_selector: before.enable_provider_selector});
+		await api.patch('/api/v1/admin/config', {provider_routing: before.provider_routing});
 	});
 
 	test('a failed save keeps the edits and shows the error', async ({page, t}) => {

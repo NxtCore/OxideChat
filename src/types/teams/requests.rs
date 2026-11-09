@@ -1,5 +1,6 @@
 use serde::{Deserialize, Deserializer};
 use super::TeamRole;
+use crate::types::TeamProviderRouting;
 use uuid::Uuid;
 
 fn deserialize_nullable_field<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -60,6 +61,8 @@ pub struct SaveTeamRequest {
 	pub members: Vec<TeamMemberInput>,
 	pub provider_ids: Vec<Uuid>,
 	pub model_ids: Vec<Uuid>,
+	#[serde(default)]
+	pub provider_routing: TeamProviderRouting,
 }
 
 #[derive(Debug, Deserialize)]

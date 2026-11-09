@@ -1,5 +1,5 @@
 use crate::types::oauth::PublicOAuthProvider;
-use crate::types::{Role, ThemeCssVars};
+use crate::types::{ChatProviderSelectorResponse, ProviderRoutingSettings, Role, ThemeCssVars};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -17,8 +17,10 @@ pub struct BaseResponse {
 	pub needs_setup: bool,
 	pub oauth_providers: Vec<PublicOAuthProvider>,
 	pub roles: Vec<Role>,
-	/// Whether the chat upstream-provider selector is enabled instance-wide.
-	pub enable_provider_selector: bool,
+	/// The installation's chat provider selector and upstream provider allowlist.
+	pub provider_routing: ProviderRoutingSettings,
+	/// The chat provider selector as the current user gets it, after their teams' overrides.
+	pub chat_provider_selector: ChatProviderSelectorResponse,
 	/// Instance-wide default model ID.
 	pub default_model_id: Option<Uuid>,
 	/// Theme for users who have not picked their own.

@@ -18,6 +18,7 @@ pub mod login_limit;
 pub mod mcp;
 pub mod models;
 pub mod oauth;
+pub mod provider_routing;
 pub mod providers;
 pub mod request_logs;
 pub mod response;

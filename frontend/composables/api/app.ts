@@ -1,5 +1,9 @@
 export const patchAdminConfig = (body: object) => useNuxtApp().$customFetch('/api/v1/admin/config', {method: 'PATCH', body});
 
+export const upstreamProviders = <T>() => useNuxtApp().$customFetch<T[]>('/api/v1/admin/upstream-providers');
+
+export const syncUpstreamProviders = <T>() => useNuxtApp().$customFetch<T>('/api/v1/admin/upstream-providers/sync', {method: 'POST'});
+
 export const oauthProviders = <T>() => useNuxtApp().$customFetch<T[]>('/api/v1/admin/oauth-providers');
 
 export const oauthPresets = <T>() => useNuxtApp().$customFetch<T[]>('/api/v1/admin/oauth-providers/presets');

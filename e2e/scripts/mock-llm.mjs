@@ -95,6 +95,16 @@ const server = http.createServer(async (req, res) => {
 		return sendJson(res, 200, {object: 'list', data: MODELS.map(id => ({id, object: 'model', created: 0, owned_by: 'mock'}))});
 	}
 
+	if (req.method === 'GET' && url.pathname === '/v1/providers') {
+		return sendJson(res, 200, {
+			data: [
+				{name: 'Azure', slug: 'azure', headquarters: 'US', datacenters: ['US', 'SE']},
+				{name: 'Mistral', slug: 'mistral', headquarters: 'FR', datacenters: ['FR']},
+				{name: 'Together', slug: 'together', headquarters: 'US', datacenters: ['US']},
+			],
+		});
+	}
+
 	if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
 		let body;
 		try {

@@ -66,7 +66,10 @@ async fn main() {
 			std::process::exit(1);
 		}
 	}
-	config::Config::init(&pool).await;
+	if let Err(error) = config::Config::init(&pool).await {
+		eprintln!("[CONFIG] Failed to load configuration: {error}");
+		std::process::exit(1);
+	}
 	println!("[CONFIG] Configuration loaded");
 
 	i18n::I18n::init(&pool).await;

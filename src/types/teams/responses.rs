@@ -3,6 +3,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::Team;
+use crate::types::TeamProviderRouting;
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TeamSummary"))]
@@ -54,6 +55,7 @@ pub struct TeamDetailedResponse {
 	pub default_model_id: Option<Uuid>,
 	pub members: Vec<TeamMemberResponse>,
 	pub model_access: TeamModelAccessResponse,
+	pub provider_routing: TeamProviderRouting,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }

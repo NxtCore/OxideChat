@@ -9,6 +9,7 @@ const STALE_AFTER_WRITE: {path: RegExp; markStale: () => void}[] = [
     {path: /^\/api\/v1\/(admin\/)?(tools|mcp-servers)(\/|$)/, markStale: () => (usePreferencesStore().toolsStale = true)},
     {path: /^\/api\/v1\/admin\/(budgets|teams|users)(\/|$)/, markStale: () => (useBudgetStore().myStatusStale = true)},
     {path: /^\/api\/v1\/admin\/(models|image-models|providers|teams|users|gateway)(\/|$)/, markStale: () => useDeveloperStore().$patch({loaded: false, modelsLoaded: false})},
+    {path: /^\/api\/v1\/admin\/providers(\/|$)/, markStale: () => clearNuxtState('upstream-gateways')},
 ];
 
 function markStaleAfterWrite(request: RequestInfo, method: string | undefined) {

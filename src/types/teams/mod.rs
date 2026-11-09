@@ -5,10 +5,11 @@ mod responses;
 pub use requests::*;
 pub use responses::*;
 
-use crate::types::BaseType;
+use crate::types::{BaseType, ProviderAllowlists, TeamProviderRouting};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use sqlx::types::Json;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
@@ -38,8 +39,21 @@ pub struct Team {
 	pub allow_all_models: bool,
 	pub budget_id: Option<Uuid>,
 	pub default_model_id: Option<Uuid>,
+	pub provider_selector_enabled: Option<bool>,
+	pub allowed_upstream_providers: Json<ProviderAllowlists>,
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 }
 
 impl BaseType for Team {}
+
+impl Team {
+	/// The team's overrides of the installation's provider routing settings.
+	#[must_use]
+	pub fn provider_routing(&self) -> TeamProviderRouting {
+		TeamProviderRouting {
+			selector_enabled: self.provider_selector_enabled,
+			allowed_providers: self.allowed_upstream_providers.0.clone(),
+		}
+	}
+}

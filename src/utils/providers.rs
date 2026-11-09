@@ -81,6 +81,7 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 		&& let Err(e) = sync_gateway_catalog(pool, provider).await {
 			eprintln!("[AI] Warning: gateway catalog sync failed for {}: {e}", provider.name);
 		}
+	sync_upstream(pool, provider).await;
 
 	Ok(SyncProviderResponse {
 		success: true,
@@ -89,6 +90,15 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 		models_removed: summary.removed,
 		message: format!("Synced {} models", sync_models.len()),
 	})
+}
+
+/// Refreshes the upstream providers a routing provider can send requests to; failures keep the previous snapshot.
+async fn sync_upstream(pool: &PgPool, provider: &Provider) {
+	if provider.kind.routes_upstream()
+		&& let Err(error) = crate::types::sync_upstream_providers(pool, provider).await
+	{
+		tracing::warn!(provider_id = %provider.id, %error, "upstream provider sync after model sync failed");
+	}
 }
 
 /// Sync the `OpenRouter` gateway catalog: upsert the public catalog, flag models the configured

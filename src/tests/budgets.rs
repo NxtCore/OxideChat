@@ -439,7 +439,7 @@ mod scope {
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn budget_errors_render_as_openai_errors(pool: PgPool) -> TestResult {
-		crate::config::Config::init(&pool).await;
+		crate::config::Config::init(&pool).await?;
 		crate::i18n::I18n::init(&pool).await;
 		let response = crate::routes::gateway::model_access_error_response(GatewayModelAccessError::BudgetExceeded, "budget provider/paid");
 		assert_eq!(response.status().as_u16(), 429);
