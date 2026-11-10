@@ -150,6 +150,7 @@ impl ImageGenExecutor {
 			team_id: Budget::primary_team_id(db, &user_id).await.ok().flatten(),
 			api_key_id: None,
 			model_id: &model.id,
+			preset_id: None,
 			provider_id: &model.provider_id,
 			request_type: "image",
 			input_tokens,

@@ -2,10 +2,10 @@
 	<div class="space-y-5">
 		<div>
 			<h3 class="text-base font-semibold text-foreground mb-1">
-				{{ store.getTranslation('settings.models.editor.core_prompt') }}
+				{{ store.getTranslation(titleKey ?? 'settings.models.editor.core_prompt') }}
 			</h3>
 			<p class="text-xs text-muted-foreground">
-				{{ store.getTranslation('settings.models.editor.core_prompt_desc') }}
+				{{ store.getTranslation(descriptionKey ?? 'settings.models.editor.core_prompt_desc') }}
 			</p>
 		</div>
 
@@ -22,6 +22,7 @@
 				id="system-prompt"
 				ref="systemPromptTextareaRef"
 				v-model="form.system_prompt"
+				data-testid="system-prompt"
 				:placeholder="store.getTranslation('settings.models.editor.system_prompt_placeholder')"
 				rows="12"
 				class="font-mono text-sm"
@@ -58,6 +59,8 @@ import {useMainStore} from '@/stores';
 
 const props = defineProps<{
 	form: Record<string, any>;
+	titleKey?: string;
+	descriptionKey?: string;
 }>();
 
 const store = useMainStore();

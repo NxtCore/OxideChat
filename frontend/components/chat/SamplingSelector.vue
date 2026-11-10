@@ -15,6 +15,9 @@
 			<div>
 				<h3 class="text-sm font-semibold text-foreground">{{ t('title') }}</h3>
 				<p class="text-xs text-muted-foreground">{{ t('description') }}</p>
+				<p v-if="presetDefaults" class="mt-2 rounded-md bg-primary/10 px-2 py-1.5 text-xs text-primary" data-testid="sampling-preset-defaults">
+					{{ store.getTranslation('presets.sampling.defaults', {preset: presetName, values: presetDefaults}) }}
+				</p>
 			</div>
 
 			<div class="space-y-3">
@@ -31,14 +34,14 @@
 					:max="p.max"
 					:step="p.step"
 					:labels="p.labels"
-					@toggle="toggle(p.key, p.def)"
+					@toggle="toggle(p.key, presetValue(p.key) ?? p.def)"
 				/>
 				<ParamCard
 					data-testid="sampling-param-seed"
 					:label="editor('seed')"
 					:tooltip="editor('seed_tooltip')"
 					:enabled="form.seed !== null"
-					@toggle="toggle('seed', 42)"
+					@toggle="toggle('seed', presetValue('seed') ?? 42)"
 				>
 					<ShadInput v-model.number="form.seed" type="number" step="1" class="h-8 text-xs font-mono" :placeholder="editor('seed_placeholder')" />
 				</ParamCard>
@@ -63,7 +66,9 @@
 			</div>
 
 			<div class="flex justify-between gap-2 pt-1">
-				<ShadButton variant="ghost" size="sm" data-testid="sampling-reset" :disabled="saving" @click="reset">{{ t('reset') }}</ShadButton>
+				<ShadButton variant="ghost" size="sm" data-testid="sampling-reset" :disabled="saving" @click="reset">
+					{{ presetDefaults ? store.getTranslation('presets.sampling.reset') : t('reset') }}
+				</ShadButton>
 				<ShadButton size="sm" data-testid="sampling-save" :disabled="saving" @click="save">
 					<Loader2 v-if="saving" class="h-3.5 w-3.5 animate-spin" />
 					{{ t('save') }}
@@ -78,6 +83,7 @@ import {Loader2, Plus, SlidersHorizontal, X} from 'lucide-vue-next';
 import {cn} from '~/lib/utils';
 import {useMainStore} from '~/stores';
 import {useChatStore} from '~/stores/chatStore';
+import {useModelStore} from '~/stores/modelStore';
 import type {ChatSampling} from '~/types/chat';
 import ParamCard from '~/components/settings/models/ParamCard.vue';
 
@@ -86,6 +92,20 @@ type SliderParam = {key: Exclude<NumericKey, 'seed'>; def: number; min: number; 
 
 const store = useMainStore();
 const chatStore = useChatStore();
+const modelStore = useModelStore();
+
+const preset = computed(() => modelStore.selectedModel?.preset ?? null);
+const presetName = computed(() => preset.value?.name ?? '');
+
+function presetValue(key: NumericKey): number | null {
+	const value = preset.value?.sampling[key];
+	return typeof value === 'number' ? value : null;
+}
+
+const presetDefaults = computed(() => {
+	const parts = numericKeys.filter(key => presetValue(key) !== null).map(key => `${editor(key)} ${presetValue(key)}`);
+	return parts.length > 0 ? parts.join(', ') : null;
+});
 
 const t = (key: string) => store.getTranslation(`chat.sampling.${key}`);
 const editor = (key: string) => store.getTranslation(`settings.models.editor.${key}`);

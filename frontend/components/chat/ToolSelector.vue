@@ -24,6 +24,14 @@
 							{{ store.getTranslation('chat.tool_selector.count', {count: modelStore.enabledTools.length}) }}
 						</span>
 					</div>
+					<p
+						v-if="modelStore.selectedModel?.preset?.tools_locked"
+						data-testid="tools-locked-notice"
+						class="mx-1 mb-2 flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-1.5 text-xs text-primary"
+					>
+						<Lock class="h-3.5 w-3.5 shrink-0" />
+						{{ store.getTranslation('presets.tools_locked', {preset: modelStore.selectedModel.preset.name}) }}
+					</p>
 					<div class="relative">
 						<Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
 						<ShadInput
@@ -173,7 +181,7 @@
 
 <script setup lang="ts">
 import {computed, onMounted, ref, watch} from 'vue';
-import {Bookmark, Check, ChevronRight, Minus, Search, Server, Wrench, Sparkles, Globe, Code} from 'lucide-vue-next';
+import {Bookmark, Check, ChevronRight, Lock, Minus, Search, Server, Wrench, Sparkles, Globe, Code} from 'lucide-vue-next';
 import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useMainStore} from '~/stores';

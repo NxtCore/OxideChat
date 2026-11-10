@@ -82,7 +82,7 @@ pub struct Provider {
 	pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ProviderSlim {
 	pub id: Uuid,

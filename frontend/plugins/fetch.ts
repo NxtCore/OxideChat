@@ -3,6 +3,7 @@ import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useBudgetStore} from '~/stores/budgetStore';
 import {useDeveloperStore} from '~/stores/developerStore';
+import {usePresetStore} from '~/stores/presetStore';
 
 const STALE_AFTER_WRITE: {path: RegExp; markStale: () => void}[] = [
     {path: /^\/api\/v1\/admin\/(models|image-models|providers|teams|users|config)(\/|$)/, markStale: () => (useModelStore().stale = true)},
@@ -10,6 +11,7 @@ const STALE_AFTER_WRITE: {path: RegExp; markStale: () => void}[] = [
     {path: /^\/api\/v1\/admin\/(budgets|teams|users)(\/|$)/, markStale: () => (useBudgetStore().myStatusStale = true)},
     {path: /^\/api\/v1\/admin\/(models|image-models|providers|teams|users|gateway)(\/|$)/, markStale: () => useDeveloperStore().$patch({loaded: false, modelsLoaded: false})},
     {path: /^\/api\/v1\/admin\/providers(\/|$)/, markStale: () => clearNuxtState('upstream-gateways')},
+    {path: /^\/api\/v1\/(presets|admin\/(models|providers|teams|users|tools))(\/|$)/, markStale: () => (usePresetStore().stale = true)},
 ];
 
 function markStaleAfterWrite(request: RequestInfo, method: string | undefined) {

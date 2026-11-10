@@ -6,16 +6,16 @@
 			</SettingsRow>
 
 			<SettingsRow :label="store.getTranslation('settings.admin_config.instance_icon')" :hint="store.getTranslation('settings.admin_config.instance_icon_hint')" stacked>
-				<div class="flex items-center gap-3">
-					<img :src="form.instance.icon_id ? imageUrl(form.instance.icon_id) : '/light_transparent.svg'" alt="" class="h-10 w-10 rounded-md border border-border object-contain p-1" data-testid="config-instance-icon-preview" />
-					<input ref="iconInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" data-testid="config-instance-icon-input" @change="uploadIcon" />
-					<ShadButton variant="outline" size="sm" :disabled="!canEdit || settingsForm.saving || uploadingIcon" @click="iconInput?.click()">
-						{{ store.getTranslation('settings.admin_config.upload_icon') }}
-					</ShadButton>
-					<ShadButton v-if="form.instance.icon_id" variant="ghost" size="sm" :disabled="!canEdit || settingsForm.saving" data-testid="config-instance-icon-remove" @click="form.instance.icon_id = null">
-						{{ store.getTranslation('common.remove') }}
-					</ShadButton>
-				</div>
+				<ImagePicker
+					v-model="form.instance.icon_id"
+					value-mode="id"
+					:allow-link="false"
+					:disabled="!canEdit || settingsForm.saving"
+					:title="store.getTranslation('settings.admin_config.instance_icon')"
+					test-id="config-instance-icon"
+				>
+					<template #fallback><img src="/light_transparent.svg" alt="" class="h-full w-full object-contain p-2" /></template>
+				</ImagePicker>
 			</SettingsRow>
 
 			<SettingsRow :label="store.getTranslation('settings.admin_config.provider_selector.label')" :hint="store.getTranslation('settings.admin_config.provider_selector.hint')">
@@ -131,32 +131,6 @@ const form = reactive({
 
 const titleModel = ref<ModelList | null>(null);
 const titleModelReasons = computed(() => !!form.title_generation.model_id && !!titleModel.value?.capabilities.some(capability => capability.startsWith('REASONING')));
-
-const iconInput = ref<HTMLInputElement | null>(null);
-const uploadingIcon = ref(false);
-
-async function uploadIcon(event: Event) {
-	const input = event.target as HTMLInputElement;
-	const file = input.files?.[0];
-	input.value = '';
-	if (!file) return;
-	uploadingIcon.value = true;
-	try {
-		const dataUri = await new Promise<string>((resolve, reject) => {
-			const reader = new FileReader();
-			reader.onload = () => resolve(reader.result as string);
-			reader.onerror = () => reject(reader.error);
-			reader.readAsDataURL(file);
-		});
-		const response = await postImage(dataUri);
-		if (!response.ok) throw new Error(await response.text());
-		form.instance.icon_id = (await response.json()).id;
-	} catch (e: any) {
-		store.toast(store.getTranslation('settings.admin_config.upload_icon_error'), {type: 'error', description: errorMessage(e, '')});
-	} finally {
-		uploadingIcon.value = false;
-	}
-}
 
 const availableThemes = computed(() => themeStore.fetchedThemes.filter(theme => !theme.error));
 

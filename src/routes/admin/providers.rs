@@ -4,7 +4,7 @@
 
 use crate::ai::{parse_extra_headers, reload_providers};
 use crate::types::consts::{ADMIN_PROVIDERS_EDIT, ADMIN_PROVIDERS_VIEW};
-use crate::types::{AppError, AuthUser, JobState};
+use crate::types::{AppError, AuthUser, JobState, is_reserved_provider_name};
 use crate::types::models::Model;
 use crate::types::providers::{
 	CreateProviderRequest, Provider, ProviderResponse, SyncProviderResponse, TestProviderRequest, TestProviderResponse, UpdateProviderRequest,
@@ -48,6 +48,9 @@ pub async fn get_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Pa
 /// Create a new system provider
 pub async fn create_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Json(req): Json<CreateProviderRequest>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
+	if is_reserved_provider_name(&req.name) {
+		return Err(ErrorCode::ProviderNameReserved.into());
+	}
 
 	let api_key = req.api_key.as_deref().map(encrypt_api_key).transpose().map_err(|error| {
 		tracing::error!("Failed to encrypt provider credential: {error}");
@@ -79,6 +82,9 @@ pub async fn create_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 /// Update an existing provider
 pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<UpdateProviderRequest>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
+	if req.name.as_deref().is_some_and(is_reserved_provider_name) {
+		return Err(ErrorCode::ProviderNameReserved.into());
+	}
 
 	let base_url = req.base_url.as_deref().map(|url| url.trim_end_matches('/').to_string());
 	if req.reported_cost.as_ref().and_then(Option::as_ref).is_some_and(|cost| !cost.is_valid()) {

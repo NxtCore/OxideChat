@@ -9,6 +9,7 @@ pub mod models;
 pub mod oauth;
 pub mod openai;
 pub mod preferences;
+pub mod presets;
 pub mod providers;
 pub mod streaming;
 pub mod tools;
@@ -53,6 +54,10 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/models", get(models::list_models))
 		.route("/api/v1/models/{id}/favorite", post(models::set_model_favorite))
 		.route("/api/v1/models/{id}/provider-options", get(models::get_provider_options))
+		// Presets
+		.route("/api/v1/presets", get(presets::list_presets).post(presets::create_preset))
+		.route("/api/v1/presets/check-slug", get(presets::check_slug))
+		.route("/api/v1/presets/{id}", get(presets::get_preset).put(presets::update_preset).delete(presets::delete_preset))
 		// Providers
 		.route("/api/v1/providers", get(providers::list_providers))
 		// Tools

@@ -42,8 +42,4 @@ pub struct ModelConfig {
 	pub updated_at: DateTime<Utc>,
 }
 
-pub struct ModelConfigViewer<'a> {
-	pub user_id: &'a Uuid,
-}
-
 impl BaseType for ModelConfig {}

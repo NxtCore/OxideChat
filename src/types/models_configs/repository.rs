@@ -1,4 +1,4 @@
-use super::{ModelConfig, ModelConfigViewer};
+use super::ModelConfig;
 use uuid::Uuid;
 
 impl ModelConfig {
@@ -43,45 +43,6 @@ impl ModelConfig {
 		.bind(stable_key)
 		.bind(name)
 		.fetch_one(&mut *conn)
-		.await
-	}
-
-	pub async fn find_for_user_by_stable_key(pool: &sqlx::PgPool, viewer: ModelConfigViewer<'_>, stable_key: &str) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as::<_, ModelConfig>(
-			r#"
-			SELECT
-				id,
-				owner_id,
-				model_id AS model_id,
-				stable_key,
-				name,
-				description,
-				icon,
-				capabilities,
-				input_modalities,
-				output_modalities,
-				context_length,
-				max_output_tokens,
-				system_prompt,
-				COALESCE(sampling, '{}'::jsonb) AS sampling,
-				COALESCE(enabled_tools, '[]'::jsonb) AS enabled_tools,
-				COALESCE(is_public, false) AS is_public,
-				COALESCE(is_featured, false) AS is_featured,
-				COALESCE(is_default, false) AS is_default,
-				COALESCE(is_favorite, false) AS is_favorite,
-				category,
-				COALESCE(tags, '[]'::jsonb) AS tags,
-				COALESCE(usage_count, 0) AS usage_count,
-				COALESCE(extra_settings, '{}'::jsonb) AS extra_settings,
-				created_at,
-				updated_at
-			FROM model_configs
-			WHERE owner_id = $1 AND stable_key = $2
-			"#,
-		)
-		.bind(viewer.user_id)
-		.bind(stable_key)
-		.fetch_optional(pool)
 		.await
 	}
 
