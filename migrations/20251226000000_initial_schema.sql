@@ -839,6 +839,7 @@ CREATE TABLE IF NOT EXISTS gateway_request_logs (
     team_id UUID REFERENCES teams(id) ON DELETE SET NULL,
     api_key_id UUID REFERENCES gateway_api_keys(id) ON DELETE SET NULL,
     model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+    preset_id UUID REFERENCES model_presets(id) ON DELETE SET NULL,
     public_model_id VARCHAR NOT NULL,
     provider VARCHAR,
     request_type VARCHAR(50) NOT NULL,

@@ -18,7 +18,7 @@ pub(super) struct RequestInputs<'a> {
 	pub model: &'a Model,
 	pub preset: Option<&'a Preset>,
 	pub system_config: Option<&'a ModelConfig>,
-	/// The tools this turn may call: the request's, or the preset's when it locks them.
+	/// The tools this turn may call: the request's, or the preset's when it locks them; the admin's model tools are added on top.
 	pub enabled_tools: &'a [String],
 	/// The upstream provider the user picked, already checked against what they may use.
 	pub provider_slug: Option<&'a str>,
@@ -265,9 +265,23 @@ fn apply_provider_routing(ir: &mut ChatRequestIR, inputs: &RequestInputs<'_>) {
 	});
 }
 
+/// The tools a turn may call: the turn's own tools plus those the admin enabled for the model, without duplicates.
+#[must_use]
+pub(crate) fn turn_tool_ids(enabled_tools: &[String], config: Option<&ModelConfig>) -> Vec<String> {
+	let config_tools = config.map_or(&[][..], |config| config.enabled_tools.0.as_slice());
+	let mut ids: Vec<String> = Vec::with_capacity(enabled_tools.len() + config_tools.len());
+	for id in enabled_tools.iter().chain(config_tools) {
+		if !ids.contains(id) {
+			ids.push(id.clone());
+		}
+	}
+	ids
+}
+
 async fn apply_tools_and_system_prompt(db: &PgPool, inputs: &RequestInputs<'_>, ir: &mut ChatRequestIR) {
 	let mut tool_system_prompts: Vec<String> = Vec::new();
-	let (specs, choice, prompts) = resolve_tools(db, inputs.user.id, inputs.enabled_tools).await;
+	let tool_ids = turn_tool_ids(inputs.enabled_tools, inputs.system_config);
+	let (specs, choice, prompts) = resolve_tools(db, inputs.user.id, &tool_ids).await;
 	if !specs.is_empty() {
 		ir.tools = specs;
 		ir.tool_choice = choice;

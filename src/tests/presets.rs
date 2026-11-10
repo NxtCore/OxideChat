@@ -98,7 +98,7 @@ mod validation {
 mod merge {
 	use crate::types::ChatSampling;
 	use crate::types::PresetSampling;
-	use crate::types::chat::runner::request::{SamplingLayers, merge_sampling_with_priority};
+	use crate::types::chat::runner::request::{SamplingLayers, merge_sampling_with_priority, turn_tool_ids};
 	use crate::types::models::Model;
 	use crate::types::models_configs::ModelConfig;
 	use serde_json::json;
@@ -189,6 +189,17 @@ mod merge {
 			model: &model,
 		});
 		assert_eq!(merged.temperature, Some(0.7));
+		Ok(())
+	}
+
+	#[test]
+	fn admin_tools_are_added_to_the_turn_tools() -> Result<(), serde_json::Error> {
+		let mut config = config(json!({}))?;
+		config.enabled_tools = Json(vec!["b".to_string(), "c".to_string()]);
+		let turn = vec!["a".to_string(), "b".to_string()];
+		assert_eq!(turn_tool_ids(&turn, Some(&config)), vec!["a", "b", "c"]);
+		assert_eq!(turn_tool_ids(&turn, None), vec!["a", "b"]);
+		assert_eq!(turn_tool_ids(&[], Some(&config)), vec!["b", "c"]);
 		Ok(())
 	}
 }
