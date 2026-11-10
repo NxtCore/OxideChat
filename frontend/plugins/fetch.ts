@@ -11,7 +11,8 @@ const STALE_AFTER_WRITE: {path: RegExp; markStale: () => void}[] = [
     {path: /^\/api\/v1\/admin\/(budgets|teams|users)(\/|$)/, markStale: () => (useBudgetStore().myStatusStale = true)},
     {path: /^\/api\/v1\/admin\/(models|image-models|providers|teams|users|gateway)(\/|$)/, markStale: () => useDeveloperStore().$patch({loaded: false, modelsLoaded: false})},
     {path: /^\/api\/v1\/admin\/providers(\/|$)/, markStale: () => clearNuxtState('upstream-gateways')},
-    {path: /^\/api\/v1\/(presets|admin\/(models|providers|teams|users|tools))(\/|$)/, markStale: () => (usePresetStore().stale = true)},
+    {path: /^\/api\/v1\/(presets|admin\/(models|providers|teams|users|tools|presets))(\/|$)/, markStale: () => (usePresetStore().stale = true)},
+    {path: /^\/api\/v1\/admin\/(teams|users)(\/|$)/, markStale: () => (usePresetStore().scopes = null)},
 ];
 
 function markStaleAfterWrite(request: RequestInfo, method: string | undefined) {

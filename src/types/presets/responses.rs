@@ -1,4 +1,4 @@
-use super::{Preset, PresetReasoning, PresetSampling, PresetScope};
+use super::{Preset, PresetActor, PresetReasoning, PresetSampling, PresetScope};
 use crate::types::models::ModelListPublic;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -22,6 +22,7 @@ pub struct PresetResponse {
 	pub key: String,
 	pub slug: String,
 	pub scope: PresetScope,
+	pub team: Option<PresetTeam>,
 	pub name: String,
 	pub description: Option<String>,
 	pub icon: Option<String>,
@@ -37,6 +38,48 @@ pub struct PresetResponse {
 	pub is_enabled: bool,
 	pub can_edit: bool,
 	pub unavailable: Option<PresetUnavailable>,
+	pub updated_at: DateTime<Utc>,
+}
+
+/// A team a preset belongs to or can be shared with.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct PresetTeam {
+	pub id: Uuid,
+	pub name: String,
+}
+
+/// The scopes a user may create presets in.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct PresetScopesResponse {
+	pub personal: bool,
+	pub teams: Vec<PresetTeam>,
+	pub installation: bool,
+}
+
+/// The user a personal preset belongs to, as admins see it.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct PresetOwner {
+	pub id: Uuid,
+	pub username: String,
+}
+
+/// A preset in the installation-wide admin list.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AdminPresetResponse {
+	pub id: Uuid,
+	pub key: String,
+	pub slug: String,
+	pub scope: PresetScope,
+	pub name: String,
+	pub icon: Option<String>,
+	pub team: Option<PresetTeam>,
+	pub owner: Option<PresetOwner>,
+	pub base_model_name: Option<String>,
+	pub is_enabled: bool,
 	pub updated_at: DateTime<Utc>,
 }
 
@@ -57,8 +100,10 @@ pub struct PresetBaseModel {
 impl PresetResponse {
 	/// Builds the response for `viewer`; the instructions are hidden from viewers who may not see them.
 	#[must_use]
-	pub fn build(preset: Preset, base: Option<PresetBaseModel>, viewer: &Uuid) -> Self {
-		let can_edit = preset.is_owned_by(viewer);
+	pub fn build(preset: Preset, base: Option<PresetBaseModel>, viewer: &PresetActor) -> Self {
+		let can_edit = viewer.can_manage(&preset);
+		let scope = preset.scope();
+		let team = preset.team_id.zip(preset.team_name.clone()).map(|(id, name)| PresetTeam { id, name });
 		let unavailable = if !preset.is_enabled {
 			Some(PresetUnavailable::Disabled)
 		} else {
@@ -74,7 +119,8 @@ impl PresetResponse {
 			id: preset.id,
 			key,
 			slug: preset.slug,
-			scope: PresetScope::from_stored(&preset.scope),
+			scope,
+			team,
 			name: preset.name,
 			description: preset.description,
 			icon: preset.icon,

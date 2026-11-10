@@ -42,12 +42,16 @@
 					:form="form"
 					:slug-status="slugStatus"
 					:base-model-key="baseModelKey"
-					:scope="scope"
+					:scope-label="scopeLabel"
+					:scope-options="isNew ? scopeOptions : null"
+					:scope-value="scopeChoice"
+					:slug-renamed="slugRenamed"
 					:disabled="!canEdit"
 					@name="onNameInput"
 					@slug="onSlugInput"
 					@base-key="value => (baseModelKey = value)"
 					@base="onBaseSelected"
+					@scope="value => (scopeChoice = value)"
 				/>
 				<div v-show="currentTab === 'instructions'" class="space-y-4">
 					<SettingsModelsPromptTab :form="form" title-key="presets.editor.instructions_title" description-key="presets.editor.instructions_description" />
@@ -74,7 +78,7 @@ import {AlertTriangle, ArrowLeft, Loader2, Trash2, Wand2} from 'lucide-vue-next'
 import {useMainStore} from '~/stores';
 import {usePresetStore} from '~/stores/presetStore';
 import type {ModelList} from '~/types/chat';
-import type {PresetResponse, PresetScope, PresetUnavailable, SavePresetRequest} from '~/types/presets';
+import type {PresetResponse, PresetUnavailable, SavePresetRequest} from '~/types/presets';
 import type {SlugStatus} from '~/components/settings/presets/GeneralTab.vue';
 
 definePageMeta({key: route => route.fullPath});
@@ -118,8 +122,19 @@ const form = reactive({
 	starters: ['', '', '', ''] as string[],
 });
 
-const canEdit = computed(() => isNew || !!preset.value?.can_edit);
-const scope = computed<PresetScope>(() => preset.value?.scope ?? 'personal');
+const scopeChoice = ref('');
+const scopeOptions = computed(() => {
+	const scopes = presetStore.scopes;
+	if (!scopes) return [];
+	return [
+		...(scopes.personal ? [{value: 'personal', label: store.getTranslation('presets.scope.personal')}] : []),
+		...scopes.teams.map(team => ({value: `team:${team.id}`, label: team.name})),
+		...(scopes.installation ? [{value: 'installation', label: store.getTranslation('presets.scope.installation')}] : []),
+	];
+});
+const canEdit = computed(() => (isNew ? scopeOptions.value.length > 0 : !!preset.value?.can_edit));
+const scopeLabel = computed(() => (preset.value ? presetScopeLabel(preset.value, store.getTranslation) : ''));
+const slugRenamed = computed(() => !isNew && !!preset.value && preset.value.slug !== form.slug);
 const unavailable = computed<PresetUnavailable | null>(() => (preset.value?.unavailable === 'disabled' ? null : (preset.value?.unavailable ?? null)));
 const pageTitle = computed(() => (isNew ? t('new_title') : form.name || preset.value?.name || t('loading')));
 const pageDescription = computed(() => {
@@ -179,7 +194,19 @@ function buildRequest(): SavePresetRequest {
 		starters: form.starters.map(starter => starter.trim()).filter(Boolean),
 		prompt_visible: form.prompt_visible,
 		is_enabled: form.is_enabled,
+		...(isNew ? scopeRequest() : {}),
 	};
+}
+
+function scopeRequest(): Pick<SavePresetRequest, 'scope' | 'team_id'> {
+	if (scopeChoice.value.startsWith('team:')) return {scope: 'team', team_id: scopeChoice.value.slice(5)};
+	return {scope: scopeChoice.value === 'installation' ? 'installation' : 'personal'};
+}
+
+function initialScope() {
+	const options = scopeOptions.value.map(option => option.value);
+	const requested = route.query.scope === 'team' ? options.find(value => value.startsWith('team:')) : (route.query.scope as string | undefined);
+	scopeChoice.value = requested && options.includes(requested) ? requested : (options[0] ?? '');
 }
 
 function applyPreset(loaded: PresetResponse) {
@@ -253,6 +280,8 @@ function onDeleted() {
 
 onMounted(async () => {
 	if (isNew) {
+		await presetStore.ensureScopes();
+		initialScope();
 		settingsForm.markSaved();
 		const draft = presetStore.draft;
 		presetStore.draft = null;

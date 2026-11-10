@@ -140,6 +140,7 @@ fn preset_error_code(error: &PresetError) -> ErrorCode {
 		PresetError::BaseModelNotAllowed => ErrorCode::PresetBaseModelInvalid,
 		PresetError::ToolsNotAllowed => ErrorCode::PresetToolsInvalid,
 		PresetError::NotFound => ErrorCode::NotFound,
+		PresetError::Forbidden => ErrorCode::InsufficientPermissions,
 		PresetError::Database(_) => ErrorCode::InternalError,
 	}
 }

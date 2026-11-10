@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
 use uuid::Uuid;
 
+mod admin;
+mod gateway;
 mod repository;
 mod requests;
 mod responses;
@@ -125,6 +127,8 @@ pub struct Preset {
 	pub id: Uuid,
 	pub scope: String,
 	pub owner_id: Option<Uuid>,
+	pub team_id: Option<Uuid>,
+	pub team_name: Option<String>,
 	pub slug: String,
 	pub name: String,
 	pub description: Option<String>,
@@ -148,10 +152,40 @@ impl Preset {
 		format!("{PRESET_KEY_PREFIX}{}", self.slug)
 	}
 
-	/// Whether `user_id` may edit this preset.
+	/// The scope stored on the row.
 	#[must_use]
-	pub fn is_owned_by(&self, user_id: &Uuid) -> bool {
-		self.owner_id.as_ref() == Some(user_id)
+	pub fn scope(&self) -> PresetScope {
+		PresetScope::from_stored(&self.scope)
+	}
+}
+
+/// Who is acting on presets and which scopes they may manage.
+#[derive(Debug, Clone)]
+pub struct PresetActor {
+	pub user_id: Uuid,
+	pub personal: bool,
+	pub installation_admin: bool,
+	pub admin_teams: Vec<Uuid>,
+}
+
+impl PresetActor {
+	/// Whether the actor may create or change presets of `scope`, for team presets in `team_id`.
+	#[must_use]
+	pub fn can_manage_scope(&self, scope: PresetScope, team_id: Option<&Uuid>) -> bool {
+		match scope {
+			PresetScope::Personal => self.personal,
+			PresetScope::Team => self.installation_admin || team_id.is_some_and(|team| self.admin_teams.contains(team)),
+			PresetScope::Installation => self.installation_admin,
+		}
+	}
+
+	/// Whether the actor may edit or delete `preset`.
+	#[must_use]
+	pub fn can_manage(&self, preset: &Preset) -> bool {
+		match preset.scope() {
+			PresetScope::Personal => self.personal && preset.owner_id == Some(self.user_id),
+			scope => self.can_manage_scope(scope, preset.team_id.as_ref()),
+		}
 	}
 }
 

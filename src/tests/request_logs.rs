@@ -68,6 +68,7 @@ mod logs {
 			latency_ms: None,
 			finish_reason: None,
 			time_to_first_token_ms: None,
+			preset_id: None,
 		}
 	}
 
@@ -306,6 +307,7 @@ mod categories {
 			model_id: None,
 			provider: Some("provider"),
 			streaming: true,
+			preset_id: None,
 		}
 	}
 
@@ -392,6 +394,7 @@ mod categories {
 			latency_ms: Some(40),
 			finish_reason: None,
 			time_to_first_token_ms: None,
+			preset_id: None,
 		};
 		let stored = RequestLog::record(&pool, first).await?;
 		let merged = RequestLog::record_failure(
@@ -440,6 +443,7 @@ mod categories {
 			latency_ms: Some(300),
 			finish_reason: Some("stop"),
 			time_to_first_token_ms: Some(120),
+			preset_id: None,
 		};
 		RequestLog::record(&pool, record).await?;
 		let merged = RequestLog::record_failure(
@@ -483,6 +487,7 @@ mod categories {
 				latency_ms: None,
 				finish_reason: None,
 				time_to_first_token_ms: None,
+				preset_id: None,
 			};
 			RequestLog::record(&pool, record).await?;
 		}
@@ -686,6 +691,7 @@ mod finalization {
 			model_id: Some(setup.model_id),
 			provider: Some("Final Provider"),
 			streaming: true,
+			preset_id: None,
 		};
 		let failure = crate::types::RequestLogFailure {
 			category: crate::types::RequestLogErrorCategory::Upstream,
@@ -977,6 +983,7 @@ mod dropped_streams {
 				model_id: None,
 				provider: Some("provider"),
 				streaming: true,
+				preset_id: None,
 			},
 		)
 	}
@@ -1034,6 +1041,7 @@ mod dropped_streams {
 			latency_ms: Some(80),
 			finish_reason: None,
 			time_to_first_token_ms: None,
+			preset_id: None,
 		}
 	}
 
@@ -1149,6 +1157,7 @@ mod unlogged_failures {
 			max_output_tokens: None,
 			context_length: None,
 			budget: BudgetAdmission { reservation: None, warn: false },
+			preset: None,
 		})
 	}
 
@@ -1265,6 +1274,7 @@ mod service_scope {
 			latency_ms: None,
 			finish_reason: None,
 			time_to_first_token_ms: None,
+			preset_id: None,
 		}
 	}
 

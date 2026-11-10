@@ -1,7 +1,7 @@
 <template>
 	<SettingsPage :title="t('title')" :description="t('description')">
-		<template #actions>
-			<ShadButton data-testid="preset-create" @click="router.push('/settings/presets/new')">
+		<template v-if="canCreate" #actions>
+			<ShadButton data-testid="preset-create" @click="router.push(newPresetPath)">
 				<Plus class="h-4 w-4" />
 				{{ t('create') }}
 			</ShadButton>
@@ -11,28 +11,38 @@
 			<Loader2 class="h-6 w-6 animate-spin" />
 		</div>
 
-		<div v-else-if="own.length === 0 && shared.length === 0" class="flex flex-col items-center rounded-xl border border-dashed border-border px-6 py-12 text-center" data-testid="presets-empty">
-			<Wand2 class="mb-4 h-10 w-10 text-primary" />
-			<p class="font-medium text-foreground">{{ t('empty_title') }}</p>
-			<p class="mt-1 max-w-md text-sm text-muted-foreground">{{ t('empty_description') }}</p>
-			<div class="mt-5 flex flex-wrap justify-center gap-2">
-				<ShadButton @click="router.push('/settings/presets/new')">
-					<Plus class="h-4 w-4" />
-					{{ t('create') }}
-				</ShadButton>
-				<ShadButton variant="outline" @click="router.push('/')">
-					<MessageSquare class="h-4 w-4" />
-					{{ t('start_from_chat') }}
-				</ShadButton>
-			</div>
-			<p class="mt-3 text-xs text-muted-foreground">{{ t('start_from_chat_hint') }}</p>
-		</div>
+		<template v-else>
+			<ShadTabs v-if="visibleTabs.length > 1" v-model="currentTab" class="mb-5 w-full">
+				<ShadTabsList>
+					<ShadTabsTrigger v-for="tab in visibleTabs" :key="tab" :value="tab" :data-testid="`presets-tab-${tab}`">{{ t(`tabs.${tab}`) }}</ShadTabsTrigger>
+				</ShadTabsList>
+			</ShadTabs>
 
-		<div v-else class="space-y-6">
-			<section v-for="group in groups" :key="group.key" class="space-y-2">
-				<p v-if="shared.length > 0" class="text-xs font-medium text-muted-foreground">{{ t(group.label) }}</p>
+			<div v-if="currentTab === 'mine' && rows.length === 0" class="flex flex-col items-center rounded-xl border border-dashed border-border px-6 py-12 text-center" data-testid="presets-empty">
+				<Wand2 class="mb-4 h-10 w-10 text-primary" />
+				<p class="font-medium text-foreground">{{ t('empty_title') }}</p>
+				<p class="mt-1 max-w-md text-sm text-muted-foreground">{{ t('empty_description') }}</p>
+				<div class="mt-5 flex flex-wrap justify-center gap-2">
+					<ShadButton v-if="canCreate" @click="router.push(newPresetPath)">
+						<Plus class="h-4 w-4" />
+						{{ t('create') }}
+					</ShadButton>
+					<ShadButton variant="outline" @click="router.push('/')">
+						<MessageSquare class="h-4 w-4" />
+						{{ t('start_from_chat') }}
+					</ShadButton>
+				</div>
+				<p class="mt-3 text-xs text-muted-foreground">{{ t('start_from_chat_hint') }}</p>
+			</div>
+
+			<div v-else-if="rows.length === 0" class="rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground" data-testid="presets-empty-shared">
+				{{ t(canCreate ? 'empty_shared_editable' : 'empty_shared') }}
+			</div>
+
+			<div v-else class="space-y-2">
+				<p v-if="currentTab !== 'mine' && !canCreate" class="text-xs text-muted-foreground">{{ t('read_only') }}</p>
 				<div
-					v-for="preset in group.items"
+					v-for="preset in rows"
 					:key="preset.id"
 					data-testid="preset-row"
 					:data-preset-key="preset.key"
@@ -45,6 +55,9 @@
 					<NuxtLink :to="`/settings/presets/${preset.id}`" class="min-w-0 flex-1">
 						<div class="flex flex-wrap items-center gap-2">
 							<span class="font-medium text-foreground">{{ preset.name }}</span>
+							<span v-if="preset.scope === 'team'" class="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary" data-testid="preset-row-scope">
+								{{ presetScopeLabel(preset, store.getTranslation) }}
+							</span>
 							<span v-if="preset.unavailable" class="rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
 								{{ store.getTranslation(`presets.unavailable.${preset.unavailable}`) }}
 							</span>
@@ -68,7 +81,7 @@
 						:aria-label="t('enabled')"
 						@update:model-value="value => setEnabled(preset, Boolean(value))"
 					/>
-					<ShadDropdownMenu v-if="preset.can_edit">
+					<ShadDropdownMenu>
 						<ShadDropdownMenuTrigger as-child>
 							<ShadButton variant="ghost" size="icon" class="h-8 w-8" data-testid="preset-row-menu" :aria-label="t('actions')">
 								<MoreHorizontal class="h-4 w-4" />
@@ -76,53 +89,78 @@
 						</ShadDropdownMenuTrigger>
 						<ShadDropdownMenuContent align="end" class="border-border bg-popover">
 							<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent" @click="router.push(`/settings/presets/${preset.id}`)">
-								<Pencil class="mr-2 h-4 w-4" />
-								{{ t('edit') }}
+								<Pencil v-if="preset.can_edit" class="mr-2 h-4 w-4" />
+								<Eye v-else class="mr-2 h-4 w-4" />
+								{{ t(preset.can_edit ? 'edit' : 'view') }}
 							</ShadDropdownMenuItem>
-							<ShadDropdownMenuItem class="text-popover-foreground focus:bg-accent" @click="duplicate(preset)">
+							<ShadDropdownMenuItem v-if="hasAnyScope" data-testid="preset-row-duplicate" class="text-popover-foreground focus:bg-accent" @click="duplicate(preset)">
 								<CopyPlus class="mr-2 h-4 w-4" />
 								{{ t('duplicate') }}
 							</ShadDropdownMenuItem>
-							<ShadDropdownMenuSeparator class="bg-border" />
-							<ShadDropdownMenuItem data-testid="preset-row-delete" class="text-destructive focus:bg-destructive/10" @click="pendingDelete = preset">
-								<Trash2 class="mr-2 h-4 w-4" />
-								{{ t('delete') }}
-							</ShadDropdownMenuItem>
+							<template v-if="preset.can_edit">
+								<ShadDropdownMenuSeparator class="bg-border" />
+								<ShadDropdownMenuItem data-testid="preset-row-delete" class="text-destructive focus:bg-destructive/10" @click="pendingDelete = preset">
+									<Trash2 class="mr-2 h-4 w-4" />
+									{{ t('delete') }}
+								</ShadDropdownMenuItem>
+							</template>
 						</ShadDropdownMenuContent>
 					</ShadDropdownMenu>
-					<ChevronRight v-else class="h-5 w-5 text-muted-foreground" />
 				</div>
-			</section>
-		</div>
+			</div>
+		</template>
 
 		<SettingsPresetsDeleteDialog :preset="pendingDelete" @close="pendingDelete = null" />
 	</SettingsPage>
 </template>
 
 <script setup lang="ts">
-import {ChevronRight, Copy, CopyPlus, Loader2, MessageSquare, MoreHorizontal, Pencil, Plus, Trash2, Wand2} from 'lucide-vue-next';
+import {Copy, CopyPlus, Eye, Loader2, MessageSquare, MoreHorizontal, Pencil, Plus, Trash2, Wand2} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import {usePresetStore} from '~/stores/presetStore';
-import type {PresetResponse} from '~/types/presets';
+import type {PresetResponse, PresetScope} from '~/types/presets';
+
+type PresetTab = 'mine' | 'team' | 'organization';
+
+const TAB_SCOPES: Record<PresetTab, PresetScope> = {mine: 'personal', team: 'team', organization: 'installation'};
 
 const store = useMainStore();
 const presetStore = usePresetStore();
 const router = useRouter();
+const route = useRoute();
 
 const t = (key: string) => store.getTranslation(`presets.settings.${key}`);
 
 const pendingDelete = ref<PresetResponse | null>(null);
 
-const own = computed(() => presetStore.presets.filter(preset => preset.can_edit));
-const shared = computed(() => presetStore.presets.filter(preset => !preset.can_edit));
-const groups = computed(() =>
-	[
-		{key: 'own', label: 'mine', items: own.value},
-		{key: 'shared', label: 'shared', items: shared.value},
-	].filter(group => group.items.length > 0),
-);
+const scopes = computed(() => presetStore.scopes);
+const hasAnyScope = computed(() => !!scopes.value && (scopes.value.personal || scopes.value.teams.length > 0 || scopes.value.installation));
 
-onMounted(() => presetStore.ensurePresets());
+const visibleTabs = computed<PresetTab[]>(() => {
+	const has = (scope: PresetScope) => presetStore.presets.some(preset => preset.scope === scope);
+	const tabs: PresetTab[] = ['mine'];
+	if ((scopes.value?.teams.length ?? 0) > 0 || has('team')) tabs.push('team');
+	if (scopes.value?.installation || has('installation')) tabs.push('organization');
+	return tabs;
+});
+
+const queryTab = route.query.tab as PresetTab | undefined;
+const currentTab = ref<PresetTab>(queryTab && queryTab in TAB_SCOPES ? queryTab : 'mine');
+
+watch(currentTab, tab => router.replace({query: tab === 'mine' ? {} : {tab}}));
+
+const rows = computed(() => presetStore.presets.filter(preset => preset.scope === TAB_SCOPES[currentTab.value]));
+
+const canCreate = computed(() => {
+	if (!scopes.value) return false;
+	if (currentTab.value === 'team') return scopes.value.teams.length > 0;
+	if (currentTab.value === 'organization') return scopes.value.installation;
+	return scopes.value.personal;
+});
+
+const newPresetPath = computed(() => `/settings/presets/new?scope=${TAB_SCOPES[currentTab.value]}`);
+
+onMounted(() => Promise.all([presetStore.ensurePresets(), presetStore.ensureScopes()]));
 
 async function setEnabled(preset: PresetResponse, enabled: boolean) {
 	try {

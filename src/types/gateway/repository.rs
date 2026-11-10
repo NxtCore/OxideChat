@@ -1,15 +1,31 @@
 use super::{GatewayAuthContext, GatewayAuthError, GatewayAuthFailure, GatewayCredential, GatewayInference, GatewayModel, GatewayModelAccessError, public_model_id};
 use super::{GatewayRatePolicy, GatewayRateRule};
-use crate::types::{BudgetAdmission, BudgetLedger, RequestLogOwner, TokenEstimate};
+use crate::types::{BudgetAdmission, BudgetLedger, GatewayPreset, Preset, RequestLogOwner, TokenEstimate, RESERVED_PROVIDER_NAME, preset_slug};
 use crate::utils::auth::{hash_password, verify_password};
 use chrono::Utc;
 use omniference::types::providers::OpenAIModel;
 use sqlx::{PgPool, types::Json};
+use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 use uuid::Uuid;
 
 // Internal Types
 
+macro_rules! accessible_to_key {
+	() => {
+		"m.is_enabled = TRUE AND p.is_enabled = TRUE AND EXISTS (
+			SELECT 1
+			FROM teams t
+			LEFT JOIN team_model_access model_access ON model_access.team_id = t.id AND model_access.model_id = m.id
+			LEFT JOIN team_model_access provider_access ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
+			WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = t.id AND tm.user_id = $1))
+			  AND t.id = $2
+			  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
+		)"
+	};
+}
+
+#[derive(sqlx::FromRow)]
 struct ResolvedModel {
 	id: Uuid,
 	engine_model_id: String,
@@ -28,6 +44,7 @@ impl From<ResolvedModel> for GatewayInference {
 			max_output_tokens: model.max_tokens.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
 			context_length: model.context_length.and_then(|value| u32::try_from(value).ok()).filter(|value| *value > 0),
 			budget: BudgetAdmission::default(),
+			preset: None,
 		}
 	}
 }
@@ -200,7 +217,64 @@ impl GatewayModel {
 		)
 		.fetch_all(pool)
 		.await?;
-		Ok(models.into_iter().map(OpenAIModel::from).collect())
+		let mut listed: Vec<OpenAIModel> = models.into_iter().map(OpenAIModel::from).collect();
+		let presets = Preset::list_for_gateway(pool, context).await?;
+		if !presets.is_empty() {
+			let base_ids: Vec<Uuid> = presets.iter().filter_map(|preset| preset.base_model_id).collect();
+			let accessible: HashSet<Uuid> = Self::accessible_model_ids(pool, context, &base_ids).await?.into_iter().collect();
+			listed.extend(
+				presets
+					.into_iter()
+					.filter(|preset| preset.base_model_id.is_some_and(|id| accessible.contains(&id)))
+					.map(|preset| OpenAIModel {
+						id: preset.key(),
+						object: Some("model".to_string()),
+						created: Some(u64::try_from(preset.updated_at.timestamp()).unwrap_or_default()),
+						owned_by: Some(RESERVED_PROVIDER_NAME.to_string()),
+					}),
+			);
+		}
+		Ok(listed)
+	}
+
+	async fn accessible_model_ids(pool: &PgPool, context: &GatewayAuthContext, ids: &[Uuid]) -> Result<Vec<Uuid>, sqlx::Error> {
+		sqlx::query_scalar(concat!(
+			"SELECT m.id FROM models m JOIN providers p ON p.id = m.provider_id WHERE m.id = ANY($3) AND ",
+			accessible_to_key!()
+		))
+		.bind(context.user_id)
+		.bind(context.team_id)
+		.bind(ids)
+		.fetch_all(pool)
+		.await
+	}
+
+	async fn resolve_model_by_id(pool: &PgPool, context: &GatewayAuthContext, model_id: &Uuid) -> Result<Option<ResolvedModel>, sqlx::Error> {
+		sqlx::query_as::<_, ResolvedModel>(concat!(
+			"SELECT m.id, m.model_id AS engine_model_id, p.name AS provider_name, 			        COALESCE(c.max_output_tokens, m.max_tokens) AS max_tokens, COALESCE(c.context_length, m.context_length) AS context_length 			 FROM models m 			 JOIN providers p ON p.id = m.provider_id 			 LEFT JOIN model_configs c ON c.model_id = m.id AND c.owner_id IS NULL 			 WHERE m.id = $3 AND ",
+			accessible_to_key!()
+		))
+		.bind(context.user_id)
+		.bind(context.team_id)
+		.bind(model_id)
+		.fetch_optional(pool)
+		.await
+	}
+
+	async fn resolve_preset(pool: &PgPool, context: &GatewayAuthContext, slug: &str) -> Result<Option<GatewayInference>, sqlx::Error> {
+		let Some(preset) = Preset::find_for_gateway(pool, context, slug).await? else {
+			return Ok(None);
+		};
+		let Some(base_id) = preset.base_model_id else {
+			return Ok(None);
+		};
+		let Some(model) = Self::resolve_model_by_id(pool, context, &base_id).await? else {
+			return Ok(None);
+		};
+		let mut inference = GatewayInference::from(model);
+		inference.public_model_id = preset.key();
+		inference.preset = Some(GatewayPreset::from(preset));
+		Ok(Some(inference))
 	}
 
 	/// Resolves one enabled provider/model identifier accessible to the context.
@@ -213,7 +287,11 @@ impl GatewayModel {
 	///
 	/// Returns an error when model-access storage cannot be queried.
 	pub async fn resolve_accessible(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<Option<Uuid>, sqlx::Error> {
-		Ok(Self::resolve_model(pool, context, requested_id).await?.map(|model| model.id))
+		match Self::resolve_inference(pool, context, requested_id).await {
+			Ok(inference) => Ok(Some(inference.model_id)),
+			Err(GatewayModelAccessError::Database(error)) => Err(error),
+			Err(_) => Ok(None),
+		}
 	}
 
 	async fn resolve_model(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<Option<ResolvedModel>, sqlx::Error> {
@@ -261,6 +339,9 @@ impl GatewayModel {
 	/// Returns [`GatewayModelAccessError::NotFound`] for inaccessible or ambiguous
 	/// models and a database error when model access cannot be queried.
 	pub async fn resolve_inference(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<GatewayInference, GatewayModelAccessError> {
+		if let Some(slug) = preset_slug(requested_id) {
+			return Self::resolve_preset(pool, context, slug).await?.ok_or(GatewayModelAccessError::NotFound);
+		}
 		let model = Self::resolve_model(pool, context, requested_id).await?.ok_or(GatewayModelAccessError::NotFound)?;
 		Ok(model.into())
 	}

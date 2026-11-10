@@ -7,6 +7,7 @@ pub mod i18n;
 pub mod mcp;
 pub mod models;
 pub mod oauth_providers;
+pub mod presets;
 pub mod provider_billing;
 pub mod providers;
 pub mod teams;
@@ -106,6 +107,8 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/upstream-providers", get(upstream_providers::list_upstream_providers))
 		.route("/api/v1/admin/upstream-providers/sync", post(upstream_providers::sync_upstream_providers))
 		.route("/api/v1/config", get(config::get_global_config))
+		.route("/api/v1/admin/presets", get(presets::list_presets))
+		.route("/api/v1/admin/presets/{id}", patch(presets::update_preset))
 		.route("/api/v1/admin/oauth-providers", get(oauth_providers::list_oauth_providers).post(oauth_providers::create_oauth_provider))
 		.route("/api/v1/admin/oauth-providers/presets", get(oauth_providers::list_oauth_presets))
 		.route("/api/v1/admin/oauth-providers/{id}", put(oauth_providers::update_oauth_provider).delete(oauth_providers::delete_oauth_provider))

@@ -69,7 +69,7 @@
 											<div class="flex items-center gap-2 flex-wrap">
 												<span class="font-medium text-sm">{{ preset.name }}</span>
 												<span class="px-1.5 py-0.5 text-xs rounded bg-primary/10 text-primary">
-													{{ store.getTranslation(`presets.scope.${preset.scope}`) }}
+													{{ presetScopeLabel(preset, store.getTranslation) }}
 												</span>
 											</div>
 											<p class="text-xs text-muted-foreground mt-0.5 truncate">

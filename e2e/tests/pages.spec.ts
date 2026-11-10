@@ -10,6 +10,8 @@ const ADMIN_PAGES = [
 	'/settings/translations',
 	'/settings/providers',
 	'/settings/tools',
+	'/settings/presets',
+	'/settings/admin-presets',
 	'/settings/models',
 	'/settings/teams',
 	'/settings/budgets',
@@ -24,7 +26,7 @@ const ADMIN_PAGES = [
 	'/developer/playground',
 ];
 
-const MEMBER_PAGES = ['/', '/settings/profile', '/settings/usage', '/settings/appearance', '/settings/sessions', '/developer/keys', '/developer/logs', '/developer/usage', '/developer/models', '/developer/playground'];
+const MEMBER_PAGES = ['/', '/settings/profile', '/settings/usage', '/settings/presets', '/settings/appearance', '/settings/sessions', '/developer/keys', '/developer/logs', '/developer/usage', '/developer/models', '/developer/playground'];
 
 async function visit(page: import('@playwright/test').Page, path: string) {
 	await page.goto(path);

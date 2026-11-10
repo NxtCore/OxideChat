@@ -44,6 +44,7 @@ pub async fn chat_completions(
 	let requested = request.model.clone();
 	let estimate = |inference: &mut GatewayInference| {
 		request.model.clone_from(&inference.engine_model_id);
+		inference.apply_preset_to_chat(&mut request);
 		inference.chat_estimate(&context.policy, &mut request)
 	};
 	let admitted = match admit_inference(&state, scope, GatewayRoute::CHAT, &requested, estimate).await {
@@ -78,6 +79,7 @@ pub async fn responses(
 	};
 	let estimate = |inference: &mut GatewayInference| {
 		request.model = Some(inference.engine_model_id.clone());
+		inference.apply_preset_to_responses(&mut request);
 		inference.responses_estimate(&context.policy, &mut request)
 	};
 	let admitted = match admit_inference(&state, scope, GatewayRoute::RESPONSES, &requested, estimate).await {

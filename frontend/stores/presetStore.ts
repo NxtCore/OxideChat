@@ -1,5 +1,5 @@
 import {defineStore} from 'pinia';
-import type {ComposerModel, PresetDraft, PresetResponse, PresetSlugAvailability, SavePresetRequest} from '~/types/presets';
+import type {ComposerModel, PresetDraft, PresetResponse, PresetScopesResponse, PresetSlugAvailability, SavePresetRequest} from '~/types/presets';
 
 export const usePresetStore = defineStore('preset', {
 	state: () => ({
@@ -7,6 +7,7 @@ export const usePresetStore = defineStore('preset', {
 		loaded: false,
 		stale: false,
 		draft: null as PresetDraft | null,
+		scopes: null as PresetScopesResponse | null,
 	}),
 
 	getters: {
@@ -25,6 +26,18 @@ export const usePresetStore = defineStore('preset', {
 					this.stale = false;
 				} catch (e) {
 					console.error('Failed to load presets:', e);
+				}
+			});
+		},
+
+		async ensureScopes() {
+			if (this.scopes) return;
+			await inflight('preset-scopes', async () => {
+				try {
+					const {$customFetch} = useNuxtApp();
+					this.scopes = await $customFetch<PresetScopesResponse>(`${presetsPath}/scopes`);
+				} catch (e) {
+					console.error('Failed to load preset scopes:', e);
 				}
 			});
 		},

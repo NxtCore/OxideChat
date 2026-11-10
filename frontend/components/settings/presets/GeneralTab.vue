@@ -44,6 +44,14 @@
 					</ShadButton>
 				</div>
 				<p class="text-xs" :class="slugStatus === 'taken' || slugStatus === 'invalid' ? 'text-destructive' : 'text-muted-foreground'">{{ slugHint }}</p>
+				<p v-if="slugRenamed" class="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-500" data-testid="preset-slug-renamed">
+					<AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+					{{ t('slug_renamed') }}
+				</p>
+				<p class="text-xs text-muted-foreground">
+					{{ t('api_hint') }}
+					<NuxtLink to="/developer/models" class="text-primary hover:underline">{{ t('api_link') }}</NuxtLink>
+				</p>
 			</div>
 
 			<div class="space-y-1.5" data-testid="preset-base-model">
@@ -73,8 +81,20 @@
 				</ImagePicker>
 			</div>
 
-			<div class="rounded-lg border border-border bg-muted/30 p-3">
-				<p class="text-sm font-medium text-foreground">{{ t('scope') }}: {{ store.getTranslation(`presets.scope.${scope}`) }}</p>
+			<div v-if="scopeOptions" class="space-y-1.5">
+				<ShadLabel>{{ t('scope') }}</ShadLabel>
+				<ShadSelect :model-value="scopeValue" @update:model-value="value => emit('scope', String(value))">
+					<ShadSelectTrigger data-testid="preset-scope">
+						<ShadSelectValue />
+					</ShadSelectTrigger>
+					<ShadSelectContent>
+						<ShadSelectItem v-for="option in scopeOptions" :key="option.value" :value="option.value" :data-testid="`preset-scope-${option.value}`">{{ option.label }}</ShadSelectItem>
+					</ShadSelectContent>
+				</ShadSelect>
+				<p class="text-xs text-muted-foreground">{{ t('scope_choose_description') }}</p>
+			</div>
+			<div v-else class="rounded-lg border border-border bg-muted/30 p-3">
+				<p class="text-sm font-medium text-foreground">{{ t('scope') }}: {{ scopeLabel }}</p>
 				<p class="text-xs text-muted-foreground">{{ t('scope_description') }}</p>
 			</div>
 		</div>
@@ -82,10 +102,9 @@
 </template>
 
 <script setup lang="ts">
-import {Check, Copy, Loader2, Wand2, X} from 'lucide-vue-next';
+import {AlertTriangle, Check, Copy, Loader2, Wand2, X} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import type {ModelList} from '~/types/chat';
-import type {PresetScope} from '~/types/presets';
 
 export type SlugStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 
@@ -93,7 +112,10 @@ const props = defineProps<{
 	form: Record<string, any>;
 	slugStatus: SlugStatus;
 	baseModelKey: string | null;
-	scope: PresetScope;
+	scopeLabel: string;
+	scopeOptions: {value: string; label: string}[] | null;
+	scopeValue: string;
+	slugRenamed: boolean;
 	disabled?: boolean;
 }>();
 
@@ -102,6 +124,7 @@ const emit = defineEmits<{
 	slug: [value: string];
 	'base-key': [value: string | null];
 	base: [model: ModelList | null];
+	scope: [value: string];
 }>();
 
 const store = useMainStore();

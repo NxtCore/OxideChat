@@ -145,6 +145,7 @@ pub struct RequestLogTrace<'a> {
 	pub model_id: Option<Uuid>,
 	pub provider: Option<&'a str>,
 	pub streaming: bool,
+	pub preset_id: Option<Uuid>,
 }
 
 #[derive(Debug)]
@@ -158,6 +159,7 @@ pub struct RequestLogAbort {
 	model_id: Option<Uuid>,
 	provider: Option<String>,
 	streaming: bool,
+	preset_id: Option<Uuid>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -213,6 +215,7 @@ pub struct RequestLogRecord<'a> {
 	pub latency_ms: Option<i32>,
 	pub finish_reason: Option<&'a str>,
 	pub time_to_first_token_ms: Option<i32>,
+	pub preset_id: Option<Uuid>,
 }
 
 pub const REQUEST_LOG_SCOPE_TEAM_SERVICE: &str = "team_service";

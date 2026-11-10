@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod support {
+pub mod support {
 	use crate::tests::gateway::support::*;
 	use crate::types::*;
 	use rust_decimal::Decimal;

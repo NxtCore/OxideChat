@@ -3,7 +3,7 @@ use crate::i18n::I18n;
 use crate::utils::gateway_limits::{self, limit_error_response};
 use crate::types::{
 	API_KEY_ID_HEADER, BUDGET_RESERVATION_METADATA_KEY, GatewayAdmission, GatewayAuthContext, GatewayEstimate, GatewayInference, GatewayLimitError, GatewayModel, GatewayModelAccessError, GatewayRequestScope, GatewayRoute,
-	GatewayRun, INFERENCE_READ_SCOPE, INFERENCE_WRITE_SCOPE, JobState, PUBLIC_MODEL_METADATA_KEY, REQUEST_ID_METADATA_KEY, RESERVATION_METADATA_KEY, RequestLog, RequestLogContext,
+	GatewayRun, INFERENCE_READ_SCOPE, PRESET_METADATA_KEY, INFERENCE_WRITE_SCOPE, JobState, PUBLIC_MODEL_METADATA_KEY, REQUEST_ID_METADATA_KEY, RESERVATION_METADATA_KEY, RequestLog, RequestLogContext,
 	RequestLogErrorCategory, RequestLogFailure, RequestLogOwner, RequestLogTrace, STARTED_AT_METADATA_KEY, STREAMING_METADATA_KEY, TEAM_ID_HEADER,
 };
 use axum::extract::{Request, State};
@@ -293,6 +293,7 @@ async fn log_auth_rejection(state: &JobState, (log, route): (RequestLogContext, 
 		model_id: None,
 		provider: None,
 		streaming: false,
+		preset_id: None,
 	};
 	let failure = RequestLogFailure {
 		category: RequestLogErrorCategory::Auth,
@@ -372,6 +373,9 @@ fn request_metadata(run: &GatewayRun<'_>, inference: &GatewayInference) -> SkinR
 	metadata.insert("oxide_api_key_id".to_string(), scope.context.key_id.to_string());
 	metadata.insert("oxide_model_id".to_string(), inference.model_id.to_string());
 	metadata.insert(PUBLIC_MODEL_METADATA_KEY.to_string(), inference.public_model_id.clone());
+	if let Some(preset) = &inference.preset {
+		metadata.insert(PRESET_METADATA_KEY.to_string(), preset.id.to_string());
+	}
 	metadata.insert("oxide_team_id".to_string(), scope.context.team_id.to_string());
 	metadata.insert("oxide_request_type".to_string(), scope.usage_type.to_string());
 	metadata.insert(REQUEST_ID_METADATA_KEY.to_string(), scope.log.request_id.to_string());
