@@ -21,11 +21,17 @@ impl Preset {
 	/// # Errors
 	/// Returns the database error when the query fails.
 	pub async fn list_for_gateway(pool: &PgPool, context: &GatewayAuthContext) -> Result<Vec<Self>, sqlx::Error> {
-		sqlx::query_as::<_, Self>(concat!("SELECT ", preset_columns!(), " FROM model_presets WHERE ", visible_to_key!(), " ORDER BY slug"))
-			.bind(context.user_id)
-			.bind(context.team_id)
-			.fetch_all(pool)
-			.await
+		sqlx::query_as::<_, Self>(concat!(
+			"SELECT ",
+			preset_columns!(),
+			" FROM model_presets WHERE ",
+			visible_to_key!(),
+			" ORDER BY slug"
+		))
+		.bind(context.user_id)
+		.bind(context.team_id)
+		.fetch_all(pool)
+		.await
 	}
 
 	/// The enabled preset behind `presets/<slug>` if the API key can call it.

@@ -1,6 +1,8 @@
 use super::repository::{audit, map_write_error};
 use super::rows::preset_columns;
-use super::{AdminPresetQuery, AdminPresetResponse, AdminUpdatePresetRequest, PRESET_KEY_PREFIX, Preset, PresetError, PresetOwner, PresetScope, PresetTeam, is_valid_preset_slug};
+use super::{
+	AdminPresetQuery, AdminPresetResponse, AdminUpdatePresetRequest, PRESET_KEY_PREFIX, Preset, PresetError, PresetOwner, PresetScope, PresetTeam, is_valid_preset_slug,
+};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -94,6 +96,9 @@ impl Preset {
 		.ok_or(PresetError::NotFound)?;
 		audit(&mut tx, EVENT_ADMIN_UPDATED, actor_id, &preset).await?;
 		tx.commit().await?;
-		Self::admin_rows(pool, &AdminPresetQuery::default(), Some(&preset.id)).await?.pop().ok_or(PresetError::NotFound)
+		Self::admin_rows(pool, &AdminPresetQuery::default(), Some(&preset.id))
+			.await?
+			.pop()
+			.ok_or(PresetError::NotFound)
 	}
 }

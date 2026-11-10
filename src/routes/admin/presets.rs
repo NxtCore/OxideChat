@@ -15,7 +15,12 @@ pub async fn list_presets(State(state): State<Arc<JobState>>, user: AuthUser, Qu
 }
 
 /// PATCH /api/v1/admin/presets/{id}
-pub async fn update_preset(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<AdminUpdatePresetRequest>) -> Result<Response, AppError> {
+pub async fn update_preset(
+	State(state): State<Arc<JobState>>,
+	user: AuthUser,
+	Path(id): Path<Uuid>,
+	Json(request): Json<AdminUpdatePresetRequest>,
+) -> Result<Response, AppError> {
 	user.require(&state.db, ADMIN_PRESETS_EDIT).await?;
 	json_ok(Preset::admin_update(&state.db, &user.id, &id, request).await?)
 }
