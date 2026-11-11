@@ -52,6 +52,12 @@
 					{{ t('api_hint') }}
 					<NuxtLink to="/developer/models" class="text-primary hover:underline">{{ t('api_link') }}</NuxtLink>
 				</p>
+				<div class="relative rounded-md bg-muted">
+					<ShadButton variant="ghost" size="icon" type="button" class="absolute right-1 top-1 h-7 w-7" :aria-label="store.getTranslation('developer.reveal.copy')" @click="store.copyToClipboard(curl)">
+						<Copy class="h-3.5 w-3.5" />
+					</ShadButton>
+					<pre class="overflow-x-auto p-3 pr-10 font-mono text-xs leading-relaxed text-foreground" data-testid="preset-api-snippet"><code>{{ curl }}</code></pre>
+				</div>
 			</div>
 
 			<div class="space-y-1.5" data-testid="preset-base-model">
@@ -69,9 +75,9 @@
 			<div class="flex items-center justify-between rounded-lg border border-border p-3">
 				<div class="space-y-0.5">
 					<ShadLabel>{{ t('enabled') }}</ShadLabel>
-					<p class="text-xs text-muted-foreground">{{ t('enabled_description') }}</p>
+					<p class="text-xs text-muted-foreground">{{ t(enabledLocked ? 'disabled_by_admin' : 'enabled_description') }}</p>
 				</div>
-				<ShadSwitch v-model:model-value="form.is_enabled" />
+				<ShadSwitch v-model:model-value="form.is_enabled" :disabled="enabledLocked" data-testid="preset-enabled" />
 			</div>
 
 			<div class="space-y-1.5">
@@ -116,6 +122,7 @@ const props = defineProps<{
 	scopeOptions: {value: string; label: string}[] | null;
 	scopeValue: string;
 	slugRenamed: boolean;
+	enabledLocked: boolean;
 	disabled?: boolean;
 }>();
 
@@ -129,6 +136,10 @@ const emit = defineEmits<{
 
 const store = useMainStore();
 const t = (key: string) => store.getTranslation(`presets.editor.${key}`);
+
+const curl = computed(() =>
+	gatewaySnippets(import.meta.client ? gatewayBaseUrl() : '', {model: presetKey(props.form.slug), messages: [{role: 'user', content: 'Hello'}]}).curl,
+);
 
 const slugHint = computed(() => {
 	if (props.slugStatus === 'invalid') return t('slug_invalid');

@@ -15,7 +15,9 @@ export function usePresetActions() {
 	const route = useRoute();
 	const router = useRouter();
 
-	const canCreate = computed(() => store.hasPermission(SETTINGS_PRESETS_EDIT));
+	const personal = store.hasPermission(SETTINGS_PRESETS_EDIT);
+	if (!personal) presetStore.ensureScopes();
+	const canCreate = computed(() => personal || !!presetStore.scopes?.teams.length || !!presetStore.scopes?.installation);
 
 	function openSettings(path: string) {
 		store.settingsReturnPath = route.path.startsWith('/chats/') ? route.fullPath : '/';

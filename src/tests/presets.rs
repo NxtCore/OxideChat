@@ -512,6 +512,40 @@ mod scopes {
 		assert!(filtered.is_empty());
 		Ok(())
 	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_preset_an_admin_turned_off_stays_off_for_its_owner(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let owner = personal(team.member_id);
+		let preset = Preset::create(&pool, &owner, for_model("moderated", team.model_id)).await?;
+		let off = AdminUpdatePresetRequest { slug: None, is_enabled: Some(false) };
+		Preset::admin_update(&pool, &team.admin_id, &preset.id, off).await?;
+
+		let mut edit = for_model("moderated", team.model_id);
+		edit.is_enabled = false;
+		edit.name = "Still editable".to_string();
+		let edited = Preset::update(&pool, &owner, &preset.id, edit.clone()).await?;
+		assert!(edited.disabled_by_admin);
+		edit.is_enabled = true;
+		assert!(matches!(Preset::update(&pool, &owner, &preset.id, edit.clone()).await, Err(PresetError::Forbidden)));
+
+		let on = AdminUpdatePresetRequest { slug: None, is_enabled: Some(true) };
+		Preset::admin_update(&pool, &team.admin_id, &preset.id, on).await?;
+		edit.is_enabled = false;
+		Preset::update(&pool, &owner, &preset.id, edit.clone()).await?;
+		edit.is_enabled = true;
+		assert!(Preset::update(&pool, &owner, &preset.id, edit).await?.is_enabled);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_team_preset_for_an_unknown_team_is_invalid(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let installation = actor(&pool, team.admin_id, true).await?;
+		let missing = Preset::create(&pool, &installation, shared("ghost", team.model_id, PresetScope::Team, Some(Uuid::new_v4()))).await;
+		assert!(matches!(missing, Err(PresetError::Invalid)));
+		Ok(())
+	}
 }
 
 #[cfg(test)]

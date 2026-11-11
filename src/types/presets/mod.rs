@@ -142,6 +142,7 @@ pub struct Preset {
 	pub starters: Vec<String>,
 	pub prompt_visible: bool,
 	pub is_enabled: bool,
+	pub disabled_by_admin: bool,
 	pub updated_at: DateTime<Utc>,
 }
 

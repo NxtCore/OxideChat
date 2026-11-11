@@ -7,7 +7,7 @@ use sqlx::postgres::PgArguments;
 use sqlx::query::QueryAs;
 use sqlx::types::Json;
 use sqlx::{PgPool, Postgres, Transaction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 const AUDIT_TARGET: &str = "preset";
@@ -26,7 +26,13 @@ macro_rules! visible_to_user {
 }
 
 pub(super) fn map_write_error(error: sqlx::Error) -> PresetError {
-	if is_unique_violation(&error) { PresetError::SlugTaken } else { PresetError::Database(error) }
+	if is_unique_violation(&error) {
+		PresetError::SlugTaken
+	} else if error.as_database_error().is_some_and(sqlx::error::DatabaseError::is_foreign_key_violation) {
+		PresetError::Invalid
+	} else {
+		PresetError::Database(error)
+	}
 }
 
 pub(super) async fn audit(tx: &mut Transaction<'_, Postgres>, event: &str, actor_id: &Uuid, preset: &Preset) -> Result<(), sqlx::Error> {
@@ -225,9 +231,13 @@ impl Preset {
 	/// Replaces a preset the actor manages, audited in the same transaction; its scope never changes.
 	///
 	/// # Errors
-	/// Returns [`PresetError::NotFound`] when the actor may not manage the preset, and the errors of [`Preset::create`] otherwise.
+	/// Returns [`PresetError::NotFound`] when the actor may not manage the preset, [`PresetError::Forbidden`] when someone
+	/// other than an installation admin turns on a preset an admin turned off, and the errors of [`Preset::create`] otherwise.
 	pub async fn update(pool: &PgPool, actor: &PresetActor, id: &Uuid, request: SavePresetRequest) -> Result<Self, PresetError> {
 		let current = Self::find_managed(pool, actor, id).await?;
+		if current.disabled_by_admin && request.is_enabled && !actor.installation_admin {
+			return Err(PresetError::Forbidden);
+		}
 		let mut request = request;
 		request.scope = Some(current.scope());
 		request.team_id = current.team_id;
@@ -237,7 +247,7 @@ impl Preset {
 		let query = sqlx::query_as::<_, Self>(concat!(
 			"UPDATE model_presets SET slug = $2, name = $3, description = $4, icon = $5, base_model_id = $6, system_prompt = $7, \
 			 sampling = $8, reasoning = $9, tool_ids = $10, tools_locked = $11, starters = $12, prompt_visible = $13, is_enabled = $14, \
-			 updated_at = NOW() \
+			 disabled_by_admin = disabled_by_admin AND NOT $14, updated_at = NOW() \
 			 WHERE id = $1 AND deleted_at IS NULL RETURNING ",
 			preset_columns!()
 		))
@@ -283,6 +293,14 @@ impl Preset {
 			.into_iter()
 			.map(|(model, allowed)| (model.id, (model, allowed)))
 			.collect();
+		let preset_ids: Vec<Uuid> = presets.iter().map(|preset| preset.id).collect();
+		let used: HashSet<Uuid> =
+			sqlx::query_scalar("SELECT id FROM unnest($1::uuid[]) AS id WHERE EXISTS (SELECT 1 FROM gateway_request_logs l WHERE l.preset_id = id)")
+				.bind(&preset_ids)
+				.fetch_all(pool)
+				.await?
+				.into_iter()
+				.collect();
 		Ok(presets
 			.into_iter()
 			.map(|preset| {
@@ -290,7 +308,11 @@ impl Preset {
 					.base_model_id
 					.and_then(|id| bases.get(&id))
 					.map(|(model, allowed)| PresetBaseModel { model: model.clone(), allowed: *allowed });
-				PresetResponse::build(preset, base, actor)
+				let has_gateway_usage = used.contains(&preset.id);
+				PresetResponse {
+					has_gateway_usage,
+					..PresetResponse::build(preset, base, actor)
+				}
 			})
 			.collect())
 	}

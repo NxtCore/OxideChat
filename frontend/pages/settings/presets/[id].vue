@@ -46,6 +46,7 @@
 					:scope-options="isNew ? scopeOptions : null"
 					:scope-value="scopeChoice"
 					:slug-renamed="slugRenamed"
+					:enabled-locked="enabledLocked"
 					:disabled="!canEdit"
 					@name="onNameInput"
 					@slug="onSlugInput"
@@ -134,7 +135,8 @@ const scopeOptions = computed(() => {
 });
 const canEdit = computed(() => (isNew ? scopeOptions.value.length > 0 : !!preset.value?.can_edit));
 const scopeLabel = computed(() => (preset.value ? presetScopeLabel(preset.value, store.getTranslation) : ''));
-const slugRenamed = computed(() => !isNew && !!preset.value && preset.value.slug !== form.slug);
+const slugRenamed = computed(() => !!preset.value?.has_gateway_usage && preset.value.slug !== form.slug);
+const enabledLocked = computed(() => !!preset.value?.disabled_by_admin && !presetStore.scopes?.installation);
 const unavailable = computed<PresetUnavailable | null>(() => (preset.value?.unavailable === 'disabled' ? null : (preset.value?.unavailable ?? null)));
 const pageTitle = computed(() => (isNew ? t('new_title') : form.name || preset.value?.name || t('loading')));
 const pageDescription = computed(() => {
@@ -297,6 +299,7 @@ onMounted(async () => {
 	}
 	try {
 		applyPreset(await presetStore.fetchPreset(presetId));
+		if (preset.value?.disabled_by_admin) await presetStore.ensureScopes();
 		slugStatus.value = 'available';
 		settingsForm.markSaved();
 	} catch {

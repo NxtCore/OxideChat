@@ -78,6 +78,7 @@
 						v-if="preset.can_edit"
 						data-testid="preset-row-enabled"
 						:model-value="preset.is_enabled"
+						:disabled="preset.disabled_by_admin && !scopes?.installation"
 						:aria-label="t('enabled')"
 						@update:model-value="value => setEnabled(preset, Boolean(value))"
 					/>

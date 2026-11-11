@@ -798,6 +798,7 @@ CREATE TABLE IF NOT EXISTS model_presets (
     starters TEXT[] NOT NULL DEFAULT '{}' CONSTRAINT model_presets_starters_check CHECK (cardinality(starters) <= 4),
     prompt_visible BOOLEAN NOT NULL DEFAULT true,
     is_enabled BOOLEAN NOT NULL DEFAULT true,
+    disabled_by_admin BOOLEAN NOT NULL DEFAULT false,
     created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -862,6 +863,7 @@ CREATE TABLE IF NOT EXISTS gateway_request_logs (
 CREATE INDEX IF NOT EXISTS idx_gateway_request_logs_user_created ON gateway_request_logs(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_gateway_request_logs_key_created ON gateway_request_logs(api_key_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_gateway_request_logs_request_id ON gateway_request_logs(request_id) WHERE request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_gateway_request_logs_preset ON gateway_request_logs(preset_id) WHERE preset_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS request_log_retention (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -4106,6 +4108,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'presets.editor.api_hint', 'Verwende diese ID als Modell in API-Anfragen.'),
     ('en', 'presets.editor.api_link', 'Developer models'),
     ('de', 'presets.editor.api_link', 'Entwickler-Modelle'),
+    ('en', 'presets.editor.disabled_by_admin', 'An administrator turned this preset off. Only they can turn it on again.'),
+    ('de', 'presets.editor.disabled_by_admin', 'Ein Administrator hat dieses Preset ausgeschaltet. Nur Administratoren können es wieder einschalten.'),
     ('en', 'presets.admin.title', 'Presets'),
     ('de', 'presets.admin.title', 'Presets'),
     ('en', 'presets.admin.description', 'Every preset of this installation. Turn presets off or rename them to free an ID; edit team and organization presets in their editor.'),

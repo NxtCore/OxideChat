@@ -73,6 +73,8 @@ impl Preset {
 
 	/// Renames or turns on or off any preset, audited in the same transaction.
 	///
+	/// A preset an admin turned off stays off until an installation admin turns it on again.
+	///
 	/// # Errors
 	/// Returns [`PresetError::InvalidSlug`] or [`PresetError::SlugTaken`] for a bad slug and [`PresetError::NotFound`]
 	/// when the preset does not exist.
@@ -83,7 +85,8 @@ impl Preset {
 		}
 		let mut tx = pool.begin().await?;
 		let preset = sqlx::query_as::<_, Self>(concat!(
-			"UPDATE model_presets SET slug = COALESCE($2, slug), is_enabled = COALESCE($3, is_enabled), updated_at = NOW() \
+			"UPDATE model_presets SET slug = COALESCE($2, slug), is_enabled = COALESCE($3, is_enabled), \
+			 disabled_by_admin = COALESCE(NOT $3, disabled_by_admin), updated_at = NOW() \
 			 WHERE id = $1 AND deleted_at IS NULL RETURNING ",
 			preset_columns!()
 		))

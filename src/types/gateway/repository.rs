@@ -25,6 +25,16 @@ macro_rules! accessible_to_key {
 	};
 }
 
+macro_rules! resolved_model_select {
+	() => {
+		"SELECT DISTINCT m.id, m.model_id AS engine_model_id, p.name AS provider_name,
+			COALESCE(c.max_output_tokens, m.max_tokens) AS max_tokens, COALESCE(c.context_length, m.context_length) AS context_length
+		 FROM models m
+		 JOIN providers p ON p.id = m.provider_id
+		 LEFT JOIN model_configs c ON c.model_id = m.id AND c.owner_id IS NULL"
+	};
+}
+
 #[derive(sqlx::FromRow)]
 struct ResolvedModel {
 	id: Uuid,
@@ -250,15 +260,12 @@ impl GatewayModel {
 	}
 
 	async fn resolve_model_by_id(pool: &PgPool, context: &GatewayAuthContext, model_id: &Uuid) -> Result<Option<ResolvedModel>, sqlx::Error> {
-		sqlx::query_as::<_, ResolvedModel>(concat!(
-			"SELECT m.id, m.model_id AS engine_model_id, p.name AS provider_name, 			        COALESCE(c.max_output_tokens, m.max_tokens) AS max_tokens, COALESCE(c.context_length, m.context_length) AS context_length 			 FROM models m 			 JOIN providers p ON p.id = m.provider_id 			 LEFT JOIN model_configs c ON c.model_id = m.id AND c.owner_id IS NULL 			 WHERE m.id = $3 AND ",
-			accessible_to_key!()
-		))
-		.bind(context.user_id)
-		.bind(context.team_id)
-		.bind(model_id)
-		.fetch_optional(pool)
-		.await
+		sqlx::query_as::<_, ResolvedModel>(concat!(resolved_model_select!(), " WHERE m.id = $3 AND ", accessible_to_key!()))
+			.bind(context.user_id)
+			.bind(context.team_id)
+			.bind(model_id)
+			.fetch_optional(pool)
+			.await
 	}
 
 	async fn resolve_preset(pool: &PgPool, context: &GatewayAuthContext, slug: &str) -> Result<Option<GatewayInference>, sqlx::Error> {
@@ -295,38 +302,15 @@ impl GatewayModel {
 	}
 
 	async fn resolve_model(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<Option<ResolvedModel>, sqlx::Error> {
-		let mut matches = sqlx::query_as!(
-			ResolvedModel,
-			r#"
-			SELECT DISTINCT
-				m.id,
-				m.model_id AS engine_model_id,
-				p.name AS provider_name,
-				COALESCE(c.max_output_tokens, m.max_tokens) AS max_tokens,
-				COALESCE(c.context_length, m.context_length) AS context_length
-			FROM models m
-			JOIN providers p ON p.id = m.provider_id
-			LEFT JOIN model_configs c ON c.model_id = m.id AND c.owner_id IS NULL
-			WHERE (m.model_id = $3 OR LOWER(p.name || '/' || m.model_id) = LOWER($3))
-			  AND m.is_enabled = TRUE
-			  AND p.is_enabled = TRUE
-			  AND EXISTS (
-				SELECT 1
-				FROM teams t
-				LEFT JOIN team_model_access model_access
-					ON model_access.team_id = t.id AND model_access.model_id = m.id
-				LEFT JOIN team_model_access provider_access
-					ON provider_access.team_id = t.id AND provider_access.provider_id = p.id
-				WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = t.id AND tm.user_id = $1))
-				  AND t.id = $2
-				  AND (t.allow_all_models OR model_access.id IS NOT NULL OR provider_access.id IS NOT NULL)
-			  )
-			LIMIT 2
-			"#,
-			context.user_id,
-			context.team_id,
-			requested_id
-		)
+		let mut matches = sqlx::query_as::<_, ResolvedModel>(concat!(
+			resolved_model_select!(),
+			" WHERE (m.model_id = $3 OR LOWER(p.name || '/' || m.model_id) = LOWER($3)) AND ",
+			accessible_to_key!(),
+			" LIMIT 2"
+		))
+		.bind(context.user_id)
+		.bind(context.team_id)
+		.bind(requested_id)
 		.fetch_all(pool)
 		.await?;
 		Ok(if matches.len() == 1 { matches.pop() } else { None })
