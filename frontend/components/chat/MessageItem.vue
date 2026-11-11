@@ -229,7 +229,7 @@ const chatStore = useChatStore();
 const modelStore = useModelStore();
 const {sendAndStream} = useChatStream();
 const iconStore = useIconsStore();
-const {renderStreaming, renderComplete} = useMarkdown();
+const {renderStreaming, renderComplete, isHighlighterReady} = useMarkdown();
 
 const showReasoning = ref(false);
 const previewData = ref<{code: string; language: string} | null>(null);
@@ -314,7 +314,17 @@ const hasInterleavedParts = computed(() => {
 	return Array.isArray(parts) && parts.some(p => p.type === 'tool_call');
 });
 
-const partHtmlCache = new Map<number, {text: string; streaming: boolean; html: string}>();
+const partHtmlCache = new Map<number, {text: string; streaming: boolean; highlighted: boolean; html: string}>();
+
+function renderPart(index: number, text: string): string {
+	const streaming = isStreaming.value;
+	const highlighted = isHighlighterReady.value;
+	const cached = partHtmlCache.get(index);
+	if (cached?.text === text && cached.streaming === streaming && cached.highlighted === highlighted) return cached.html;
+	const html = streaming ? renderStreaming(text) : renderComplete(text);
+	partHtmlCache.set(index, {text, streaming, highlighted, html});
+	return html;
+}
 
 const orderedParts = computed(() => {
 	const parts = props.message.content_parts;
@@ -332,17 +342,9 @@ const orderedParts = computed(() => {
 			};
 		}
 		if (part.type === 'reasoning') {
-			const text = part.text;
-			const cached = partHtmlCache.get(index);
-			const html = cached?.text === text && cached.streaming === isStreaming.value ? cached.html : isStreaming.value ? renderStreaming(text) : renderComplete(text);
-			partHtmlCache.set(index, {text, streaming: isStreaming.value, html});
-			return {type: 'reasoning' as const, html};
+			return {type: 'reasoning' as const, html: renderPart(index, part.text)};
 		}
-		const text = part.text;
-		const cached = partHtmlCache.get(index);
-		const html = cached?.text === text && cached.streaming === isStreaming.value ? cached.html : isStreaming.value ? renderStreaming(text) : renderComplete(text);
-		partHtmlCache.set(index, {text, streaming: isStreaming.value, html});
-		return {type: 'text' as const, html};
+		return {type: 'text' as const, html: renderPart(index, part.text)};
 	});
 });
 
