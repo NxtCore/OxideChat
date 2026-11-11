@@ -42,8 +42,8 @@ test.describe('presets', () => {
 		try {
 			await page.goto('/');
 			await pickModel(page, t, seed.model.displayName);
-			await page.getByTestId('preset-menu').click();
-			await page.getByTestId('preset-menu-save').click();
+			await openPicker(page);
+			await page.getByTestId('picker-save-preset').click();
 			await expect(page).toHaveURL(/\/settings\/presets\/new$/);
 
 			await page.getByTestId('preset-name').fill(name);
@@ -133,17 +133,33 @@ test.describe('presets', () => {
 		}
 	});
 
-	test('the composer menu offers to edit an own preset and hides missing instructions', async ({page, api, seed}) => {
-		const preset = await api.post('/api/v1/presets', {slug: slugFor(uniqueName('locked')), name: uniqueName('Locked'), base_model_id: seed.model.id, tools_locked: true});
+	test('the picker offers to edit an own preset and shows its instructions', async ({page, api, seed}) => {
+		const locked = await api.post('/api/v1/presets', {slug: slugFor(uniqueName('locked')), name: uniqueName('Locked'), base_model_id: seed.model.id, tools_locked: true});
+		const briefed = await api.post('/api/v1/presets', {slug: slugFor(uniqueName('briefed')), name: uniqueName('Briefed'), base_model_id: seed.model.id, system_prompt: 'Answer in haiku.'});
 		try {
 			await page.goto('/');
-			await pickPreset(page, preset.key);
+			await pickPreset(page, locked.key);
 			await expect(page.getByTestId('preset-empty-state')).toBeVisible();
-			await page.getByTestId('preset-menu').click();
-			await expect(page.getByTestId('preset-menu-edit')).toBeVisible();
-			await expect(page.getByTestId('preset-menu-instructions')).toHaveCount(0);
+			await expect(page.getByTestId('preset-menu')).toHaveCount(0);
+
+			await openPicker(page);
+			await page.getByTestId('picker-presets-tab').click();
+			const lockedRow = page.locator(`[data-testid="picker-preset"][data-preset-key="${locked.key}"]`);
+			await expect(lockedRow.getByTestId('picker-preset-edit')).toBeVisible();
+			await expect(lockedRow.getByTestId('picker-preset-instructions')).toHaveCount(0);
+
+			const briefedRow = page.locator(`[data-testid="picker-preset"][data-preset-key="${briefed.key}"]`);
+			await briefedRow.getByTestId('picker-preset-instructions').click();
+			await expect(page.getByTestId('preset-instructions')).toHaveText('Answer in haiku.');
+			await page.keyboard.press('Escape');
+
+			await openPicker(page);
+			await page.getByTestId('picker-presets-tab').click();
+			await lockedRow.getByTestId('picker-preset-edit').click();
+			await expect(page).toHaveURL(new RegExp(`/settings/presets/${locked.id}$`));
 		} finally {
-			await api.delete(`/api/v1/presets/${preset.id}`);
+			await api.delete(`/api/v1/presets/${locked.id}`);
+			await api.delete(`/api/v1/presets/${briefed.id}`);
 		}
 	});
 

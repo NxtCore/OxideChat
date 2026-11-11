@@ -6,6 +6,7 @@ export const USAGE = {prompt_tokens: 1000, completion_tokens: 2000};
 export const REPORTED_COST = 86;
 
 const MODELS = ['mock-chat', 'mock-error', 'mock-slow'];
+const BULK_MODELS = Array.from({length: 120}, (_, i) => `bulk-model-${String(i + 1).padStart(3, '0')}`);
 
 function lastUserText(body) {
 	const messages = body.messages ?? [];
@@ -89,6 +90,10 @@ const server = http.createServer(async (req, res) => {
 
 	if (req.headers.authorization !== 'Bearer mock-key') {
 		return sendJson(res, 401, {error: {message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key'}});
+	}
+
+	if (req.method === 'GET' && url.pathname === '/bulk/v1/models') {
+		return sendJson(res, 200, {object: 'list', data: BULK_MODELS.map(id => ({id, object: 'model', created: 0, owned_by: 'mock'}))});
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/models') {

@@ -61,6 +61,8 @@
 									class="px-3 py-2 transition-colors border-b border-border/50"
 									:class="isPresetBlocked(preset) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent/50 cursor-pointer'"
 									@click="selectPreset(preset)"
+									@pointerenter="activeRow = preset.key"
+									@focusin="activeRow = preset.key"
 								>
 									<div class="flex items-start gap-3">
 										<img v-if="preset.icon" :src="preset.icon" class="h-5 w-5 mt-0.5 rounded-md bg-muted object-cover" alt="" />
@@ -80,26 +82,26 @@
 											</p>
 										</div>
 										<div class="flex items-center gap-1 ml-2">
-											<Tooltip>
-												<TooltipTrigger as-child>
-													<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleDefaultKey(preset.key)">
-														<Bookmark class="h-4 w-4" :class="isDefaultKey(preset.key) ? 'fill-primary stroke-primary' : ''" />
-													</button>
-												</TooltipTrigger>
-												<TooltipContent>
-													<p>{{ store.getTranslation('chat.model_selector.toggle_default') }}</p>
-												</TooltipContent>
-											</Tooltip>
-											<Tooltip>
-												<TooltipTrigger as-child>
-													<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="togglePresetFavorite(preset.key)">
-														<Star class="h-4 w-4" :class="isFavoriteKey(preset.key) ? 'fill-primary stroke-primary' : ''" />
-													</button>
-												</TooltipTrigger>
-												<TooltipContent>
-													<p>{{ store.getTranslation('chat.model_selector.toggle_favorite') }}</p>
-												</TooltipContent>
-											</Tooltip>
+											<RowTooltip v-if="preset.system_prompt" :active="activeRow === preset.key" :text="store.getTranslation('presets.menu.view_instructions')">
+												<button class="p-1 rounded hover:bg-accent text-muted-foreground" data-testid="picker-preset-instructions" @click.stop="showInstructions(preset)">
+													<ScrollText class="h-4 w-4" />
+												</button>
+											</RowTooltip>
+											<RowTooltip v-if="preset.can_edit" :active="activeRow === preset.key" :text="store.getTranslation('presets.menu.edit')">
+												<button class="p-1 rounded hover:bg-accent text-muted-foreground" data-testid="picker-preset-edit" @click.stop="editPreset(preset)">
+													<Pencil class="h-4 w-4" />
+												</button>
+											</RowTooltip>
+											<RowTooltip :active="activeRow === preset.key" :text="store.getTranslation('chat.model_selector.toggle_default')">
+												<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleDefaultKey(preset.key)">
+													<Bookmark class="h-4 w-4" :class="isDefaultKey(preset.key) ? 'fill-primary stroke-primary' : ''" />
+												</button>
+											</RowTooltip>
+											<RowTooltip :active="activeRow === preset.key" :text="store.getTranslation('chat.model_selector.toggle_favorite')">
+												<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="togglePresetFavorite(preset.key)">
+													<Star class="h-4 w-4" :class="isFavoriteKey(preset.key) ? 'fill-primary stroke-primary' : ''" />
+												</button>
+											</RowTooltip>
 										</div>
 									</div>
 								</div>
@@ -116,9 +118,12 @@
 							<div
 								v-for="model in pickerModels"
 								:key="model.id"
+								data-testid="picker-model"
 								class="px-3 py-2 transition-colors border-b border-border/50 last:border-0"
 								:class="model.budget_blocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent/50 cursor-pointer'"
 								@click="selectModel(model)"
+								@pointerenter="activeRow = model.id"
+								@focusin="activeRow = model.id"
 							>
 								<div class="flex items-start gap-3">
 									<img v-if="model.icon" :src="model.icon" class="h-5 w-5 mt-0.5 flex items-center justify-center rounded-md bg-muted overflow-hidden" />
@@ -156,59 +161,34 @@
 
 									<div class="flex items-center gap-1 ml-2">
 										<div v-if="model.capabilities.length > 0" class="p-1 gap-1 rounded-4xl bg-muted">
-											<Tooltip v-if="model.capabilities.includes('TOOLS')">
-												<TooltipTrigger as-child>
-													<button class="rounded p-1">
-														<Wrench class="h-4 w-4" />
-													</button>
-												</TooltipTrigger>
-												<TooltipContent>
-													<p>{{ store.getTranslation('chat.model_selector.tool_calling') }}</p>
-												</TooltipContent>
-											</Tooltip>
-											<Tooltip v-if="modelStore.hasReasoningCapability(model)">
-												<TooltipTrigger as-child>
-													<button class="p-1 text-muted-foreground">
-														<Sparkles class="h-4 w-4" />
-													</button>
-												</TooltipTrigger>
-												<TooltipContent>
-													<p>{{ store.getTranslation('chat.model_selector.reasoning_capable') }}</p>
-												</TooltipContent>
-											</Tooltip>
-											<Tooltip v-if="modelStore.hasVisionCapability(model)">
-												<TooltipTrigger as-child>
-													<button class="p-1 text-muted-foreground">
-														<Eye class="h-4 w-4" />
-													</button>
-												</TooltipTrigger>
-												<TooltipContent>
-													<p>{{ store.getTranslation('chat.model_selector.vision_capable') }}</p>
-												</TooltipContent>
-											</Tooltip>
+											<RowTooltip v-if="model.capabilities.includes('TOOLS')" :active="activeRow === model.id" :text="store.getTranslation('chat.model_selector.tool_calling')">
+												<button class="rounded p-1">
+													<Wrench class="h-4 w-4" />
+												</button>
+											</RowTooltip>
+											<RowTooltip v-if="modelStore.hasReasoningCapability(model)" :active="activeRow === model.id" :text="store.getTranslation('chat.model_selector.reasoning_capable')">
+												<button class="p-1 text-muted-foreground">
+													<Sparkles class="h-4 w-4" />
+												</button>
+											</RowTooltip>
+											<RowTooltip v-if="modelStore.hasVisionCapability(model)" :active="activeRow === model.id" :text="store.getTranslation('chat.model_selector.vision_capable')">
+												<button class="p-1 text-muted-foreground">
+													<Eye class="h-4 w-4" />
+												</button>
+											</RowTooltip>
 										</div>
-										<Tooltip>
-											<TooltipTrigger as-child>
-												<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleDefault(model)">
-													<Bookmark v-if="isDefaultModel(model)" class="h-4 w-4 fill-primary stroke-primary" />
-													<Bookmark v-else class="h-4 w-4" />
-												</button>
-											</TooltipTrigger>
-											<TooltipContent>
-												<p>{{ store.getTranslation('chat.model_selector.toggle_default') }}</p>
-											</TooltipContent>
-										</Tooltip>
-										<Tooltip>
-											<TooltipTrigger as-child>
-												<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleFavorite(model)">
-													<Star v-if="modelStore.isFavoriteModel(model)" class="h-4 w-4 fill-primary stroke-primary" />
-													<Star v-else class="h-4 w-4" />
-												</button>
-											</TooltipTrigger>
-											<TooltipContent>
-												<p>{{ store.getTranslation('chat.model_selector.toggle_favorite') }}</p>
-											</TooltipContent>
-										</Tooltip>
+										<RowTooltip :active="activeRow === model.id" :text="store.getTranslation('chat.model_selector.toggle_default')">
+											<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleDefault(model)">
+												<Bookmark v-if="isDefaultModel(model)" class="h-4 w-4 fill-primary stroke-primary" />
+												<Bookmark v-else class="h-4 w-4" />
+											</button>
+										</RowTooltip>
+										<RowTooltip :active="activeRow === model.id" :text="store.getTranslation('chat.model_selector.toggle_favorite')">
+											<button class="p-1 rounded hover:bg-accent text-muted-foreground" @click.stop="toggleFavorite(model)">
+												<Star v-if="modelStore.isFavoriteModel(model)" class="h-4 w-4 fill-primary stroke-primary" />
+												<Star v-else class="h-4 w-4" />
+											</button>
+										</RowTooltip>
 									</div>
 								</div>
 							</div>
@@ -263,29 +243,39 @@
 							<Bot v-else class="h-5 w-5" />
 						</button>
 						<div class="flex-1" />
-						<NuxtLink
+						<button
 							v-if="canCreatePresets"
-							to="/settings/presets/new"
-							data-testid="picker-new-preset"
+							type="button"
+							data-testid="picker-save-preset"
 							class="shrink-0 inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-							@click="isOpen = false"
+							:title="store.getTranslation('presets.picker.save_hint')"
+							@click="savePreset"
 						>
-							<Plus class="h-3.5 w-3.5" />
-							{{ store.getTranslation('presets.picker.new') }}
-						</NuxtLink>
+							<BookmarkPlus class="h-3.5 w-3.5" />
+							{{ store.getTranslation('presets.menu.save_as') }}
+						</button>
 					</div>
 				</div>
 			</div>
 		</PopoverContent>
 	</Popover>
+
+	<ShadDialog :open="!!instructionsPreset" @update:open="open => !open && (instructionsPreset = null)">
+		<ShadDialogContent class="max-w-2xl">
+			<ShadDialogHeader>
+				<ShadDialogTitle>{{ store.getTranslation('presets.menu.instructions_title', {preset: instructionsPreset?.name ?? ''}) }}</ShadDialogTitle>
+				<ShadDialogDescription>{{ store.getTranslation('presets.menu.instructions_description') }}</ShadDialogDescription>
+			</ShadDialogHeader>
+			<pre class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap rounded-lg bg-muted p-3 font-mono text-xs text-foreground" data-testid="preset-instructions">{{ instructionsPreset?.system_prompt }}</pre>
+		</ShadDialogContent>
+	</ShadDialog>
 </template>
 
 <script setup lang="ts">
-import {Bot, Star, Bookmark, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2, Plus, Wand2} from 'lucide-vue-next';
+import {Bot, Star, Bookmark, BookmarkPlus, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2, Pencil, ScrollText, Wand2} from 'lucide-vue-next';
 import type {ModelList, UpdatePreferencesRequest} from '~/types/chat';
 import type {PresetResponse} from '~/types/presets';
 import {usePresetStore} from '~/stores/presetStore';
-import {SETTINGS_PRESETS_EDIT} from '~/types/generated/permissions';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
@@ -294,7 +284,7 @@ import {useModelPicker} from '~/composables/useModelPicker';
 import {sanitizeSvg} from '~/composables/useMarkdown';
 import {cn} from '~/lib/utils';
 import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
-import {Tooltip, TooltipContent, TooltipTrigger} from '~/components/ui/tooltip';
+import RowTooltip from './RowTooltip.vue';
 
 const props = defineProps<{
 	class?: string;
@@ -307,11 +297,20 @@ const preferencesStore = usePreferencesStore();
 const iconStore = useIconsStore();
 const store = useMainStore();
 
+const sanitizedIcons = new Map<string, string>();
+
 function providerIconHtml(providerName: string | undefined, modelId?: string): string {
 	const icon = iconStore.getProviderIcon(providerName, modelId);
-	return icon?.type === 'svg' ? sanitizeSvg(icon.icon) : '';
+	if (icon?.type !== 'svg') return '';
+	let html = sanitizedIcons.get(icon.icon);
+	if (html === undefined) {
+		html = sanitizeSvg(icon.icon);
+		sanitizedIcons.set(icon.icon, html);
+	}
+	return html;
 }
 const isOpen = ref(false);
+const activeRow = ref<string | null>(null);
 const {
 	models: pickerModels,
 	providers: pickerProviders,
@@ -343,12 +342,13 @@ watch(isOpen, async (open) => {
 			pickerLoaded = true;
 			await pickerInit();
 		}
-		setupObserver();
 	} else {
-		teardownObserver();
+		activeRow.value = null;
 		if (pickerClearSearch()) pickerLoaded = false;
 	}
 });
+
+watch(sentinel, element => (element ? setupObserver() : teardownObserver()));
 
 function setupObserver() {
 	teardownObserver();
@@ -377,7 +377,23 @@ onUnmounted(() => {
 	teardownObserver();
 });
 
-const canCreatePresets = computed(() => store.hasPermission(SETTINGS_PRESETS_EDIT));
+const {canCreate: canCreatePresets, openSettings, saveAsPreset} = usePresetActions();
+const instructionsPreset = ref<PresetResponse | null>(null);
+
+function savePreset() {
+	isOpen.value = false;
+	saveAsPreset();
+}
+
+function editPreset(preset: PresetResponse) {
+	isOpen.value = false;
+	openSettings(`/settings/presets/${preset.id}`);
+}
+
+function showInstructions(preset: PresetResponse) {
+	isOpen.value = false;
+	instructionsPreset.value = preset;
+}
 
 const visiblePresets = computed(() => {
 	const filter = pickerFilter.value;

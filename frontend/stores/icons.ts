@@ -1,9 +1,29 @@
 import {defineStore} from 'pinia';
+import {markRaw} from 'vue';
+
+type ProviderMeta = {variants: string[]; type: string; icon: string};
+
+export type ProviderIcon = {icon: string; type: 'svg' | 'png'};
+
+const iconCache = new Map<string, ProviderIcon | null>();
+
+function toIcon(meta: ProviderMeta): ProviderIcon {
+	return {icon: meta.icon, type: meta.type as 'svg' | 'png'};
+}
+
+function findIcon(providersMeta: Record<string, ProviderMeta>, name: string, normalized: string): ProviderIcon | null {
+	const exact = Object.values(providersMeta).find(meta => meta.variants.includes(normalized));
+	if (exact) return toIcon(exact);
+	const partial = Object.values(providersMeta).find(meta => meta.variants.some(variant => normalized.includes(variant) || variant.includes(normalized)));
+	if (partial) return toIcon(partial);
+	const openrouter = providersMeta.openrouter;
+	return name === 'openrouter' && openrouter ? toIcon(openrouter) : null;
+}
 
 export const useIconsStore = defineStore('icons', {
 	state: () => {
 		return {
-			providersMeta: {
+			providersMeta: markRaw({
 				openrouter: {
 					variants: ['openrouter', 'open-router', 'open router'],
 					type: 'svg',
@@ -179,33 +199,21 @@ export const useIconsStore = defineStore('icons', {
 					type: 'svg',
 					icon: '<svg fill="currentColor" fill-rule="evenodd" height="1em" style="flex:none;line-height:1" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>Arcee</title><path d="M13.236 2.377 2.751 20.493H0L11.863 0zm3.554 6.156-9.606 11.96H4.13L15.511 6.32zm6.908 11.96H14.05l8.406-2.151zm-3.42-5.922-7.843 5.92H8.482l10.597-7.997 1.2 2.077z"/></svg>',
 				},
-			},
-			providerLookup: {} as Record<string, string>,
+			}) as Record<string, ProviderMeta>,
 		};
 	},
 	getters: {
 		getProviderIcon: state => {
-			return (providerName: string | undefined, modelId?: string): {icon: string; type: 'svg' | 'png'; modelId?: string} | null => {
+			return (providerName: string | undefined, modelId?: string): ProviderIcon | null => {
 				if (!providerName) return null;
-				providerName = providerName.toLowerCase().trim();
-				const normalized = providerName === 'openrouter' ? (modelId?.split('/')[1] || providerName).toLowerCase() : providerName;
-				if (state.providerLookup[normalized]) {
-					const provider = state.providersMeta[state.providerLookup[normalized]];
-					return {icon: provider.icon, type: provider.type as 'svg' | 'png'};
-				}
-				for (const [key, meta] of Object.entries(state.providersMeta)) {
-					if (
-						meta.variants.some(variant => {
-							if (variant === normalized) return true;
-							if (normalized.includes(variant) || variant.includes(normalized)) return true;
-						})
-					) {
-						state.providerLookup[normalized] = key;
-						return {icon: meta.icon, type: meta.type as 'svg' | 'png'};
-					}
-				}
-
-				return providerName === 'openrouter' ? {icon: state.providersMeta.openrouter.icon, type: state.providersMeta.openrouter.type} : null;
+				const name = providerName.toLowerCase().trim();
+				const normalized = name === 'openrouter' ? (modelId?.split('/')[1] || name).toLowerCase() : name;
+				const cacheKey = `${name}|${normalized}`;
+				const cached = iconCache.get(cacheKey);
+				if (cached !== undefined) return cached;
+				const icon = findIcon(state.providersMeta, name, normalized);
+				iconCache.set(cacheKey, icon);
+				return icon;
 			};
 		},
 
