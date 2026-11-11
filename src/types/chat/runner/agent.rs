@@ -10,10 +10,15 @@ use crate::types::{
 use axum::response::sse::Event;
 use futures_util::{Stream, StreamExt};
 use omniference::{
-	stream::StreamEvent,
+	stream::{FinishReason, StreamEvent},
 	types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role},
 };
-use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
+use std::{
+	collections::HashMap,
+	convert::Infallible,
+	sync::Arc,
+	time::{Duration, Instant},
+};
 use uuid::Uuid;
 
 const MAX_ITERATIONS: usize = 10;
@@ -44,6 +49,10 @@ struct IterationState {
 	content: String,
 	reasoning: String,
 	completed_tool_calls: Vec<(String, String, serde_json::Value)>,
+	first_token: Option<Instant>,
+	tool_time: Duration,
+	finish_reason: Option<FinishReason>,
+	saw_tool_call: bool,
 }
 
 /// Tokens used by every request of a turn, shown on the message.
@@ -52,6 +61,8 @@ pub(crate) struct TokenTotals {
 	pub(crate) input: u32,
 	pub(crate) output: u32,
 	pub(crate) reasoning: u32,
+	pub(crate) cached_input: u32,
+	pub(crate) cache_write: u32,
 }
 
 pub(crate) struct AgentRun {
@@ -76,6 +87,9 @@ pub(crate) struct AgentRun {
 	reasoning_content: String,
 	reasoning_start: Option<Instant>,
 	reasoning_latency_ms: Option<i32>,
+	time_to_first_token: Option<Duration>,
+	generation_time: Duration,
+	finish_reason: Option<FinishReason>,
 	cost_details: CostDetails,
 	all_tool_executions: Vec<ToolExecutionInternal>,
 	assistant_message_parts: Vec<MessagePart>,
@@ -160,6 +174,9 @@ impl AgentRun {
 			reasoning_content: String::new(),
 			reasoning_start: None,
 			reasoning_latency_ms: None,
+			time_to_first_token: None,
+			generation_time: Duration::ZERO,
+			finish_reason: None,
 			cost_details: CostDetails::default(),
 			all_tool_executions: Vec::new(),
 			assistant_message_parts: Vec::new(),
@@ -233,6 +250,9 @@ impl AgentRun {
 	pub(crate) fn apply(&mut self, event: StreamEvent) -> Option<StreamData> {
 		match event {
 			StreamEvent::TextDelta { content } => {
+				if !content.is_empty() {
+					self.mark_first_token();
+				}
 				if let Some(start) = self.reasoning_start.take() {
 					self.reasoning_latency_ms = Some(start.elapsed().as_millis() as i32);
 				}
@@ -241,6 +261,9 @@ impl AgentRun {
 				Some(StreamData::TextDelta { content })
 			}
 			StreamEvent::ReasoningDelta { content } => {
+				if !content.is_empty() {
+					self.mark_first_token();
+				}
 				if self.reasoning_start.is_none() {
 					self.reasoning_start = Some(Instant::now());
 				}
@@ -249,6 +272,8 @@ impl AgentRun {
 				Some(StreamData::ReasoningDelta { content })
 			}
 			StreamEvent::ToolCallStart { id, name, args_json } => {
+				self.mark_first_token();
+				self.step.saw_tool_call = true;
 				self.step.pending_tool_calls.insert(id.clone(), (name.clone(), args_json.to_string()));
 				Some(StreamData::ToolCallStart { id, name })
 			}
@@ -265,17 +290,27 @@ impl AgentRun {
 			StreamEvent::Tokens { input, output } => {
 				self.tokens.input += input;
 				self.tokens.output += output;
-				Some(StreamData::Tokens {
-					input: self.tokens.input,
-					output: self.tokens.output,
-					reasoning: if self.tokens.reasoning > 0 { Some(self.tokens.reasoning) } else { None },
-				})
+				Some(self.tokens_event())
 			}
-			StreamEvent::OpenAIMetadata { completion_tokens_details, .. } => {
-				if let Some(details) = completion_tokens_details
-					&& details.reasoning_tokens > 0 {
-						self.tokens.reasoning += details.reasoning_tokens;
-					}
+			StreamEvent::OpenAIMetadata {
+				prompt_tokens_details,
+				completion_tokens_details,
+				..
+			} => {
+				if let Some(details) = prompt_tokens_details {
+					self.tokens.cached_input += details.cached_tokens;
+					self.tokens.cache_write += details.cache_write_tokens;
+				}
+				let reasoning = completion_tokens_details.map_or(0, |details| details.reasoning_tokens);
+				self.tokens.reasoning += reasoning;
+				(reasoning > 0).then(|| self.tokens_event())
+			}
+			StreamEvent::ReasoningBlock { .. } => {
+				self.mark_first_token();
+				None
+			}
+			StreamEvent::Finish { reason } => {
+				self.step.finish_reason = Some(reason);
 				None
 			}
 			StreamEvent::Error { code, message } => Some(StreamData::Error { code, message }),
@@ -288,6 +323,31 @@ impl AgentRun {
 			}
 			_ => None,
 		}
+	}
+
+	fn tokens_event(&self) -> StreamData {
+		StreamData::Tokens {
+			input: self.tokens.input,
+			output: self.tokens.output,
+			reasoning: (self.tokens.reasoning > 0).then_some(self.tokens.reasoning),
+		}
+	}
+
+	fn mark_first_token(&mut self) {
+		if self.step.first_token.is_none() {
+			self.step.first_token = Some(Instant::now());
+		}
+		if self.time_to_first_token.is_none() {
+			self.time_to_first_token = Some(self.start_time.elapsed());
+		}
+	}
+
+	fn close_step(&mut self) {
+		if let Some(first_token) = self.step.first_token {
+			self.generation_time += first_token.elapsed().saturating_sub(self.step.tool_time);
+		}
+		let fallback = if self.step.saw_tool_call { FinishReason::ToolCalls } else { FinishReason::Stop };
+		self.finish_reason = Some(self.step.finish_reason.unwrap_or(fallback));
 	}
 
 	pub(crate) fn take_pending_call(&mut self, id: String, args: serde_json::Value) -> Option<ToolCall> {
@@ -341,6 +401,7 @@ impl AgentRun {
 
 	pub(crate) fn record_tool_result(&mut self, call: ToolCall, started: Instant, result: ToolOutput) -> StreamData {
 		let ToolOutput { output, error, tool_id, function_id } = result;
+		self.step.tool_time += started.elapsed();
 		self.step.tool_results.push(ToolExecutionInternal {
 			call_id: call.id.clone(),
 			tool_name: call.name.clone(),
@@ -362,6 +423,7 @@ impl AgentRun {
 	}
 
 	pub(crate) async fn finish_iteration(&mut self) -> Finish {
+		self.close_step();
 		if self.step.tool_results.is_empty() {
 			Finish::Stop(self.finalize_turn().await)
 		} else {
@@ -435,6 +497,12 @@ impl AgentRun {
 			reasoning_tokens: Some(self.tokens.reasoning as i32),
 			latency_ms: Some(self.start_time.elapsed().as_millis() as i32),
 			reasoning_latency_ms: self.reasoning_latency_ms,
+			cached_input_tokens: Some(self.tokens.cached_input as i32),
+			cache_write_tokens: Some(self.tokens.cache_write as i32),
+			time_to_first_token_ms: self.time_to_first_token.map(|ttft| ttft.as_millis() as i32),
+			generation_ms: (!self.generation_time.is_zero()).then_some(self.generation_time.as_millis() as i32),
+			finish_reason: self.finish_reason.map(|reason| reason.as_str().to_string()),
+			steps: Some(self.iteration as i32),
 		};
 		let reasoning_details = ReasoningDetails {
 			effort: self.reasoning_effort.clone(),

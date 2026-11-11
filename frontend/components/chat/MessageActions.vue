@@ -73,6 +73,10 @@
 						<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.model') }}</span>
 						<span class="text-foreground font-medium">{{ modelName }}</span>
 					</div>
+					<div v-if="message.reasoning_details?.effort" class="flex justify-between text-xs" data-testid="message-details-effort">
+						<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.reasoning_effort') }}</span>
+						<span class="text-foreground">{{ effortLabel(message.reasoning_details.effort) }}</span>
+					</div>
 
 					<div class="h-px bg-border" />
 
@@ -80,6 +84,14 @@
 						<div class="flex justify-between text-xs">
 							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.input_tokens') }}</span>
 							<span class="text-foreground">{{ message.usage_details.input_tokens?.toLocaleString() || '-' }}</span>
+						</div>
+						<div v-if="message.usage_details.cached_input_tokens" class="flex justify-between text-xs" data-testid="message-details-cached">
+							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.cached_input_tokens') }}</span>
+							<span class="text-foreground">{{ message.usage_details.cached_input_tokens.toLocaleString() }}</span>
+						</div>
+						<div v-if="message.usage_details.cache_write_tokens" class="flex justify-between text-xs">
+							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.cache_write_tokens') }}</span>
+							<span class="text-foreground">{{ message.usage_details.cache_write_tokens.toLocaleString() }}</span>
 						</div>
 						<div class="flex justify-between text-xs">
 							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.output_tokens') }}</span>
@@ -115,6 +127,10 @@
 					<div class="h-px bg-border" />
 
 					<div class="space-y-1">
+						<div v-if="message.usage_details.time_to_first_token_ms" class="flex justify-between text-xs" data-testid="message-details-ttft">
+							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.time_to_first_token') }}</span>
+							<span class="text-foreground">{{ formatLatency(message.usage_details.time_to_first_token_ms) }}</span>
+						</div>
 						<div class="flex justify-between text-xs">
 							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.response_latency') }}</span>
 							<span class="text-foreground">{{ formatLatency(message.usage_details.latency_ms) }}</span>
@@ -122,6 +138,25 @@
 						<div v-if="message.usage_details.reasoning_latency_ms" class="flex justify-between text-xs">
 							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.reasoning_latency') }}</span>
 							<span class="text-foreground">{{ formatLatency(message.usage_details.reasoning_latency_ms) }}</span>
+						</div>
+						<div v-if="tokensPerSecond" class="flex justify-between text-xs" data-testid="message-details-speed">
+							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.tokens_per_second') }}</span>
+							<span class="text-foreground">{{ store.getTranslation('chat.message_actions.tokens_per_second_value', {value: tokensPerSecond}) }}</span>
+						</div>
+					</div>
+
+					<div v-if="message.usage_details.finish_reason || (message.usage_details.steps ?? 0) > 1" class="h-px bg-border" />
+
+					<div v-if="message.usage_details.finish_reason || (message.usage_details.steps ?? 0) > 1" class="space-y-1">
+						<div v-if="message.usage_details.finish_reason" class="flex justify-between text-xs" data-testid="message-details-finish">
+							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.finish_reason') }}</span>
+							<span :class="message.usage_details.finish_reason === 'length' || message.usage_details.finish_reason === 'content_filter' ? 'text-destructive' : 'text-foreground'">
+								{{ store.getTranslation(`chat.message_actions.finish_reasons.${message.usage_details.finish_reason}`) }}
+							</span>
+						</div>
+						<div v-if="(message.usage_details.steps ?? 0) > 1" class="flex justify-between text-xs">
+							<span class="text-muted-foreground">{{ store.getTranslation('chat.message_actions.steps') }}</span>
+							<span class="text-foreground">{{ message.usage_details.steps }}</span>
 						</div>
 					</div>
 
@@ -211,6 +246,18 @@ function formatLatency(ms: number | null): string {
 	if (!ms) return '-';
 	if (ms < 1000) return `${ms}ms`;
 	return `${(ms / 1000).toFixed(2)}s`;
+}
+
+const tokensPerSecond = computed(() => {
+	const output = props.message.usage_details.output_tokens;
+	const generationMs = props.message.usage_details.generation_ms;
+	if (!output || !generationMs) return null;
+	const perSecond = output / (generationMs / 1000);
+	return perSecond.toLocaleString(undefined, {maximumFractionDigits: perSecond < 10 ? 1 : 0});
+});
+
+function effortLabel(effort: string): string {
+	return store.getTranslation(`chat.reasoning_selector.${effort === 'xhigh' ? 'extra_high' : effort}`);
 }
 
 function formatTime(timestamp: string): string {

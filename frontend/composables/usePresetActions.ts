@@ -16,7 +16,7 @@ export function usePresetActions() {
 	const router = useRouter();
 
 	const personal = store.hasPermission(SETTINGS_PRESETS_EDIT);
-	if (!personal) presetStore.ensureScopes();
+	if (!personal && store.user) presetStore.ensureScopes();
 	const canCreate = computed(() => personal || !!presetStore.scopes?.teams.length || !!presetStore.scopes?.installation);
 
 	function openSettings(path: string) {
