@@ -1,4 +1,4 @@
-use super::{MAX_PRESET_SLUG_LEN, MAX_PRESET_STARTERS, PresetReasoning, PresetSampling, SavePresetRequest};
+use super::{MAX_PRESET_SLUG_LEN, MAX_PRESET_STARTERS, PresetReasoning, PresetSampling, PresetScope, SavePresetRequest};
 
 const MAX_NAME_LEN: usize = 100;
 const MAX_DESCRIPTION_LEN: usize = 2_000;
@@ -24,6 +24,8 @@ pub enum PresetError {
 	ToolsNotAllowed,
 	#[error("the preset does not exist")]
 	NotFound,
+	#[error("the preset may not be managed by this user")]
+	Forbidden,
 	#[error(transparent)]
 	Database(#[from] sqlx::Error),
 }
@@ -82,6 +84,11 @@ impl SavePresetRequest {
 	/// # Errors
 	/// Returns [`PresetError::InvalidSlug`] for a malformed slug and [`PresetError::Invalid`] for any other field.
 	pub fn normalized(mut self) -> Result<Self, PresetError> {
+		match self.scope {
+			Some(PresetScope::Team) if self.team_id.is_none() => return Err(PresetError::Invalid),
+			Some(PresetScope::Team) => {}
+			_ => self.team_id = None,
+		}
 		self.slug = self.slug.trim().to_string();
 		if !is_valid_preset_slug(&self.slug) {
 			return Err(PresetError::InvalidSlug);

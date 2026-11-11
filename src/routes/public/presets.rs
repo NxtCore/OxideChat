@@ -1,8 +1,9 @@
-//! Preset routes: a user's own presets and the shared presets they can use.
+//! Preset routes: personal presets, team presets managed by team admins, and installation presets.
 
-use crate::types::consts::SETTINGS_PRESETS_EDIT;
+use crate::types::consts::{ADMIN_PRESETS_EDIT, SETTINGS_PRESETS_EDIT};
 use crate::types::{
-	AppError, AuthUser, Budget, BudgetSubject, JobState, Preset, PresetError, PresetResponse, PresetSlugAvailability, PresetSlugQuery, SavePresetRequest, is_valid_preset_slug, json_ok,
+	AppError, AuthUser, Budget, BudgetSubject, JobState, Preset, PresetActor, PresetError, PresetResponse, PresetSlugAvailability, PresetSlugQuery, SavePresetRequest,
+	is_valid_preset_slug, json_ok,
 };
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::Json;
@@ -13,9 +14,15 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-async fn responses(state: &JobState, user: &AuthUser, presets: Vec<Preset>) -> Result<Vec<PresetResponse>, AppError> {
-	let mut responses = Preset::responses_for_user(&state.db, &user.id, presets).await?;
-	let blocked: HashSet<Uuid> = match Budget::status_for(&state.db, BudgetSubject::user(user.id)).await {
+async fn actor(state: &JobState, user: &AuthUser) -> Result<PresetActor, AppError> {
+	let personal = user.check_permission(&state.db, SETTINGS_PRESETS_EDIT).await?;
+	let installation_admin = user.check_permission(&state.db, ADMIN_PRESETS_EDIT).await?;
+	Ok(PresetActor::load(&state.db, &user.id, personal, installation_admin).await?)
+}
+
+async fn responses(state: &JobState, actor: &PresetActor, presets: Vec<Preset>) -> Result<Vec<PresetResponse>, AppError> {
+	let mut responses = Preset::responses_for_user(&state.db, actor, presets).await?;
+	let blocked: HashSet<Uuid> = match Budget::status_for(&state.db, BudgetSubject::user(actor.user_id)).await {
 		Ok(status) => status.blocked_model_ids.into_iter().collect(),
 		Err(error) => {
 			tracing::warn!(%error, "failed to load budget status for presets");
@@ -28,22 +35,32 @@ async fn responses(state: &JobState, user: &AuthUser, presets: Vec<Preset>) -> R
 	Ok(responses)
 }
 
-async fn single(state: &JobState, user: &AuthUser, preset: Preset) -> Result<PresetResponse, AppError> {
-	responses(state, user, vec![preset]).await?.pop().ok_or_else(|| PresetError::NotFound.into())
+async fn single(state: &JobState, actor: &PresetActor, preset: Preset) -> Result<PresetResponse, AppError> {
+	responses(state, actor, vec![preset]).await?.pop().ok_or_else(|| PresetError::NotFound.into())
 }
 
 /// GET /api/v1/presets
 ///
 /// Every preset the user can see, with its base model and whether it can be used.
 pub async fn list_presets(State(state): State<Arc<JobState>>, user: AuthUser) -> Result<Response, AppError> {
+	let actor = actor(&state, &user).await?;
 	let presets = Preset::list_for_user(&state.db, &user.id).await?;
-	json_ok(responses(&state, &user, presets).await?)
+	json_ok(responses(&state, &actor, presets).await?)
+}
+
+/// GET /api/v1/presets/scopes
+///
+/// The scopes and teams the user may create presets in.
+pub async fn list_scopes(State(state): State<Arc<JobState>>, user: AuthUser) -> Result<Response, AppError> {
+	let actor = actor(&state, &user).await?;
+	json_ok(actor.scopes(&state.db).await?)
 }
 
 /// GET /api/v1/presets/{id}
 pub async fn get_preset(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
-	let preset = Preset::find_visible(&state.db, &user.id, &id).await?.ok_or(PresetError::NotFound)?;
-	json_ok(single(&state, &user, preset).await?)
+	let actor = actor(&state, &user).await?;
+	let preset = Preset::find_for_actor(&state.db, &actor, &id).await?.ok_or(PresetError::NotFound)?;
+	json_ok(single(&state, &actor, preset).await?)
 }
 
 /// GET /api/v1/presets/check-slug
@@ -58,22 +75,22 @@ pub async fn check_slug(State(state): State<Arc<JobState>>, _user: AuthUser, Que
 
 /// POST /api/v1/presets
 pub async fn create_preset(State(state): State<Arc<JobState>>, user: AuthUser, Json(request): Json<SavePresetRequest>) -> Result<Response, AppError> {
-	user.require(&state.db, SETTINGS_PRESETS_EDIT).await?;
-	let preset = Preset::create_personal(&state.db, &user.id, request).await?;
-	let response = single(&state, &user, preset).await?;
+	let actor = actor(&state, &user).await?;
+	let preset = Preset::create(&state.db, &actor, request).await?;
+	let response = single(&state, &actor, preset).await?;
 	Ok(ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build())
 }
 
 /// PUT /api/v1/presets/{id}
 pub async fn update_preset(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<SavePresetRequest>) -> Result<Response, AppError> {
-	user.require(&state.db, SETTINGS_PRESETS_EDIT).await?;
-	let preset = Preset::update_personal(&state.db, &user.id, &id, request).await?;
-	json_ok(single(&state, &user, preset).await?)
+	let actor = actor(&state, &user).await?;
+	let preset = Preset::update(&state.db, &actor, &id, request).await?;
+	json_ok(single(&state, &actor, preset).await?)
 }
 
 /// DELETE /api/v1/presets/{id}
 pub async fn delete_preset(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
-	user.require(&state.db, SETTINGS_PRESETS_EDIT).await?;
-	Preset::delete_personal(&state.db, &user.id, &id).await?;
+	let actor = actor(&state, &user).await?;
+	Preset::delete(&state.db, &actor, &id).await?;
 	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).status(StatusCode::NO_CONTENT).build())
 }

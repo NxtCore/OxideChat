@@ -26,9 +26,9 @@ impl RequestLog {
 			INSERT INTO gateway_request_logs (
 				user_id, team_id, api_key_id, model_id, public_model_id, request_type, status, status_code,
 				input_tokens, output_tokens, reasoning_tokens, cost_total, request_id, provider, error_category,
-				streaming, latency_ms, finish_reason, time_to_first_token_ms
+				streaming, latency_ms, finish_reason, time_to_first_token_ms, preset_id
 			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 			ON CONFLICT (request_id) WHERE request_id IS NOT NULL DO UPDATE SET
 				status = CASE
 					WHEN gateway_request_logs.error_category = 'interrupted' AND EXCLUDED.status = 'success' THEN 'success'
@@ -47,7 +47,8 @@ impl RequestLog {
 				cost_total = GREATEST(gateway_request_logs.cost_total, EXCLUDED.cost_total),
 				latency_ms = GREATEST(gateway_request_logs.latency_ms, EXCLUDED.latency_ms),
 				finish_reason = COALESCE(EXCLUDED.finish_reason, gateway_request_logs.finish_reason),
-				time_to_first_token_ms = COALESCE(EXCLUDED.time_to_first_token_ms, gateway_request_logs.time_to_first_token_ms)
+				time_to_first_token_ms = COALESCE(EXCLUDED.time_to_first_token_ms, gateway_request_logs.time_to_first_token_ms),
+				preset_id = COALESCE(gateway_request_logs.preset_id, EXCLUDED.preset_id)
 			RETURNING id, user_id, team_id, api_key_id, model_id, public_model_id, request_type, status, status_code,
 			          input_tokens, output_tokens, reasoning_tokens, cost_total, created_at, request_id, provider,
 			          error_category, streaming, latency_ms, finish_reason, time_to_first_token_ms
@@ -72,6 +73,7 @@ impl RequestLog {
 		.bind(params.latency_ms)
 		.bind(params.finish_reason)
 		.bind(params.time_to_first_token_ms)
+		.bind(params.preset_id)
 		.fetch_one(pool)
 		.await
 	}
@@ -104,6 +106,7 @@ impl RequestLog {
 				latency_ms: Some(trace.context.latency_ms(Utc::now())),
 				finish_reason: None,
 				time_to_first_token_ms: None,
+				preset_id: trace.preset_id,
 			},
 		)
 		.await
@@ -250,6 +253,7 @@ impl RequestLogAbort {
 			model_id: trace.model_id,
 			provider: trace.provider.map(str::to_owned),
 			streaming: trace.streaming,
+			preset_id: trace.preset_id,
 		}
 	}
 
@@ -269,6 +273,7 @@ impl RequestLogAbort {
 				model_id: self.model_id,
 				provider: self.provider.as_deref(),
 				streaming: self.streaming,
+				preset_id: self.preset_id,
 			};
 			let failure = RequestLogFailure {
 				category: RequestLogErrorCategory::Interrupted,

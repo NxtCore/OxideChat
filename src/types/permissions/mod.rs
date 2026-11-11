@@ -28,6 +28,8 @@ permissions! {
 	ADMIN_DEVELOPER_LIMITS_EDIT = "admin.developer.limits.edit",
 	ADMIN_DEVELOPER_ACCESS_EDIT = "admin.developer.access.edit",
 	ADMIN_DEVELOPER_AUDIT_VIEW = "admin.developer.audit.view",
+	ADMIN_PRESETS_VIEW = "admin.presets.view",
+	ADMIN_PRESETS_EDIT = "admin.presets.edit",
 	ADMIN_I18N_VIEW = "admin.i18n.view",
 	ADMIN_I18N_EDIT = "admin.i18n.edit",
 	SETTINGS_APPEARANCE_EDIT = "settings.appearance.edit",

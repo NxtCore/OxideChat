@@ -1,4 +1,4 @@
-use super::{PresetReasoning, PresetSampling};
+use super::{PresetReasoning, PresetSampling, PresetScope};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -6,6 +6,12 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SavePresetRequest {
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub scope: Option<PresetScope>,
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub team_id: Option<Uuid>,
 	pub slug: String,
 	pub name: String,
 	#[serde(default)]
@@ -29,6 +35,25 @@ pub struct SavePresetRequest {
 	pub prompt_visible: bool,
 	#[serde(default = "default_true")]
 	pub is_enabled: bool,
+}
+
+/// Filters for the admin preset list.
+#[derive(Debug, Default, Deserialize)]
+pub struct AdminPresetQuery {
+	pub scope: Option<PresetScope>,
+	pub team_id: Option<Uuid>,
+}
+
+/// Admin change to any preset: a new slug to settle a taken ID, or turning it on or off.
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AdminUpdatePresetRequest {
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub slug: Option<String>,
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub is_enabled: Option<bool>,
 }
 
 /// Query for checking whether a slug is still free.

@@ -69,5 +69,8 @@ test.describe('message actions', () => {
 		await expect(details).toBeVisible();
 		await expect(details).toContainText(t('chat.message_actions.total_cost'));
 		await expect(details).toContainText(t('chat.message_actions.input_tokens'));
+		await expect(details.getByTestId('message-details-ttft')).toContainText(t('chat.message_actions.time_to_first_token'));
+		await expect(details.getByTestId('message-details-speed')).toContainText(/\d/);
+		await expect(details.getByTestId('message-details-finish')).toContainText(t('chat.message_actions.finish_reasons.stop'));
 	});
 });

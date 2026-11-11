@@ -94,6 +94,12 @@ export interface ChatMessage {
 		reasoning_tokens: number | null;
 		latency_ms: number | null;
 		reasoning_latency_ms: number | null;
+		cached_input_tokens?: number | null;
+		cache_write_tokens?: number | null;
+		time_to_first_token_ms?: number | null;
+		generation_ms?: number | null;
+		finish_reason?: 'stop' | 'length' | 'tool_calls' | 'content_filter' | null;
+		steps?: number | null;
 	};
 	reasoning_details: {
 		effort: string | null;

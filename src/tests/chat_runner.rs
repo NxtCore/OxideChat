@@ -38,6 +38,7 @@ mod agent {
 	use crate::types::chat::runner::prepare::PreparedTurn;
 	use crate::types::*;
 	use omniference::stream::StreamEvent;
+	use omniference::types::{CompletionTokensDetails, PromptTokensDetails};
 	use sqlx::PgPool;
 	use std::sync::Arc;
 	use std::time::Instant;
@@ -152,6 +153,75 @@ mod agent {
 		let tokens = run.apply(StreamEvent::Tokens { input: 1, output: 2 });
 		assert!(matches!(tokens, Some(StreamData::Tokens { input: 11, output: 7, reasoning: None })));
 		assert!(run.apply(StreamEvent::Done).is_none());
+		Ok(())
+	}
+
+	fn token_details(cached: u32, cache_write: u32, reasoning: u32) -> StreamEvent {
+		StreamEvent::OpenAIMetadata {
+			system_fingerprint: None,
+			service_tier: None,
+			prompt_tokens_details: Some(PromptTokensDetails {
+				cached_tokens: cached,
+				audio_tokens: 0,
+				cache_write_tokens: cache_write,
+			}),
+			completion_tokens_details: Some(CompletionTokensDetails {
+				reasoning_tokens: reasoning,
+				audio_tokens: 0,
+				accepted_prediction_tokens: 0,
+				rejected_prediction_tokens: 0,
+			}),
+		}
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn reasoning_tokens_reach_the_stream_once_the_provider_reports_them(pool: PgPool) -> TestResult {
+		let mut run = run(&fixture(&pool).await?);
+		run.apply(StreamEvent::Tokens { input: 10, output: 50 });
+		let tokens = run.apply(token_details(0, 0, 30));
+		assert!(matches!(tokens, Some(StreamData::Tokens { input: 10, output: 50, reasoning: Some(30) })));
+		assert!(run.apply(token_details(4, 0, 0)).is_none());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_turn_records_cache_timing_finish_reason_and_steps(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool).await?;
+		let mut run = run(&fixture);
+		run.next_request().await.map_err(|_| "request refused")?;
+		run.apply(StreamEvent::Tokens { input: 1_000, output: 10 });
+		run.apply(token_details(800, 100, 0));
+		tool_step(&mut run, "call-1")?;
+		assert!(matches!(run.finish_iteration().await, Finish::Continue));
+
+		run.next_request().await.map_err(|_| "request refused")?;
+		run.apply(StreamEvent::TextDelta { content: String::new() });
+		run.apply(StreamEvent::TextDelta { content: "Cut".to_string() });
+		run.apply(StreamEvent::Tokens { input: 2_000, output: 20 });
+		run.apply(token_details(1_500, 0, 0));
+		run.apply(StreamEvent::Finish {
+			reason: omniference::stream::FinishReason::Length,
+		});
+		let usage = done_message(run.finish_iteration().await)?.usage_details;
+		assert_eq!(usage.cached_input_tokens, Some(2_300));
+		assert_eq!(usage.cache_write_tokens, Some(100));
+		assert_eq!(usage.finish_reason.as_deref(), Some("length"));
+		assert_eq!(usage.steps, Some(2));
+		let first_token = usage.time_to_first_token_ms.ok_or("missing time to first token")?;
+		assert!(first_token <= usage.latency_ms.ok_or("missing latency")?);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_step_that_only_calls_tools_finishes_with_tool_calls(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool).await?;
+		let mut run = run(&fixture);
+		run.next_request().await.map_err(|_| "request refused")?;
+		tool_step(&mut run, "call-1")?;
+		assert!(matches!(run.finish_iteration().await, Finish::Continue));
+		let message = done_message(run.save_partial().await.map(Finish::Stop).ok_or("nothing saved")?)?;
+		assert_eq!(message.usage_details.finish_reason.as_deref(), Some("tool_calls"));
+		assert_eq!(message.usage_details.steps, Some(1));
 		Ok(())
 	}
 

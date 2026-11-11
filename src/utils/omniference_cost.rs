@@ -108,6 +108,7 @@ impl OxideCostSink {
 					.time_to_first_token
 					.filter(|_| streaming)
 					.map(|duration| i32::try_from(duration.as_millis()).unwrap_or(i32::MAX)),
+				preset_id: metadata_uuid(record, PRESET_METADATA_KEY),
 			},
 		)
 		.await?;

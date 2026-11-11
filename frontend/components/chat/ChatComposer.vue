@@ -56,7 +56,6 @@
 						</button>
 						<input ref="fileInputRef" type="file" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
 						<ModelSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
-						<ChatPresetMenu />
 						<ReasoningSelector
 							v-if="modelStore.hasConfigurableReasoningCapability(modelStore.selectedModel)"
 							class="border-none! bg-transparent! shadow-none! hover:bg-muted/50"
@@ -99,7 +98,6 @@ import ContextLimitIndicator from './ContextLimitIndicator.vue';
 import ToolSelector from './ToolSelector.vue';
 import ProviderSelector from './ProviderSelector.vue';
 import SamplingSelector from './SamplingSelector.vue';
-import ChatPresetMenu from './ChatPresetMenu.vue';
 import McpManagerDialog from '../mcp/McpManagerDialog.vue';
 
 const emit = defineEmits<{send: (content: string, parts?: any[]) => void}>();

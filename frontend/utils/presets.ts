@@ -1,5 +1,5 @@
 import type {ModelList} from '~/types/chat';
-import type {ComposerModel, PresetResponse, SavePresetRequest} from '~/types/presets';
+import type {ComposerModel, PresetResponse, PresetScope, PresetTeam, SavePresetRequest} from '~/types/presets';
 
 export const PRESET_KEY_PREFIX = 'presets/';
 
@@ -72,4 +72,8 @@ export function presetToRequest(preset: PresetResponse): SavePresetRequest {
 		prompt_visible: preset.prompt_visible,
 		is_enabled: preset.is_enabled,
 	};
+}
+
+export function presetScopeLabel(preset: {scope: PresetScope; team: PresetTeam | null}, translate: (key: string) => string): string {
+	return preset.scope === 'team' && preset.team ? preset.team.name : translate(`presets.scope.${preset.scope}`);
 }

@@ -584,6 +584,7 @@ mod estimate {
 			max_output_tokens: Some(100),
 			context_length: Some(1000),
 			budget: BudgetAdmission::default(),
+			preset: None,
 		};
 		let text = serde_json::to_vec(&serde_json::json!({"messages": [{"role": "user", "content": "hello"}]}))?;
 		let external = serde_json::to_vec(&serde_json::json!({"previous_response_id": "opaque-history"}))?;
@@ -600,6 +601,7 @@ mod estimate {
 			max_output_tokens: None,
 			context_length: None,
 			budget: BudgetAdmission::default(),
+			preset: None,
 		};
 		assert!(unknown.estimate_tokens(&text, None, 1).is_err());
 		assert!(unknown.estimate_tokens(&external, Some(100), 1).is_err());

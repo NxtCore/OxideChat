@@ -1,7 +1,7 @@
 macro_rules! preset_columns {
 	() => {
-		"id, scope, owner_id, slug, name, description, icon, base_model_id, system_prompt, sampling, reasoning, tool_ids, \
-		 tools_locked, starters, prompt_visible, is_enabled, updated_at"
+		"id, scope, owner_id, team_id, (SELECT t.name FROM teams t WHERE t.id = model_presets.team_id) AS team_name, slug, name, description, icon, base_model_id, system_prompt, sampling, reasoning, tool_ids, \
+		 tools_locked, starters, prompt_visible, is_enabled, disabled_by_admin, updated_at"
 	};
 }
 

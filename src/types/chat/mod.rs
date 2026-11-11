@@ -37,6 +37,18 @@ pub struct UsageDetails {
 	pub latency_ms: Option<i32>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub reasoning_latency_ms: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub cached_input_tokens: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub cache_write_tokens: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub time_to_first_token_ms: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub generation_ms: Option<i32>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub finish_reason: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub steps: Option<i32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

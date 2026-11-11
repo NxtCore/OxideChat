@@ -8,6 +8,7 @@ mod keys;
 mod keys_repository;
 mod limiter;
 mod policy;
+mod preset;
 mod repository;
 
 pub(crate) use body::ReservedBody;
@@ -16,6 +17,7 @@ pub use estimate::GatewayEstimate;
 pub use keys::*;
 pub use limiter::*;
 pub use policy::*;
+pub use preset::GatewayPreset;
 
 use crate::types::{BudgetAdmission, BudgetError, BudgetSubject, RequestLogAbort, RequestLogContext, RequestLogOwner, RequestLogTrace};
 use axum::body::Body;
@@ -160,6 +162,7 @@ pub struct GatewayInference {
 	pub max_output_tokens: Option<u32>,
 	pub context_length: Option<u32>,
 	pub budget: BudgetAdmission,
+	pub preset: Option<GatewayPreset>,
 }
 
 impl GatewayInference {
@@ -209,13 +212,16 @@ impl GatewayRequestScope<'_> {
 			model_id,
 			provider,
 			streaming: self.streaming,
+			preset_id: None,
 		}
 	}
 
 	#[must_use]
 	/// Describes this request for its log row using a resolved model.
 	pub fn inference_trace<'b>(&self, inference: &'b GatewayInference) -> RequestLogTrace<'b> {
-		self.trace(&inference.public_model_id, Some(inference.model_id), Some(&inference.provider_name))
+		let mut trace = self.trace(&inference.public_model_id, Some(inference.model_id), Some(&inference.provider_name));
+		trace.preset_id = inference.preset.as_ref().map(|preset| preset.id);
+		trace
 	}
 }
 
