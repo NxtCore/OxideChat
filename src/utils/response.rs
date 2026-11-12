@@ -148,6 +148,7 @@ pub enum ErrorCode {
 	ApiKeyAdminDisabled,
 	PresetSlugTaken,
 	RoleNameTaken,
+	RoleLockOut,
 
 	// 429 Too Many Requests
 	RateLimited,
@@ -208,7 +209,7 @@ impl ErrorCode {
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
 			Self::Forbidden | Self::InsufficientPermissions | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden | Self::RoleProtected | Self::RolePermissionNotHeld => StatusCode::FORBIDDEN,
 			Self::NotFound | Self::UserNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
-			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled | Self::PresetSlugTaken | Self::RoleNameTaken => StatusCode::CONFLICT,
+			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled | Self::PresetSlugTaken | Self::RoleNameTaken | Self::RoleLockOut => StatusCode::CONFLICT,
 			Self::RateLimited | Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -278,6 +279,7 @@ impl ErrorCode {
 			Self::ApiKeyAdminDisabled => "developer.errors.key_admin_disabled",
 			Self::PresetSlugTaken => "presets.errors.slug_taken",
 			Self::RoleNameTaken => "roles.errors.name_taken",
+			Self::RoleLockOut => "roles.errors.lock_out",
 			Self::RoleNameInvalid => "roles.errors.name_invalid",
 			Self::RolePermissionUnknown => "roles.errors.permission_unknown",
 			Self::RoleProtected => "roles.errors.protected",
@@ -354,6 +356,7 @@ impl ErrorCode {
 			Self::ApiKeyAdminDisabled => "api_key_admin_disabled",
 			Self::PresetSlugTaken => "preset_slug_taken",
 			Self::RoleNameTaken => "role_name_taken",
+			Self::RoleLockOut => "role_lock_out",
 			Self::RoleNameInvalid => "role_name_invalid",
 			Self::RolePermissionUnknown => "role_permission_unknown",
 			Self::RoleProtected => "role_protected",

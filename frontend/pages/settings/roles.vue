@@ -31,7 +31,7 @@
 					<Pencil v-if="isEditable(role)" class="h-4 w-4" />
 					<Eye v-else class="h-4 w-4" />
 				</ShadButton>
-				<ShadButton v-if="isEditable(role)" variant="ghost" size="icon" class="h-8 w-8 text-destructive" data-testid="role-delete" :aria-label="t('delete')" @click="deleting = role">
+				<ShadButton v-if="isEditable(role) && !role.is_builtin" variant="ghost" size="icon" class="h-8 w-8 text-destructive" data-testid="role-delete" :aria-label="t('delete')" @click="deleting = role">
 					<Trash2 class="h-4 w-4" />
 				</ShadButton>
 			</div>
@@ -45,7 +45,7 @@
 				</ShadDialogHeader>
 				<div class="space-y-2">
 					<ShadLabel for="role-name">{{ t('name') }}</ShadLabel>
-					<ShadInput id="role-name" v-model="form.name" data-testid="role-name" maxlength="50" :disabled="editorReadonly" />
+					<ShadInput id="role-name" v-model="form.name" data-testid="role-name" maxlength="50" :disabled="editorReadonly || !!editing?.is_builtin" />
 				</div>
 				<div class="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
 					<ShadLabel>{{ t('permissions') }}</ShadLabel>
@@ -132,7 +132,7 @@ const groups = computed(() => {
 });
 
 function isEditable(role: RoleResponse): boolean {
-	return canEdit.value && !role.is_builtin && role.permissions.every(permission => store.hasPermission(permission));
+	return canEdit.value && role.permissions.every(permission => store.hasPermission(permission));
 }
 
 function impliedBy(permission: string): boolean {

@@ -48,10 +48,12 @@ pub enum RoleError {
 	NameTaken,
 	#[error("a permission does not exist")]
 	UnknownPermission,
-	#[error("built-in roles cannot be changed")]
+	#[error("built-in roles cannot be renamed or deleted")]
 	Protected,
 	#[error("the actor does not hold every permission involved")]
 	PermissionNotHeld,
+	#[error("no role could manage roles after this change")]
+	LockOut,
 	#[error("the role does not exist")]
 	NotFound,
 	#[error(transparent)]

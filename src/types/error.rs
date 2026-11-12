@@ -156,6 +156,7 @@ fn role_error_code(error: &RoleError) -> ErrorCode {
 		RoleError::UnknownPermission => ErrorCode::RolePermissionUnknown,
 		RoleError::Protected => ErrorCode::RoleProtected,
 		RoleError::PermissionNotHeld => ErrorCode::RolePermissionNotHeld,
+		RoleError::LockOut => ErrorCode::RoleLockOut,
 		RoleError::NotFound => ErrorCode::NotFound,
 		RoleError::Database(_) => ErrorCode::InternalError,
 	}

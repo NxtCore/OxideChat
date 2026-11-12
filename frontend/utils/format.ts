@@ -1,7 +1,7 @@
 import {useMainStore} from '~/stores';
 
 export function errorMessage(error: any, fallback: string): string {
-	return error?.data?.message ?? error?.message ?? fallback;
+	return error?.data?.errors?.[0]?.message ?? error?.data?.message ?? error?.message ?? fallback;
 }
 
 export function formatMoney(value: string | number): string {

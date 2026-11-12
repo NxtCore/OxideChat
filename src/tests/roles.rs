@@ -100,16 +100,44 @@ mod tests {
 		};
 		for name in ["admin", "user"] {
 			let id = builtin_id(&pool, name).await?;
-			assert!(matches!(Role::update(&pool, &actor, &id, &request(name, &[])).await, Err(RoleError::Protected)));
+			assert!(matches!(Role::update(&pool, &actor, &id, &request("Renamed", &[])).await, Err(RoleError::Protected)));
 			assert!(matches!(Role::delete(&pool, &actor, &id).await, Err(RoleError::Protected)));
 		}
-		let roles = Role::list_detailed(&pool).await?;
-		assert!(roles.iter().filter(|role| role.is_builtin).count() >= 2);
-		assert!(
-			roles
-				.iter()
-				.any(|role| role.name == "admin" && role.permissions.iter().any(|permission| permission == "admin.*"))
-		);
+		let user_role = builtin_id(&pool, "user").await?;
+		let changed = Role::update(&pool, &actor, &user_role, &request("user", &["settings.profile.view"])).await?;
+		assert!(changed.is_builtin);
+		assert_eq!(changed.permissions, ["settings.profile.view"]);
+		assert_eq!(audit_events(&pool, &user_role).await?, ["role_updated"]);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn the_last_role_that_can_manage_roles_keeps_that_permission(pool: PgPool) -> TestResult {
+		let actor_id = create_user(&pool).await?;
+		let held = vec!["*".to_owned()];
+		let actor = RoleActor {
+			id: &actor_id,
+			permissions: &held,
+		};
+		let admin_role = builtin_id(&pool, "admin").await?;
+		let without_roles = request("admin", &["admin.users.edit", "settings.*"]);
+
+		assert!(matches!(Role::update(&pool, &actor, &admin_role, &without_roles).await, Err(RoleError::LockOut)));
+		let unchanged = Role::find_detailed(&pool, &admin_role).await?.ok_or("admin role")?;
+		assert!(unchanged.permissions.iter().any(|permission| permission == "admin.*"));
+
+		let managers = Role::create(&pool, &actor, &request("Managers", &["admin.roles.edit"])).await?;
+		Role::update(&pool, &actor, &admin_role, &without_roles).await?;
+		assert!(matches!(Role::delete(&pool, &actor, &managers.id).await, Err(RoleError::LockOut)));
+		assert!(matches!(
+			Role::update(&pool, &actor, &managers.id, &request("Managers", &[])).await,
+			Err(RoleError::LockOut)
+		));
+		assert!(Role::find_detailed(&pool, &managers.id).await?.is_some());
+
+		let wildcard = Role::create(&pool, &actor, &request("Roles admins", &["admin.*"])).await?;
+		Role::delete(&pool, &actor, &managers.id).await?;
+		assert!(Role::find_detailed(&pool, &wildcard.id).await?.is_some());
 		Ok(())
 	}
 

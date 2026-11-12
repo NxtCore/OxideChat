@@ -1,6 +1,7 @@
 use super::{Role, RoleActor, RoleError, RoleResponse, SaveRoleRequest};
 use crate::logging::AuditLog;
-use crate::types::{AuditEntry, is_unique_violation};
+use crate::types::consts::ADMIN_ROLES_EDIT;
+use crate::types::{AuditEntry, User, is_unique_violation};
 use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -51,6 +52,17 @@ async fn replace_permissions(tx: &mut Transaction<'_, Postgres>, role_id: &Uuid,
 	Ok(())
 }
 
+async fn check_not_locked_out(tx: &mut Transaction<'_, Postgres>) -> Result<(), RoleError> {
+	let granted: Vec<String> = sqlx::query_scalar("SELECT DISTINCT p.name FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id")
+		.fetch_all(&mut **tx)
+		.await?;
+	if granted.iter().any(|permission| User::permission_matches(permission, ADMIN_ROLES_EDIT)) {
+		Ok(())
+	} else {
+		Err(RoleError::LockOut)
+	}
+}
+
 async fn audit(tx: &mut Transaction<'_, Postgres>, event: &str, actor_id: &Uuid, role_id: &Uuid, metadata: Value) -> Result<(), sqlx::Error> {
 	let entry = AuditEntry {
 		event,
@@ -86,17 +98,21 @@ impl Role {
 		Ok(role)
 	}
 
-	/// Renames a role and replaces its permissions, audited in the same transaction.
+	/// Renames a role and replaces its permissions, audited in the same transaction. Built-in roles keep their name.
 	///
 	/// # Errors
-	/// Returns [`RoleError::Protected`] for a built-in role, [`RoleError::NotFound`] when it does not exist, and the
-	/// errors of [`Role::create`] for a bad request.
+	/// Returns [`RoleError::Protected`] when a built-in role would be renamed, [`RoleError::LockOut`] when no role could
+	/// manage roles afterwards, [`RoleError::NotFound`] when it does not exist, and the errors of [`Role::create`] for a
+	/// bad request.
 	pub async fn update(pool: &PgPool, actor: &RoleActor<'_>, id: &Uuid, request: &SaveRoleRequest) -> Result<RoleResponse, RoleError> {
 		let name = request.valid_name()?;
 		let permissions = request.unique_permissions();
 		check_held(actor, &permissions)?;
 		let mut tx = pool.begin().await?;
 		let before = Self::lock_changeable(&mut tx, actor, id).await?;
+		if before.is_builtin && before.name != name {
+			return Err(RoleError::Protected);
+		}
 		check_known(&mut tx, &permissions).await?;
 		sqlx::query("UPDATE roles SET name = $2 WHERE id = $1")
 			.bind(id)
@@ -105,6 +121,7 @@ impl Role {
 			.await
 			.map_err(map_write_error)?;
 		replace_permissions(&mut tx, id, &permissions).await?;
+		check_not_locked_out(&mut tx).await?;
 		let metadata = json!({
 			"name": name,
 			"permissions": permissions,
@@ -119,12 +136,17 @@ impl Role {
 	/// Deletes a role; its users lose it. Audited in the same transaction.
 	///
 	/// # Errors
-	/// Returns [`RoleError::Protected`] for a built-in role, [`RoleError::PermissionNotHeld`] when the actor does not
-	/// hold all of its permissions, and [`RoleError::NotFound`] when it does not exist.
+	/// Returns [`RoleError::Protected`] for a built-in role, [`RoleError::LockOut`] when no role could manage roles
+	/// afterwards, [`RoleError::PermissionNotHeld`] when the actor does not hold all of its permissions, and
+	/// [`RoleError::NotFound`] when it does not exist.
 	pub async fn delete(pool: &PgPool, actor: &RoleActor<'_>, id: &Uuid) -> Result<(), RoleError> {
 		let mut tx = pool.begin().await?;
 		let before = Self::lock_changeable(&mut tx, actor, id).await?;
+		if before.is_builtin {
+			return Err(RoleError::Protected);
+		}
 		sqlx::query("DELETE FROM roles WHERE id = $1").bind(id).execute(&mut *tx).await?;
+		check_not_locked_out(&mut tx).await?;
 		let metadata = json!({ "name": before.name, "permissions": before.permissions, "user_count": before.user_count });
 		audit(&mut tx, EVENT_DELETED, actor.id, id, metadata).await?;
 		tx.commit().await?;
@@ -132,6 +154,7 @@ impl Role {
 	}
 
 	async fn lock_changeable(tx: &mut Transaction<'_, Postgres>, actor: &RoleActor<'_>, id: &Uuid) -> Result<RoleResponse, RoleError> {
+		sqlx::query("LOCK TABLE role_permissions IN SHARE ROW EXCLUSIVE MODE").execute(&mut **tx).await?;
 		let locked: Option<Uuid> = sqlx::query_scalar("SELECT id FROM roles WHERE id = $1 FOR UPDATE")
 			.bind(id)
 			.fetch_optional(&mut **tx)
@@ -140,9 +163,6 @@ impl Role {
 			return Err(RoleError::NotFound);
 		}
 		let role = Self::find_detailed(&mut **tx, id).await?.ok_or(RoleError::NotFound)?;
-		if role.is_builtin {
-			return Err(RoleError::Protected);
-		}
 		check_held(actor, &role.permissions)?;
 		Ok(role)
 	}

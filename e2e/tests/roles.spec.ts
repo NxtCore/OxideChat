@@ -9,7 +9,8 @@ type Role = {id: string; name: string; is_builtin: boolean; permissions: string[
 test.describe.configure({mode: 'serial'});
 
 test.describe('roles and permissions', () => {
-	test('built-in roles can only be viewed', async ({page, t}) => {
+	test('built-in roles keep their name and the last role that can manage roles keeps that permission', async ({page, api, t, allowErrors}) => {
+		allowErrors(/409/);
 		await page.goto('/settings/roles');
 		const adminRow = page.locator('[data-testid="role-row"][data-role-name="admin"]');
 		await expect(adminRow).toContainText(t('roles.builtin'));
@@ -17,7 +18,12 @@ test.describe('roles and permissions', () => {
 		await adminRow.getByTestId('role-edit').click();
 		await expect(page.getByText(t('roles.builtin_hint'))).toBeVisible();
 		await expect(page.getByTestId('role-name')).toBeDisabled();
-		await expect(page.getByTestId('role-save')).toHaveCount(0);
+		await page.getByTestId('role-permission-admin.*').click();
+		await page.getByTestId('role-save').click();
+		await expect(page.getByText(t('roles.errors.lock_out'))).toBeVisible();
+
+		const admin = (await api.get<Role[]>('/api/v1/admin/roles')).find(role => role.name === 'admin');
+		expect(admin?.permissions).toContain('admin.*');
 	});
 
 	test('an admin creates a role, a member gets its permissions, and losing it takes them away', async ({page, api, seed, browser, baseURL, t}) => {
