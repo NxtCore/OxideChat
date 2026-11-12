@@ -4,7 +4,7 @@
 
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
-use crate::types::{AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, SetUserRolesRequest, SetUserTeamsRequest, UpdateUserRequest, User, json_ok};
+use crate::types::{AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, Role, RoleActor, SetUserRolesRequest, SetUserTeamsRequest, UpdateUserRequest, User, json_ok};
 use crate::utils::auth::{hash_password, validate_email, validate_password, validate_username};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
@@ -36,7 +36,7 @@ pub async fn get_user(State(state): State<Arc<JobState>>, auth: AuthUser, Path(i
 
 /// Create a new user.
 pub async fn create_user(State(state): State<Arc<JobState>>, actor: AuthUser, Json(req): Json<CreateAdminUserRequest>) -> Result<Response, AppError> {
-	actor.require(&state.db, ADMIN_USERS_EDIT).await?;
+	let permissions = actor.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
 
 	if !validate_email(&req.email) {
 		return Err(ErrorCode::InvalidEmail.into());
@@ -56,14 +56,19 @@ pub async fn create_user(State(state): State<Arc<JobState>>, actor: AuthUser, Js
 		ErrorCode::InternalError
 	})?;
 
-	let new_user = User::create(&state.db, &req.email, &req.username, &password_hash).await.map_err(AppError::database)?;
-	new_user.initialize_defaults(&state.db).await.map_err(AppError::database)?;
-
 	for role_name in &req.roles {
-		if !crate::types::Role::exists(&state.db, role_name).await.map_err(AppError::database)? {
+		if !Role::exists(&state.db, role_name).await.map_err(AppError::database)? {
 			return Err(ErrorCode::NotFound.into());
 		}
 	}
+	let role_actor = RoleActor {
+		id: &actor.id,
+		permissions: &permissions,
+	};
+	role_actor.check_role_change(&state.db, &[], &req.roles).await?;
+
+	let new_user = User::create(&state.db, &req.email, &req.username, &password_hash).await.map_err(AppError::database)?;
+	new_user.initialize_defaults(&state.db).await.map_err(AppError::database)?;
 
 	new_user.set_roles(&state.db, &req.roles).await.map_err(AppError::database)?;
 
@@ -80,9 +85,14 @@ pub async fn create_user(State(state): State<Arc<JobState>>, actor: AuthUser, Js
 
 /// Update a user's email or username.
 pub async fn update_user(State(state): State<Arc<JobState>>, actor: AuthUser, Path(id): Path<Uuid>, Json(req): Json<UpdateUserRequest>) -> Result<Response, AppError> {
-	actor.require(&state.db, ADMIN_USERS_EDIT).await?;
+	let permissions = actor.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
 
 	let mut target = User::find_by_id(&state.db, &id).await.map_err(AppError::database)?.ok_or(ErrorCode::UserNotFound)?;
+	let role_actor = RoleActor {
+		id: &actor.id,
+		permissions: &permissions,
+	};
+	role_actor.check_outranks(&state.db, &target).await?;
 
 	if let Some(email) = &req.email {
 		if !validate_email(email) {
@@ -111,13 +121,18 @@ pub async fn update_user(State(state): State<Arc<JobState>>, actor: AuthUser, Pa
 
 /// Delete a user. Admins cannot delete their own account.
 pub async fn delete_user(State(state): State<Arc<JobState>>, actor: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
-	actor.require(&state.db, ADMIN_USERS_EDIT).await?;
+	let permissions = actor.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
 
 	if actor.id == id {
 		return Err(ErrorCode::Forbidden.into());
 	}
 
 	let target = User::find_by_id(&state.db, &id).await.map_err(AppError::database)?.ok_or(ErrorCode::UserNotFound)?;
+	let role_actor = RoleActor {
+		id: &actor.id,
+		permissions: &permissions,
+	};
+	role_actor.check_outranks(&state.db, &target).await?;
 
 	AuditLog::log(&state.db, LogEvent::UserDeleted, Some(actor.id), Some(EntityType::User), Some(id));
 
@@ -130,7 +145,7 @@ pub async fn delete_user(State(state): State<Arc<JobState>>, actor: AuthUser, Pa
 
 /// Replace the full role set for a user. Admins cannot change their own roles.
 pub async fn set_user_roles(State(state): State<Arc<JobState>>, actor: AuthUser, Path(id): Path<Uuid>, Json(req): Json<SetUserRolesRequest>) -> Result<Response, AppError> {
-	actor.require(&state.db, ADMIN_USERS_EDIT).await?;
+	let permissions = actor.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
 
 	if actor.id == id {
 		return Err(ErrorCode::Forbidden.into());
@@ -139,10 +154,16 @@ pub async fn set_user_roles(State(state): State<Arc<JobState>>, actor: AuthUser,
 	let target = User::find_by_id(&state.db, &id).await.map_err(AppError::database)?.ok_or(ErrorCode::UserNotFound)?;
 
 	for role_name in &req.roles {
-		if !crate::types::Role::exists(&state.db, role_name).await.map_err(AppError::database)? {
+		if !Role::exists(&state.db, role_name).await.map_err(AppError::database)? {
 			return Err(ErrorCode::NotFound.into());
 		}
 	}
+	let role_actor = RoleActor {
+		id: &actor.id,
+		permissions: &permissions,
+	};
+	let current = target.roles(&state.db).await?;
+	role_actor.check_role_change(&state.db, &current, &req.roles).await?;
 
 	target.set_roles(&state.db, &req.roles).await.map_err(AppError::database)?;
 
@@ -154,9 +175,14 @@ pub async fn set_user_roles(State(state): State<Arc<JobState>>, actor: AuthUser,
 }
 
 pub async fn set_user_teams(State(state): State<Arc<JobState>>, actor: AuthUser, Path(id): Path<Uuid>, Json(req): Json<SetUserTeamsRequest>) -> Result<Response, AppError> {
-	actor.require(&state.db, ADMIN_USERS_EDIT).await?;
+	let permissions = actor.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
 
 	let target = User::find_by_id(&state.db, &id).await.map_err(AppError::database)?.ok_or(ErrorCode::UserNotFound)?;
+	let role_actor = RoleActor {
+		id: &actor.id,
+		permissions: &permissions,
+	};
+	role_actor.check_outranks(&state.db, &target).await?;
 
 	target.set_teams(&state.db, &req.team_ids).await.map_err(AppError::database)?;
 
@@ -169,13 +195,18 @@ pub async fn set_user_teams(State(state): State<Arc<JobState>>, actor: AuthUser,
 
 /// Reset a user's password.
 pub async fn reset_password(State(state): State<Arc<JobState>>, actor: AuthUser, Path(id): Path<Uuid>, Json(req): Json<AdminResetPasswordRequest>) -> Result<Response, AppError> {
-	actor.require(&state.db, ADMIN_USERS_EDIT).await?;
+	let permissions = actor.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
 
 	let target = User::find_by_id(&state.db, &id).await.map_err(AppError::database)?.ok_or(ErrorCode::UserNotFound)?;
 
 	if target.auth_method != "local" {
 		return Err(ErrorCode::ExternalAuthRequired.into());
 	}
+	let role_actor = RoleActor {
+		id: &actor.id,
+		permissions: &permissions,
+	};
+	role_actor.check_outranks(&state.db, &target).await?;
 
 	validate_password(&req.password)?;
 

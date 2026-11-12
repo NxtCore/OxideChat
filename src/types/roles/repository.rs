@@ -44,6 +44,19 @@ impl Role {
 		Ok(row.map(RoleResponse::from))
 	}
 
+	/// The permissions granted by the roles with the given names.
+	///
+	/// # Errors
+	/// Returns the database error when the query fails.
+	pub async fn permissions_of(pool: &PgPool, names: &[String]) -> Result<Vec<String>, sqlx::Error> {
+		sqlx::query_scalar(
+			"SELECT DISTINCT p.name FROM roles r JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id WHERE r.name = ANY($1)",
+		)
+		.bind(names)
+		.fetch_all(pool)
+		.await
+	}
+
 	/// Every permission that can be granted, sorted by name, with its group.
 	///
 	/// # Errors

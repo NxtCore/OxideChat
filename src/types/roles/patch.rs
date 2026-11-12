@@ -74,6 +74,31 @@ async fn audit(tx: &mut Transaction<'_, Postgres>, event: &str, actor_id: &Uuid,
 	AuditLog::write(tx, entry).await
 }
 
+impl RoleActor<'_> {
+	/// Checks that the actor holds every permission of the roles a user gains or loses when `current` becomes `requested`.
+	///
+	/// # Errors
+	/// Returns [`RoleError::PermissionNotHeld`] when the actor lacks one of them, and the database error when the lookup fails.
+	pub async fn check_role_change(&self, pool: &PgPool, current: &[String], requested: &[String]) -> Result<(), RoleError> {
+		let changed: Vec<String> = current
+			.iter()
+			.filter(|name| !requested.contains(name))
+			.chain(requested.iter().filter(|name| !current.contains(name)))
+			.cloned()
+			.collect();
+		check_held(self, &Role::permissions_of(pool, &changed).await?)
+	}
+
+	/// Checks that the actor holds every permission of `target`, so nobody can take over or remove a stronger account.
+	///
+	/// # Errors
+	/// Returns [`RoleError::Outranked`] when the target holds a permission the actor does not, and the database error
+	/// when the lookup fails.
+	pub async fn check_outranks(&self, pool: &PgPool, target: &User) -> Result<(), RoleError> {
+		check_held(self, &target.permissions(pool).await?).map_err(|_| RoleError::Outranked)
+	}
+}
+
 impl Role {
 	/// Creates a role with the given permissions, audited in the same transaction.
 	///

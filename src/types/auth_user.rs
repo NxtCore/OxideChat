@@ -25,6 +25,21 @@ impl AuthUser {
 			Err(ErrorCode::InsufficientPermissions.into())
 		}
 	}
+
+	/// Checks a permission like [`AuthUser::require`] and returns every permission the user holds, for callers that
+	/// need both.
+	///
+	/// # Errors
+	///
+	/// Returns `InsufficientPermissions` when the permission is missing and a server error when the lookup fails.
+	pub async fn require_permissions(&self, pool: &PgPool, permission: &str) -> Result<Vec<String>, AppError> {
+		let permissions = self.0.permissions(pool).await?;
+		if permissions.iter().any(|held| User::permission_matches(held, permission)) {
+			Ok(permissions)
+		} else {
+			Err(ErrorCode::InsufficientPermissions.into())
+		}
+	}
 }
 
 impl Deref for AuthUser {

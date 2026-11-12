@@ -23,7 +23,7 @@ mod tests {
 
 	async fn audit_events(pool: &PgPool, role_id: &Uuid) -> TestResult<Vec<String>> {
 		Ok(
-			sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_type = 'role' AND target_id = $1 ORDER BY xmin::text::bigint")
+			sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_type = 'role' AND target_id = $1 ORDER BY created_at")
 				.bind(role_id)
 				.fetch_all(pool)
 				.await?,
@@ -172,6 +172,82 @@ mod tests {
 		));
 		assert!(matches!(Role::delete(&pool, &limited, &strong.id).await, Err(RoleError::PermissionNotHeld)));
 		Role::delete(&pool, &limited, &viewer.id).await?;
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn user_admins_cannot_hand_out_or_take_over_stronger_roles(pool: PgPool) -> TestResult {
+		let actor_id = create_user(&pool).await?;
+		let admin_held = admin_permissions();
+		let admin = RoleActor {
+			id: &actor_id,
+			permissions: &admin_held,
+		};
+		let desk_held = vec!["admin.users.edit".to_owned()];
+		let desk = RoleActor {
+			id: &actor_id,
+			permissions: &desk_held,
+		};
+		Role::create(&pool, &admin, &request("Desk", &["admin.users.edit"])).await?;
+		let names = |list: &[&str]| list.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+
+		assert!(matches!(desk.check_role_change(&pool, &[], &names(&["admin"])).await, Err(RoleError::PermissionNotHeld)));
+		assert!(matches!(desk.check_role_change(&pool, &names(&["admin"]), &[]).await, Err(RoleError::PermissionNotHeld)));
+		desk.check_role_change(&pool, &[], &names(&["Desk"])).await?;
+		desk.check_role_change(&pool, &names(&["admin"]), &names(&["admin", "Desk"])).await?;
+
+		let admin_id = create_user(&pool).await?;
+		let admin_user = User::find_by_id(&pool, &admin_id).await?.ok_or("admin")?;
+		admin_user.set_roles(&pool, &names(&["admin"])).await?;
+		assert!(matches!(desk.check_outranks(&pool, &admin_user).await, Err(RoleError::Outranked)));
+		admin.check_outranks(&pool, &admin_user).await?;
+
+		let plain_id = create_user(&pool).await?;
+		let plain = User::find_by_id(&pool, &plain_id).await?.ok_or("plain")?;
+		plain.set_roles(&pool, &names(&["Desk"])).await?;
+		desk.check_outranks(&pool, &plain).await?;
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn user_admins_cannot_edit_or_move_stronger_accounts(pool: PgPool) -> TestResult {
+		use axum::body::Body;
+		use axum::http::{Request, StatusCode};
+		use tower::ServiceExt;
+
+		crate::config::Config::init(&pool).await?;
+		crate::i18n::I18n::init(&pool).await;
+		let admin_held = admin_permissions();
+		let setup_id = create_user(&pool).await?;
+		let admin = RoleActor {
+			id: &setup_id,
+			permissions: &admin_held,
+		};
+		Role::create(&pool, &admin, &request("Desk", &["admin.users.edit"])).await?;
+
+		let desk_id = create_user(&pool).await?;
+		User::find_by_id(&pool, &desk_id).await?.ok_or("desk")?.set_roles(&pool, &["Desk".to_owned()]).await?;
+		let session = Uuid::new_v4();
+		User::insert_session(&pool, session, &desk_id, chrono::Utc::now() + chrono::Duration::days(1)).await?;
+		let target_id = create_user(&pool).await?;
+		let target = User::find_by_id(&pool, &target_id).await?.ok_or("target")?;
+		target.set_roles(&pool, &["admin".to_owned()]).await?;
+
+		let router = crate::routes::build_router(crate::tests::gateway::support::job_state(pool.clone()));
+		let put = |uri: String, body: &'static str| {
+			Request::builder()
+				.method("PUT")
+				.uri(uri)
+				.header("content-type", "application/json")
+				.header("cookie", format!("{}={session}", crate::utils::auth::SESSION_COOKIE_NAME))
+				.body(Body::from(body))
+		};
+		let email = router.clone().oneshot(put(format!("/api/v1/admin/users/{target_id}"), r#"{"email":"taken@example.com"}"#)?).await?;
+		assert_eq!(email.status(), StatusCode::FORBIDDEN);
+		let teams = router.oneshot(put(format!("/api/v1/admin/users/{target_id}/teams"), r#"{"team_ids":[]}"#)?).await?;
+		assert_eq!(teams.status(), StatusCode::FORBIDDEN);
+		let after = User::find_by_id(&pool, &target_id).await?.ok_or("target")?;
+		assert_eq!(after.email, target.email);
 		Ok(())
 	}
 

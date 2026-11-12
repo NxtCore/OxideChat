@@ -26,8 +26,7 @@ pub async fn list_permissions(State(state): State<Arc<JobState>>, auth: AuthUser
 
 /// POST /api/v1/admin/roles
 pub async fn create_role(State(state): State<Arc<JobState>>, auth: AuthUser, Json(request): Json<SaveRoleRequest>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_ROLES_EDIT).await?;
-	let permissions = auth.permissions(&state.db).await?;
+	let permissions = auth.require_permissions(&state.db, ADMIN_ROLES_EDIT).await?;
 	let actor = RoleActor {
 		id: &auth.id,
 		permissions: &permissions,
@@ -38,8 +37,7 @@ pub async fn create_role(State(state): State<Arc<JobState>>, auth: AuthUser, Jso
 
 /// PUT /api/v1/admin/roles/{id}
 pub async fn update_role(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(request): Json<SaveRoleRequest>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_ROLES_EDIT).await?;
-	let permissions = auth.permissions(&state.db).await?;
+	let permissions = auth.require_permissions(&state.db, ADMIN_ROLES_EDIT).await?;
 	let actor = RoleActor {
 		id: &auth.id,
 		permissions: &permissions,
@@ -49,8 +47,7 @@ pub async fn update_role(State(state): State<Arc<JobState>>, auth: AuthUser, Pat
 
 /// DELETE /api/v1/admin/roles/{id}
 pub async fn delete_role(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_ROLES_EDIT).await?;
-	let permissions = auth.permissions(&state.db).await?;
+	let permissions = auth.require_permissions(&state.db, ADMIN_ROLES_EDIT).await?;
 	let actor = RoleActor {
 		id: &auth.id,
 		permissions: &permissions,

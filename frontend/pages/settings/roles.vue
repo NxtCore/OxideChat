@@ -135,12 +135,17 @@ function isEditable(role: RoleResponse): boolean {
 	return canEdit.value && role.permissions.every(permission => store.hasPermission(permission));
 }
 
+function covers(wildcard: string, permission: string): boolean {
+	return wildcard !== permission && wildcard.endsWith('.*') && permission.startsWith(wildcard.slice(0, -1));
+}
+
 function impliedBy(permission: string): boolean {
-	return form.permissions.some(selected => selected !== permission && selected.endsWith('.*') && permission.startsWith(selected.slice(0, -1)));
+	return form.permissions.some(selected => covers(selected, permission));
 }
 
 function toggle(permission: string, checked: boolean) {
-	form.permissions = checked ? [...form.permissions, permission] : form.permissions.filter(selected => selected !== permission);
+	const others = form.permissions.filter(selected => selected !== permission && !(checked && covers(permission, selected)));
+	form.permissions = checked ? [...others, permission] : others;
 }
 
 function openEditor(role: RoleResponse | null) {
@@ -179,7 +184,7 @@ async function save() {
 		roles.value = editing.value ? roles.value.map(row => (row.id === role.id ? role : row)) : [...roles.value, role];
 		store.toast(t('saved'), {type: 'success'});
 		closeEditor();
-		await store.refreshRoles();
+		store.setRoles(roles.value);
 	} catch (e: any) {
 		store.toast(t('save_error'), {type: 'error', description: errorMessage(e, '')});
 	} finally {
@@ -196,7 +201,7 @@ async function remove() {
 		roles.value = roles.value.filter(row => row.id !== role.id);
 		store.toast(t('deleted'), {type: 'success'});
 		deleting.value = null;
-		await store.refreshRoles();
+		store.setRoles(roles.value);
 	} catch (e: any) {
 		store.toast(t('delete_error'), {type: 'error', description: errorMessage(e, '')});
 	} finally {
