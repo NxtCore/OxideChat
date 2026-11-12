@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::Team;
+use super::{Team, TeamRole};
 use crate::types::TeamProviderRouting;
 
 #[derive(Debug, Clone, Serialize)]
@@ -11,6 +11,64 @@ pub struct TeamSummaryResponse {
 	pub id: Uuid,
 	pub name: String,
 	pub is_default: bool,
+}
+
+/// A team one user belongs to, with the role they hold in it.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct UserTeamResponse {
+	pub id: Uuid,
+	pub name: String,
+	pub is_default: bool,
+	pub role: TeamRole,
+}
+
+/// How a team grants models: all of them, every model of a provider, or one model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum ModelGrantKind {
+	All,
+	Provider,
+	Model,
+}
+
+impl ModelGrantKind {
+	/// Parses the kind a query returned; unknown values are treated as a single model.
+	#[must_use]
+	pub fn from_stored(value: &str) -> Self {
+		match value {
+			"all" => Self::All,
+			"provider" => Self::Provider,
+			_ => Self::Model,
+		}
+	}
+}
+
+/// One grant that lets a user use models: the team it comes from and the provider or model it names (`target` is empty for all models).
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct UserModelGrant {
+	pub team: TeamSummaryResponse,
+	pub kind: ModelGrantKind,
+	pub target: Option<ModelGrantTarget>,
+}
+
+/// The provider or model a grant names.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ModelGrantTarget {
+	pub id: Uuid,
+	pub name: String,
+}
+
+/// The models a user may use through their teams: how many of the enabled models, and the grants behind them.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct UserModelAccessResponse {
+	pub usable: i64,
+	pub total: i64,
+	pub grants: Vec<UserModelGrant>,
 }
 
 #[derive(Debug, Serialize)]

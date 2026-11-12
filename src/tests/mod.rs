@@ -29,4 +29,5 @@ pub mod sessions;
 pub mod support;
 pub mod teams;
 pub mod tools;
+pub mod users;
 pub mod workspaces;

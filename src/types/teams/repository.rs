@@ -22,12 +22,6 @@ impl Team {
 			.map(|s| format!("%{}%", Self::escape_like_pattern(s)))
 	}
 
-	pub async fn default_id(pool: &PgPool) -> Result<Uuid, sqlx::Error> {
-		sqlx::query_scalar("SELECT id FROM teams WHERE is_default = true ORDER BY created_at ASC LIMIT 1")
-			.fetch_one(pool)
-			.await
-	}
-
 	pub async fn ensure_default_membership(pool: &PgPool, user_id: &Uuid) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
@@ -547,29 +541,9 @@ impl Team {
 	}
 
 	pub async fn set_user_teams(pool: &PgPool, user_id: &Uuid, team_ids: &[Uuid]) -> Result<(), sqlx::Error> {
-		let default_id = Self::default_id(pool).await?;
-		let mut ids = Vec::with_capacity(team_ids.len() + 1);
-		ids.push(default_id);
-		for id in team_ids {
-			if !ids.contains(id) {
-				ids.push(*id);
-			}
-		}
-
 		let mut tx = pool.begin().await?;
-		sqlx::query("DELETE FROM team_members WHERE user_id = $1 AND team_id <> ALL($2)")
-			.bind(user_id)
-			.bind(&ids)
-			.execute(&mut *tx)
-			.await?;
-		let mut builder = QueryBuilder::<Postgres>::new("INSERT INTO team_members (team_id, user_id) ");
-		builder.push_values(&ids, |mut row, team_id| {
-			row.push_bind(team_id).push_bind(user_id);
-		});
-		builder.push(" ON CONFLICT DO NOTHING");
-		builder.build().execute(&mut *tx).await?;
-		tx.commit().await?;
-		Ok(())
+		Self::replace_user_teams(&mut tx, user_id, team_ids).await?;
+		tx.commit().await
 	}
 
 	pub async fn user_can_use_model(pool: &PgPool, user_id: &Uuid, model_id: &Uuid) -> Result<bool, sqlx::Error> {

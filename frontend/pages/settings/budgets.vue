@@ -397,6 +397,7 @@ interface UserEntry {
 }
 
 const store = useMainStore();
+const route = useRoute();
 const budgetStore = useBudgetStore();
 
 const loading = ref(false);
@@ -616,7 +617,9 @@ onMounted(async () => {
 	loading.value = true;
 	try {
 		await Promise.all([budgetStore.fetchBudgets(), loadTeamsAndUsers(), loadOperationalData()]);
-		if (budgetStore.budgets[0]) await loadBudget(budgetStore.budgets[0]);
+		const wanted = budgetStore.budgets.find(budget => budget.id === route.query.budget);
+		if (wanted) activeTab.value = 'budgets';
+		if (wanted ?? budgetStore.budgets[0]) await loadBudget(wanted ?? budgetStore.budgets[0]);
 	} finally {
 		loading.value = false;
 	}

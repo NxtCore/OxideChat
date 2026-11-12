@@ -1,6 +1,7 @@
 mod repository;
 mod requests;
 mod responses;
+mod user_access;
 
 pub use requests::*;
 pub use responses::*;
@@ -27,6 +28,12 @@ impl TeamRole {
 			Self::Member => "member",
 			Self::Admin => "admin",
 		}
+	}
+
+	/// Parses a stored role; unknown values are treated as a member.
+	#[must_use]
+	pub fn from_stored(value: &str) -> Self {
+		if value == "admin" { Self::Admin } else { Self::Member }
 	}
 }
 

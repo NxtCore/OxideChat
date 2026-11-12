@@ -320,6 +320,7 @@ import type {TeamProviderRouting} from '~/types/generated/TeamProviderRouting';
 import type {ProviderResponse as ProviderListItem, ModelListAdmin, TeamDetailed, TeamList, TeamRole, UserListResponse} from '~/types/chat';
 
 const store = useMainStore();
+const route = useRoute();
 const iconStore = useIconsStore();
 
 const teams = ref<TeamList[]>([]);
@@ -468,7 +469,8 @@ async function loadTeams() {
 		const result = await adminTeams({size: 100, search: search.value});
 		teams.value = result.items ?? [];
 		if (!selectedTeam.value && teams.value.length > 0) {
-			await loadTeam(teams.value[0].id);
+			const wanted = teams.value.find(team => team.id === route.query.team);
+			await loadTeam((wanted ?? teams.value[0]).id);
 		}
 	} catch (e: any) {
 		store.toast(store.getTranslation('settings.teams.load_error'), {type: 'error', description: e?.message});

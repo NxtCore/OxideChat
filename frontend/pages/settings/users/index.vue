@@ -42,9 +42,14 @@
 			<div
 				v-for="user in users"
 				:key="user.id"
-				class="rounded-lg border border-border bg-card px-4 py-3 flex items-center gap-4 transition-all hover:border-border/80"
+				class="rounded-lg border border-border bg-card flex items-center gap-4 pr-4 transition-all hover:border-primary/50 hover:bg-accent/10"
+				data-testid="user-row"
 			>
-				<div class="flex-1 min-w-0">
+				<NuxtLink
+					:to="`/settings/users/${user.id}`"
+					class="flex-1 min-w-0 rounded-lg py-3 pl-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					data-testid="user-row-link"
+				>
 					<div class="flex items-center gap-2 flex-wrap">
 						<span class="font-medium text-foreground">{{ user.username }}</span>
 						<span
@@ -70,7 +75,7 @@
 						<span class="text-border">·</span>
 						<span>{{ formatDate(user.created_at) }}</span>
 					</div>
-				</div>
+				</NuxtLink>
 
 				<div class="flex items-center gap-2 shrink-0">
 					<ShadButton

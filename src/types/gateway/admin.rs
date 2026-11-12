@@ -51,6 +51,8 @@ pub const EVENT_BUDGET_UPDATED: &str = "budget_updated";
 pub const EVENT_BUDGET_DELETED: &str = "budget_deleted";
 /// Audit event written when a user's budget assignment changes.
 pub const EVENT_USER_BUDGET_UPDATED: &str = "user_budget_updated";
+/// Audit event written when the roles or teams of a user change.
+pub const EVENT_USER_ASSIGNMENTS_UPDATED: &str = "user_assignments_updated";
 
 const SENSITIVE_KEY_PARTS: [&str; 9] = ["secret", "password", "hash", "authorization", "credential", "prompt", "content", "bearer", "cookie"];
 

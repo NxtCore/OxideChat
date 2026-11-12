@@ -10,6 +10,10 @@ mod tests {
 		insert_user(pool, &format!("team_user_{suffix}")).await.unwrap()
 	}
 
+	async fn default_team_id(pool: &PgPool) -> Result<Uuid, sqlx::Error> {
+		sqlx::query_scalar("SELECT id FROM teams WHERE is_default").fetch_one(pool).await
+	}
+
 	async fn create_provider(pool: &PgPool, name: &str) -> Uuid {
 		sqlx::query_scalar::<_, Uuid>(
 			r#"
@@ -41,7 +45,7 @@ mod tests {
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn default_team_exists_and_user_defaults_join_it(pool: PgPool) {
-		let default_id = Team::default_id(&pool).await.unwrap();
+		let default_id = default_team_id(&pool).await.unwrap();
 		let user_id = create_user(&pool, "default").await;
 		Team::ensure_default_membership(&pool, &user_id).await.unwrap();
 
@@ -56,7 +60,7 @@ mod tests {
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn current_user_response_carries_the_team_default_model(pool: PgPool) -> Result<(), Box<dyn std::error::Error>> {
-		let default_id = Team::default_id(&pool).await?;
+		let default_id = default_team_id(&pool).await?;
 		let user_id = create_user(&pool, "effective_default").await;
 		Team::ensure_default_membership(&pool, &user_id).await?;
 		let provider_id = create_provider(&pool, "effective_default_provider").await;
@@ -125,7 +129,7 @@ mod tests {
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn default_team_cannot_be_deleted(pool: PgPool) {
-		let default_id = Team::default_id(&pool).await.unwrap();
+		let default_id = default_team_id(&pool).await.unwrap();
 		let team = Team::find_by_id(&pool, &default_id).await.unwrap().unwrap();
 		assert!(!team.delete(&pool).await.unwrap());
 		assert!(Team::find_by_id(&pool, &default_id).await.unwrap().is_some());

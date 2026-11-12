@@ -114,6 +114,18 @@ impl GatewayAdminKeyResponse {
 		})
 	}
 
+	/// Every key one user owns, newest first.
+	///
+	/// # Errors
+	///
+	/// Returns an error when key storage cannot be queried.
+	pub async fn list_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+		sqlx::query_as::<_, Self>(concat!(select_keys!(), " WHERE user_id = $1 ORDER BY created_at DESC, id"))
+			.bind(user_id)
+			.fetch_all(pool)
+			.await
+	}
+
 	/// Finds one key of any user.
 	///
 	/// # Errors

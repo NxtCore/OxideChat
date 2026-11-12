@@ -54,6 +54,8 @@ pub enum RoleError {
 	PermissionNotHeld,
 	#[error("the target user holds a permission the actor does not")]
 	Outranked,
+	#[error("nobody may change their own roles")]
+	OwnRoles,
 	#[error("no role could manage roles after this change")]
 	LockOut,
 	#[error("the role does not exist")]

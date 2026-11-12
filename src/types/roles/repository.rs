@@ -9,7 +9,7 @@ const ROLE_SELECT: &str = "SELECT r.id, r.name, r.is_builtin, \
 	FROM roles r \
 	LEFT JOIN role_permissions rp ON rp.role_id = r.id \
 	LEFT JOIN permissions p ON p.id = rp.permission_id \
-	WHERE ($1::uuid IS NULL OR r.id = $1) \
+	WHERE ($1::uuid IS NULL OR r.id = $1) 	AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM user_roles held WHERE held.role_id = r.id AND held.user_id = $2)) \
 	GROUP BY r.id \
 	ORDER BY r.is_builtin DESC, lower(r.name)";
 
@@ -31,7 +31,16 @@ impl Role {
 	/// # Errors
 	/// Returns the database error when the query fails.
 	pub async fn list_detailed(pool: &PgPool) -> Result<Vec<RoleResponse>, sqlx::Error> {
-		let rows = sqlx::query_as::<_, RoleRow>(ROLE_SELECT).bind(None::<Uuid>).fetch_all(pool).await?;
+		let rows = sqlx::query_as::<_, RoleRow>(ROLE_SELECT).bind(None::<Uuid>).bind(None::<Uuid>).fetch_all(pool).await?;
+		Ok(rows.into_iter().map(RoleResponse::from).collect())
+	}
+
+	/// The roles a user holds with their permissions, built-in roles first.
+	///
+	/// # Errors
+	/// Returns the database error when the query fails.
+	pub async fn list_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<RoleResponse>, sqlx::Error> {
+		let rows = sqlx::query_as::<_, RoleRow>(ROLE_SELECT).bind(None::<Uuid>).bind(user_id).fetch_all(pool).await?;
 		Ok(rows.into_iter().map(RoleResponse::from).collect())
 	}
 
@@ -40,8 +49,16 @@ impl Role {
 	/// # Errors
 	/// Returns the database error when the query fails.
 	pub async fn find_detailed(executor: impl PgExecutor<'_>, id: &Uuid) -> Result<Option<RoleResponse>, sqlx::Error> {
-		let row = sqlx::query_as::<_, RoleRow>(ROLE_SELECT).bind(id).fetch_optional(executor).await?;
+		let row = sqlx::query_as::<_, RoleRow>(ROLE_SELECT).bind(id).bind(None::<Uuid>).fetch_optional(executor).await?;
 		Ok(row.map(RoleResponse::from))
+	}
+
+	/// The names of the roles with the given IDs; IDs without a role are skipped.
+	///
+	/// # Errors
+	/// Returns the database error when the query fails.
+	pub async fn names_of(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<String>, sqlx::Error> {
+		sqlx::query_scalar("SELECT name FROM roles WHERE id = ANY($1)").bind(ids).fetch_all(pool).await
 	}
 
 	/// The permissions granted by the roles with the given names.

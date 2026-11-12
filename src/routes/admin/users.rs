@@ -4,8 +4,11 @@
 
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
-use crate::types::{AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, Role, RoleActor, SetUserRolesRequest, SetUserTeamsRequest, UpdateUserRequest, User, json_ok};
-use crate::utils::auth::{hash_password, validate_email, validate_password, validate_username};
+use crate::types::{
+	AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, ReplaceAssignmentsRequest, Role, RoleActor, RoleError, SetUserRolesRequest,
+	SetUserTeamsRequest, UpdateUserRequest, User, json_ok,
+};
+use crate::utils::auth::{SESSION_COOKIE_NAME, hash_password, validate_email, validate_password, validate_username};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -14,6 +17,7 @@ use axum::{
 	response::{IntoResponse, Response},
 };
 use std::sync::Arc;
+use tower_cookies::Cookies;
 use uuid::Uuid;
 
 /// List users with optional pagination, search, and role filter.
@@ -32,6 +36,70 @@ pub async fn get_user(State(state): State<Arc<JobState>>, auth: AuthUser, Path(i
 	let response = target.to_response(&state.db).await.map_err(AppError::database)?;
 
 	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())
+}
+
+/// GET /api/v1/admin/users/{id}/overview
+///
+/// Everything that applies to one user: profile, sessions, roles, effective permissions, teams and, for the admin areas the
+/// caller may view, model access, presets, budgets and API keys.
+pub async fn get_user_overview(State(state): State<Arc<JobState>>, auth: AuthUser, cookies: Cookies, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	let permissions = auth.require_permissions(&state.db, ADMIN_USERS_VIEW).await?;
+	let target = User::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::UserNotFound)?;
+	let actor = RoleActor {
+		id: &auth.id,
+		permissions: &permissions,
+	};
+	let session = cookies.get(SESSION_COOKIE_NAME).and_then(|cookie| Uuid::parse_str(cookie.value()).ok());
+	json_ok(target.overview(&state.db, &actor, session.as_ref()).await?)
+}
+
+/// GET /api/v1/admin/users/{id}/assignments
+pub async fn get_user_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	let permissions = auth.require_permissions(&state.db, ADMIN_USERS_VIEW).await?;
+	let target = User::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::UserNotFound)?;
+	let actor = RoleActor {
+		id: &auth.id,
+		permissions: &permissions,
+	};
+	json_ok(target.assignments(&state.db, &actor).await?)
+}
+
+/// PUT /api/v1/admin/users/{id}/assignments
+///
+/// Replaces the roles and teams of a user.
+pub async fn replace_user_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<ReplaceAssignmentsRequest>) -> Result<Response, AppError> {
+	let permissions = auth.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
+	if !req.is_valid_for(&User::ASSIGNMENT_KINDS) {
+		return Err(ErrorCode::ValidationFailed.into());
+	}
+	let target = User::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::UserNotFound)?;
+	let actor = RoleActor {
+		id: &auth.id,
+		permissions: &permissions,
+	};
+	target.replace_assignments(&state.db, &actor, &req).await.map_err(|error| match error {
+		RoleError::Database(error) => AppError::foreign_key_or(error, ErrorCode::ValidationFailed),
+		other => other.into(),
+	})?;
+	json_ok(target.assignments(&state.db, &actor).await?)
+}
+
+/// DELETE `/api/v1/admin/users/{id}/sessions/{session_id}`
+///
+/// Signs a user out of one of their sessions.
+pub async fn revoke_user_session(State(state): State<Arc<JobState>>, auth: AuthUser, Path((id, session_id)): Path<(Uuid, String)>) -> Result<Response, AppError> {
+	let permissions = auth.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
+	let target = User::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::UserNotFound)?;
+	let actor = RoleActor {
+		id: &auth.id,
+		permissions: &permissions,
+	};
+	actor.check_outranks(&state.db, &target).await?;
+	if !User::revoke_session(&state.db, &id, &session_id).await? {
+		return Err(ErrorCode::NotFound.into());
+	}
+	AuditLog::log(&state.db, LogEvent::SessionRevoked, Some(auth.id), Some(EntityType::User), Some(id));
+	Ok((StatusCode::NO_CONTENT, "").into_response())
 }
 
 /// Create a new user.

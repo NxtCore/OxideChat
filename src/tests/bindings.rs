@@ -108,11 +108,16 @@ mod tests {
 			PermissionResponse,
 			SaveRoleRequest,
 			UserListResponse,
+			UserOverviewResponse,
 			UserResponse,
 			WorkspaceDeleteAction,
 			WorkspaceResponse,
 		);
 
+		write_permissions()
+	}
+
+	fn write_permissions() -> Result<(), Box<dyn Error>> {
 		let mut permissions = String::new();
 		for (name, value) in ALL {
 			writeln!(permissions, "export const {name} = '{value}';")?;

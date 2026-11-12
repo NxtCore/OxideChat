@@ -99,8 +99,6 @@ import type {PermissionResponse} from '~/types/generated/PermissionResponse';
 import type {RoleResponse} from '~/types/generated/RoleResponse';
 import type {SaveRoleRequest} from '~/types/generated/SaveRoleRequest';
 
-const GROUP_ORDER = ['wildcard', 'settings'];
-
 const store = useMainStore();
 const {$customFetch} = useNuxtApp();
 
@@ -122,14 +120,7 @@ const editorHint = computed(() => {
 	return t('not_held_hint');
 });
 
-const groups = computed(() => {
-	const byGroup = new Map<string, string[]>();
-	for (const permission of permissions.value) {
-		byGroup.set(permission.group, [...(byGroup.get(permission.group) ?? []), permission.name]);
-	}
-	const rank = (id: string) => (GROUP_ORDER.includes(id) ? GROUP_ORDER.indexOf(id) : GROUP_ORDER.length);
-	return [...byGroup.entries()].map(([id, names]) => ({id, permissions: names})).sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
-});
+const groups = computed(() => groupPermissions(permissions.value).map(group => ({id: group.id, permissions: group.permissions.map(permission => permission.name)})));
 
 function isEditable(role: RoleResponse): boolean {
 	return canEdit.value && role.permissions.every(permission => store.hasPermission(permission));
