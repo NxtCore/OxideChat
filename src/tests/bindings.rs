@@ -44,6 +44,7 @@ mod tests {
 			ApiKeyAnalyticsRow,
 			AssignmentKind,
 			AssignmentRef,
+			AssignmentRole,
 			AssignmentTarget,
 			AssignmentsResponse,
 			ReplaceAssignmentsRequest,

@@ -86,16 +86,6 @@
 					<template #fallback><Wand2 class="h-1/2 w-1/2 text-primary" /></template>
 				</ImagePicker>
 			</div>
-
-			<div v-if="assignment" class="space-y-1.5">
-				<ShadLabel>{{ t('scope') }}</ShadLabel>
-				<SettingsAssignmentPicker :model-value="assignment" :options="assignmentOptions" :kinds="assignmentKinds" single test-id="preset-scope" @update:model-value="targets => emit('assignment', targets)" />
-				<p class="text-xs text-muted-foreground">{{ t('scope_choose_description') }}</p>
-			</div>
-			<div v-else class="rounded-lg border border-border bg-muted/30 p-3">
-				<p class="text-sm font-medium text-foreground">{{ t('scope') }}: {{ scopeLabel }}</p>
-				<p class="text-xs text-muted-foreground">{{ t('scope_description') }}</p>
-			</div>
 		</div>
 	</div>
 </template>
@@ -103,7 +93,6 @@
 <script setup lang="ts">
 import {AlertTriangle, Check, Copy, Loader2, Wand2, X} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
-import type {AssignmentKind, AssignmentOption, AssignmentTarget} from '~/types/assignments';
 import type {ModelList} from '~/types/chat';
 
 export type SlugStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -112,9 +101,6 @@ const props = defineProps<{
 	form: Record<string, any>;
 	slugStatus: SlugStatus;
 	baseModelKey: string | null;
-	scopeLabel: string;
-	assignment: AssignmentTarget[] | null;
-	assignmentOptions: AssignmentOption[];
 	slugRenamed: boolean;
 	enabledLocked: boolean;
 	disabled?: boolean;
@@ -125,13 +111,10 @@ const emit = defineEmits<{
 	slug: [value: string];
 	'base-key': [value: string | null];
 	base: [model: ModelList | null];
-	assignment: [targets: AssignmentTarget[]];
 }>();
 
 const store = useMainStore();
 const t = (key: string) => store.getTranslation(`presets.editor.${key}`);
-
-const assignmentKinds = computed(() => (['user', 'team', 'everyone'] as AssignmentKind[]).filter(kind => props.assignmentOptions.some(option => option.kind === kind)));
 
 const curl = computed(() =>
 	gatewaySnippets(import.meta.client ? gatewayBaseUrl() : '', {model: presetKey(props.form.slug), messages: [{role: 'user', content: 'Hello'}]}).curl,

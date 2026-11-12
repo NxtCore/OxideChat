@@ -176,8 +176,12 @@ test.describe('presets', () => {
 			await sourceRow.getByTestId('preset-row-menu').click();
 			await page.getByTestId('preset-row-duplicate').click();
 			await expect(page).toHaveURL(/\/settings\/presets\/new$/);
-			await page.getByTestId('preset-scope-add').click();
+			await page.getByTestId('preset-sharing-badge').click();
+			await page.getByTestId('preset-scope-kind-team').click();
+			await page.getByTestId('preset-scope-select').click();
 			await page.getByTestId(`preset-scope-option-team:${team.id}`).click();
+			await expect(page.getByTestId('preset-sharing-badge')).toHaveText(team.name);
+			await page.getByTestId('preset-tab-general').click();
 			await page.getByTestId('preset-name').fill(name);
 			await expect(page.getByTestId('preset-slug-status')).toHaveAttribute('data-status', 'available');
 			await page.getByTestId('settings-save-bar-save').click();

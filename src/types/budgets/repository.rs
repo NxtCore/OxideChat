@@ -452,6 +452,7 @@ impl Budget {
 		Ok(AssignmentsResponse {
 			kinds: Self::ASSIGNMENT_KINDS.to_vec(),
 			single: false,
+			roles: Vec::new(),
 			targets: rows.into_iter().map(AssignmentTarget::from).collect(),
 		})
 	}

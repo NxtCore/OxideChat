@@ -1,3 +1,4 @@
+use crate::types::AssignmentKind;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
@@ -167,6 +168,8 @@ pub struct PresetActor {
 	pub personal: bool,
 	pub installation_admin: bool,
 	pub admin_teams: Vec<Uuid>,
+	pub teams: Vec<Uuid>,
+	pub editable: Vec<Uuid>,
 }
 
 impl PresetActor {
@@ -180,7 +183,34 @@ impl PresetActor {
 		}
 	}
 
-	/// Whether the actor may edit or delete `preset`.
+	/// Whether `preset` lives in the actor's own scope: their personal preset, one of their teams' or the installation's.
+	#[must_use]
+	pub fn is_home(&self, preset: &Preset) -> bool {
+		match preset.scope() {
+			PresetScope::Personal => preset.owner_id == Some(self.user_id),
+			PresetScope::Team => preset.team_id.is_some_and(|team| self.teams.contains(&team)),
+			PresetScope::Installation => true,
+		}
+	}
+
+	/// Whether the actor may share presets with `kind`, for teams with `team_id`: teams they manage, and for installation
+	/// admins also single users and everyone.
+	#[must_use]
+	pub fn can_share_with(&self, kind: AssignmentKind, team_id: Option<&Uuid>) -> bool {
+		match kind {
+			AssignmentKind::Team => self.can_manage_scope(PresetScope::Team, team_id),
+			AssignmentKind::User | AssignmentKind::Everyone => self.installation_admin,
+			AssignmentKind::Role | AssignmentKind::Key => false,
+		}
+	}
+
+	/// Whether the actor may change `preset`: its managers and everyone it is shared with as an editor.
+	#[must_use]
+	pub fn can_edit(&self, preset: &Preset) -> bool {
+		self.can_manage(preset) || self.editable.contains(&preset.id)
+	}
+
+	/// Whether the actor owns `preset` and so may delete it and change who it is shared with.
 	#[must_use]
 	pub fn can_manage(&self, preset: &Preset) -> bool {
 		match preset.scope() {

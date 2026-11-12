@@ -257,9 +257,18 @@
 								:options="assignmentOptions"
 								:kinds="assignmentData.kinds"
 								:disabled="!canEdit"
+								:description="store.getTranslation(`settings.budgets.assign.description_${selected.kind}`)"
+								:describe="describeAssignment"
+								:empty-title="store.getTranslation('settings.budgets.assign.empty_title')"
+								:empty-hint="store.getTranslation('settings.budgets.assign.empty_hint')"
+								:note="store.getTranslation(`settings.budgets.assign.note_${selected.kind}`)"
 								test-id="budget-assignments"
 								@update:model-value="saveAssignments"
 							/>
+							<div v-else class="space-y-2">
+								<ShadSkeleton class="h-4 w-2/3" />
+								<ShadSkeleton class="h-12 w-full" />
+							</div>
 						</div>
 					</div>
 				</div>
@@ -571,6 +580,11 @@ async function deleteBudget() {
 	} catch {
 		store.toast(store.getTranslation('settings.budgets.delete_error'), {type: 'error'});
 	}
+}
+
+function describeAssignment(target: AssignmentOption) {
+	const key = target.kind === 'team' ? `team_${selected.value?.kind}` : 'user';
+	return store.getTranslation(`settings.budgets.assign.effect_${key}`);
 }
 
 function assignmentsPath(budgetId: string) {

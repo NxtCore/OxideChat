@@ -97,7 +97,7 @@ pub async fn delete_preset(State(state): State<Arc<JobState>>, user: AuthUser, P
 
 /// GET /api/v1/presets/{id}/assignments
 ///
-/// Who the preset is shared with: its owner, one team or everyone.
+/// Who can use the preset: its owner and everyone, the teams and the users it is shared with.
 pub async fn get_preset_assignments(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	let actor = actor(&state, &user).await?;
 	let preset = Preset::find_for_actor(&state.db, &actor, &id).await?.ok_or(PresetError::NotFound)?;
@@ -106,12 +106,9 @@ pub async fn get_preset_assignments(State(state): State<Arc<JobState>>, user: Au
 
 /// PUT /api/v1/presets/{id}/assignments
 ///
-/// Moves the preset to the one target in the body.
+/// Makes the targets in the body the only ones the preset is shared with; its owner always keeps it.
 pub async fn replace_preset_assignments(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<ReplaceAssignmentsRequest>) -> Result<Response, AppError> {
 	let actor = actor(&state, &user).await?;
-	let [target] = request.targets[..] else {
-		return Err(PresetError::Invalid.into());
-	};
-	let preset = Preset::replace_assignment(&state.db, &actor, &id, target).await?;
+	let preset = Preset::replace_assignments(&state.db, &actor, &id, &request).await?;
 	json_ok(preset.assignments(&state.db, &actor).await?)
 }

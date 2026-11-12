@@ -9,12 +9,15 @@ macro_rules! visible_to_key {
 			(scope = 'personal' AND owner_id = $1)
 			OR (scope = 'team' AND team_id = $2)
 			OR scope = 'installation'
+			OR shared_with_everyone
+			OR EXISTS (SELECT 1 FROM model_preset_shares s WHERE s.preset_id = model_presets.id AND (s.user_id = $1 OR s.team_id = $2))
 		)"
 	};
 }
 
 impl Preset {
-	/// Enabled presets an API key can call: its owner's personal presets, its pinned team's and the installation's.
+	/// Enabled presets an API key can call: its owner's personal presets, its pinned team's, the installation's and those
+	/// shared with its owner, its team or everyone.
 	///
 	/// Service-account keys have no owner and never see personal presets. Base-model access is checked by the caller.
 	///

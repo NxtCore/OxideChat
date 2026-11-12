@@ -16,7 +16,7 @@ export function useAssignments() {
 
 	async function replace(path: string, targets: AssignmentTarget[]): Promise<boolean> {
 		try {
-			const body = {targets: targets.filter(target => !target.inherited).map(({kind, id}) => ({kind, id}))};
+			const body = {targets: targets.filter(target => !target.inherited && !target.owner).map(({kind, id, role}) => ({kind, id, ...(role ? {role} : {})}))};
 			data.value = await $customFetch<AssignmentsResponse>(path, {method: 'PUT', body});
 			store.toast(store.getTranslation('assignments.save_success'), {type: 'success'});
 			return true;

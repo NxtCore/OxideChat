@@ -238,6 +238,8 @@ mod repository {
 			personal: true,
 			installation_admin: false,
 			admin_teams: Vec::new(),
+			teams: Vec::new(),
+			editable: Vec::new(),
 		}
 	}
 
@@ -413,34 +415,125 @@ mod scopes {
 		}
 	}
 
+	fn share(targets: &[(AssignmentKind, Option<Uuid>)]) -> ReplaceAssignmentsRequest {
+		ReplaceAssignmentsRequest {
+			targets: targets.iter().map(|(kind, id)| AssignmentRef { kind: *kind, id: *id, role: None }).collect(),
+		}
+	}
+
+	async fn shared_with(pool: &PgPool, preset: &Preset, actor: &PresetActor) -> TestResult<Vec<(AssignmentKind, Option<Uuid>, bool)>> {
+		let response = preset.assignments(pool, actor).await?;
+		assert!(!response.single);
+		Ok(response.targets.iter().map(|target| (target.kind, target.id, target.owner)).collect())
+	}
+
 	#[sqlx::test(migrations = "./migrations")]
-	async fn a_preset_moves_between_the_scopes_its_manager_controls(pool: PgPool) -> TestResult {
+	async fn a_preset_is_shared_with_several_teams_and_users_and_keeps_its_owner(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let admin = actor(&pool, team.admin_id, true).await?;
+		let preset = Preset::create(&pool, &admin, for_model("shareable", team.model_id)).await?;
+		assert!(Preset::find_visible_by_slug(&pool, &team.member_id, "shareable").await?.is_none());
+
+		let both = share(&[(AssignmentKind::Team, Some(team.team_id)), (AssignmentKind::User, Some(team.outsider_id)), (AssignmentKind::User, Some(team.admin_id))]);
+		let shared = Preset::replace_assignments(&pool, &admin, &preset.id, &both).await?;
+		assert_eq!((shared.scope(), shared.owner_id), (PresetScope::Personal, Some(team.admin_id)));
+		assert_eq!(
+			shared_with(&pool, &shared, &admin).await?,
+			vec![
+				(AssignmentKind::User, Some(team.admin_id), true),
+				(AssignmentKind::Team, Some(team.team_id), false),
+				(AssignmentKind::User, Some(team.outsider_id), false),
+			]
+		);
+		assert!(Preset::find_visible_by_slug(&pool, &team.member_id, "shareable").await?.is_some());
+		assert!(Preset::find_visible_by_slug(&pool, &team.outsider_id, "shareable").await?.is_some());
+
+		let member = actor(&pool, team.member_id, false).await?;
+		let seen = Preset::responses_for_user(&pool, &member, Preset::list_for_user(&pool, &team.member_id).await?).await?;
+		assert_eq!(seen.iter().map(|preset| (preset.shared, preset.can_edit)).collect::<Vec<_>>(), vec![(true, false)]);
+		let edit = Preset::update(&pool, &member, &preset.id, for_model("shareable", team.model_id)).await;
+		assert!(matches!(edit, Err(PresetError::NotFound)));
+
+		let only_team = share(&[(AssignmentKind::Team, Some(team.team_id))]);
+		Preset::replace_assignments(&pool, &admin, &preset.id, &only_team).await?;
+		assert!(Preset::find_visible_by_slug(&pool, &team.outsider_id, "shareable").await?.is_none());
+		assert!(Preset::find_visible_by_slug(&pool, &team.member_id, "shareable").await?.is_some());
+
+		Preset::replace_assignments(&pool, &admin, &preset.id, &share(&[(AssignmentKind::Everyone, None)])).await?;
+		assert!(Preset::find_visible_by_slug(&pool, &team.outsider_id, "shareable").await?.is_some());
+		Preset::replace_assignments(&pool, &admin, &preset.id, &share(&[])).await?;
+		assert!(Preset::find_visible_by_slug(&pool, &team.member_id, "shareable").await?.is_none());
+		assert_eq!(shared_with(&pool, &preset, &admin).await?, vec![(AssignmentKind::User, Some(team.admin_id), true)]);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn editors_change_a_shared_preset_but_neither_delete_nor_share_it(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let owner = actor(&pool, team.admin_id, true).await?;
+		let preset = Preset::create(&pool, &owner, for_model("co-edited", team.model_id)).await?;
+		let editor = |kind, id| AssignmentRef { kind, id: Some(id), role: Some(AssignmentRole::Editor) };
+		let viewer = AssignmentRef { kind: AssignmentKind::User, id: Some(team.outsider_id), role: None };
+		let request = ReplaceAssignmentsRequest {
+			targets: vec![editor(AssignmentKind::Team, team.team_id), viewer],
+		};
+		Preset::replace_assignments(&pool, &owner, &preset.id, &request).await?;
+		let roles: Vec<Option<AssignmentRole>> = preset.assignments(&pool, &owner).await?.targets.iter().map(|target| target.role).collect();
+		assert_eq!(roles, vec![None, Some(AssignmentRole::Editor), Some(AssignmentRole::Viewer)]);
+
+		let member = actor(&pool, team.member_id, false).await?;
+		let seen = Preset::responses_for_user(&pool, &member, Preset::list_for_user(&pool, &team.member_id).await?).await?;
+		assert_eq!((seen[0].can_edit, seen[0].can_manage, seen[0].shared), (true, false, true));
+		let renamed = Preset::update(&pool, &member, &preset.id, for_model("co-edited-2", team.model_id)).await?;
+		assert_eq!((renamed.slug.as_str(), renamed.owner_id), ("co-edited-2", Some(team.admin_id)));
+		assert!(matches!(Preset::delete(&pool, &member, &preset.id).await, Err(PresetError::NotFound)));
+		assert!(matches!(Preset::replace_assignments(&pool, &member, &preset.id, &share(&[])).await, Err(PresetError::NotFound)));
+		assert!(preset.assignments(&pool, &member).await?.kinds.is_empty());
+
+		let outsider = actor(&pool, team.outsider_id, false).await?;
+		let edit = Preset::update(&pool, &outsider, &preset.id, for_model("co-edited-3", team.model_id)).await;
+		assert!(matches!(edit, Err(PresetError::NotFound)));
+
+		let everyone = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef { kind: AssignmentKind::Everyone, id: None, role: Some(AssignmentRole::Editor) }],
+		};
+		assert!(matches!(Preset::replace_assignments(&pool, &owner, &preset.id, &everyone).await, Err(PresetError::Invalid)));
+
+		let downgraded = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef { kind: AssignmentKind::Team, id: Some(team.team_id), role: Some(AssignmentRole::Viewer) }],
+		};
+		Preset::replace_assignments(&pool, &owner, &preset.id, &downgraded).await?;
+		let member = actor(&pool, team.member_id, false).await?;
+		let edit = Preset::update(&pool, &member, &preset.id, for_model("co-edited-4", team.model_id)).await;
+		assert!(matches!(edit, Err(PresetError::NotFound)));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn sharing_needs_the_right_to_manage_the_new_target(pool: PgPool) -> TestResult {
 		let team = team(&pool).await?;
 		let admin = actor(&pool, team.admin_id, false).await?;
-		let preset = Preset::create(&pool, &admin, for_model("movable", team.model_id)).await?;
-		let to_team = AssignmentRef { kind: AssignmentKind::Team, id: Some(team.team_id) };
+		let preset = Preset::create(&pool, &admin, for_model("guarded", team.model_id)).await?;
+		assert_eq!(preset.assignments(&pool, &admin).await?.kinds, vec![AssignmentKind::Team]);
 
-		let moved = Preset::replace_assignment(&pool, &admin, &preset.id, to_team).await?;
-		assert_eq!((moved.scope(), moved.owner_id, moved.team_id), (PresetScope::Team, None, Some(team.team_id)));
-		assert!(Preset::find_visible_by_slug(&pool, &team.member_id, "movable").await?.is_some());
-		let response = moved.assignments(&pool, &admin).await?;
-		assert!(response.single);
-		assert_eq!(response.kinds, vec![AssignmentKind::User, AssignmentKind::Team]);
-		assert_eq!(response.targets.iter().map(|target| (target.kind, target.id)).collect::<Vec<_>>(), vec![(AssignmentKind::Team, Some(team.team_id))]);
-
-		let everyone = AssignmentRef { kind: AssignmentKind::Everyone, id: None };
-		assert!(matches!(Preset::replace_assignment(&pool, &admin, &preset.id, everyone).await, Err(PresetError::Forbidden)));
-		let other_team = AssignmentRef { kind: AssignmentKind::Team, id: Some(team.outsider_team_id) };
-		assert!(matches!(Preset::replace_assignment(&pool, &admin, &preset.id, other_team).await, Err(PresetError::Forbidden)));
-		let someone_else = AssignmentRef { kind: AssignmentKind::User, id: Some(team.member_id) };
-		assert!(matches!(Preset::replace_assignment(&pool, &admin, &preset.id, someone_else).await, Err(PresetError::Invalid)));
+		let own_team = share(&[(AssignmentKind::Team, Some(team.team_id))]);
+		Preset::replace_assignments(&pool, &admin, &preset.id, &own_team).await?;
+		for denied in [
+			share(&[(AssignmentKind::Team, Some(team.team_id)), (AssignmentKind::Team, Some(team.outsider_team_id))]),
+			share(&[(AssignmentKind::User, Some(team.member_id))]),
+			share(&[(AssignmentKind::Everyone, None)]),
+		] {
+			assert!(matches!(Preset::replace_assignments(&pool, &admin, &preset.id, &denied).await, Err(PresetError::Forbidden)));
+		}
+		let invalid = share(&[(AssignmentKind::Role, Some(team.team_id))]);
+		assert!(matches!(Preset::replace_assignments(&pool, &admin, &preset.id, &invalid).await, Err(PresetError::Invalid)));
+		let unknown = share(&[(AssignmentKind::Team, Some(Uuid::new_v4()))]);
+		let installation_admin = actor(&pool, team.admin_id, true).await?;
+		assert!(matches!(Preset::replace_assignments(&pool, &installation_admin, &preset.id, &unknown).await, Err(PresetError::Invalid)));
 		let member = actor(&pool, team.member_id, false).await?;
-		assert!(matches!(Preset::replace_assignment(&pool, &member, &preset.id, to_team).await, Err(PresetError::NotFound)));
+		assert!(matches!(Preset::replace_assignments(&pool, &member, &preset.id, &own_team).await, Err(PresetError::NotFound)));
 
-		let mine = AssignmentRef { kind: AssignmentKind::User, id: Some(team.admin_id) };
-		let back = Preset::replace_assignment(&pool, &admin, &preset.id, mine).await?;
-		assert_eq!((back.scope(), back.owner_id, back.team_id), (PresetScope::Personal, Some(team.admin_id), None));
-		assert!(Preset::find_visible_by_slug(&pool, &team.member_id, "movable").await?.is_none());
+		assert_eq!(shared_with(&pool, &preset, &admin).await?.len(), 2);
 		Ok(())
 	}
 
@@ -626,6 +719,31 @@ mod gateway {
 		assert_eq!(listed(&pool, &service_key).await?, ["presets/org-wide", "presets/team-shared"]);
 		let outsider_key = context(&pool, Some(team.outsider_id), team.outsider_team_id).await?;
 		assert_eq!(listed(&pool, &outsider_key).await?, ["presets/org-wide"]);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_shared_preset_reaches_the_keys_of_the_teams_and_users_it_is_shared_with(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let installation = actor(&pool, team.admin_id, true).await?;
+		let preset = Preset::create(&pool, &installation, for_model("admin-own", team.model_id)).await?;
+		let service_key = context(&pool, None, team.team_id).await?;
+		let outsider_key = context(&pool, Some(team.outsider_id), team.outsider_team_id).await?;
+		assert!(listed(&pool, &service_key).await?.is_empty());
+
+		let with_team = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef { kind: AssignmentKind::Team, id: Some(team.team_id), role: None }],
+		};
+		Preset::replace_assignments(&pool, &installation, &preset.id, &with_team).await?;
+		assert_eq!(listed(&pool, &service_key).await?, ["presets/admin-own"]);
+		assert!(listed(&pool, &outsider_key).await?.is_empty());
+
+		let with_user = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef { kind: AssignmentKind::User, id: Some(team.outsider_id), role: None }],
+		};
+		Preset::replace_assignments(&pool, &installation, &preset.id, &with_user).await?;
+		assert!(listed(&pool, &service_key).await?.is_empty());
+		assert_eq!(listed(&pool, &outsider_key).await?, ["presets/admin-own"]);
 		Ok(())
 	}
 

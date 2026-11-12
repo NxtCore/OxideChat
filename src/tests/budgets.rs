@@ -863,7 +863,7 @@ mod budget_audit {
 
 	#[test]
 	fn a_replace_request_only_takes_allowed_kinds_with_ids() {
-		let request = |kind, id| ReplaceAssignmentsRequest { targets: vec![AssignmentRef { kind, id }] };
+		let request = |kind, id| ReplaceAssignmentsRequest { targets: vec![AssignmentRef { kind, id, role: None }] };
 		let id = Some(Uuid::new_v4());
 		assert!(request(AssignmentKind::Team, id).is_valid_for(&Budget::ASSIGNMENT_KINDS));
 		assert!(!request(AssignmentKind::Role, id).is_valid_for(&Budget::ASSIGNMENT_KINDS));

@@ -1,18 +1,23 @@
 <template>
-	<div class="space-y-5">
-		<div>
-			<h3 class="text-base font-semibold text-foreground mb-1">{{ store.getTranslation('settings.models.editor.access') }}</h3>
-			<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.access_desc') }}</p>
-		</div>
-		<div v-if="!data" class="flex items-center justify-center py-10 text-muted-foreground">
-			<Loader2 class="h-5 w-5 animate-spin" />
+	<div class="space-y-3">
+		<h3 class="text-base font-semibold text-foreground">{{ t('access') }}</h3>
+		<div v-if="!data && active" class="space-y-2">
+			<ShadSkeleton class="h-4 w-2/3" />
+			<ShadSkeleton class="h-12 w-full" />
+			<ShadSkeleton class="h-12 w-full" />
 		</div>
 		<SettingsAssignmentPicker
-			v-else
+			v-else-if="data"
 			:model-value="data.targets"
 			:options="teams"
 			:kinds="data.kinds"
 			:disabled="!store.hasPermission(ADMIN_TEAMS_EDIT)"
+			:description="t('access_desc')"
+			:describe="() => t('access_effect')"
+			:inherited-hint="t('access_inherited')"
+			inherited-to="/settings/teams"
+			:empty-title="t('access_empty_title')"
+			:empty-hint="t('access_empty_hint')"
 			test-id="model-access"
 			@update:model-value="targets => replace(path, targets)"
 		/>
@@ -20,7 +25,6 @@
 </template>
 
 <script setup lang="ts">
-import {Loader2} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import type {AssignmentOption} from '~/types/assignments';
 import {ADMIN_TEAMS_EDIT} from '~/types/generated/permissions';
@@ -28,6 +32,7 @@ import {ADMIN_TEAMS_EDIT} from '~/types/generated/permissions';
 const props = defineProps<{modelId: string; active: boolean}>();
 
 const store = useMainStore();
+const t = (key: string) => store.getTranslation(`settings.models.editor.${key}`);
 const {data, load, replace} = useAssignments();
 const teams = ref<AssignmentOption[]>([]);
 const path = `/api/v1/admin/models/${props.modelId}/assignments`;

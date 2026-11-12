@@ -55,7 +55,7 @@
 					<NuxtLink :to="`/settings/presets/${preset.id}`" class="min-w-0 flex-1">
 						<div class="flex flex-wrap items-center gap-2">
 							<span class="font-medium text-foreground">{{ preset.name }}</span>
-							<span v-if="preset.scope === 'team'" class="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary" data-testid="preset-row-scope">
+							<span v-if="preset.scope === 'team' || preset.shared" class="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary" data-testid="preset-row-scope">
 								{{ presetScopeLabel(preset, store.getTranslation) }}
 							</span>
 							<span v-if="preset.unavailable" class="rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
@@ -98,7 +98,7 @@
 								<CopyPlus class="mr-2 h-4 w-4" />
 								{{ t('duplicate') }}
 							</ShadDropdownMenuItem>
-							<template v-if="preset.can_edit">
+							<template v-if="preset.can_manage">
 								<ShadDropdownMenuSeparator class="bg-border" />
 								<ShadDropdownMenuItem data-testid="preset-row-delete" class="text-destructive focus:bg-destructive/10" @click="pendingDelete = preset">
 									<Trash2 class="mr-2 h-4 w-4" />
@@ -121,9 +121,9 @@ import {useMainStore} from '~/stores';
 import {usePresetStore} from '~/stores/presetStore';
 import type {PresetResponse, PresetScope} from '~/types/presets';
 
-type PresetTab = 'mine' | 'team' | 'organization';
+type PresetTab = 'mine' | 'team' | 'organization' | 'shared';
 
-const TAB_SCOPES: Record<PresetTab, PresetScope> = {mine: 'personal', team: 'team', organization: 'installation'};
+const TAB_SCOPES: Partial<Record<PresetTab, PresetScope>> = {mine: 'personal', team: 'team', organization: 'installation'};
 
 const store = useMainStore();
 const presetStore = usePresetStore();
@@ -138,24 +138,26 @@ const scopes = computed(() => presetStore.scopes);
 const hasAnyScope = computed(() => !!scopes.value && (scopes.value.personal || scopes.value.teams.length > 0 || scopes.value.installation));
 
 const visibleTabs = computed<PresetTab[]>(() => {
-	const has = (scope: PresetScope) => presetStore.presets.some(preset => preset.scope === scope);
+	const has = (scope: PresetScope) => presetStore.presets.some(preset => preset.scope === scope && !preset.shared);
 	const tabs: PresetTab[] = ['mine'];
 	if ((scopes.value?.teams.length ?? 0) > 0 || has('team')) tabs.push('team');
 	if (scopes.value?.installation || has('installation')) tabs.push('organization');
+	if (presetStore.presets.some(preset => preset.shared)) tabs.push('shared');
 	return tabs;
 });
 
 const queryTab = route.query.tab as PresetTab | undefined;
-const currentTab = ref<PresetTab>(queryTab && queryTab in TAB_SCOPES ? queryTab : 'mine');
+const currentTab = ref<PresetTab>(queryTab && (queryTab in TAB_SCOPES || queryTab === 'shared') ? queryTab : 'mine');
 
 watch(currentTab, tab => router.replace({query: tab === 'mine' ? {} : {tab}}));
 
-const rows = computed(() => presetStore.presets.filter(preset => preset.scope === TAB_SCOPES[currentTab.value]));
+const rows = computed(() => presetStore.presets.filter(preset => (currentTab.value === 'shared' ? preset.shared : !preset.shared && preset.scope === TAB_SCOPES[currentTab.value])));
 
 const canCreate = computed(() => {
 	if (!scopes.value) return false;
 	if (currentTab.value === 'team') return scopes.value.teams.length > 0;
 	if (currentTab.value === 'organization') return scopes.value.installation;
+	if (currentTab.value === 'shared') return false;
 	return scopes.value.personal;
 });
 
