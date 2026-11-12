@@ -425,6 +425,36 @@ mod tests {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn model_assignments_replace_team_grants_and_mark_inherited_access(pool: PgPool) {
+		use crate::types::AssignmentKind;
+		restrict_general_team(&pool).await;
+		let admin = create_user(&pool, "assign-admin").await;
+		let provider_id = create_provider(&pool, "Assign Provider", true).await;
+		let model_id = create_model(&pool, provider_id, "assign-model", "Assign Model", true).await;
+		let direct = create_team(&pool, "Direct").await;
+		let dropped = create_team(&pool, "Dropped").await;
+		let through_provider = create_team(&pool, "Through Provider").await;
+		grant_model(&pool, dropped, model_id).await;
+		grant_provider(&pool, through_provider, provider_id).await;
+
+		Model::replace_assignments(&pool, &admin, &model_id, &[direct]).await.unwrap();
+
+		let response = Model::assignments(&pool, &model_id).await.unwrap();
+		assert_eq!(response.kinds, vec![AssignmentKind::Team]);
+		let targets: Vec<(Option<Uuid>, bool)> = response.targets.iter().map(|target| (target.id, target.inherited)).collect();
+		assert_eq!(targets, vec![(Some(direct), false), (Some(through_provider), true)]);
+		let audited: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_logs WHERE event = 'team_models_updated' AND target_id = ANY($1)")
+			.bind(vec![direct, dropped])
+			.fetch_one(&pool)
+			.await
+			.unwrap();
+		assert_eq!(audited, 2);
+
+		assert!(Model::replace_assignments(&pool, &admin, &model_id, &[Uuid::new_v4()]).await.is_err());
+		assert_eq!(Model::assignments(&pool, &model_id).await.unwrap().targets.len(), 2);
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn sync_preserves_model_id_when_a_model_temporarily_disappears(pool: PgPool) {
 		let provider_id = create_provider(&pool, "Sync Provider", true).await;
 		let model_id = create_model(&pool, provider_id, "image-model", "Image Model", true).await;

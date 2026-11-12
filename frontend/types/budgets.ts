@@ -4,7 +4,6 @@ export type {UserBudgetStatus} from './generated/UserBudgetStatus';
 export type {AnalyticsRow} from './generated/AnalyticsRow';
 export type {AnalyticsDayModelRow} from './generated/AnalyticsDayModelRow';
 export type {ApiKeyAnalyticsRow} from './generated/ApiKeyAnalyticsRow';
-export type {BudgetAssignmentInfo} from './generated/BudgetAssignmentInfo';
 export type {BudgetPayload} from './generated/BudgetPayload';
 export type {BudgetTeamSummary} from './generated/BudgetTeamSummary';
 export type {UserBudgetOverview} from './generated/UserBudgetOverview';

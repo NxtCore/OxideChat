@@ -2,7 +2,7 @@ use super::rows::preset_columns;
 use super::{Preset, PresetActor, PresetBaseModel, PresetError, PresetResponse, PresetScope, PresetScopesResponse, PresetTeam, SavePresetRequest};
 use crate::logging::AuditLog;
 use crate::types::models::{Model, ModelListPublic};
-use crate::types::{AuditEntry, Tool, is_unique_violation};
+use crate::types::{AssignmentKind, AssignmentRef, AssignmentTarget, AssignmentsResponse, AuditEntry, Tool, is_unique_violation};
 use sqlx::postgres::PgArguments;
 use sqlx::query::QueryAs;
 use sqlx::types::Json;
@@ -175,10 +175,14 @@ impl Preset {
 		if !base_usable {
 			return Err(PresetError::BaseModelNotAllowed);
 		}
-		if !request.tool_ids.is_empty() {
-			let tools = Tool::find_enabled_for_user(pool, &request.tool_ids, &actor.user_id).await?;
+		Self::check_tools(pool, actor, scope, &request.tool_ids).await
+	}
+
+	async fn check_tools(pool: &PgPool, actor: &PresetActor, scope: PresetScope, tool_ids: &[Uuid]) -> Result<(), PresetError> {
+		if !tool_ids.is_empty() {
+			let tools = Tool::find_enabled_for_user(pool, tool_ids, &actor.user_id).await?;
 			let shared = scope != PresetScope::Personal;
-			if tools.len() != request.tool_ids.len() || (shared && tools.iter().any(|tool| tool.owner_id.is_some())) {
+			if tools.len() != tool_ids.len() || (shared && tools.iter().any(|tool| tool.owner_id.is_some())) {
 				return Err(PresetError::ToolsNotAllowed);
 			}
 		}
@@ -228,7 +232,7 @@ impl Preset {
 		Ok(preset)
 	}
 
-	/// Replaces a preset the actor manages, audited in the same transaction; its scope never changes.
+	/// Replaces a preset the actor manages, audited in the same transaction; its scope only changes through [`Preset::replace_assignment`].
 	///
 	/// # Errors
 	/// Returns [`PresetError::NotFound`] when the actor may not manage the preset, [`PresetError::Forbidden`] when someone
@@ -257,6 +261,69 @@ impl Preset {
 			.await
 			.map_err(map_write_error)?
 			.ok_or(PresetError::NotFound)?;
+		audit(&mut tx, EVENT_UPDATED, &actor.user_id, &preset).await?;
+		tx.commit().await?;
+		Ok(preset)
+	}
+
+	/// Who the preset is shared with, in the shared assignment shape: its owner, one team or everyone.
+	///
+	/// `kinds` lists what the actor may move it to.
+	///
+	/// # Errors
+	/// Returns the database error when the owner's name cannot be loaded.
+	pub async fn assignments(&self, pool: &PgPool, actor: &PresetActor) -> Result<AssignmentsResponse, sqlx::Error> {
+		let target = match self.scope() {
+			PresetScope::Personal => {
+				let label: Option<String> = sqlx::query_scalar("SELECT username::text FROM users WHERE id = $1").bind(self.owner_id).fetch_optional(pool).await?;
+				(AssignmentKind::User, self.owner_id, label.unwrap_or_default())
+			}
+			PresetScope::Team => (AssignmentKind::Team, self.team_id, self.team_name.clone().unwrap_or_default()),
+			PresetScope::Installation => (AssignmentKind::Everyone, None, String::new()),
+		};
+		let allowed = [
+			(AssignmentKind::User, actor.personal),
+			(AssignmentKind::Team, actor.installation_admin || !actor.admin_teams.is_empty()),
+			(AssignmentKind::Everyone, actor.installation_admin),
+		];
+		Ok(AssignmentsResponse {
+			kinds: allowed.into_iter().filter(|(_, allowed)| *allowed).map(|(kind, _)| kind).collect(),
+			single: true,
+			targets: vec![AssignmentTarget { kind: target.0, id: target.1, label: target.2, inherited: false }],
+		})
+	}
+
+	/// Moves a preset the actor manages to the actor (personal), one team or everyone, audited in the same transaction.
+	///
+	/// # Errors
+	/// Returns [`PresetError::NotFound`] when the actor may not manage the preset, [`PresetError::Forbidden`] when they may not
+	/// manage the new scope, [`PresetError::ToolsNotAllowed`] when a shared preset would bundle a personal tool and
+	/// [`PresetError::Invalid`] for any other kind of target or an unknown team.
+	pub async fn replace_assignment(pool: &PgPool, actor: &PresetActor, id: &Uuid, target: AssignmentRef) -> Result<Self, PresetError> {
+		let current = Self::find_managed(pool, actor, id).await?;
+		let (scope, owner_id, team_id) = match (target.kind, target.id) {
+			(AssignmentKind::User, Some(user_id)) if user_id == actor.user_id => (PresetScope::Personal, Some(user_id), None),
+			(AssignmentKind::Team, Some(team_id)) => (PresetScope::Team, None, Some(team_id)),
+			(AssignmentKind::Everyone, None) => (PresetScope::Installation, None, None),
+			_ => return Err(PresetError::Invalid),
+		};
+		if !actor.can_manage_scope(scope, team_id.as_ref()) {
+			return Err(PresetError::Forbidden);
+		}
+		Self::check_tools(pool, actor, scope, &current.tool_ids).await?;
+		let mut tx = pool.begin().await?;
+		let preset = sqlx::query_as::<_, Self>(concat!(
+			"UPDATE model_presets SET scope = $2, owner_id = $3, team_id = $4, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING ",
+			preset_columns!()
+		))
+		.bind(id)
+		.bind(scope.as_str())
+		.bind(owner_id)
+		.bind(team_id)
+		.fetch_optional(&mut *tx)
+		.await
+		.map_err(map_write_error)?
+		.ok_or(PresetError::NotFound)?;
 		audit(&mut tx, EVENT_UPDATED, &actor.user_id, &preset).await?;
 		tx.commit().await?;
 		Ok(preset)

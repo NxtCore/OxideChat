@@ -59,12 +59,6 @@ impl UpdateBudgetRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct BudgetAssignmentRequest {
-	pub team_id: Option<Uuid>,
-	pub user_id: Option<Uuid>,
-}
-
-#[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "BudgetResetPayload", optional_fields = nullable))]
 pub struct BudgetResetRequest {
 	pub assignment_id: Option<Uuid>,

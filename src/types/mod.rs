@@ -25,6 +25,7 @@ pub struct Pagination {
 	pub page_size: usize,
 }
 
+pub mod assignments;
 pub mod auth;
 pub mod auth_user;
 pub mod base;
@@ -53,6 +54,7 @@ pub mod tools;
 pub mod usage;
 pub mod user;
 
+pub use assignments::*;
 pub use auth::*;
 pub use auth_user::*;
 pub use base::*;

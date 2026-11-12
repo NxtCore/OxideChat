@@ -1,12 +1,12 @@
 use super::rows::EffectiveBudgetRow;
 use super::{
-	Budget, BudgetAssignmentInfo, BudgetAssignmentRequest, BudgetResetEventResponse, BudgetResetRequest, BudgetResponse, BudgetTeamSummaryResponse, CreateBudgetRequest,
+	Budget, BudgetResetEventResponse, BudgetResetRequest, BudgetResponse, BudgetTeamSummaryResponse, CreateBudgetRequest,
 	BudgetAction, BudgetCheck, BudgetScope, BudgetSubject, EffectiveBudget, EffectiveBudgetResponse, TeamBudgetAssignmentOverviewResponse, TeamBudgetOverviewResponse, UpdateBudgetRequest, UserBudgetOverviewResponse,
 	UserBudgetStatus,
 };
 use crate::logging::AuditLog;
 use crate::types::{AUDIT_BUDGET_TARGET, AUDIT_TEAM_TARGET, AUDIT_USER_TARGET, AuditEntry, BaseType, EVENT_BUDGET_CREATED, EVENT_BUDGET_DELETED, EVENT_BUDGET_UPDATED, EVENT_TEAM_BUDGET_UPDATED, EVENT_USER_BUDGET_UPDATED};
-use crate::types::{Page, PageQuery};
+use crate::types::{AssignmentKind, AssignmentTarget, AssignmentsResponse, Page, PageQuery};
 use crate::types::models::ModelPricing;
 use chrono::{DateTime, Datelike, Duration, NaiveTime, TimeZone, Utc};
 use rust_decimal::Decimal;
@@ -337,11 +337,9 @@ impl Budget {
 		AuditLog::write(tx, entry).await
 	}
 
-	async fn assign_to_user(&self, pool: &PgPool, actor_id: &Uuid, user_id: &Uuid) -> Result<(), sqlx::Error> {
-		let mut tx = pool.begin().await?;
-		let lock_key = Self::advisory_lock_key(self.kind.as_str(), None, Some(user_id));
-		sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(lock_key).execute(&mut *tx).await?;
-		let before = Self::user_budget_ids(&mut tx, user_id).await?;
+	async fn assign_to_user_in(tx: &mut Transaction<'_, Postgres>, budget_id: Uuid, kind: &str, user_id: &Uuid) -> Result<(), sqlx::Error> {
+		let lock_key = Self::advisory_lock_key(kind, None, Some(user_id));
+		sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(lock_key).execute(&mut **tx).await?;
 		sqlx::query(
 			r#"
 			DELETE FROM budget_assignments ba
@@ -352,16 +350,15 @@ impl Budget {
 			"#,
 		)
 		.bind(user_id)
-		.bind(self.kind.as_str())
-		.execute(&mut *tx)
+		.bind(kind)
+		.execute(&mut **tx)
 		.await?;
 		sqlx::query("INSERT INTO budget_assignments (budget_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-			.bind(self.id)
+			.bind(budget_id)
 			.bind(user_id)
-			.execute(&mut *tx)
+			.execute(&mut **tx)
 			.await?;
-		Self::audit_user_budget(&mut tx, actor_id, user_id, &before).await?;
-		tx.commit().await
+		Ok(())
 	}
 
 	fn advisory_lock_key(kind: &str, team_id: Option<&Uuid>, user_id: Option<&Uuid>) -> i64 {
@@ -377,67 +374,86 @@ impl Budget {
 		h.finish() as i64
 	}
 
-	pub async fn assign(&self, pool: &PgPool, actor_id: &Uuid, req: &BudgetAssignmentRequest) -> Result<(), sqlx::Error> {
-		if let Some(team_id) = req.team_id {
-			let mut tx = pool.begin().await?;
-			let before = Self::team_budget_ids(&mut tx, &team_id).await?;
-			Self::assign_to_team_in(&mut tx, self.id, self.kind.as_str(), &team_id).await?;
-			Self::audit_team_budget(&mut tx, actor_id, &team_id, &before).await?;
-			tx.commit().await
-		} else if let Some(user_id) = req.user_id {
-			self.assign_to_user(pool, actor_id, &user_id).await
-		} else {
-			Ok(())
-		}
-	}
+	/// The kinds a budget can be assigned to here; per-key budgets are managed with the key.
+	pub const ASSIGNMENT_KINDS: [AssignmentKind; 2] = [AssignmentKind::User, AssignmentKind::Team];
 
-	/// Deletes an assignment and audits it in the same transaction when it belonged to a team or a user.
+	/// Makes `team_ids` and `user_ids` the budget's only teams and users, auditing every target that changed in one transaction.
+	///
+	/// A target that gains this budget loses its other budget of the same kind.
 	///
 	/// # Errors
 	///
-	/// Returns an error when the assignment cannot be removed or audited; nothing is changed then.
-	pub async fn delete_assignment(pool: &PgPool, actor_id: &Uuid, budget_id: &Uuid, assignment_id: &Uuid) -> Result<(), sqlx::Error> {
+	/// Returns an error when a target does not exist or a change cannot be stored or audited; nothing is changed then.
+	pub async fn replace_assignments(&self, pool: &PgPool, actor_id: &Uuid, team_ids: &[Uuid], user_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
-		let target: Option<(Option<Uuid>, Option<Uuid>)> = sqlx::query_as("SELECT team_id, user_id FROM budget_assignments WHERE id = $1 AND budget_id = $2")
-			.bind(assignment_id)
-			.bind(budget_id)
-			.fetch_optional(&mut *tx)
+		let current: Vec<(Option<Uuid>, Option<Uuid>)> = sqlx::query_as("SELECT team_id, user_id FROM budget_assignments WHERE budget_id = $1 AND api_key_id IS NULL FOR UPDATE")
+			.bind(self.id)
+			.fetch_all(&mut *tx)
 			.await?;
-		let (team_id, user_id) = target.unwrap_or((None, None));
-		let before = match (team_id, user_id) {
-			(Some(team_id), _) => Self::team_budget_ids(&mut tx, &team_id).await?,
-			(_, Some(user_id)) => Self::user_budget_ids(&mut tx, &user_id).await?,
-			_ => Vec::new(),
-		};
-		sqlx::query("DELETE FROM budget_assignments WHERE id = $1 AND budget_id = $2")
-			.bind(assignment_id)
-			.bind(budget_id)
-			.execute(&mut *tx)
-			.await?;
-		if let Some(team_id) = team_id {
-			Self::audit_team_budget(&mut tx, actor_id, &team_id, &before).await?;
+		let current_teams: Vec<Uuid> = current.iter().filter_map(|(team_id, _)| *team_id).collect();
+		let current_users: Vec<Uuid> = current.iter().filter_map(|(_, user_id)| *user_id).collect();
+		for team_id in current_teams.iter().filter(|id| !team_ids.contains(id)) {
+			self.change_team(&mut tx, actor_id, team_id, false).await?;
 		}
-		if let Some(user_id) = user_id {
-			Self::audit_user_budget(&mut tx, actor_id, &user_id, &before).await?;
+		for user_id in current_users.iter().filter(|id| !user_ids.contains(id)) {
+			self.change_user(&mut tx, actor_id, user_id, false).await?;
+		}
+		for team_id in team_ids.iter().filter(|id| !current_teams.contains(id)) {
+			self.change_team(&mut tx, actor_id, team_id, true).await?;
+		}
+		for user_id in user_ids.iter().filter(|id| !current_users.contains(id)) {
+			self.change_user(&mut tx, actor_id, user_id, true).await?;
 		}
 		tx.commit().await
 	}
 
-	pub async fn list_assignments(pool: &PgPool, budget_id: &Uuid) -> Result<Vec<BudgetAssignmentInfo>, sqlx::Error> {
-		sqlx::query_as::<_, BudgetAssignmentInfo>(
+	async fn change_team(&self, tx: &mut Transaction<'_, Postgres>, actor_id: &Uuid, team_id: &Uuid, assign: bool) -> Result<(), sqlx::Error> {
+		let before = Self::team_budget_ids(tx, team_id).await?;
+		if assign {
+			Self::assign_to_team_in(tx, self.id, self.kind.as_str(), team_id).await?;
+		} else {
+			sqlx::query("DELETE FROM budget_assignments WHERE budget_id = $1 AND team_id = $2").bind(self.id).bind(team_id).execute(&mut **tx).await?;
+		}
+		Self::audit_team_budget(tx, actor_id, team_id, &before).await
+	}
+
+	async fn change_user(&self, tx: &mut Transaction<'_, Postgres>, actor_id: &Uuid, user_id: &Uuid, assign: bool) -> Result<(), sqlx::Error> {
+		let before = Self::user_budget_ids(tx, user_id).await?;
+		if assign {
+			Self::assign_to_user_in(tx, self.id, self.kind.as_str(), user_id).await?;
+		} else {
+			sqlx::query("DELETE FROM budget_assignments WHERE budget_id = $1 AND user_id = $2").bind(self.id).bind(user_id).execute(&mut **tx).await?;
+		}
+		Self::audit_user_budget(tx, actor_id, user_id, &before).await
+	}
+
+	/// The teams and users a budget is assigned to, oldest first.
+	///
+	/// # Errors
+	///
+	/// Returns the database error when the query fails.
+	pub async fn assignments(pool: &PgPool, budget_id: &Uuid) -> Result<AssignmentsResponse, sqlx::Error> {
+		let rows = sqlx::query_as::<_, (String, Uuid, String, bool)>(
 			r#"
-			SELECT ba.id, ba.budget_id, ba.team_id, t.name AS team_name,
-			       ba.user_id, COALESCE(u.username, u.email) AS user_label, ba.assigned_at
+			SELECT CASE WHEN ba.team_id IS NULL THEN 'user' ELSE 'team' END,
+			       COALESCE(ba.team_id, ba.user_id),
+			       COALESCE(t.name, u.username, u.email),
+			       false
 			FROM budget_assignments ba
 			LEFT JOIN teams t ON t.id = ba.team_id
 			LEFT JOIN users u ON u.id = ba.user_id
-			WHERE ba.budget_id = $1
+			WHERE ba.budget_id = $1 AND ba.api_key_id IS NULL
 			ORDER BY ba.assigned_at ASC
 			"#,
 		)
 		.bind(budget_id)
 		.fetch_all(pool)
-		.await
+		.await?;
+		Ok(AssignmentsResponse {
+			kinds: Self::ASSIGNMENT_KINDS.to_vec(),
+			single: false,
+			targets: rows.into_iter().map(AssignmentTarget::from).collect(),
+		})
 	}
 
 	pub async fn budgets_for(pool: &PgPool, subject: BudgetSubject) -> Result<Vec<EffectiveBudget>, sqlx::Error> {

@@ -72,9 +72,8 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/budgets/{id}", patch(budgets::update_budget).delete(budgets::delete_budget))
 		.route(
 			"/api/v1/admin/budgets/{id}/assignments",
-			get(budgets::get_budget_assignments).post(budgets::assign_budget),
+			get(budgets::get_budget_assignments).put(budgets::replace_budget_assignments),
 		)
-		.route("/api/v1/admin/budgets/{id}/assignments/{assignment_id}", delete(budgets::delete_assignment))
 		.route("/api/v1/admin/analytics", get(analytics::get_analytics))
 		.route("/api/v1/admin/gateway/keys", get(gateway::list_keys))
 		.route("/api/v1/admin/gateway/keys/{id}", get(gateway::get_key))
@@ -104,6 +103,7 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/image-models", get(models::list_image_models))
 		.route("/api/v1/admin/image-model-providers", get(models::list_image_model_providers))
 		.route("/api/v1/admin/models/{id}", get(models::get_model).patch(models::patch_model))
+		.route("/api/v1/admin/models/{id}/assignments", get(models::get_model_assignments).put(models::replace_model_assignments))
 		.route("/api/v1/admin/models/{id}/pricing", get(models::get_model_pricing).put(models::put_model_pricing).delete(models::delete_model_pricing))
 		.route("/api/v1/admin/models/{id}/provider-options", get(catalog::list_provider_options))
 		.route("/api/v1/admin/models/{id}/provider-options/refresh", post(catalog::refresh_provider_options))

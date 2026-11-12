@@ -87,16 +87,9 @@
 				</ImagePicker>
 			</div>
 
-			<div v-if="scopeOptions" class="space-y-1.5">
+			<div v-if="assignment" class="space-y-1.5">
 				<ShadLabel>{{ t('scope') }}</ShadLabel>
-				<ShadSelect :model-value="scopeValue" @update:model-value="value => emit('scope', String(value))">
-					<ShadSelectTrigger data-testid="preset-scope">
-						<ShadSelectValue />
-					</ShadSelectTrigger>
-					<ShadSelectContent>
-						<ShadSelectItem v-for="option in scopeOptions" :key="option.value" :value="option.value" :data-testid="`preset-scope-${option.value}`">{{ option.label }}</ShadSelectItem>
-					</ShadSelectContent>
-				</ShadSelect>
+				<SettingsAssignmentPicker :model-value="assignment" :options="assignmentOptions" :kinds="assignmentKinds" single test-id="preset-scope" @update:model-value="targets => emit('assignment', targets)" />
 				<p class="text-xs text-muted-foreground">{{ t('scope_choose_description') }}</p>
 			</div>
 			<div v-else class="rounded-lg border border-border bg-muted/30 p-3">
@@ -110,6 +103,7 @@
 <script setup lang="ts">
 import {AlertTriangle, Check, Copy, Loader2, Wand2, X} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
+import type {AssignmentKind, AssignmentOption, AssignmentTarget} from '~/types/assignments';
 import type {ModelList} from '~/types/chat';
 
 export type SlugStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -119,8 +113,8 @@ const props = defineProps<{
 	slugStatus: SlugStatus;
 	baseModelKey: string | null;
 	scopeLabel: string;
-	scopeOptions: {value: string; label: string}[] | null;
-	scopeValue: string;
+	assignment: AssignmentTarget[] | null;
+	assignmentOptions: AssignmentOption[];
 	slugRenamed: boolean;
 	enabledLocked: boolean;
 	disabled?: boolean;
@@ -131,11 +125,13 @@ const emit = defineEmits<{
 	slug: [value: string];
 	'base-key': [value: string | null];
 	base: [model: ModelList | null];
-	scope: [value: string];
+	assignment: [targets: AssignmentTarget[]];
 }>();
 
 const store = useMainStore();
 const t = (key: string) => store.getTranslation(`presets.editor.${key}`);
+
+const assignmentKinds = computed(() => (['user', 'team', 'everyone'] as AssignmentKind[]).filter(kind => props.assignmentOptions.some(option => option.kind === kind)));
 
 const curl = computed(() =>
 	gatewaySnippets(import.meta.client ? gatewayBaseUrl() : '', {model: presetKey(props.form.slug), messages: [{role: 'user', content: 'Hello'}]}).curl,

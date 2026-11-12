@@ -22,18 +22,6 @@ pub struct BudgetResponse {
 	pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub struct BudgetAssignmentInfo {
-	pub id: Uuid,
-	pub budget_id: Uuid,
-	pub team_id: Option<Uuid>,
-	pub team_name: Option<String>,
-	pub user_id: Option<Uuid>,
-	pub user_label: Option<String>,
-	pub assigned_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "EffectiveBudget"))]
 pub struct EffectiveBudgetResponse {

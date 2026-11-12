@@ -176,8 +176,8 @@ test.describe('presets', () => {
 			await sourceRow.getByTestId('preset-row-menu').click();
 			await page.getByTestId('preset-row-duplicate').click();
 			await expect(page).toHaveURL(/\/settings\/presets\/new$/);
-			await page.getByTestId('preset-scope').click();
-			await page.getByTestId(`preset-scope-team:${team.id}`).click();
+			await page.getByTestId('preset-scope-add').click();
+			await page.getByTestId(`preset-scope-option-team:${team.id}`).click();
 			await page.getByTestId('preset-name').fill(name);
 			await expect(page.getByTestId('preset-slug-status')).toHaveAttribute('data-status', 'available');
 			await page.getByTestId('settings-save-bar-save').click();

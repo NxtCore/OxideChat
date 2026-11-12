@@ -2,7 +2,7 @@
 
 use crate::types::consts::{ADMIN_PRESETS_EDIT, SETTINGS_PRESETS_EDIT};
 use crate::types::{
-	AppError, AuthUser, Budget, BudgetSubject, JobState, Preset, PresetActor, PresetError, PresetResponse, PresetSlugAvailability, PresetSlugQuery, SavePresetRequest,
+	AppError, AuthUser, Budget, ReplaceAssignmentsRequest, BudgetSubject, JobState, Preset, PresetActor, PresetError, PresetResponse, PresetSlugAvailability, PresetSlugQuery, SavePresetRequest,
 	is_valid_preset_slug, json_ok,
 };
 use crate::utils::response::{ResponseBody, ResponseBuilder};
@@ -93,4 +93,25 @@ pub async fn delete_preset(State(state): State<Arc<JobState>>, user: AuthUser, P
 	let actor = actor(&state, &user).await?;
 	Preset::delete(&state.db, &actor, &id).await?;
 	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).status(StatusCode::NO_CONTENT).build())
+}
+
+/// GET /api/v1/presets/{id}/assignments
+///
+/// Who the preset is shared with: its owner, one team or everyone.
+pub async fn get_preset_assignments(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	let actor = actor(&state, &user).await?;
+	let preset = Preset::find_for_actor(&state.db, &actor, &id).await?.ok_or(PresetError::NotFound)?;
+	json_ok(preset.assignments(&state.db, &actor).await?)
+}
+
+/// PUT /api/v1/presets/{id}/assignments
+///
+/// Moves the preset to the one target in the body.
+pub async fn replace_preset_assignments(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<ReplaceAssignmentsRequest>) -> Result<Response, AppError> {
+	let actor = actor(&state, &user).await?;
+	let [target] = request.targets[..] else {
+		return Err(PresetError::Invalid.into());
+	};
+	let preset = Preset::replace_assignment(&state.db, &actor, &id, target).await?;
+	json_ok(preset.assignments(&state.db, &actor).await?)
 }

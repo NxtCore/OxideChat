@@ -414,6 +414,37 @@ mod scopes {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn a_preset_moves_between_the_scopes_its_manager_controls(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let admin = actor(&pool, team.admin_id, false).await?;
+		let preset = Preset::create(&pool, &admin, for_model("movable", team.model_id)).await?;
+		let to_team = AssignmentRef { kind: AssignmentKind::Team, id: Some(team.team_id) };
+
+		let moved = Preset::replace_assignment(&pool, &admin, &preset.id, to_team).await?;
+		assert_eq!((moved.scope(), moved.owner_id, moved.team_id), (PresetScope::Team, None, Some(team.team_id)));
+		assert!(Preset::find_visible_by_slug(&pool, &team.member_id, "movable").await?.is_some());
+		let response = moved.assignments(&pool, &admin).await?;
+		assert!(response.single);
+		assert_eq!(response.kinds, vec![AssignmentKind::User, AssignmentKind::Team]);
+		assert_eq!(response.targets.iter().map(|target| (target.kind, target.id)).collect::<Vec<_>>(), vec![(AssignmentKind::Team, Some(team.team_id))]);
+
+		let everyone = AssignmentRef { kind: AssignmentKind::Everyone, id: None };
+		assert!(matches!(Preset::replace_assignment(&pool, &admin, &preset.id, everyone).await, Err(PresetError::Forbidden)));
+		let other_team = AssignmentRef { kind: AssignmentKind::Team, id: Some(team.outsider_team_id) };
+		assert!(matches!(Preset::replace_assignment(&pool, &admin, &preset.id, other_team).await, Err(PresetError::Forbidden)));
+		let someone_else = AssignmentRef { kind: AssignmentKind::User, id: Some(team.member_id) };
+		assert!(matches!(Preset::replace_assignment(&pool, &admin, &preset.id, someone_else).await, Err(PresetError::Invalid)));
+		let member = actor(&pool, team.member_id, false).await?;
+		assert!(matches!(Preset::replace_assignment(&pool, &member, &preset.id, to_team).await, Err(PresetError::NotFound)));
+
+		let mine = AssignmentRef { kind: AssignmentKind::User, id: Some(team.admin_id) };
+		let back = Preset::replace_assignment(&pool, &admin, &preset.id, mine).await?;
+		assert_eq!((back.scope(), back.owner_id, back.team_id), (PresetScope::Personal, Some(team.admin_id), None));
+		assert!(Preset::find_visible_by_slug(&pool, &team.member_id, "movable").await?.is_none());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn team_presets_are_managed_by_team_admins_and_seen_by_members(pool: PgPool) -> TestResult {
 		let team = team(&pool).await?;
 		let member = actor(&pool, team.member_id, false).await?;

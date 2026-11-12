@@ -43,8 +43,8 @@
 					:slug-status="slugStatus"
 					:base-model-key="baseModelKey"
 					:scope-label="scopeLabel"
-					:scope-options="isNew ? scopeOptions : null"
-					:scope-value="scopeChoice"
+					:assignment="canEdit ? assignment : null"
+					:assignment-options="assignmentOptions"
 					:slug-renamed="slugRenamed"
 					:enabled-locked="enabledLocked"
 					:disabled="!canEdit"
@@ -52,7 +52,7 @@
 					@slug="onSlugInput"
 					@base-key="value => (baseModelKey = value)"
 					@base="onBaseSelected"
-					@scope="value => (scopeChoice = value)"
+					@assignment="onAssignment"
 				/>
 				<div v-show="currentTab === 'instructions'" class="space-y-4">
 					<SettingsModelsPromptTab :form="form" title-key="presets.editor.instructions_title" description-key="presets.editor.instructions_description" />
@@ -78,6 +78,7 @@
 import {AlertTriangle, ArrowLeft, Loader2, Trash2, Wand2} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import {usePresetStore} from '~/stores/presetStore';
+import type {AssignmentOption, AssignmentTarget} from '~/types/assignments';
 import type {ModelList} from '~/types/chat';
 import type {PresetResponse, PresetUnavailable, SavePresetRequest} from '~/types/presets';
 import type {SlugStatus} from '~/components/settings/presets/GeneralTab.vue';
@@ -123,17 +124,20 @@ const form = reactive({
 	starters: ['', '', '', ''] as string[],
 });
 
-const scopeChoice = ref('');
-const scopeOptions = computed(() => {
+const {data: storedAssignment, load: loadAssignment, replace: replaceAssignment} = useAssignments();
+const newAssignment = ref<AssignmentTarget[]>([]);
+const assignment = computed(() => (isNew ? newAssignment.value : (storedAssignment.value?.targets ?? null)));
+const assignmentPath = `/api/v1/presets/${presetId}/assignments`;
+const assignmentOptions = computed<AssignmentOption[]>(() => {
 	const scopes = presetStore.scopes;
 	if (!scopes) return [];
 	return [
-		...(scopes.personal ? [{value: 'personal', label: store.getTranslation('presets.scope.personal')}] : []),
-		...scopes.teams.map(team => ({value: `team:${team.id}`, label: team.name})),
-		...(scopes.installation ? [{value: 'installation', label: store.getTranslation('presets.scope.installation')}] : []),
+		...(scopes.personal ? [{kind: 'user' as const, id: store.user?.id ?? null, label: store.getTranslation('presets.scope.personal')}] : []),
+		...scopes.teams.map(team => ({kind: 'team' as const, id: team.id, label: team.name})),
+		...(scopes.installation ? [{kind: 'everyone' as const, id: null, label: ''}] : []),
 	];
 });
-const canEdit = computed(() => (isNew ? scopeOptions.value.length > 0 : !!preset.value?.can_edit));
+const canEdit = computed(() => (isNew ? assignmentOptions.value.length > 0 : !!preset.value?.can_edit));
 const scopeLabel = computed(() => (preset.value ? presetScopeLabel(preset.value, store.getTranslation) : ''));
 const slugRenamed = computed(() => !!preset.value?.has_gateway_usage && preset.value.slug !== form.slug);
 const enabledLocked = computed(() => !!preset.value?.disabled_by_admin && !presetStore.scopes?.installation);
@@ -201,14 +205,23 @@ function buildRequest(): SavePresetRequest {
 }
 
 function scopeRequest(): Pick<SavePresetRequest, 'scope' | 'team_id'> {
-	if (scopeChoice.value.startsWith('team:')) return {scope: 'team', team_id: scopeChoice.value.slice(5)};
-	return {scope: scopeChoice.value === 'installation' ? 'installation' : 'personal'};
+	const target = newAssignment.value[0];
+	if (target?.kind === 'team' && target.id) return {scope: 'team', team_id: target.id};
+	return {scope: target?.kind === 'everyone' ? 'installation' : 'personal'};
 }
 
-function initialScope() {
-	const options = scopeOptions.value.map(option => option.value);
-	const requested = route.query.scope === 'team' ? options.find(value => value.startsWith('team:')) : (route.query.scope as string | undefined);
-	scopeChoice.value = requested && options.includes(requested) ? requested : (options[0] ?? '');
+function initialAssignment() {
+	const kind = route.query.scope === 'team' ? 'team' : route.query.scope === 'installation' ? 'everyone' : 'user';
+	const option = assignmentOptions.value.find(candidate => candidate.kind === kind) ?? assignmentOptions.value[0];
+	newAssignment.value = option ? [{...option, inherited: false}] : [];
+}
+
+async function onAssignment(targets: AssignmentTarget[]) {
+	if (isNew) {
+		newAssignment.value = targets;
+		return;
+	}
+	if (await replaceAssignment(assignmentPath, targets)) preset.value = await presetStore.fetchPreset(presetId);
 }
 
 function applyPreset(loaded: PresetResponse) {
@@ -283,7 +296,7 @@ function onDeleted() {
 onMounted(async () => {
 	if (isNew) {
 		await presetStore.ensureScopes();
-		initialScope();
+		initialAssignment();
 		settingsForm.markSaved();
 		const draft = presetStore.draft;
 		presetStore.draft = null;
@@ -299,7 +312,8 @@ onMounted(async () => {
 	}
 	try {
 		applyPreset(await presetStore.fetchPreset(presetId));
-		if (preset.value?.disabled_by_admin) await presetStore.ensureScopes();
+		if (preset.value?.can_edit) await Promise.all([presetStore.ensureScopes(), loadAssignment(assignmentPath)]);
+		else if (preset.value?.disabled_by_admin) await presetStore.ensureScopes();
 		slugStatus.value = 'available';
 		settingsForm.markSaved();
 	} catch {

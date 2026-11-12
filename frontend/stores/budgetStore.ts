@@ -4,7 +4,6 @@ import type {
 	AnalyticsRow,
 	ApiKeyAnalyticsRow,
 	Budget,
-	BudgetAssignmentInfo,
 	BudgetPayload,
 	BudgetResetEvent,
 	BudgetResetPayload,
@@ -49,7 +48,6 @@ export const useBudgetStore = defineStore('budget', {
 			byDay: [] as AnalyticsRow[],
 			byDayModel: [] as AnalyticsDayModelRow[],
 		},
-		assignments: [] as BudgetAssignmentInfo[],
 		userOverview: [] as UserBudgetOverview[],
 		teamOverview: [] as TeamBudgetOverview[],
 		resetHistory: [] as BudgetResetEvent[],
@@ -109,11 +107,6 @@ export const useBudgetStore = defineStore('budget', {
 			await $customFetch(`/api/v1/admin/budgets/${id}`, {method: 'DELETE'});
 			await this.fetchBudgets();
 		},
-		async fetchAssignments(budgetId: string) {
-			const {$customFetch} = useNuxtApp();
-			this.assignments = await $customFetch<BudgetAssignmentInfo[]>(`/api/v1/admin/budgets/${budgetId}/assignments`);
-			return this.assignments;
-		},
 		async fetchUserOverview() {
 			const {$customFetch} = useNuxtApp();
 			this.userOverview = await $customFetch<UserBudgetOverview[]>('/api/v1/admin/budgets/overview/users');
@@ -134,16 +127,6 @@ export const useBudgetStore = defineStore('budget', {
 			const reset = await $customFetch<BudgetResetEvent>('/api/v1/admin/budgets/resets', {method: 'POST', body: payload});
 			await Promise.all([this.fetchUserOverview(), this.fetchTeamOverview(), this.fetchResetHistory()]);
 			return reset;
-		},
-		async assignBudget(id: string, body: {team_id?: string | null; user_id?: string | null}) {
-			const {$customFetch} = useNuxtApp();
-			await $customFetch(`/api/v1/admin/budgets/${id}/assignments`, {method: 'POST', body});
-			await this.fetchAssignments(id);
-		},
-		async removeAssignment(budgetId: string, assignmentId: string) {
-			const {$customFetch} = useNuxtApp();
-			await $customFetch(`/api/v1/admin/budgets/${budgetId}/assignments/${assignmentId}`, {method: 'DELETE'});
-			await this.fetchAssignments(budgetId);
 		},
 		async fetchAllAnalytics(params: {from?: string; to?: string} = {}) {
 			const {$customFetch} = useNuxtApp();

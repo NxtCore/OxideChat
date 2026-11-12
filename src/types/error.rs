@@ -56,6 +56,13 @@ impl AppError {
 		if is_unique_violation(&error) { Self::Code(code) } else { Self::Database(error) }
 	}
 
+	/// Maps a foreign key violation (a referenced row does not exist) to `code`, any other database failure to an internal error.
+	#[must_use]
+	pub fn foreign_key_or(error: sqlx::Error, code: ErrorCode) -> Self {
+		let missing = error.as_database_error().is_some_and(sqlx::error::DatabaseError::is_foreign_key_violation);
+		if missing { Self::Code(code) } else { Self::Database(error) }
+	}
+
 	/// Wraps a database failure so it renders `DatabaseError` and is logged.
 	#[must_use]
 	pub fn database(error: sqlx::Error) -> Self {
