@@ -237,7 +237,7 @@ impl User {
 		Ok(Page { has_more, items })
 	}
 
-	pub(super) fn permission_matches(user_permission: &str, required: &str) -> bool {
+	pub(crate) fn permission_matches(user_permission: &str, required: &str) -> bool {
 		if user_permission == required {
 			return true;
 		}

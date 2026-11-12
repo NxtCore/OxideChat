@@ -131,6 +131,14 @@ export const useMainStore = defineStore('main', {
 				}
 			}
 		},
+		async refreshRoles() {
+			try {
+				const base = await useNuxtApp().$customFetch<Base>('/api/v1/base');
+				if (this.base && base) this.base.roles = base.roles;
+			} catch (e: any) {
+				console.error('Failed to refresh roles:', e?.toString());
+			}
+		},
 		async refreshChatProviderSelector() {
 			try {
 				const base = await useNuxtApp().$customFetch<Base>('/api/v1/base');

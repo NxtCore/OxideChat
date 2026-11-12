@@ -112,6 +112,8 @@ pub enum ErrorCode {
 	PresetBaseModelInvalid,
 	PresetToolsInvalid,
 	ProviderNameReserved,
+	RoleNameInvalid,
+	RolePermissionUnknown,
 
 	// 401 Unauthorized
 	NotAuthenticated,
@@ -127,6 +129,8 @@ pub enum ErrorCode {
 	ApiKeyTeamForbidden,
 	ApiKeyTeamAdminRequired,
 	ApiKeyServiceAccountForbidden,
+	RoleProtected,
+	RolePermissionNotHeld,
 
 	// 404 Not Found
 	NotFound,
@@ -143,6 +147,7 @@ pub enum ErrorCode {
 	ApiKeyRuleDuplicate,
 	ApiKeyAdminDisabled,
 	PresetSlugTaken,
+	RoleNameTaken,
 
 	// 429 Too Many Requests
 	RateLimited,
@@ -191,6 +196,8 @@ impl ErrorCode {
 			| Self::PresetBaseModelInvalid
 			| Self::PresetToolsInvalid
 			| Self::ProviderNameReserved
+			| Self::RoleNameInvalid
+			| Self::RolePermissionUnknown
 			=> StatusCode::BAD_REQUEST,
 
 			Self::NotAuthenticated
@@ -199,9 +206,9 @@ impl ErrorCode {
 			| Self::OAuthStateMismatch
 			| Self::OAuthTokenError
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
-			Self::Forbidden | Self::InsufficientPermissions | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden => StatusCode::FORBIDDEN,
+			Self::Forbidden | Self::InsufficientPermissions | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden | Self::RoleProtected | Self::RolePermissionNotHeld => StatusCode::FORBIDDEN,
 			Self::NotFound | Self::UserNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
-			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled | Self::PresetSlugTaken => StatusCode::CONFLICT,
+			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled | Self::PresetSlugTaken | Self::RoleNameTaken => StatusCode::CONFLICT,
 			Self::RateLimited | Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -270,6 +277,11 @@ impl ErrorCode {
 			Self::ApiKeyRuleDuplicate => "developer.errors.rule_duplicate",
 			Self::ApiKeyAdminDisabled => "developer.errors.key_admin_disabled",
 			Self::PresetSlugTaken => "presets.errors.slug_taken",
+			Self::RoleNameTaken => "roles.errors.name_taken",
+			Self::RoleNameInvalid => "roles.errors.name_invalid",
+			Self::RolePermissionUnknown => "roles.errors.permission_unknown",
+			Self::RoleProtected => "roles.errors.protected",
+			Self::RolePermissionNotHeld => "roles.errors.permission_not_held",
 
 			Self::RateLimited => "errors.rate_limited",
 			Self::TooManyRequests => "errors.too_many_requests",
@@ -341,6 +353,11 @@ impl ErrorCode {
 			Self::ApiKeyRuleDuplicate => "api_key_rule_duplicate",
 			Self::ApiKeyAdminDisabled => "api_key_admin_disabled",
 			Self::PresetSlugTaken => "preset_slug_taken",
+			Self::RoleNameTaken => "role_name_taken",
+			Self::RoleNameInvalid => "role_name_invalid",
+			Self::RolePermissionUnknown => "role_permission_unknown",
+			Self::RoleProtected => "role_protected",
+			Self::RolePermissionNotHeld => "role_permission_not_held",
 
 			Self::RateLimited => "rate_limited",
 			Self::TooManyRequests => "too_many_requests",

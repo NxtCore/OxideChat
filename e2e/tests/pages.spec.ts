@@ -18,6 +18,7 @@ const ADMIN_PAGES = [
 	'/settings/gateway-admin',
 	'/settings/analytics',
 	'/settings/users',
+	'/settings/roles',
 	'/settings/admin-config',
 	'/developer/keys',
 	'/developer/logs',
@@ -65,7 +66,7 @@ test.describe('every page renders as member', () => {
 	test('member settings navigation hides admin tabs', async ({page, t}) => {
 		await visit(page, '/settings/profile');
 		await expect(page.getByRole('link', {name: t('settings.tabs.profile')})).toBeVisible();
-		for (const tab of ['providers', 'tools', 'models', 'teams', 'budgets', 'gateway_admin', 'analytics', 'admin_users', 'admin_config']) {
+		for (const tab of ['providers', 'tools', 'models', 'teams', 'budgets', 'gateway_admin', 'analytics', 'admin_users', 'roles', 'admin_config']) {
 			await expect(page.getByRole('link', {name: t(`settings.tabs.${tab}`), exact: true})).toHaveCount(0);
 		}
 		await expect(page.getByTestId('settings-nav-account')).toBeVisible();

@@ -10,6 +10,7 @@ pub mod oauth_providers;
 pub mod presets;
 pub mod provider_billing;
 pub mod providers;
+pub mod roles;
 pub mod teams;
 pub mod tools;
 pub mod upstream_providers;
@@ -94,6 +95,10 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/users/{id}/roles", put(users::set_user_roles))
 		.route("/api/v1/admin/users/{id}/teams", put(users::set_user_teams))
 		.route("/api/v1/admin/users/{id}/password", put(users::reset_password))
+		// Admin Roles
+		.route("/api/v1/admin/roles", get(roles::list_roles).post(roles::create_role))
+		.route("/api/v1/admin/roles/{id}", put(roles::update_role).delete(roles::delete_role))
+		.route("/api/v1/admin/permissions", get(roles::list_permissions))
 		// Admin Models
 		.route("/api/v1/admin/models", get(models::list_models))
 		.route("/api/v1/admin/image-models", get(models::list_image_models))

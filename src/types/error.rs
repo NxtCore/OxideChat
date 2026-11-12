@@ -1,6 +1,6 @@
 //! Handler error type shared by all routes.
 
-use crate::types::{GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError};
+use crate::types::{GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError, RoleError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::response::{IntoResponse, Response};
@@ -29,6 +29,9 @@ pub enum AppError {
 	/// A preset could not be saved or found.
 	#[error(transparent)]
 	Preset(#[from] PresetError),
+	/// A role could not be saved, deleted or found.
+	#[error(transparent)]
+	Role(#[from] RoleError),
 }
 
 /// Returns true when the database rejected a statement because of a unique constraint.
@@ -69,6 +72,7 @@ impl AppError {
 			Self::GatewayKey(error) => key_error_code(error),
 			Self::GatewayAdmin(error) => admin_error_code(error),
 			Self::Preset(error) => preset_error_code(error),
+			Self::Role(error) => role_error_code(error),
 		}
 	}
 }
@@ -142,5 +146,17 @@ fn preset_error_code(error: &PresetError) -> ErrorCode {
 		PresetError::NotFound => ErrorCode::NotFound,
 		PresetError::Forbidden => ErrorCode::InsufficientPermissions,
 		PresetError::Database(_) => ErrorCode::InternalError,
+	}
+}
+
+fn role_error_code(error: &RoleError) -> ErrorCode {
+	match error {
+		RoleError::InvalidName => ErrorCode::RoleNameInvalid,
+		RoleError::NameTaken => ErrorCode::RoleNameTaken,
+		RoleError::UnknownPermission => ErrorCode::RolePermissionUnknown,
+		RoleError::Protected => ErrorCode::RoleProtected,
+		RoleError::PermissionNotHeld => ErrorCode::RolePermissionNotHeld,
+		RoleError::NotFound => ErrorCode::NotFound,
+		RoleError::Database(_) => ErrorCode::InternalError,
 	}
 }

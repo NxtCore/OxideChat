@@ -32,6 +32,8 @@ permissions! {
 	ADMIN_PRESETS_EDIT = "admin.presets.edit",
 	ADMIN_I18N_VIEW = "admin.i18n.view",
 	ADMIN_I18N_EDIT = "admin.i18n.edit",
+	ADMIN_ROLES_VIEW = "admin.roles.view",
+	ADMIN_ROLES_EDIT = "admin.roles.edit",
 	SETTINGS_APPEARANCE_EDIT = "settings.appearance.edit",
 	SETTINGS_PRESETS_EDIT = "settings.presets.edit",
 	SETTINGS_SESSIONS_VIEW = "settings.sessions.view",

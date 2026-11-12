@@ -23,6 +23,7 @@ pub mod provider_routing;
 pub mod providers;
 pub mod request_logs;
 pub mod response;
+pub mod roles;
 pub mod service_accounts;
 pub mod sessions;
 pub mod support;
