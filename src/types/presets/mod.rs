@@ -1,4 +1,4 @@
-use crate::types::AssignmentKind;
+use crate::types::{AssignmentKind, AssignmentTarget};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
@@ -208,6 +208,16 @@ impl PresetActor {
 	#[must_use]
 	pub fn can_edit(&self, preset: &Preset) -> bool {
 		self.can_manage(preset) || self.editable.contains(&preset.id)
+	}
+
+	/// Whether a share reaches the actor: a share with them, or with one of their teams.
+	#[must_use]
+	pub fn is_share_target(&self, target: &AssignmentTarget) -> bool {
+		match (target.kind, target.id) {
+			(AssignmentKind::User, Some(id)) => id == self.user_id,
+			(AssignmentKind::Team, Some(id)) => self.teams.contains(&id),
+			_ => false,
+		}
 	}
 
 	/// Whether the actor owns `preset` and so may delete it and change who it is shared with.

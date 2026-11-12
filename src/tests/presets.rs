@@ -468,6 +468,38 @@ mod scopes {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn viewers_only_see_the_owner_and_the_shares_that_reach_them(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let admin = actor(&pool, team.admin_id, true).await?;
+		let preset = Preset::create(&pool, &admin, for_model("private-shares", team.model_id)).await?;
+		let targets = share(&[
+			(AssignmentKind::Everyone, None),
+			(AssignmentKind::Team, Some(team.team_id)),
+			(AssignmentKind::Team, Some(team.outsider_team_id)),
+			(AssignmentKind::User, Some(team.outsider_id)),
+		]);
+		Preset::replace_assignments(&pool, &admin, &preset.id, &targets).await?;
+
+		let member = actor(&pool, team.member_id, false).await?;
+		assert_eq!(
+			shared_with(&pool, &preset, &member).await?,
+			vec![(AssignmentKind::User, Some(team.admin_id), true), (AssignmentKind::Everyone, None, false), (AssignmentKind::Team, Some(team.team_id), false)]
+		);
+		let outsider = actor(&pool, team.outsider_id, false).await?;
+		assert_eq!(
+			shared_with(&pool, &preset, &outsider).await?,
+			vec![
+				(AssignmentKind::User, Some(team.admin_id), true),
+				(AssignmentKind::Everyone, None, false),
+				(AssignmentKind::Team, Some(team.outsider_team_id), false),
+				(AssignmentKind::User, Some(team.outsider_id), false),
+			]
+		);
+		assert_eq!(preset.assignments(&pool, &admin).await?.targets.len(), 5);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn editors_change_a_shared_preset_but_neither_delete_nor_share_it(pool: PgPool) -> TestResult {
 		let team = team(&pool).await?;
 		let owner = actor(&pool, team.admin_id, true).await?;

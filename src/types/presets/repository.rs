@@ -346,6 +346,7 @@ impl Preset {
 			owner: false,
 			role: None,
 		});
+		let manages = actor.can_manage(self);
 		let mut targets = Vec::with_capacity(shares.rows.len() + 2);
 		targets.push(AssignmentTarget {
 			kind: owner.0,
@@ -356,15 +357,20 @@ impl Preset {
 			role: None,
 		});
 		targets.extend(everyone);
-		targets.extend(shares.rows.into_iter().map(|(kind, id, label, role)| AssignmentTarget {
-			kind: AssignmentKind::from_stored(&kind),
-			id: Some(id),
-			label,
-			inherited: false,
-			owner: false,
-			role: Some(AssignmentRole::from_stored(&role)),
-		}));
-		let manages = actor.can_manage(self);
+		targets.extend(
+			shares
+				.rows
+				.into_iter()
+				.map(|(kind, id, label, role)| AssignmentTarget {
+					kind: AssignmentKind::from_stored(&kind),
+					id: Some(id),
+					label,
+					inherited: false,
+					owner: false,
+					role: Some(AssignmentRole::from_stored(&role)),
+				})
+				.filter(|target| manages || actor.is_share_target(target)),
+		);
 		let kinds = Self::ASSIGNMENT_KINDS.into_iter().filter(|kind| match kind {
 			_ if !manages => false,
 			AssignmentKind::Team => actor.installation_admin || !actor.admin_teams.is_empty(),
