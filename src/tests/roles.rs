@@ -142,6 +142,25 @@ mod tests {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn a_role_nobody_holds_does_not_count_as_managing_roles(pool: PgPool) -> TestResult {
+		let actor_id = create_user(&pool).await?;
+		let held = vec!["*".to_owned()];
+		let actor = RoleActor {
+			id: &actor_id,
+			permissions: &held,
+		};
+		let admin_role = builtin_id(&pool, "admin").await?;
+		sqlx::query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)").bind(actor_id).bind(admin_role).execute(&pool).await?;
+		let unused = Role::create(&pool, &actor, &request("Unused", &["admin.roles.edit"])).await?;
+		let without_roles = request("admin", &["admin.users.edit", "settings.*"]);
+
+		assert!(matches!(Role::update(&pool, &actor, &admin_role, &without_roles).await, Err(RoleError::LockOut)));
+		sqlx::query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)").bind(actor_id).bind(unused.id).execute(&pool).await?;
+		Role::update(&pool, &actor, &admin_role, &without_roles).await?;
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn only_held_permissions_can_be_granted_or_removed(pool: PgPool) -> TestResult {
 		let actor_id = create_user(&pool).await?;
 		let admin_held = admin_permissions();
@@ -244,7 +263,7 @@ mod tests {
 		};
 		let email = router.clone().oneshot(put(format!("/api/v1/admin/users/{target_id}"), r#"{"email":"taken@example.com"}"#)?).await?;
 		assert_eq!(email.status(), StatusCode::FORBIDDEN);
-		let teams = router.oneshot(put(format!("/api/v1/admin/users/{target_id}/teams"), r#"{"team_ids":[]}"#)?).await?;
+		let teams = router.oneshot(put(format!("/api/v1/admin/users/{target_id}/assignments"), r#"{"targets":[]}"#)?).await?;
 		assert_eq!(teams.status(), StatusCode::FORBIDDEN);
 		let after = User::find_by_id(&pool, &target_id).await?.ok_or("target")?;
 		assert_eq!(after.email, target.email);

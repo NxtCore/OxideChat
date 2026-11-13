@@ -1,7 +1,7 @@
 use crate::types::user::rows::{CountRow, PermissionNameRow, RoleNameRow, UserRoleRow};
 use crate::types::user::{User, UserListResponse, UserResponse};
 use crate::types::{BaseType, Page, PageQuery, PreferencesResponse, Team, UserPreferences};
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool};
 use uuid::Uuid;
 
 impl User {
@@ -114,7 +114,7 @@ impl User {
 		Ok(rows.into_iter().map(|r| r.name).collect())
 	}
 
-	pub async fn permissions(&self, pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+	pub async fn permissions(&self, executor: impl PgExecutor<'_>) -> Result<Vec<String>, sqlx::Error> {
 		let rows: Vec<PermissionNameRow> = sqlx::query_as(
 			"SELECT DISTINCT p.name FROM permissions p
              INNER JOIN role_permissions rp ON p.id = rp.permission_id
@@ -122,7 +122,7 @@ impl User {
              WHERE ur.user_id = $1",
 		)
 		.bind(self.id)
-		.fetch_all(pool)
+		.fetch_all(executor)
 		.await?;
 		Ok(rows.into_iter().map(|p| p.name).collect())
 	}

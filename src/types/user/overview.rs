@@ -4,7 +4,12 @@ use super::{EffectivePermission, PermissionSource, User, UserOverviewResponse, U
 use crate::types::consts::{ADMIN_BUDGETS_VIEW, ADMIN_DEVELOPER_VIEW, ADMIN_PRESETS_VIEW, ADMIN_TEAMS_VIEW};
 use crate::types::{Budget, BudgetSubject, GatewayAdminKeyResponse, PermissionResponse, Preset, Role, RoleActor, RoleResponse, Team};
 use sqlx::PgPool;
+use std::future::Future;
 use uuid::Uuid;
+
+async fn when<T>(load: bool, query: impl Future<Output = Result<T, sqlx::Error>>) -> Result<Option<T>, sqlx::Error> {
+	if load { query.await.map(Some) } else { Ok(None) }
+}
 
 impl EffectivePermission {
 	/// Keeps the permissions that one of `roles` grants, each with the roles granting it; a role that holds the permission itself and a
@@ -42,13 +47,17 @@ impl User {
 	/// # Errors
 	/// Returns the database error when a query fails.
 	pub async fn overview(&self, pool: &PgPool, actor: &RoleActor<'_>, session: Option<&Uuid>) -> Result<UserOverviewResponse, sqlx::Error> {
-		let roles = Role::list_for_user(pool, &self.id).await?;
-		let teams = Team::memberships_for_user(pool, &self.id).await?;
-		let permissions = EffectivePermission::resolve(Role::list_permissions(pool).await?, &roles);
-		let model_access = if actor.holds(ADMIN_TEAMS_VIEW) { Some(Team::model_access_for_user(pool, &self.id).await?) } else { None };
-		let presets = if actor.holds(ADMIN_PRESETS_VIEW) { Some(Preset::admin_list_visible_to(pool, &self.id).await?) } else { None };
-		let budgets = if actor.holds(ADMIN_BUDGETS_VIEW) { Some(Budget::evaluate(pool, BudgetSubject::user(self.id)).await?) } else { None };
-		let keys = if actor.holds(ADMIN_DEVELOPER_VIEW) { Some(GatewayAdminKeyResponse::list_for_user(pool, &self.id).await?) } else { None };
+		let (roles, teams, all_permissions, model_access, presets, budgets, keys, sessions) = tokio::try_join!(
+			Role::list_for_user(pool, &self.id),
+			Team::memberships_for_user(pool, &self.id),
+			Role::list_permissions(pool),
+			when(actor.holds(ADMIN_TEAMS_VIEW), Team::model_access_for_user(pool, &self.id)),
+			when(actor.holds(ADMIN_PRESETS_VIEW), Preset::admin_list_visible_to(pool, &self.id)),
+			when(actor.holds(ADMIN_BUDGETS_VIEW), Budget::evaluate(pool, BudgetSubject::user(self.id))),
+			when(actor.holds(ADMIN_DEVELOPER_VIEW), GatewayAdminKeyResponse::list_for_user(pool, &self.id)),
+			Self::list_sessions(pool, &self.id, session),
+		)?;
+		let permissions = EffectivePermission::resolve(all_permissions, &roles);
 		Ok(UserOverviewResponse {
 			profile: UserProfileResponse {
 				id: self.id,
@@ -58,7 +67,7 @@ impl User {
 				created_at: self.created_at,
 			},
 			can_edit: actor.can_edit_user(&roles),
-			sessions: Self::list_sessions(pool, &self.id, session).await?,
+			sessions,
 			assignments: self.assignments_from(actor, &roles, &teams),
 			roles,
 			permissions,

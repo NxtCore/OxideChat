@@ -5,7 +5,7 @@
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
 use crate::types::{
-	AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, ReplaceAssignmentsRequest, Role, RoleActor, RoleError,
+	AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, ReplaceAssignmentsRequest, Role, RoleError,
 	UpdateUserRequest, User, json_ok,
 };
 use crate::utils::auth::{SESSION_COOKIE_NAME, hash_password, validate_email, validate_password, validate_username};
@@ -45,10 +45,7 @@ pub async fn get_user(State(state): State<Arc<JobState>>, auth: AuthUser, Path(i
 pub async fn get_user_overview(State(state): State<Arc<JobState>>, auth: AuthUser, cookies: Cookies, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	let permissions = auth.require_permissions(&state.db, ADMIN_USERS_VIEW).await?;
 	let target = User::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::UserNotFound)?;
-	let actor = RoleActor {
-		id: &auth.id,
-		permissions: &permissions,
-	};
+	let actor = auth.role_actor(&permissions);
 	let session = cookies.get(SESSION_COOKIE_NAME).and_then(|cookie| Uuid::parse_str(cookie.value()).ok());
 	json_ok(target.overview(&state.db, &actor, session.as_ref()).await?)
 }
@@ -57,10 +54,7 @@ pub async fn get_user_overview(State(state): State<Arc<JobState>>, auth: AuthUse
 pub async fn get_user_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	let permissions = auth.require_permissions(&state.db, ADMIN_USERS_VIEW).await?;
 	let target = User::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::UserNotFound)?;
-	let actor = RoleActor {
-		id: &auth.id,
-		permissions: &permissions,
-	};
+	let actor = auth.role_actor(&permissions);
 	json_ok(target.assignments(&state.db, &actor).await?)
 }
 
@@ -73,10 +67,7 @@ pub async fn replace_user_assignments(State(state): State<Arc<JobState>>, auth: 
 		return Err(ErrorCode::ValidationFailed.into());
 	}
 	let target = User::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::UserNotFound)?;
-	let actor = RoleActor {
-		id: &auth.id,
-		permissions: &permissions,
-	};
+	let actor = auth.role_actor(&permissions);
 	target.replace_assignments(&state.db, &actor, &req).await.map_err(|error| match error {
 		RoleError::Database(error) => AppError::foreign_key_or(error, ErrorCode::ValidationFailed),
 		other => other.into(),
@@ -90,10 +81,7 @@ pub async fn replace_user_assignments(State(state): State<Arc<JobState>>, auth: 
 pub async fn revoke_user_session(State(state): State<Arc<JobState>>, auth: AuthUser, Path((id, session_id)): Path<(Uuid, String)>) -> Result<Response, AppError> {
 	let permissions = auth.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
 	let target = User::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::UserNotFound)?;
-	let actor = RoleActor {
-		id: &auth.id,
-		permissions: &permissions,
-	};
+	let actor = auth.role_actor(&permissions);
 	actor.check_outranks(&state.db, &target).await?;
 	if !User::revoke_session(&state.db, &id, &session_id).await? {
 		return Err(ErrorCode::NotFound.into());
@@ -129,10 +117,7 @@ pub async fn create_user(State(state): State<Arc<JobState>>, actor: AuthUser, Js
 			return Err(ErrorCode::NotFound.into());
 		}
 	}
-	let role_actor = RoleActor {
-		id: &actor.id,
-		permissions: &permissions,
-	};
+	let role_actor = actor.role_actor(&permissions);
 	role_actor.check_role_change(&state.db, &[], &req.roles).await?;
 
 	let new_user = User::create(&state.db, &req.email, &req.username, &password_hash).await.map_err(AppError::database)?;
@@ -156,10 +141,7 @@ pub async fn update_user(State(state): State<Arc<JobState>>, actor: AuthUser, Pa
 	let permissions = actor.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
 
 	let mut target = User::find_by_id(&state.db, &id).await.map_err(AppError::database)?.ok_or(ErrorCode::UserNotFound)?;
-	let role_actor = RoleActor {
-		id: &actor.id,
-		permissions: &permissions,
-	};
+	let role_actor = actor.role_actor(&permissions);
 	role_actor.check_outranks(&state.db, &target).await?;
 
 	if let Some(email) = &req.email {
@@ -196,10 +178,7 @@ pub async fn delete_user(State(state): State<Arc<JobState>>, actor: AuthUser, Pa
 	}
 
 	let target = User::find_by_id(&state.db, &id).await.map_err(AppError::database)?.ok_or(ErrorCode::UserNotFound)?;
-	let role_actor = RoleActor {
-		id: &actor.id,
-		permissions: &permissions,
-	};
+	let role_actor = actor.role_actor(&permissions);
 	role_actor.check_outranks(&state.db, &target).await?;
 
 	AuditLog::log(&state.db, LogEvent::UserDeleted, Some(actor.id), Some(EntityType::User), Some(id));
@@ -220,10 +199,7 @@ pub async fn reset_password(State(state): State<Arc<JobState>>, actor: AuthUser,
 	if target.auth_method != "local" {
 		return Err(ErrorCode::ExternalAuthRequired.into());
 	}
-	let role_actor = RoleActor {
-		id: &actor.id,
-		permissions: &permissions,
-	};
+	let role_actor = actor.role_actor(&permissions);
 	role_actor.check_outranks(&state.db, &target).await?;
 
 	validate_password(&req.password)?;

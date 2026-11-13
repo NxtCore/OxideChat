@@ -566,6 +566,17 @@ mod scopes {
 		assert!(matches!(Preset::replace_assignments(&pool, &member, &preset.id, &own_team).await, Err(PresetError::NotFound)));
 
 		assert_eq!(shared_with(&pool, &preset, &admin).await?.len(), 2);
+
+		let with_user = share(&[(AssignmentKind::Team, Some(team.team_id)), (AssignmentKind::User, Some(team.member_id))]);
+		Preset::replace_assignments(&pool, &installation_admin, &preset.id, &with_user).await?;
+		let promoted = ReplaceAssignmentsRequest {
+			targets: vec![
+				AssignmentRef { kind: AssignmentKind::Team, id: Some(team.team_id), role: None },
+				AssignmentRef { kind: AssignmentKind::User, id: Some(team.member_id), role: Some(AssignmentRole::Editor) },
+			],
+		};
+		assert!(matches!(Preset::replace_assignments(&pool, &admin, &preset.id, &promoted).await, Err(PresetError::Forbidden)));
+		Preset::replace_assignments(&pool, &admin, &preset.id, &with_user).await?;
 		Ok(())
 	}
 

@@ -18,7 +18,7 @@
 				</ShadTabsList>
 			</ShadTabs>
 
-			<SettingsPresetsAdminList v-if="currentTab === 'all'" />
+			<SettingsPresetsAdminList v-if="currentTab === 'all' && store.hasPermission(ADMIN_PRESETS_VIEW)" />
 
 			<div v-else-if="currentTab === 'mine' && rows.length === 0" class="flex flex-col items-center rounded-xl border border-dashed border-border px-6 py-12 text-center" data-testid="presets-empty">
 				<Wand2 class="mb-4 h-10 w-10 text-primary" />
@@ -151,7 +151,7 @@ const visibleTabs = computed<PresetTab[]>(() => {
 });
 
 const queryTab = route.query.tab as PresetTab | undefined;
-const currentTab = ref<PresetTab>(queryTab && (queryTab in TAB_SCOPES || queryTab === 'shared' || (queryTab === 'all' && store.hasPermission(ADMIN_PRESETS_VIEW))) ? queryTab : 'mine');
+const currentTab = ref<PresetTab>(queryTab && (queryTab in TAB_SCOPES || queryTab === 'shared' || queryTab === 'all') ? queryTab : 'mine');
 
 watch(currentTab, tab => router.replace({query: tab === 'mine' ? {} : {tab}}));
 

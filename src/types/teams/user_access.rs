@@ -1,5 +1,5 @@
 use super::{ModelGrantKind, ModelGrantTarget, Team, TeamRole, TeamSummaryResponse, UserModelAccessResponse, UserModelGrant, UserTeamResponse};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow)]
@@ -31,13 +31,13 @@ impl Team {
 	///
 	/// # Errors
 	/// Returns the database error when the query fails.
-	pub async fn memberships_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<UserTeamResponse>, sqlx::Error> {
+	pub async fn memberships_for_user(executor: impl PgExecutor<'_>, user_id: &Uuid) -> Result<Vec<UserTeamResponse>, sqlx::Error> {
 		let rows = sqlx::query_as::<_, (Uuid, String, bool, String)>(
 			"SELECT t.id, t.name::text, t.is_default, tm.role::text FROM teams t JOIN team_members tm ON tm.team_id = t.id \
 			 WHERE tm.user_id = $1 ORDER BY t.is_default DESC, lower(t.name)",
 		)
 		.bind(user_id)
-		.fetch_all(pool)
+		.fetch_all(executor)
 		.await?;
 		Ok(rows
 			.into_iter()

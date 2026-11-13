@@ -39,8 +39,8 @@ impl Role {
 	///
 	/// # Errors
 	/// Returns the database error when the query fails.
-	pub async fn list_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<RoleResponse>, sqlx::Error> {
-		let rows = sqlx::query_as::<_, RoleRow>(ROLE_SELECT).bind(None::<Uuid>).bind(user_id).fetch_all(pool).await?;
+	pub async fn list_for_user(executor: impl PgExecutor<'_>, user_id: &Uuid) -> Result<Vec<RoleResponse>, sqlx::Error> {
+		let rows = sqlx::query_as::<_, RoleRow>(ROLE_SELECT).bind(None::<Uuid>).bind(user_id).fetch_all(executor).await?;
 		Ok(rows.into_iter().map(RoleResponse::from).collect())
 	}
 
@@ -57,20 +57,20 @@ impl Role {
 	///
 	/// # Errors
 	/// Returns the database error when the query fails.
-	pub async fn names_of(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<String>, sqlx::Error> {
-		sqlx::query_scalar("SELECT name FROM roles WHERE id = ANY($1)").bind(ids).fetch_all(pool).await
+	pub async fn names_of(executor: impl PgExecutor<'_>, ids: &[Uuid]) -> Result<Vec<String>, sqlx::Error> {
+		sqlx::query_scalar("SELECT name FROM roles WHERE id = ANY($1)").bind(ids).fetch_all(executor).await
 	}
 
 	/// The permissions granted by the roles with the given names.
 	///
 	/// # Errors
 	/// Returns the database error when the query fails.
-	pub async fn permissions_of(pool: &PgPool, names: &[String]) -> Result<Vec<String>, sqlx::Error> {
+	pub async fn permissions_of(executor: impl PgExecutor<'_>, names: &[String]) -> Result<Vec<String>, sqlx::Error> {
 		sqlx::query_scalar(
 			"SELECT DISTINCT p.name FROM roles r JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id WHERE r.name = ANY($1)",
 		)
 		.bind(names)
-		.fetch_all(pool)
+		.fetch_all(executor)
 		.await
 	}
 

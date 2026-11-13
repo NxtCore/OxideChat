@@ -3,7 +3,7 @@ use crate::logging::AuditLog;
 use crate::types::consts::ADMIN_ROLES_EDIT;
 use crate::types::{AuditEntry, User, is_unique_violation};
 use serde_json::{Value, json};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 const AUDIT_TARGET: &str = "role";
@@ -52,15 +52,21 @@ async fn replace_permissions(tx: &mut Transaction<'_, Postgres>, role_id: &Uuid,
 	Ok(())
 }
 
-async fn check_not_locked_out(tx: &mut Transaction<'_, Postgres>) -> Result<(), RoleError> {
-	let granted: Vec<String> = sqlx::query_scalar("SELECT DISTINCT p.name FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id")
-		.fetch_all(&mut **tx)
-		.await?;
-	if granted.iter().any(|permission| User::permission_matches(permission, ADMIN_ROLES_EDIT)) {
-		Ok(())
-	} else {
-		Err(RoleError::LockOut)
-	}
+/// Whether some role grants `admin.roles.edit`, and whether some user holds such a role.
+async fn role_managers(tx: &mut Transaction<'_, Postgres>) -> Result<(bool, bool), RoleError> {
+	let granted: Vec<(String, bool)> = sqlx::query_as(
+		"SELECT p.name, EXISTS (SELECT 1 FROM user_roles ur WHERE ur.role_id = rp.role_id) \
+		 FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id",
+	)
+	.fetch_all(&mut **tx)
+	.await?;
+	let managing: Vec<bool> = granted.into_iter().filter(|(permission, _)| User::permission_matches(permission, ADMIN_ROLES_EDIT)).map(|(_, held)| held).collect();
+	Ok((!managing.is_empty(), managing.contains(&true)))
+}
+
+async fn check_not_locked_out(tx: &mut Transaction<'_, Postgres>, held_before: bool) -> Result<(), RoleError> {
+	let (granted, held) = role_managers(tx).await?;
+	if granted && (held || !held_before) { Ok(()) } else { Err(RoleError::LockOut) }
 }
 
 async fn audit(tx: &mut Transaction<'_, Postgres>, event: &str, actor_id: &Uuid, role_id: &Uuid, metadata: Value) -> Result<(), sqlx::Error> {
@@ -79,14 +85,14 @@ impl RoleActor<'_> {
 	///
 	/// # Errors
 	/// Returns [`RoleError::PermissionNotHeld`] when the actor lacks one of them, and the database error when the lookup fails.
-	pub async fn check_role_change(&self, pool: &PgPool, current: &[String], requested: &[String]) -> Result<(), RoleError> {
+	pub async fn check_role_change(&self, executor: impl PgExecutor<'_>, current: &[String], requested: &[String]) -> Result<(), RoleError> {
 		let changed: Vec<String> = current
 			.iter()
 			.filter(|name| !requested.contains(name))
 			.chain(requested.iter().filter(|name| !current.contains(name)))
 			.cloned()
 			.collect();
-		check_held(self, &Role::permissions_of(pool, &changed).await?)
+		check_held(self, &Role::permissions_of(executor, &changed).await?)
 	}
 
 	/// Checks that the actor holds every permission of `target`, so nobody can take over or remove a stronger account.
@@ -94,8 +100,8 @@ impl RoleActor<'_> {
 	/// # Errors
 	/// Returns [`RoleError::Outranked`] when the target holds a permission the actor does not, and the database error
 	/// when the lookup fails.
-	pub async fn check_outranks(&self, pool: &PgPool, target: &User) -> Result<(), RoleError> {
-		check_held(self, &target.permissions(pool).await?).map_err(|_| RoleError::Outranked)
+	pub async fn check_outranks(&self, executor: impl PgExecutor<'_>, target: &User) -> Result<(), RoleError> {
+		check_held(self, &target.permissions(executor).await?).map_err(|_| RoleError::Outranked)
 	}
 }
 
@@ -138,6 +144,7 @@ impl Role {
 		if before.is_builtin && before.name != name {
 			return Err(RoleError::Protected);
 		}
+		let (_, held_before) = role_managers(&mut tx).await?;
 		check_known(&mut tx, &permissions).await?;
 		sqlx::query("UPDATE roles SET name = $2 WHERE id = $1")
 			.bind(id)
@@ -146,7 +153,7 @@ impl Role {
 			.await
 			.map_err(map_write_error)?;
 		replace_permissions(&mut tx, id, &permissions).await?;
-		check_not_locked_out(&mut tx).await?;
+		check_not_locked_out(&mut tx, held_before).await?;
 		let metadata = json!({
 			"name": name,
 			"permissions": permissions,
@@ -170,8 +177,9 @@ impl Role {
 		if before.is_builtin {
 			return Err(RoleError::Protected);
 		}
+		let (_, held_before) = role_managers(&mut tx).await?;
 		sqlx::query("DELETE FROM roles WHERE id = $1").bind(id).execute(&mut *tx).await?;
-		check_not_locked_out(&mut tx).await?;
+		check_not_locked_out(&mut tx, held_before).await?;
 		let metadata = json!({ "name": before.name, "permissions": before.permissions, "user_count": before.user_count });
 		audit(&mut tx, EVENT_DELETED, actor.id, id, metadata).await?;
 		tx.commit().await?;

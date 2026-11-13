@@ -41,8 +41,13 @@ watch(
 	async active => {
 		if (!active || loaded || !props.editable || !canViewTeams.value) return;
 		loaded = true;
-		const list = await adminTeams({size: 100});
-		options.value = (list?.items ?? []).map(team => ({kind: 'team' as const, id: team.id, label: team.name}));
+		const teams = [];
+		for (let page = 1; ; page++) {
+			const list = await adminTeams({page, size: 100});
+			teams.push(...(list?.items ?? []));
+			if (!list?.has_more) break;
+		}
+		options.value = teams.map(team => ({kind: 'team' as const, id: team.id, label: team.name}));
 	},
 	{immediate: true},
 );

@@ -68,29 +68,30 @@ impl User {
 	///
 	/// # Errors
 	/// Returns [`RoleError::OwnRoles`] when the actor changes their own roles, [`RoleError::PermissionNotHeld`] when a role that is
-	/// gained or lost grants something the actor does not hold, [`RoleError::Outranked`] when the teams of a stronger account change,
+	/// gained or lost grants something the actor does not hold, [`RoleError::Outranked`] when the roles or teams of a stronger account change,
 	/// and the database error when a role or team does not exist; nothing is changed then.
 	pub async fn replace_assignments(&self, pool: &PgPool, actor: &RoleActor<'_>, request: &ReplaceAssignmentsRequest) -> Result<(), RoleError> {
 		let role_ids = request.ids(AssignmentKind::Role);
 		let team_ids = request.ids(AssignmentKind::Team);
-		let current = Role::list_for_user(pool, &self.id).await?;
+		let mut tx = pool.begin().await?;
+		sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(self.id).execute(&mut *tx).await?;
+		let current = Role::list_for_user(&mut *tx, &self.id).await?;
 		let roles_change = current.len() != role_ids.len() || current.iter().any(|role| !role_ids.contains(&role.id));
-		if roles_change {
-			if actor.id == &self.id {
-				return Err(RoleError::OwnRoles);
-			}
-			let current_names: Vec<String> = current.into_iter().map(|role| role.name).collect();
-			let requested_names = Role::names_of(pool, &role_ids).await?;
-			actor.check_role_change(pool, &current_names, &requested_names).await?;
+		if roles_change && actor.id == &self.id {
+			return Err(RoleError::OwnRoles);
 		}
-		let memberships = Team::memberships_for_user(pool, &self.id).await?;
+		let memberships = Team::memberships_for_user(&mut *tx, &self.id).await?;
 		let leaves = memberships.iter().any(|team| !team.is_default && !team_ids.contains(&team.id));
 		let joins = team_ids.iter().any(|id| memberships.iter().all(|team| team.id != *id));
-		if leaves || joins {
-			actor.check_outranks(pool, self).await?;
+		if roles_change || leaves || joins {
+			actor.check_outranks(&mut *tx, self).await?;
+		}
+		if roles_change {
+			let current_names: Vec<String> = current.into_iter().map(|role| role.name).collect();
+			let requested_names = Role::names_of(&mut *tx, &role_ids).await?;
+			actor.check_role_change(&mut *tx, &current_names, &requested_names).await?;
 		}
 
-		let mut tx = pool.begin().await?;
 		let (roles_removed, roles_added) = self.replace_roles(&mut tx, &role_ids).await?;
 		let (teams_left, teams_joined) = Team::replace_user_teams(&mut tx, &self.id, &team_ids).await?;
 		if !(roles_removed.is_empty() && roles_added.is_empty() && teams_left.is_empty() && teams_joined.is_empty()) {

@@ -1,6 +1,6 @@
 //! Authenticated user extractor for handlers.
 
-use crate::types::{AppError, RequestContext, User};
+use crate::types::{AppError, RequestContext, RoleActor, User};
 use crate::utils::response::ErrorCode;
 use axum::{extract::FromRequestParts, http::request::Parts};
 use sqlx::PgPool;
@@ -39,6 +39,12 @@ impl AuthUser {
 		} else {
 			Err(ErrorCode::InsufficientPermissions.into())
 		}
+	}
+
+	/// The user as a [`RoleActor`] holding `permissions`, as returned by [`AuthUser::require_permissions`].
+	#[must_use]
+	pub fn role_actor<'a>(&'a self, permissions: &'a [String]) -> RoleActor<'a> {
+		RoleActor { id: &self.id, permissions }
 	}
 }
 

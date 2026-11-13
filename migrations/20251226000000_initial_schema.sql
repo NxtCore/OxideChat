@@ -4368,6 +4368,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'assignments.save_success', 'Zuweisungen gespeichert'),
     ('en', 'assignments.save_error', 'Assignments could not be saved'),
     ('de', 'assignments.save_error', 'Zuweisungen konnten nicht gespeichert werden'),
+    ('en', 'assignments.load_error', 'Assignments could not be loaded'),
+    ('de', 'assignments.load_error', 'Zuweisungen konnten nicht geladen werden'),
     ('en', 'assignments.none', 'Not assigned to anyone yet'),
     ('de', 'assignments.none', 'Noch niemandem zugewiesen'),
     ('en', 'assignments.inherited', 'Comes from a wider rule and cannot be removed here.'),

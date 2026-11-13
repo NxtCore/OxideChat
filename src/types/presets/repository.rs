@@ -40,8 +40,11 @@ impl Shares {
 		})
 	}
 
-	fn has(&self, kind: AssignmentKind, id: &Uuid) -> bool {
-		self.rows.iter().any(|(stored, target, _, _)| AssignmentKind::from_stored(stored) == kind && target == id)
+	/// Whether a share with `id` already gives at least `role`, so keeping it needs no permission.
+	fn covers(&self, kind: AssignmentKind, id: &Uuid, role: AssignmentRole) -> bool {
+		self.rows
+			.iter()
+			.any(|(stored, target, _, stored_role)| AssignmentKind::from_stored(stored) == kind && target == id && AssignmentRole::from_stored(stored_role) >= role)
 	}
 
 	fn is_empty(&self) -> bool {
@@ -386,7 +389,7 @@ impl Preset {
 
 	/// Makes the request's targets the only ones a preset the actor manages is shared with, audited in the same transaction.
 	///
-	/// The owner always keeps the preset, so naming it changes nothing. Shares that stay need no permission; a new one needs
+	/// The owner always keeps the preset, so naming it changes nothing. Shares that stay with the same or a weaker role need no permission; a new one or an upgrade to editor needs
 	/// the actor to manage that team, or to be an installation admin for a user or everyone. A team or user with the
 	/// editor role may change the preset but neither delete nor share it; everyone can only be given the viewer role.
 	///
@@ -416,8 +419,8 @@ impl Preset {
 		let stored = |roles: &BTreeMap<Uuid, AssignmentRole>| -> Vec<&'static str> { roles.values().map(|role| role.as_str()).collect() };
 
 		let shares = Shares::load(pool, id).await?;
-		let mut new_teams = team_ids.iter().filter(|team| !shares.has(AssignmentKind::Team, team));
-		let new_user = user_ids.iter().any(|user| !shares.has(AssignmentKind::User, user));
+		let mut new_teams = teams.iter().filter(|(team, role)| !shares.covers(AssignmentKind::Team, team, **role)).map(|(team, _)| team);
+		let new_user = users.iter().any(|(user, role)| !shares.covers(AssignmentKind::User, user, *role));
 		let allowed = new_teams.all(|team| actor.can_share_with(AssignmentKind::Team, Some(team)))
 			&& (!new_user || actor.can_share_with(AssignmentKind::User, None))
 			&& (!everyone || shares.everyone || actor.can_share_with(AssignmentKind::Everyone, None));
@@ -425,7 +428,9 @@ impl Preset {
 			return Err(PresetError::Forbidden);
 		}
 		let shared = current.scope() != PresetScope::Personal || everyone || !team_ids.is_empty() || !user_ids.is_empty();
-		Self::check_tools(pool, actor, shared, &current.tool_ids).await?;
+		if shared && Tool::any_personal(pool, &current.tool_ids).await? {
+			return Err(PresetError::ToolsNotAllowed);
+		}
 
 		let mut tx = pool.begin().await?;
 		let preset = sqlx::query_as::<_, Self>(concat!(

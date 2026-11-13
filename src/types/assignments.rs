@@ -46,7 +46,7 @@ impl ReplaceAssignmentsRequest {
 // Response Types
 
 /// What an assigned target may do with the thing, for features that tell viewers and editors apart.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum AssignmentRole {

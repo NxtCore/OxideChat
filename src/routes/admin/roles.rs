@@ -1,7 +1,7 @@
 //! Admin routes for roles and the permissions they grant.
 
 use crate::types::consts::{ADMIN_ROLES_EDIT, ADMIN_ROLES_VIEW};
-use crate::types::{AppError, AuthUser, JobState, Role, RoleActor, SaveRoleRequest, json_ok};
+use crate::types::{AppError, AuthUser, JobState, Role, SaveRoleRequest, json_ok};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -27,10 +27,7 @@ pub async fn list_permissions(State(state): State<Arc<JobState>>, auth: AuthUser
 /// POST /api/v1/admin/roles
 pub async fn create_role(State(state): State<Arc<JobState>>, auth: AuthUser, Json(request): Json<SaveRoleRequest>) -> Result<Response, AppError> {
 	let permissions = auth.require_permissions(&state.db, ADMIN_ROLES_EDIT).await?;
-	let actor = RoleActor {
-		id: &auth.id,
-		permissions: &permissions,
-	};
+	let actor = auth.role_actor(&permissions);
 	let role = Role::create(&state.db, &actor, &request).await?;
 	Ok(ResponseBuilder::new(ResponseBody::Json(role)).status(StatusCode::CREATED).build())
 }
@@ -38,20 +35,14 @@ pub async fn create_role(State(state): State<Arc<JobState>>, auth: AuthUser, Jso
 /// PUT /api/v1/admin/roles/{id}
 pub async fn update_role(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(request): Json<SaveRoleRequest>) -> Result<Response, AppError> {
 	let permissions = auth.require_permissions(&state.db, ADMIN_ROLES_EDIT).await?;
-	let actor = RoleActor {
-		id: &auth.id,
-		permissions: &permissions,
-	};
+	let actor = auth.role_actor(&permissions);
 	json_ok(Role::update(&state.db, &actor, &id, &request).await?)
 }
 
 /// DELETE /api/v1/admin/roles/{id}
 pub async fn delete_role(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	let permissions = auth.require_permissions(&state.db, ADMIN_ROLES_EDIT).await?;
-	let actor = RoleActor {
-		id: &auth.id,
-		permissions: &permissions,
-	};
+	let actor = auth.role_actor(&permissions);
 	Role::delete(&state.db, &actor, &id).await?;
 	Ok((StatusCode::NO_CONTENT, "").into_response())
 }
