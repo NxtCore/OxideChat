@@ -167,6 +167,8 @@ pub struct PresetActor {
 	pub user_id: Uuid,
 	pub personal: bool,
 	pub installation_admin: bool,
+	/// Whether the actor may view users, which picking a single user to share with needs.
+	pub view_users: bool,
 	pub admin_teams: Vec<Uuid>,
 	pub teams: Vec<Uuid>,
 	pub editable: Vec<Uuid>,
@@ -194,12 +196,13 @@ impl PresetActor {
 	}
 
 	/// Whether the actor may share presets with `kind`, for teams with `team_id`: teams they manage, and for installation
-	/// admins also single users and everyone.
+	/// admins also everyone and, when they may view users, single users.
 	#[must_use]
 	pub fn can_share_with(&self, kind: AssignmentKind, team_id: Option<&Uuid>) -> bool {
 		match kind {
 			AssignmentKind::Team => self.can_manage_scope(PresetScope::Team, team_id),
-			AssignmentKind::User | AssignmentKind::Everyone => self.installation_admin,
+			AssignmentKind::User => self.installation_admin && self.view_users,
+			AssignmentKind::Everyone => self.installation_admin,
 			AssignmentKind::Role | AssignmentKind::Key => false,
 		}
 	}

@@ -1,6 +1,6 @@
 //! Preset routes: personal presets, team presets managed by team admins, and installation presets.
 
-use crate::types::consts::{ADMIN_PRESETS_EDIT, SETTINGS_PRESETS_EDIT};
+use crate::types::consts::{ADMIN_PRESETS_EDIT, ADMIN_USERS_VIEW, SETTINGS_PRESETS_EDIT};
 use crate::types::{
 	AppError, AuthUser, Budget, ReplaceAssignmentsRequest, BudgetSubject, JobState, Preset, PresetActor, PresetError, PresetResponse, PresetSlugAvailability, PresetSlugQuery, SavePresetRequest,
 	is_valid_preset_slug, json_ok,
@@ -17,7 +17,11 @@ use uuid::Uuid;
 async fn actor(state: &JobState, user: &AuthUser) -> Result<PresetActor, AppError> {
 	let personal = user.check_permission(&state.db, SETTINGS_PRESETS_EDIT).await?;
 	let installation_admin = user.check_permission(&state.db, ADMIN_PRESETS_EDIT).await?;
-	Ok(PresetActor::load(&state.db, &user.id, personal, installation_admin).await?)
+	let view_users = user.check_permission(&state.db, ADMIN_USERS_VIEW).await?;
+	Ok(PresetActor {
+		view_users,
+		..PresetActor::load(&state.db, &user.id, personal, installation_admin).await?
+	})
 }
 
 async fn responses(state: &JobState, actor: &PresetActor, presets: Vec<Preset>) -> Result<Vec<PresetResponse>, AppError> {

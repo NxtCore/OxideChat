@@ -82,6 +82,10 @@
 						test-id="preset-sharing"
 						@update:model-value="targets => replaceAssignment(assignmentPath, targets)"
 					/>
+					<p v-if="usersNeedView" class="flex items-start gap-2 text-xs text-muted-foreground" data-testid="preset-sharing-users-hidden">
+						<Info class="mt-px h-3.5 w-3.5 shrink-0" />
+						{{ t('users_need_view') }}
+					</p>
 				</div>
 				<div v-show="currentTab === 'instructions'" class="space-y-4">
 					<SettingsModelsPromptTab :form="form" title-key="presets.editor.instructions_title" description-key="presets.editor.instructions_description" />
@@ -104,7 +108,8 @@
 </template>
 
 <script setup lang="ts">
-import {AlertTriangle, ArrowLeft, Building2, Globe, Loader2, Trash2, User, Wand2} from 'lucide-vue-next';
+import {AlertTriangle, ArrowLeft, Building2, Globe, Info, Loader2, Trash2, User, Wand2} from 'lucide-vue-next';
+import {ADMIN_USERS_VIEW} from '~/types/generated/permissions';
 import {useMainStore} from '~/stores';
 import {usePresetStore} from '~/stores/presetStore';
 import type {AssignmentOption, AssignmentTarget} from '~/types/assignments';
@@ -191,6 +196,7 @@ const assignmentOptions = computed<AssignmentOption[]>(() => {
 });
 const canEdit = computed(() => (isNew ? assignmentOptions.value.length > 0 : !!preset.value?.can_edit));
 const canManage = computed(() => isNew || !!preset.value?.can_manage);
+const usersNeedView = computed(() => !isNew && canManage.value && !!presetStore.scopes?.installation && !store.hasPermission(ADMIN_USERS_VIEW));
 const slugRenamed = computed(() => !!preset.value?.has_gateway_usage && preset.value.slug !== form.slug);
 const enabledLocked = computed(() => !!preset.value?.disabled_by_admin && !presetStore.scopes?.installation);
 const unavailable = computed<PresetUnavailable | null>(() => (preset.value?.unavailable === 'disabled' ? null : (preset.value?.unavailable ?? null)));
@@ -281,8 +287,17 @@ function describeShare(target: AssignmentOption) {
 
 async function loadShareUsers() {
 	if (!storedAssignment.value?.kinds.includes('user')) return;
-	const list = await adminUsers({size: 200}).catch(() => null);
-	shareUsers.value = (list?.items ?? []).map(user => ({kind: 'user' as const, id: user.id, label: user.username || user.email}));
+	const options: AssignmentOption[] = [];
+	try {
+		for (let page = 1; ; page++) {
+			const list = await adminUsers({page, size: 200});
+			options.push(...list.items.map(user => ({kind: 'user' as const, id: user.id, label: user.username || user.email})));
+			if (!list.has_more) break;
+		}
+	} catch (e: any) {
+		store.toast(store.getTranslation('assignments.load_error'), {type: 'error', description: errorMessage(e, '')});
+	}
+	shareUsers.value = options;
 }
 
 function describeScope(target: AssignmentOption) {

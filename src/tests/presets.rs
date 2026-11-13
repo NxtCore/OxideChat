@@ -237,6 +237,7 @@ mod repository {
 			user_id,
 			personal: true,
 			installation_admin: false,
+			view_users: false,
 			admin_teams: Vec::new(),
 			teams: Vec::new(),
 			editable: Vec::new(),
@@ -404,7 +405,8 @@ mod scopes {
 	}
 
 	pub async fn actor(pool: &PgPool, user_id: Uuid, installation_admin: bool) -> TestResult<PresetActor> {
-		Ok(PresetActor::load(pool, &user_id, true, installation_admin).await?)
+		let actor = PresetActor::load(pool, &user_id, true, installation_admin).await?;
+		Ok(PresetActor { view_users: installation_admin, ..actor })
 	}
 
 	pub fn shared(slug: &str, model_id: Uuid, scope: PresetScope, team_id: Option<Uuid>) -> SavePresetRequest {
@@ -538,6 +540,43 @@ mod scopes {
 		let member = actor(&pool, team.member_id, false).await?;
 		let edit = Preset::update(&pool, &member, &preset.id, for_model("co-edited-4", team.model_id)).await;
 		assert!(matches!(edit, Err(PresetError::NotFound)));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn sharing_with_single_users_needs_the_right_to_view_users(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let admin = actor(&pool, team.admin_id, true).await?;
+		let blind = PresetActor { view_users: false, ..admin.clone() };
+		let preset = Preset::create(&pool, &admin, for_model("users-hidden", team.model_id)).await?;
+		assert!(!preset.assignments(&pool, &blind).await?.kinds.contains(&AssignmentKind::User));
+
+		let with_user = share(&[(AssignmentKind::User, Some(team.outsider_id))]);
+		assert!(matches!(Preset::replace_assignments(&pool, &blind, &preset.id, &with_user).await, Err(PresetError::Forbidden)));
+		Preset::replace_assignments(&pool, &admin, &preset.id, &with_user).await?;
+		let kept = share(&[(AssignmentKind::User, Some(team.outsider_id)), (AssignmentKind::Everyone, None)]);
+		Preset::replace_assignments(&pool, &blind, &preset.id, &kept).await?;
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn editors_without_access_to_the_base_model_can_still_edit_the_rest(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let owner = actor(&pool, team.admin_id, true).await?;
+		let preset = Preset::create(&pool, &owner, for_model("no-access-edit", team.model_id)).await?;
+		let editor = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef { kind: AssignmentKind::User, id: Some(team.outsider_id), role: Some(AssignmentRole::Editor) }],
+		};
+		Preset::replace_assignments(&pool, &owner, &preset.id, &editor).await?;
+		sqlx::query("UPDATE teams SET allow_all_models = false WHERE id = $1 OR is_default").bind(team.outsider_team_id).execute(&pool).await?;
+		assert!(!crate::types::models::Model::can_user_use_model(&pool, &team.outsider_id, &team.model_id).await?);
+
+		let outsider = actor(&pool, team.outsider_id, false).await?;
+		let renamed = SavePresetRequest { name: "Renamed".to_owned(), ..for_model("no-access-edit", team.model_id) };
+		assert_eq!(Preset::update(&pool, &outsider, &preset.id, renamed).await?.name, "Renamed");
+		let (_, other_model) = create_provider_model(&pool, &format!("Provider {}", Uuid::new_v4().simple()), "other").await?;
+		let switched = Preset::update(&pool, &outsider, &preset.id, for_model("no-access-edit", other_model)).await;
+		assert!(matches!(switched, Err(PresetError::BaseModelNotAllowed)));
 		Ok(())
 	}
 

@@ -4424,6 +4424,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'presets.editor.sharing_description', 'Alle hier Aufgeführten können dieses Preset nutzen, im Chat und über ihre API-Schlüssel. Wer bearbeiten darf, kann es auch ändern; nur der Besitzer löscht oder teilt es.'),
     ('en', 'presets.editor.sharing_note', 'Sharing never grants access to the base model: people only see the preset if they may use that model. Shared presets can only bundle system tools.'),
     ('de', 'presets.editor.sharing_note', 'Die Freigabe gewährt nie Zugriff auf das Basismodell: Das Preset sieht nur, wer dieses Modell nutzen darf. Geteilte Presets können nur System-Tools enthalten.'),
+    ('en', 'presets.editor.users_need_view', 'You can''t share with single users because you don''t have permission to view users. You can still share with teams or everyone.'),
+    ('de', 'presets.editor.users_need_view', 'Du kannst nicht mit einzelnen Nutzern teilen, weil dir die Berechtigung fehlt, Nutzer anzusehen. Mit Teams oder allen kannst du weiterhin teilen.'),
     ('en', 'presets.editor.sharing_effect.personal', 'Only you see it, in chat and with your own API keys.'),
     ('de', 'presets.editor.sharing_effect.personal', 'Nur du siehst es, im Chat und mit deinen eigenen API-Schlüsseln.'),
     ('en', 'presets.editor.sharing_effect.owner', 'Only {name} sees it.'),

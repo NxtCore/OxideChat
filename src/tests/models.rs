@@ -449,6 +449,20 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(audited, 2);
+		let metadata: serde_json::Value = sqlx::query_scalar("SELECT metadata FROM audit_logs WHERE event = 'team_models_updated' AND target_id = $1")
+			.bind(direct)
+			.fetch_one(&pool)
+			.await
+			.unwrap();
+		assert_eq!(metadata["before"]["model_ids"], serde_json::json!([]));
+		assert_eq!(metadata["after"]["model_ids"], serde_json::json!([model_id]));
+		let metadata: serde_json::Value = sqlx::query_scalar("SELECT metadata FROM audit_logs WHERE event = 'team_models_updated' AND target_id = $1")
+			.bind(dropped)
+			.fetch_one(&pool)
+			.await
+			.unwrap();
+		assert_eq!(metadata["before"]["model_ids"], serde_json::json!([model_id]));
+		assert_eq!(metadata["after"]["model_ids"], serde_json::json!([]));
 
 		assert!(Model::replace_assignments(&pool, &admin, &model_id, &[Uuid::new_v4()]).await.is_err());
 		assert_eq!(Model::assignments(&pool, &model_id).await.unwrap().targets.len(), 2);

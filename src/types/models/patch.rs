@@ -1,6 +1,6 @@
 use super::Model;
 use crate::logging::AuditLog;
-use crate::types::{AUDIT_TEAM_TARGET, AssignmentKind, AssignmentTarget, AssignmentsResponse, AuditEntry, EVENT_TEAM_MODELS_UPDATED};
+use crate::types::{AUDIT_TEAM_TARGET, AssignmentKind, AssignmentTarget, AssignmentsResponse, AuditEntry, EVENT_TEAM_MODELS_UPDATED, Team};
 use sqlx::types::Json;
 use uuid::Uuid;
 
@@ -57,12 +57,21 @@ impl Model {
 		.await?;
 		let changes = removed.iter().map(|team_id| (team_id, false)).chain(added.iter().map(|team_id| (team_id, true)));
 		for (team_id, granted) in changes {
+			let (provider_ids, model_ids) = Team::stored_model_access(&mut tx, team_id).await?;
+			let mut before: Vec<Uuid> = model_ids.iter().filter(|id| *id != model_id).copied().collect();
+			if !granted {
+				before.push(*model_id);
+				before.sort_unstable();
+			}
 			let entry = AuditEntry {
 				event: EVENT_TEAM_MODELS_UPDATED,
 				actor_id,
 				target_type: AUDIT_TEAM_TARGET,
 				target_id: team_id,
-				metadata: serde_json::json!({ "model_id": model_id, "granted": granted }),
+				metadata: serde_json::json!({
+					"before": { "provider_ids": provider_ids, "model_ids": before },
+					"after": { "provider_ids": provider_ids, "model_ids": model_ids },
+				}),
 			};
 			AuditLog::write(&mut tx, entry).await?;
 		}

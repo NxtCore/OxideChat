@@ -6,7 +6,7 @@ use crate::types::{AssignmentKind, AssignmentRole, AssignmentTarget, Assignments
 use sqlx::postgres::PgArguments;
 use sqlx::query::QueryAs;
 use sqlx::types::Json;
-use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
+use sqlx::{PgConnection, PgExecutor, PgPool, Postgres, Transaction};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
@@ -23,8 +23,8 @@ struct Shares {
 }
 
 impl Shares {
-	async fn load(pool: &PgPool, preset_id: &Uuid) -> Result<Self, sqlx::Error> {
-		let everyone: Option<bool> = sqlx::query_scalar("SELECT shared_with_everyone FROM model_presets WHERE id = $1").bind(preset_id).fetch_optional(pool).await?;
+	async fn load(conn: &mut PgConnection, preset_id: &Uuid) -> Result<Self, sqlx::Error> {
+		let everyone: Option<bool> = sqlx::query_scalar("SELECT shared_with_everyone FROM model_presets WHERE id = $1").bind(preset_id).fetch_optional(&mut *conn).await?;
 		let rows = sqlx::query_as::<_, (String, Uuid, String, String)>(
 			"SELECT 'team', t.id, t.name::text, s.role::text FROM model_preset_shares s JOIN teams t ON t.id = s.team_id WHERE s.preset_id = $1 \
 			 UNION ALL \
@@ -32,7 +32,7 @@ impl Shares {
 			 ORDER BY 1, 3",
 		)
 		.bind(preset_id)
-		.fetch_all(pool)
+		.fetch_all(conn)
 		.await?;
 		Ok(Self {
 			everyone: everyone.unwrap_or(false),
@@ -133,6 +133,7 @@ impl PresetActor {
 			user_id: *user_id,
 			personal,
 			installation_admin,
+			view_users: false,
 			admin_teams: memberships.iter().filter(|(_, admin)| *admin).map(|(team, _)| *team).collect(),
 			teams: memberships.into_iter().map(|(team, _)| team).collect(),
 			editable,
@@ -229,12 +230,14 @@ impl Preset {
 	}
 
 	async fn check_references(pool: &PgPool, actor: &PresetActor, shared: bool, request: &SavePresetRequest) -> Result<(), PresetError> {
-		let base_usable = Model::find_by_id(pool, &request.base_model_id).await?.is_some_and(|model| model.is_enabled)
-			&& Model::can_user_use_model(pool, &actor.user_id, &request.base_model_id).await?;
-		if !base_usable {
-			return Err(PresetError::BaseModelNotAllowed);
-		}
+		Self::check_base_model(pool, actor, &request.base_model_id).await?;
 		Self::check_tools(pool, actor, shared, &request.tool_ids).await
+	}
+
+	async fn check_base_model(pool: &PgPool, actor: &PresetActor, base_model_id: &Uuid) -> Result<(), PresetError> {
+		let base_usable = Model::find_by_id(pool, base_model_id).await?.is_some_and(|model| model.is_enabled)
+			&& Model::can_user_use_model(pool, &actor.user_id, base_model_id).await?;
+		if base_usable { Ok(()) } else { Err(PresetError::BaseModelNotAllowed) }
 	}
 
 	async fn check_tools(pool: &PgPool, actor: &PresetActor, shared: bool, tool_ids: &[Uuid]) -> Result<(), PresetError> {
@@ -296,6 +299,9 @@ impl Preset {
 
 	/// Replaces a preset the actor may edit, audited in the same transaction; its scope never changes after it is created.
 	///
+	/// The base model is only checked against the actor's access when it changes, so editors without access to it can still
+	/// change the rest; a preset never grants model access.
+	///
 	/// # Errors
 	/// Returns [`PresetError::NotFound`] when the actor may not edit the preset, [`PresetError::Forbidden`] when someone
 	/// other than an installation admin turns on a preset an admin turned off, and the errors of [`Preset::create`] otherwise.
@@ -309,7 +315,10 @@ impl Preset {
 		request.team_id = current.team_id;
 		let request = request.normalized()?;
 		let shared = current.scope() != PresetScope::Personal || Shares::exist(pool, id).await?;
-		Self::check_references(pool, actor, shared, &request).await?;
+		if current.base_model_id != Some(request.base_model_id) {
+			Self::check_base_model(pool, actor, &request.base_model_id).await?;
+		}
+		Self::check_tools(pool, actor, shared, &request.tool_ids).await?;
 		let mut tx = pool.begin().await?;
 		let query = sqlx::query_as::<_, Self>(concat!(
 			"UPDATE model_presets SET slug = $2, name = $3, description = $4, icon = $5, base_model_id = $6, system_prompt = $7, \
@@ -348,7 +357,7 @@ impl Preset {
 			PresetScope::Team => (AssignmentKind::Team, self.team_id, self.team_name.clone().unwrap_or_default()),
 			PresetScope::Installation => (AssignmentKind::Everyone, None, String::new()),
 		};
-		let shares = Shares::load(pool, &self.id).await?;
+		let shares = Shares::load(&mut *pool.acquire().await?, &self.id).await?;
 		let everyone = shares.everyone.then(|| AssignmentTarget {
 			kind: AssignmentKind::Everyone,
 			id: None,
@@ -426,7 +435,9 @@ impl Preset {
 		let user_ids: Vec<Uuid> = users.keys().copied().collect();
 		let stored = |roles: &BTreeMap<Uuid, AssignmentRole>| -> Vec<&'static str> { roles.values().map(|role| role.as_str()).collect() };
 
-		let shares = Shares::load(pool, id).await?;
+		let mut tx = pool.begin().await?;
+		sqlx::query("SELECT id FROM model_presets WHERE id = $1 FOR UPDATE").bind(id).execute(&mut *tx).await?;
+		let shares = Shares::load(&mut tx, id).await?;
 		let mut new_teams = teams.iter().filter(|(team, role)| !shares.covers(AssignmentKind::Team, team, **role)).map(|(team, _)| team);
 		let new_user = users.iter().any(|(user, role)| !shares.covers(AssignmentKind::User, user, *role));
 		let allowed = new_teams.all(|team| actor.can_share_with(AssignmentKind::Team, Some(team)))
@@ -437,7 +448,6 @@ impl Preset {
 		}
 		let shared = current.scope() != PresetScope::Personal || everyone || !team_ids.is_empty() || !user_ids.is_empty();
 
-		let mut tx = pool.begin().await?;
 		let preset = sqlx::query_as::<_, Self>(concat!(
 			"UPDATE model_presets SET shared_with_everyone = $2, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING ",
 			preset_columns!()
