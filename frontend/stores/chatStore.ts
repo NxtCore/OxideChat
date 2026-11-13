@@ -41,6 +41,15 @@ export const useChatStore = defineStore('chat', {
 	}),
 
 	getters: {
+		currentSampling(): ChatSampling {
+			return this.activeChat?.sampling ?? this.draftSampling;
+		},
+
+		samplingActiveCount(): number {
+			const {custom, ...values} = this.currentSampling;
+			return Object.values(values).filter(value => value != null).length + Object.keys(custom ?? {}).length;
+		},
+
 		pinnedChats(): Chat[] {
 			return this.chats.filter(c => c.is_pinned && !c.is_archived);
 		},

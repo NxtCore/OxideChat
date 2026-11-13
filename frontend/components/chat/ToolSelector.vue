@@ -3,6 +3,8 @@
 		<ShadPopoverTrigger as-child>
 			<button
 				type="button"
+				data-testid="tool-selector"
+				:aria-label="store.getTranslation('chat.tool_selector.title')"
 				:class="
 					cn(
 						'inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors hover:bg-muted',

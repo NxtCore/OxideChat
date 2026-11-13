@@ -9,9 +9,10 @@
 			>
 				<SlidersHorizontal class="h-4 w-4" />
 				<span v-if="activeCount > 0" class="text-xs font-medium tabular-nums" data-testid="sampling-active-count">{{ activeCount }}</span>
+				<span v-else class="text-xs">{{ store.getTranslation('chat.composer.default') }}</span>
 			</ShadButton>
 		</ShadPopoverTrigger>
-		<ShadPopoverContent class="w-96 max-h-[70vh] overflow-y-auto space-y-4" align="start" data-testid="sampling-panel">
+		<ShadPopoverContent class="w-96 max-w-[calc(100vw-1rem)] max-h-[70vh] overflow-y-auto space-y-4" align="start" data-testid="sampling-panel">
 			<div>
 				<h3 class="text-sm font-semibold text-foreground">{{ t('title') }}</h3>
 				<p class="text-xs text-muted-foreground">{{ t('description') }}</p>
@@ -129,8 +130,8 @@ const saving = ref(false);
 const form = reactive<Record<NumericKey, number | null>>({temperature: null, top_p: null, max_tokens: null, frequency_penalty: null, presence_penalty: null, seed: null});
 const customFields = ref<{key: string; value: string}[]>([]);
 
-const current = computed<ChatSampling>(() => chatStore.activeChat?.sampling ?? chatStore.draftSampling);
-const activeCount = computed(() => numericKeys.filter(key => current.value[key] != null).length + Object.keys(current.value.custom ?? {}).length);
+const current = computed<ChatSampling>(() => chatStore.currentSampling);
+const activeCount = computed(() => chatStore.samplingActiveCount);
 
 function load() {
 	for (const key of numericKeys) form[key] = current.value[key] ?? null;

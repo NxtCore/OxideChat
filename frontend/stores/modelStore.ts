@@ -1,6 +1,6 @@
 import {defineStore} from 'pinia';
 import {useMainStore} from './index';
-import type {ChatMessage, ModelList, PaginatedResponse} from '~/types/chat';
+import type {ChatMessage, ModelList, PaginatedResponse, ProviderOption, ProviderOptionsResponse} from '~/types/chat';
 import type {ComposerModel} from '~/types/presets';
 import {usePresetStore} from './presetStore';
 
@@ -17,6 +17,10 @@ export const useModelStore = defineStore('model', {
 		enabledTools: [] as string[],
 		selectedProviderSlug: null as string | null,
 		providerRoutingMode: 'prefer' as 'prefer' | 'lock',
+		providerOptions: [] as ProviderOption[],
+		providerOptionsModelId: null as string | null,
+		providerOptionsUnavailable: false,
+		providerOptionsLoading: false,
 	}),
 
 	getters: {
@@ -84,6 +88,18 @@ export const useModelStore = defineStore('model', {
 		contextPercentage(): number {
 			if (!this.selectedModel?.context_length) return 0;
 			return Math.min(100, (this.contextTokens / this.selectedModel.context_length) * 100);
+		},
+
+		providerSelectorVisible(): boolean {
+			const selector = useMainStore().base?.chat_provider_selector;
+			const kind = this.selectedModel?.provider?.kind;
+			return !!selector?.enabled && !!kind && selector.provider_kinds.includes(kind);
+		},
+
+		selectedProviderName(): string | null {
+			const slug = this.selectedProviderSlug;
+			if (!slug) return null;
+			return this.providerOptions.find(o => (o.provider_slug || '') === slug)?.provider_name || slug;
 		},
 
 		isFavoriteModel: _state => (model: ModelList) => {
@@ -180,6 +196,30 @@ export const useModelStore = defineStore('model', {
 			this.selectedProviderSlug = settings.provider_slug ?? null;
 			this.providerRoutingMode = settings.provider_routing_mode === 'lock' ? 'lock' : 'prefer';
 			this.enabledTools = Array.isArray(settings.enabled_tools) ? [...settings.enabled_tools] : [];
+		},
+
+		loadProviderOptions(): Promise<void> {
+			const model = this.selectedModel;
+			if (!model) return Promise.resolve();
+			const modelId = baseModelId(model);
+			if (this.providerOptionsModelId === modelId && this.providerOptions.length > 0) return Promise.resolve();
+			return inflight(`provider-options:${modelId}`, async () => {
+				this.providerOptionsLoading = true;
+				this.providerOptionsUnavailable = false;
+				try {
+					const res = await modelProviderOptions<ProviderOptionsResponse>(modelId);
+					this.providerOptions = res.options ?? [];
+					this.providerOptionsUnavailable = res.availability_state === 'USER_UNAVAILABLE';
+					this.providerOptionsModelId = modelId;
+					const picked = this.selectedProviderSlug;
+					if (picked && this.providerOptions.length > 0 && !this.providerOptions.some(o => o.provider_slug === picked)) this.setProviderSelection(null);
+				} catch (error) {
+					console.error('Failed to load provider options:', error);
+					this.providerOptions = [];
+				} finally {
+					this.providerOptionsLoading = false;
+				}
+			});
 		},
 
 		setProviderSelection(slug: string | null, mode?: 'prefer' | 'lock') {

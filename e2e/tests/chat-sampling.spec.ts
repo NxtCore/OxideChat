@@ -2,7 +2,7 @@ import type {Page} from '@playwright/test';
 import {test, expect} from './support/fixtures';
 
 async function pickModel(page: Page, t: (key: string) => string, displayName: string) {
-	await page.locator('button[aria-haspopup="dialog"]').filter({has: page.locator('svg[class*="chevron-down"]')}).first().click();
+	await page.getByTestId('model-selector').click();
 	const search = page.getByPlaceholder(t('chat.model_selector.search_models'));
 	await search.fill(displayName);
 	await page.getByText(displayName, {exact: true}).last().click();
@@ -12,9 +12,12 @@ async function pickModel(page: Page, t: (key: string) => string, displayName: st
 const panel = (page: Page) => page.getByTestId('sampling-panel');
 
 async function openPanel(page: Page) {
-	await page.getByTestId('sampling-selector').click();
+	if (!(await page.getByTestId('composer-settings-panel').isVisible())) await page.getByTestId('composer-settings').click();
+	await page.getByTestId('composer-settings-panel').getByTestId('sampling-selector').click();
 	await expect(panel(page)).toBeVisible();
 }
+
+const chip = (page: Page) => page.getByTestId('composer-settings').getByTestId('composer-chip-sampling');
 
 async function enableParam(page: Page, key: string) {
 	await panel(page).getByTestId(`sampling-param-${key}`).getByRole('button').last().click();
@@ -39,16 +42,16 @@ test.describe('chat sampling options', () => {
 
 			await expect(page.getByText(t('chat.sampling.saved')).first()).toBeVisible();
 			await expect(panel(page)).toBeHidden();
-			await expect(page.getByTestId('sampling-active-count')).toHaveText('2');
+			await expect(chip(page)).toHaveText(t('chat.composer.sampling_chip', {count: 2}));
 			const saved = await api.get(`/api/v1/chats/${chat.id}`);
 			expect(saved.chat.sampling).toEqual({temperature: 0.7, custom: {min_p: 0.05}});
 
 			await page.reload();
-			await expect(page.getByTestId('sampling-active-count')).toHaveText('2');
+			await expect(chip(page)).toHaveText(t('chat.composer.sampling_chip', {count: 2}));
 			await openPanel(page);
 			await expect(panel(page).getByTestId('sampling-custom-key')).toHaveValue('min_p');
 			await panel(page).getByTestId('sampling-reset').click();
-			await expect(page.getByTestId('sampling-active-count')).toHaveCount(0);
+			await expect(chip(page)).toHaveCount(0);
 			expect((await api.get(`/api/v1/chats/${chat.id}`)).chat.sampling).toEqual({});
 		} finally {
 			await api.delete(`/api/v1/chats/${chat.id}`);
@@ -78,7 +81,7 @@ test.describe('chat sampling options', () => {
 		await openPanel(page);
 		await enableParam(page, 'seed');
 		await panel(page).getByTestId('sampling-save').click();
-		await expect(page.getByTestId('sampling-active-count')).toHaveText('1');
+		await expect(chip(page)).toHaveText(t('chat.composer.sampling_chip', {count: 1}));
 
 		const composer = page.locator('textarea').first();
 		await composer.fill('Say ok.');

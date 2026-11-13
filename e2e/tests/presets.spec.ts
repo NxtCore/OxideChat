@@ -12,7 +12,7 @@ async function pickModel(page: Page, t: (key: string) => string, displayName: st
 }
 
 async function openPicker(page: Page) {
-	await page.locator('button[aria-haspopup="dialog"]').filter({has: page.locator('svg[class*="chevron-down"]')}).first().click();
+	await page.getByTestId('model-selector').click();
 }
 
 async function pickPreset(page: Page, key: string) {
@@ -81,7 +81,7 @@ test.describe('presets', () => {
 			expect(assistant.model_id).toBe(seed.model.id);
 
 			await page.reload();
-			await expect(page.locator('button[aria-haspopup="dialog"]').filter({hasText: name})).toBeVisible();
+			await expect(page.getByTestId('model-selector')).toHaveAttribute('title', name);
 
 			await page.goto('/settings/presets');
 			const row = page.locator(`[data-testid="preset-row"][data-preset-key="${key}"]`);
@@ -93,7 +93,7 @@ test.describe('presets', () => {
 
 			await page.goto(chatUrl);
 			await expect(page.getByTestId('preset-fallback-notice')).toBeVisible();
-			await expect(page.locator('button[aria-haspopup="dialog"]').filter({hasText: seed.model.displayName})).toBeVisible();
+			await expect(page.getByTestId('model-selector')).toHaveAttribute('title', seed.model.displayName);
 			await api.delete(`/api/v1/chats/${chatId}`);
 		} finally {
 			if (presetId) await api.delete(`/api/v1/presets/${presetId}`);

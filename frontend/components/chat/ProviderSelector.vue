@@ -24,10 +24,10 @@
 				<ChevronDown class="h-3 w-3 text-muted-foreground" />
 			</button>
 		</PopoverTrigger>
-		<PopoverContent class="w-[560px] p-0 overflow-hidden" align="start" :side-offset="8">
+		<PopoverContent class="w-[560px] max-w-[calc(100vw-1rem)] p-0 overflow-hidden" align="start" :side-offset="8">
 			<div class="flex h-[380px]">
 				<!-- Left: provider list -->
-				<div class="w-[240px] flex flex-col border-r border-border shrink-0">
+				<div class="w-[240px] max-w-[50%] flex flex-col border-r border-border shrink-0">
 					<!-- Search -->
 					<div class="relative border-b border-border">
 						<Search class="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
@@ -278,7 +278,7 @@ import {sanitizeSvg} from '~/composables/useMarkdown';
 import {cn} from '~/lib/utils';
 import {Popover, PopoverContent, PopoverTrigger} from '~/components/ui/popover';
 import {Tooltip, TooltipContent, TooltipTrigger} from '~/components/ui/tooltip';
-import type {ProviderOption, ProviderOptionsResponse} from '~/types/chat';
+import type {ProviderOption} from '~/types/chat';
 
 
 
@@ -290,10 +290,9 @@ const store = useMainStore();
 const iconStore = useIconsStore();
 
 const isOpen = ref(false);
-const loading = ref(false);
-const options = ref<ProviderOption[]>([]);
-const parentUnavailable = ref(false);
-const loadedModelId = ref<string | null>(null);
+const loading = computed(() => modelStore.providerOptionsLoading);
+const options = computed(() => modelStore.providerOptions);
+const parentUnavailable = computed(() => modelStore.providerOptionsUnavailable);
 
 const searchQuery = ref('');
 const sortBy = ref<'recommend' | 'latency' | 'throughput' | 'price' | 'uptime'>('recommend');
@@ -354,17 +353,9 @@ const detailOpt = computed<ProviderOption | null>(() => {
 
 const autoDetails = computed(() => sortedOptions.value[0] ?? null);
 
-const isVisible = computed(() => {
-	const selector = store.base?.chat_provider_selector;
-	const kind = modelStore.selectedModel?.provider?.kind;
-	return !!selector?.enabled && !!kind && selector.provider_kinds.includes(kind);
-});
+const isVisible = computed(() => modelStore.providerSelectorVisible);
 
-const selectedLabel = computed(() => {
-	if (!modelStore.selectedProviderSlug) return store.getTranslation('chat.provider_selector.automatic');
-	const match = options.value.find(o => (o.provider_slug || '') === modelStore.selectedProviderSlug);
-	return match?.provider_name || modelStore.selectedProviderSlug;
-});
+const selectedLabel = computed(() => modelStore.selectedProviderName ?? store.getTranslation('chat.provider_selector.automatic'));
 
 const triggerIcon = computed(() => {
 	if (!modelStore.selectedProviderSlug) return null;
@@ -457,36 +448,9 @@ function selectOption(opt: ProviderOption) {
 	isOpen.value = false;
 }
 
-async function loadOptions() {
-	const model = modelStore.selectedModel;
-	if (!model) return;
-	const modelId = baseModelId(model);
-	if (loadedModelId.value === modelId && options.value.length > 0) return;
-
-	loading.value = true;
-	parentUnavailable.value = false;
-	try {
-		const res = await modelProviderOptions<ProviderOptionsResponse>(modelId);
-		options.value = res.options ?? [];
-		parentUnavailable.value = res.availability_state === 'USER_UNAVAILABLE';
-		loadedModelId.value = modelId;
-		const picked = modelStore.selectedProviderSlug;
-		if (picked && options.value.length > 0 && !options.value.some(o => o.provider_slug === picked)) modelStore.setProviderSelection(null);
-	} catch (error) {
-		console.error('Failed to load provider options:', error);
-		options.value = [];
-	} finally {
-		loading.value = false;
-	}
-}
-
-watch(isVisible, visible => {
-	if (visible) loadOptions();
-}, {immediate: true});
-
 watch(isOpen, open => {
 	if (open) {
-		loadOptions();
+		modelStore.loadProviderOptions();
 	} else {
 		hoveredOpt.value = null;
 		isHoveringAuto.value = false;
