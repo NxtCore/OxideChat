@@ -559,7 +559,8 @@ mod tests {
 #[cfg(test)]
 mod catalog_pricing {
 	use crate::ai::{catalog, catalog_provider};
-	use crate::types::models::ModelPricing;
+	use crate::tests::support::create_user;
+	use crate::types::models::{ModelPricing, PriceRates, PriceSheet, PriceSheetError, PriceTier, PriceWindow};
 	use crate::types::providers::ProviderKind;
 	use rust_decimal::{Decimal, prelude::FromPrimitive};
 	use sqlx::PgPool;
@@ -590,22 +591,45 @@ mod catalog_pricing {
 		Ok(Served { provider_name, model_id })
 	}
 
-	fn manual(input: f64) -> omniference::catalog::ModelPricing {
-		omniference::catalog::ModelPricing {
-			input,
-			output: input * 2.0,
-			cache_read: None,
-			cache_write: None,
-			reasoning: None,
-			input_audio: None,
-			output_audio: None,
-			tiers: Vec::new(),
+	fn rates(input: f64, output: f64) -> PriceRates {
+		PriceRates {
+			input: Some(input),
+			output: Some(output),
+			..PriceRates::default()
 		}
 	}
 
-	async fn models_dev_gpt5() -> Result<omniference::catalog::ModelPricing, Box<dyn Error>> {
+	fn manual(input: f64) -> PriceSheet {
+		PriceSheet {
+			rates: rates(input, input * 2.0),
+			tiers: Some(Vec::new()),
+			..PriceSheet::default()
+		}
+	}
+
+	fn window(start: &str, end: &str) -> PriceWindow {
+		PriceWindow {
+			days: Vec::new(),
+			start: start.to_string(),
+			end: end.to_string(),
+			timezone: "UTC".to_string(),
+			rates: PriceRates {
+				input: Some(0.5),
+				..PriceRates::default()
+			},
+		}
+	}
+
+	async fn models_dev(model: &str) -> Result<omniference::catalog::ModelPricing, Box<dyn Error>> {
 		let provider = catalog_provider("models.dev reference", &ProviderKind::Openai);
-		Ok(catalog().catalog_pricing(&provider, "gpt-5").await.ok_or("gpt-5 has a models.dev price")?)
+		Ok(catalog().catalog_pricing(&provider, model).await.ok_or("model has a models.dev price")?)
+	}
+
+	async fn audit_events(pool: &PgPool, model_id: &Uuid) -> Result<Vec<String>, sqlx::Error> {
+		sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_type = 'model' AND target_id = $1 ORDER BY xmin::text::bigint")
+			.bind(model_id)
+			.fetch_all(pool)
+			.await
 	}
 
 	#[tokio::test]
@@ -620,13 +644,14 @@ mod catalog_pricing {
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn a_model_without_a_manual_price_reports_the_models_dev_price(pool: PgPool) -> TestResult {
-		let reference = models_dev_gpt5().await?;
+		let reference = models_dev("gpt-5").await?;
 		let served = serve(&pool, "gpt-5").await?;
 
 		let pricing = ModelPricing::effective(&pool, &served.model_id).await?.ok_or("model missing")?;
 		assert_eq!(pricing.reported_input, Decimal::from_f64(reference.input));
 		assert_eq!(pricing.reported_output, Decimal::from_f64(reference.output));
 		assert!(pricing.override_pricing.is_none());
+		assert_eq!(pricing.effective, pricing.catalog);
 		assert_eq!(Some(pricing.effective_input), pricing.reported_input);
 
 		let tokens = crate::types::TokenEstimate { input: 1_000_000, output: 0 };
@@ -638,33 +663,140 @@ mod catalog_pricing {
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn a_manual_price_reaches_omniference_for_its_provider_only(pool: PgPool) -> TestResult {
-		let reference = models_dev_gpt5().await?;
+		let reference = models_dev("gpt-5").await?;
 		let priced = serve(&pool, "gpt-5").await?;
 		let other = serve(&pool, "gpt-5").await?;
+		let actor = create_user(&pool).await?;
 		let priced_provider = catalog_provider(&priced.provider_name, &ProviderKind::Openai);
 		let other_provider = catalog_provider(&other.provider_name, &ProviderKind::Openai);
 
-		let saved = ModelPricing::upsert_override(&pool, &priced.model_id, &serde_json::to_value(manual(42.0))?).await?;
+		let saved = ModelPricing::save_override(&pool, &priced.model_id, manual(42.0), &actor).await?;
 		assert_eq!(saved.effective_input, Decimal::from(42));
 		assert_eq!(saved.reported_input, Decimal::from_f64(reference.input));
 		let untouched = ModelPricing::effective(&pool, &other.model_id).await?.ok_or("model missing")?;
 		assert_eq!(untouched.reported_input, Decimal::from_f64(reference.input));
 		assert!(untouched.override_pricing.is_none());
 
-		assert_eq!(catalog().effective_pricing(&priced_provider, "gpt-5").await, Some(manual(42.0)));
+		let engine_price = catalog().effective_pricing(&priced_provider, "gpt-5").await.ok_or("override missing")?;
+		assert_eq!((engine_price.input, engine_price.output), (42.0, 84.0));
+		assert!(engine_price.tiers.is_empty());
 		assert_eq!(catalog().effective_pricing(&other_provider, "gpt-5").await, Some(reference));
-		let overrides = ModelPricing::engine_overrides(&pool).await?;
-		assert_eq!(overrides, vec![(priced.provider_name.clone(), "gpt-5".to_string(), manual(42.0))]);
+		let overrides = ModelPricing::engine_overrides(&pool, &catalog()).await?;
+		assert_eq!(overrides.len(), 1);
+		assert_eq!((overrides[0].0.as_str(), overrides[0].1.as_str()), (priced.provider_name.as_str(), "gpt-5"));
 
-		ModelPricing::delete_override(&pool, &priced.model_id).await?;
+		ModelPricing::delete_override(&pool, &priced.model_id, &actor).await?;
 		assert_eq!(catalog().pricing_override(&priced_provider, "gpt-5").await, None);
-		assert!(ModelPricing::engine_overrides(&pool).await?.is_empty());
+		assert!(ModelPricing::engine_overrides(&pool, &catalog()).await?.is_empty());
+		assert_eq!(audit_events(&pool, &priced.model_id).await?, vec!["model_pricing_updated", "model_pricing_deleted"]);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_partial_override_keeps_the_catalog_rates_and_tiers_it_leaves_unset(pool: PgPool) -> TestResult {
+		let reference = models_dev("gpt-5.4").await?;
+		assert!(!reference.tiers.is_empty(), "gpt-5.4 has context tiers on models.dev");
+		let served = serve(&pool, "gpt-5.4").await?;
+		let actor = create_user(&pool).await?;
+		let sheet = PriceSheet {
+			rates: PriceRates {
+				input: Some(1.0),
+				..PriceRates::default()
+			},
+			windows: Some(vec![window("16:30", "00:30")]),
+			..PriceSheet::default()
+		};
+
+		let saved = ModelPricing::save_override(&pool, &served.model_id, sheet, &actor).await?;
+		let effective = saved.effective.ok_or("effective price missing")?;
+		let summary = effective.summary.ok_or("summary missing")?;
+		let effective = effective.price;
+		assert_eq!(effective.rates.input, Some(1.0));
+		assert_eq!(effective.rates.output, Some(reference.output));
+		assert_eq!(effective.tiers.as_ref().map(Vec::len), Some(reference.tiers.len()));
+		assert_eq!(summary.windows, 1);
+		assert!(summary.input.min <= 0.5 && summary.output.max > reference.output);
+
+		let engine_price = catalog()
+			.effective_pricing(&catalog_provider(&served.provider_name, &ProviderKind::Openai), "gpt-5.4")
+			.await
+			.ok_or("override missing")?;
+		assert_eq!(engine_price.tiers.len(), reference.tiers.len());
+		assert_eq!(engine_price.windows.len(), 1);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn removing_an_override_falls_back_to_the_catalog_tiers(pool: PgPool) -> TestResult {
+		let reference = models_dev("gpt-5.4").await?;
+		let served = serve(&pool, "gpt-5.4").await?;
+		let actor = create_user(&pool).await?;
+
+		let saved = ModelPricing::save_override(&pool, &served.model_id, manual(1.0), &actor).await?;
+		assert_eq!(saved.effective.and_then(|sheet| sheet.price.tiers).map(|tiers| tiers.len()), Some(0));
+		ModelPricing::delete_override(&pool, &served.model_id, &actor).await?;
+
+		let pricing = ModelPricing::effective(&pool, &served.model_id).await?.ok_or("model missing")?;
+		assert_eq!(pricing.effective.and_then(|sheet| sheet.price.tiers).map(|tiers| tiers.len()), Some(reference.tiers.len()));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn budget_estimates_use_the_context_tier_the_prompt_reaches(pool: PgPool) -> TestResult {
+		let reference = models_dev("gpt-5.4").await?;
+		let tier = reference.tiers.iter().min_by_key(|tier| tier.min_context_tokens).ok_or("no tier")?;
+		let tier_input = tier.input.ok_or("tier has no input rate")?;
+		let served = serve(&pool, "gpt-5.4").await?;
+
+		let tokens = crate::types::TokenEstimate { input: u64::from(tier.min_context_tokens), output: 0 };
+		let estimate = ModelPricing::estimate_cost(&pool, &served.model_id, tokens).await?;
+		let expected = Decimal::from_f64(tier_input * f64::from(tier.min_context_tokens) / 1_000_000.0).ok_or("decimal")?;
+		assert_eq!(estimate.round_dp(6), expected.round_dp(6));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn invalid_prices_are_refused_and_not_stored(pool: PgPool) -> TestResult {
+		let known = serve(&pool, "gpt-5").await?;
+		let unknown = serve(&pool, "in-house-model").await?;
+		let actor = create_user(&pool).await?;
+		let only_input = PriceSheet {
+			rates: PriceRates {
+				input: Some(1.0),
+				..PriceRates::default()
+			},
+			..PriceSheet::default()
+		};
+		let negative = PriceSheet {
+			rates: rates(-1.0, 1.0),
+			..PriceSheet::default()
+		};
+		let overlapping = PriceSheet {
+			windows: Some(vec![window("22:00", "02:00"), window("01:00", "03:00")]),
+			..PriceSheet::default()
+		};
+		let zero_tier = PriceSheet {
+			tiers: Some(vec![PriceTier {
+				min_context_tokens: 0,
+				rates: rates(1.0, 1.0),
+			}]),
+			..PriceSheet::default()
+		};
+
+		let refused = |result: Result<ModelPricing, PriceSheetError>| result.err().map(|error| error.reason());
+		assert_eq!(refused(ModelPricing::save_override(&pool, &unknown.model_id, only_input, &actor).await), Some("missing_base_rates"));
+		assert_eq!(refused(ModelPricing::save_override(&pool, &known.model_id, negative, &actor).await), Some("invalid_rate"));
+		assert_eq!(refused(ModelPricing::save_override(&pool, &known.model_id, overlapping, &actor).await), Some("overlapping_windows"));
+		assert_eq!(refused(ModelPricing::save_override(&pool, &known.model_id, zero_tier, &actor).await), Some("zero_threshold"));
+		assert!(ModelPricing::engine_overrides(&pool, &catalog()).await?.is_empty());
+		assert!(audit_events(&pool, &known.model_id).await?.is_empty());
 		Ok(())
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
 	async fn a_model_the_catalog_does_not_know_has_no_price_and_counts_as_priced(pool: PgPool) -> TestResult {
 		let served = serve(&pool, "in-house-model").await?;
+		let actor = create_user(&pool).await?;
 
 		let pricing = ModelPricing::effective(&pool, &served.model_id).await?.ok_or("model missing")?;
 		assert_eq!((pricing.reported_input, pricing.reported_output), (None, None));
@@ -674,9 +806,150 @@ mod catalog_pricing {
 		assert!(!ModelPricing::is_free(&pool, &served.model_id).await?);
 		assert!(ModelPricing::priced_model_ids(&pool).await?.contains(&served.model_id));
 
-		ModelPricing::upsert_override(&pool, &served.model_id, &serde_json::to_value(manual(0.0))?).await?;
+		ModelPricing::save_override(&pool, &served.model_id, manual(0.0), &actor).await?;
 		assert!(ModelPricing::is_free(&pool, &served.model_id).await?);
 		assert!(!ModelPricing::priced_model_ids(&pool).await?.contains(&served.model_id));
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod price_sheets {
+	use crate::types::models::{PriceRates, PriceServiceTier, PriceSheet, PriceTier, PriceWeekday, PriceWindow};
+	use std::collections::BTreeMap;
+	use std::error::Error;
+
+	type TestResult = Result<(), Box<dyn Error>>;
+
+	fn rates(input: f64, output: f64) -> PriceRates {
+		PriceRates {
+			input: Some(input),
+			output: Some(output),
+			..PriceRates::default()
+		}
+	}
+
+	fn window(days: Vec<PriceWeekday>, start: &str, end: &str, timezone: &str) -> PriceWindow {
+		PriceWindow {
+			days,
+			start: start.to_string(),
+			end: end.to_string(),
+			timezone: timezone.to_string(),
+			rates: PriceRates::default(),
+		}
+	}
+
+	fn catalog() -> PriceSheet {
+		PriceSheet {
+			rates: PriceRates {
+				cache_read: Some(0.25),
+				..rates(2.0, 8.0)
+			},
+			tiers: Some(vec![PriceTier {
+				min_context_tokens: 200_001,
+				rates: rates(4.0, 12.0),
+			}]),
+			..PriceSheet::default()
+		}
+	}
+
+	fn with_windows(windows: Vec<PriceWindow>) -> PriceSheet {
+		PriceSheet {
+			windows: Some(windows),
+			..PriceSheet::default()
+		}
+	}
+
+	#[test]
+	fn an_override_fills_only_what_it_sets() {
+		let sheet = PriceSheet {
+			rates: PriceRates {
+				output: Some(6.0),
+				..PriceRates::default()
+			},
+			..PriceSheet::default()
+		};
+		let merged = sheet.over(Some(&catalog()));
+		assert_eq!(merged.rates.input, Some(2.0));
+		assert_eq!(merged.rates.output, Some(6.0));
+		assert_eq!(merged.rates.cache_read, Some(0.25));
+		assert_eq!(merged.tiers, catalog().tiers);
+
+		let no_tiers = PriceSheet { tiers: Some(Vec::new()), ..sheet }.over(Some(&catalog()));
+		assert_eq!(no_tiers.tiers, Some(Vec::new()));
+	}
+
+	#[test]
+	fn a_sheet_round_trips_through_the_engine_price() -> TestResult {
+		let mut sheet = catalog();
+		sheet.service_tiers = Some(BTreeMap::from([("flex".to_string(), PriceServiceTier { rates: rates(1.0, 4.0), tiers: Vec::new() })]));
+		sheet.windows = Some(vec![window(vec![PriceWeekday::Mon], "16:30", "00:30", "Asia/Shanghai")]);
+		let engine = sheet.to_engine().ok_or("priced sheet")?;
+		assert_eq!(engine.service_tiers.len(), 1);
+		assert_eq!(engine.windows.len(), 1);
+		assert_eq!(PriceSheet::from_engine(&engine).over(None).to_engine(), Some(engine));
+		assert!(PriceSheet::default().to_engine().is_none());
+		Ok(())
+	}
+
+	#[test]
+	fn the_summary_spans_every_layer() -> TestResult {
+		let mut sheet = catalog();
+		sheet.service_tiers = Some(BTreeMap::from([("flex".to_string(), PriceServiceTier { rates: rates(1.0, 4.0), tiers: Vec::new() })]));
+		let summary = sheet.summary().ok_or("summary")?;
+		assert_eq!((summary.input.min, summary.input.max), (1.0, 4.0));
+		assert_eq!((summary.output.min, summary.output.max), (4.0, 12.0));
+		assert_eq!(summary.context_tiers, vec![200_001]);
+		assert_eq!(summary.service_tiers, vec!["flex".to_string()]);
+		assert_eq!(summary.windows, 0);
+		Ok(())
+	}
+
+	#[test]
+	fn normalizing_sorts_tiers_and_lowercases_service_tiers() -> TestResult {
+		let sheet = PriceSheet {
+			tiers: Some(vec![
+				PriceTier { min_context_tokens: 500, rates: PriceRates::default() },
+				PriceTier { min_context_tokens: 100, rates: PriceRates::default() },
+			]),
+			service_tiers: Some(BTreeMap::from([(" Flex ".to_string(), PriceServiceTier::default())])),
+			..PriceSheet::default()
+		}
+		.normalized();
+		let thresholds: Vec<u32> = sheet.tiers.ok_or("tiers")?.iter().map(|tier| tier.min_context_tokens).collect();
+		assert_eq!(thresholds, vec![100, 500]);
+		assert!(sheet.service_tiers.ok_or("service tiers")?.contains_key("flex"));
+		Ok(())
+	}
+
+	#[test]
+	fn windows_are_checked_for_overlaps_per_timezone() {
+		let base = Some(&catalog());
+		let check = |windows| with_windows(windows).validate(base).err().map(|error| error.reason());
+		assert_eq!(check(vec![window(vec![], "16:30", "00:30", "UTC"), window(vec![], "08:00", "12:00", "UTC")]), None);
+		assert_eq!(check(vec![window(vec![], "16:30", "00:30", "UTC"), window(vec![], "00:00", "01:00", "UTC")]), Some("overlapping_windows"));
+		assert_eq!(check(vec![window(vec![], "16:30", "00:30", "UTC"), window(vec![], "00:00", "01:00", "Europe/Berlin")]), None);
+		assert_eq!(
+			check(vec![window(vec![PriceWeekday::Sun], "23:00", "02:00", "UTC"), window(vec![PriceWeekday::Mon], "01:00", "03:00", "UTC")]),
+			Some("overlapping_windows")
+		);
+		assert_eq!(
+			check(vec![window(vec![PriceWeekday::Sat], "23:00", "02:00", "UTC"), window(vec![PriceWeekday::Mon], "01:00", "03:00", "UTC")]),
+			None
+		);
+		assert_eq!(check(vec![window(vec![], "09:00", "09:00", "UTC")]), Some("empty_window"));
+		assert_eq!(check(vec![window(vec![], "25:00", "09:00", "UTC")]), Some("invalid_time"));
+		assert_eq!(check(vec![window(vec![], "08:00", "09:00", "Mars/Olympus")]), Some("invalid_timezone"));
+	}
+
+	#[test]
+	fn service_tier_names_are_checked() {
+		let sheet = |name: &str| PriceSheet {
+			service_tiers: Some(BTreeMap::from([(name.to_string(), PriceServiceTier::default())])),
+			..PriceSheet::default()
+		};
+		assert!(sheet("priority").validate(Some(&catalog())).is_ok());
+		assert_eq!(sheet("").validate(Some(&catalog())).err().map(|error| error.reason()), Some("invalid_service_tier"));
+		assert_eq!(sheet("has space").validate(Some(&catalog())).err().map(|error| error.reason()), Some("invalid_service_tier"));
 	}
 }

@@ -219,6 +219,12 @@ pub struct GatewayModelResponse {
 	pub price_input: Option<Decimal>,
 	#[cfg_attr(test, ts(type = "string | null"))]
 	pub price_output: Option<Decimal>,
+	/// Price ranges and special rates of the price the model is billed at.
+	#[sqlx(skip)]
+	pub price: Option<crate::types::models::PriceSummary>,
+	#[serde(skip)]
+	#[cfg_attr(test, ts(skip))]
+	pub override_pricing: Option<serde_json::Value>,
 	pub team_ids: Vec<Uuid>,
 }
 

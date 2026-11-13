@@ -20,32 +20,7 @@
 			<Loader2 class="h-5 w-5 animate-spin" />
 		</div>
 
-		<div class="rounded-lg border border-border bg-card p-4">
-			<div class="mb-3 flex items-center justify-between gap-3">
-				<div>
-					<h4 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.models.editor.pricing') }}</h4>
-					<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.pricing_desc') }}</p>
-				</div>
-				<ShadButton v-if="pricing?.override_pricing != null" variant="outline" size="sm" data-testid="pricing-remove-override" @click="emit('removeOverride')">
-					<Trash2 class="h-4 w-4" />
-				</ShadButton>
-			</div>
-			<div class="grid gap-3 md:grid-cols-2">
-				<div class="rounded-md bg-muted/40 p-3 text-sm">
-					<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.reported_price') }}</p>
-					<p class="mt-1 font-medium">{{ formatPricingPair(pricing?.reported_input, pricing?.reported_output) }}</p>
-				</div>
-				<div class="rounded-md bg-muted/40 p-3 text-sm">
-					<p class="text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.effective_price') }}</p>
-					<p class="mt-1 font-medium">{{ formatPricingPair(pricing?.effective_input, pricing?.effective_output) }}</p>
-				</div>
-				<div v-for="field in pricingFields" :key="field" class="space-y-1.5">
-					<ShadLabel>{{ store.getTranslation(`settings.models.editor.override_${field}`) }}</ShadLabel>
-					<ShadInput v-model="form.pricing[field]" type="number" min="0" step="0.000001" :data-testid="`pricing-${field}`" />
-				</div>
-			</div>
-			<p class="mt-2 text-xs text-muted-foreground">{{ store.getTranslation('settings.models.editor.pricing_unit') }}</p>
-		</div>
+		<SettingsModelsPricingEditor :draft="form.pricing" :pricing="pricing" @remove-override="emit('removeOverride')" />
 
 		<div v-if="!providerOptionsLoading && providerParentUnavailable" class="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
 			{{ store.getTranslation('settings.models.editor.providers_user_unavailable') }}
@@ -91,14 +66,15 @@
 </template>
 
 <script setup lang="ts">
-import {Loader2, RotateCw, Trash2} from 'lucide-vue-next';
+import {Loader2, RotateCw} from 'lucide-vue-next';
+import type {ModelPricing} from '~/types/generated/ModelPricing';
 import {useMainStore} from '@/stores';
 
 const props = defineProps<{
 	modelId: string;
 	active: boolean;
 	form: Record<string, any>;
-	pricing: Record<string, any> | null;
+	pricing: ModelPricing | null;
 }>();
 
 const emit = defineEmits<{removeOverride: []}>();
@@ -109,7 +85,6 @@ const providerOptions = ref<Record<string, any> | null>(null);
 const providerOptionsLoading = ref(false);
 const providerOptionsLoaded = ref(false);
 const providerParentUnavailable = computed(() => providerOptions.value?.availability_state === 'USER_UNAVAILABLE');
-const pricingFields = ['input', 'output', 'reasoning', 'cache_read', 'cache_write'] as const;
 
 const columns = [
 	{key: 'provider'},
@@ -153,11 +128,6 @@ function formatPrice(opt: Record<string, any>): string {
 	if (opt.price_input == null && opt.price_output == null) return '—';
 	const fmt = (v: number | null | undefined) => (v == null ? '—' : '$' + Number(v).toFixed(2));
 	return `${fmt(opt.price_input)} / ${fmt(opt.price_output)}`;
-}
-
-function formatPricingPair(input: string | number | null | undefined, output: string | number | null | undefined): string {
-	const fmt = (value: string | number | null | undefined) => (value == null ? '-' : '$' + Number(value).toFixed(6));
-	return `${fmt(input)} / ${fmt(output)}`;
 }
 
 async function loadProviderOptions(force: boolean) {

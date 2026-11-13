@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
 	use crate::types::permissions::ALL;
-	use crate::types::models::{ModelListAdmin, ModelListPublic, ProviderTab};
+	use crate::types::models::{ModelListAdmin, ModelListPublic, ModelPricing, PriceSheet, PriceSummary, ProviderTab};
 	use crate::types::catalog::ModelProviderOptions;
 	use crate::types::oauth::{OAuthPresetResponse, OAuthProviderResponse, PublicOAuthProvider, SaveOAuthProviderRequest};
 	use crate::types::providers::{ProviderBillingOverviewResponse, ProviderResponse, TestProviderResponse, UpdateProviderBillingRequest};
@@ -74,6 +74,9 @@ mod tests {
 			McpDiscoveryResponse,
 			McpServerResponse,
 			ModelListAdmin,
+			ModelPricing,
+			PriceSheet,
+			PriceSummary,
 			ModelListPublic,
 			Page<Dummy>,
 			PreferencesResponse,

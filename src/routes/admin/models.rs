@@ -129,21 +129,14 @@ pub async fn get_model_pricing(State(state): State<Arc<JobState>>, auth: AuthUse
 pub async fn put_model_pricing(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<ModelPricingOverrideRequest>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
 
-	Model::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
-	let pricing_json = serde_json::to_value(&req.pricing).map_err(|error| {
-		tracing::error!("Failed to serialize pricing override: {error}");
-		ErrorCode::InternalError
-	})?;
-	let pricing = ModelPricing::upsert_override(&state.db, &id, &pricing_json).await?;
-
-	Ok(ResponseBuilder::new(ResponseBody::Json(pricing)).build())
+	json_ok(ModelPricing::save_override(&state.db, &id, req.pricing, &auth.id).await?)
 }
 
 pub async fn delete_model_pricing(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
 
 	Model::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
-	ModelPricing::delete_override(&state.db, &id).await?;
+	ModelPricing::delete_override(&state.db, &id, &auth.id).await?;
 
 	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).build())
 }
@@ -238,16 +231,13 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, auth: AuthUser, Pat
 		ModelConfig::patch_system_config(&mut tx, &id, &config_fields).await?;
 	}
 
-	if let Some(ref pricing) = req.pricing {
-		let pricing_json = serde_json::to_value(pricing).map_err(|error| {
-			tracing::error!("Failed to serialize pricing override: {error}");
-			ErrorCode::InternalError
-		})?;
-		ModelPricing::store_override(&mut *tx, &id, &pricing_json).await?;
+	let has_pricing = req.pricing.is_some();
+	if let Some(pricing) = req.pricing {
+		ModelPricing::store_override(&mut tx, &id, pricing, &auth.id).await?;
 	}
 
 	tx.commit().await?;
-	if req.pricing.is_some() {
+	if has_pricing {
 		ModelPricing::push_to_engine(&state.db, &id).await?;
 	}
 

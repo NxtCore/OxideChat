@@ -7,11 +7,13 @@ use sqlx::types::Json;
 use uuid::Uuid;
 
 mod patch;
+mod pricing;
 mod repository;
 mod requests;
 mod responses;
 mod rows;
 
+pub use pricing::*;
 pub use requests::*;
 pub use responses::*;
 
@@ -52,16 +54,27 @@ pub struct ModelSyncSummary {
 	pub removed: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// A model's price: the catalog's, the manual override and the merged price requests are billed at.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ModelPricing {
 	pub model_id: Uuid,
+	#[cfg_attr(test, ts(type = "string | null"))]
 	pub reported_input: Option<Decimal>,
+	#[cfg_attr(test, ts(type = "string | null"))]
 	pub reported_output: Option<Decimal>,
-	pub override_pricing: Option<Value>,
+	pub override_pricing: Option<PriceSheet>,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub effective_input: Decimal,
+	#[cfg_attr(test, ts(type = "string"))]
 	pub effective_output: Decimal,
-	/// The full price Omniference calculates costs with: the manual price, else the catalog's.
+	/// The price Omniference's catalog knows for the model's provider.
+	pub catalog: Option<PricedSheet>,
+	/// The override on top of the catalog price.
+	pub effective: Option<PricedSheet>,
+	/// The full price Omniference calculates costs with.
 	#[serde(skip)]
+	#[cfg_attr(test, ts(skip))]
 	pub pricing: Option<omniference::catalog::ModelPricing>,
 }
 

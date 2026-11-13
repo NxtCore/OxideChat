@@ -378,6 +378,8 @@ mod accounting {
 				},
 				finish_reason: None,
 				time_to_first_token: None,
+				started_at: std::time::SystemTime::now(),
+				service_tier: None,
 			});
 		}
 		queue.shutdown().await;
