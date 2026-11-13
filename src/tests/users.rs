@@ -263,7 +263,7 @@ mod overview {
 		let grant = other.replace_assignments(&pool, &weak_actor, &replace(&[user_role, admin_role], &[])).await;
 		assert!(matches!(grant, Err(RoleError::PermissionNotHeld)));
 		let demote = strong.replace_assignments(&pool, &weak_actor, &replace(&[user_role], &[team])).await;
-		assert!(matches!(demote, Err(RoleError::PermissionNotHeld)));
+		assert!(matches!(demote, Err(RoleError::Outranked)));
 		let move_out = strong.replace_assignments(&pool, &weak_actor, &replace(&[user_role, admin_role], &[])).await;
 		assert!(matches!(move_out, Err(RoleError::Outranked)));
 		assert!(strong.assignments(&pool, &weak_actor).await?.kinds.is_empty());
