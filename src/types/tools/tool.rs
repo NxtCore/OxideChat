@@ -384,8 +384,8 @@ impl Tool {
 	}
 
 	/// Whether any of the tools with these IDs belongs to a user rather than the installation.
-	pub async fn any_personal(pool: &sqlx::PgPool, ids: &[Uuid]) -> Result<bool, sqlx::Error> {
-		sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM tools WHERE id = ANY($1) AND owner_id IS NOT NULL)").bind(ids).fetch_one(pool).await
+	pub async fn any_personal(executor: impl sqlx::PgExecutor<'_>, ids: &[Uuid]) -> Result<bool, sqlx::Error> {
+		sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM tools WHERE id = ANY($1) AND owner_id IS NOT NULL)").bind(ids).fetch_one(executor).await
 	}
 
 	/// Fetch enabled tools by id that the user may use (owned by the user or global).

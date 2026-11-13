@@ -1,7 +1,6 @@
-use crate::types::Team;
 use crate::types::user::User;
+use crate::types::{Role, RoleError};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 impl User {
 	pub async fn update(&mut self, pool: &PgPool, email: Option<&str>, username: Option<&str>) -> Result<(), sqlx::Error> {
@@ -19,8 +18,16 @@ impl User {
 		Ok(())
 	}
 
-	pub async fn delete(&self, pool: &PgPool) -> Result<bool, sqlx::Error> {
-		let result = sqlx::query("DELETE FROM users WHERE id = $1").bind(self.id).execute(pool).await?;
+	/// Deletes the user unless nobody could manage roles afterwards.
+	///
+	/// # Errors
+	/// Returns [`RoleError::LockOut`] when the user was the last one able to manage roles, and the database error when a statement fails.
+	pub async fn delete(&self, pool: &PgPool) -> Result<bool, RoleError> {
+		let mut tx = pool.begin().await?;
+		let held_before = Role::lock_managers(&mut tx).await?;
+		let result = sqlx::query("DELETE FROM users WHERE id = $1").bind(self.id).execute(&mut *tx).await?;
+		Role::check_managers_kept(&mut tx, held_before).await?;
+		tx.commit().await?;
 		Ok(result.rows_affected() > 0)
 	}
 
@@ -64,9 +71,5 @@ impl User {
 			.execute(pool)
 			.await?;
 		Ok(())
-	}
-
-	pub async fn set_teams(&self, pool: &PgPool, team_ids: &[Uuid]) -> Result<(), sqlx::Error> {
-		Team::set_user_teams(pool, &self.id, team_ids).await
 	}
 }

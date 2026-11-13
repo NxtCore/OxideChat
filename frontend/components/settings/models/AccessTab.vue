@@ -37,12 +37,25 @@ const {data, load, replace} = useAssignments();
 const teams = ref<AssignmentOption[]>([]);
 const path = `/api/v1/admin/models/${props.modelId}/assignments`;
 
+async function loadTeams() {
+	const options: AssignmentOption[] = [];
+	try {
+		for (let page = 1; ; page++) {
+			const list = await adminTeams({page, size: 200});
+			options.push(...(list?.items ?? []).map(team => ({kind: 'team' as const, id: team.id, label: team.name})));
+			if (!list?.has_more) break;
+		}
+	} catch (e: any) {
+		store.toast(store.getTranslation('assignments.load_error'), {type: 'error', description: errorMessage(e, '')});
+	}
+	teams.value = options;
+}
+
 watch(
 	() => props.active,
 	async active => {
 		if (!active || data.value) return;
-		const [, list] = await Promise.all([load(path), adminTeams({size: 200})]);
-		teams.value = (list?.items ?? []).map(team => ({kind: 'team' as const, id: team.id, label: team.name}));
+		await Promise.all([load(path), loadTeams()]);
 	},
 	{immediate: true},
 );

@@ -6,7 +6,7 @@ use crate::types::{AssignmentKind, AssignmentRole, AssignmentTarget, Assignments
 use sqlx::postgres::PgArguments;
 use sqlx::query::QueryAs;
 use sqlx::types::Json;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
@@ -47,8 +47,13 @@ impl Shares {
 			.any(|(stored, target, _, stored_role)| AssignmentKind::from_stored(stored) == kind && target == id && AssignmentRole::from_stored(stored_role) >= role)
 	}
 
-	fn is_empty(&self) -> bool {
-		!self.everyone && self.rows.is_empty()
+	/// Whether the preset is shared with anyone on top of its own scope.
+	async fn exist(executor: impl PgExecutor<'_>, preset_id: &Uuid) -> Result<bool, sqlx::Error> {
+		sqlx::query_scalar("SELECT shared_with_everyone OR EXISTS (SELECT 1 FROM model_preset_shares WHERE preset_id = $1) FROM model_presets WHERE id = $1")
+			.bind(preset_id)
+			.fetch_optional(executor)
+			.await
+			.map(|shared| shared.unwrap_or(false))
 	}
 }
 
@@ -303,7 +308,7 @@ impl Preset {
 		request.scope = Some(current.scope());
 		request.team_id = current.team_id;
 		let request = request.normalized()?;
-		let shared = current.scope() != PresetScope::Personal || !Shares::load(pool, id).await?.is_empty();
+		let shared = current.scope() != PresetScope::Personal || Shares::exist(pool, id).await?;
 		Self::check_references(pool, actor, shared, &request).await?;
 		let mut tx = pool.begin().await?;
 		let query = sqlx::query_as::<_, Self>(concat!(
@@ -319,6 +324,9 @@ impl Preset {
 			.await
 			.map_err(map_write_error)?
 			.ok_or(PresetError::NotFound)?;
+		if !shared && Shares::exist(&mut *tx, id).await? && Tool::any_personal(&mut *tx, &preset.tool_ids).await? {
+			return Err(PresetError::ToolsNotAllowed);
+		}
 		audit(&mut tx, EVENT_UPDATED, &actor.user_id, &preset).await?;
 		tx.commit().await?;
 		Ok(preset)
@@ -428,9 +436,6 @@ impl Preset {
 			return Err(PresetError::Forbidden);
 		}
 		let shared = current.scope() != PresetScope::Personal || everyone || !team_ids.is_empty() || !user_ids.is_empty();
-		if shared && Tool::any_personal(pool, &current.tool_ids).await? {
-			return Err(PresetError::ToolsNotAllowed);
-		}
 
 		let mut tx = pool.begin().await?;
 		let preset = sqlx::query_as::<_, Self>(concat!(
@@ -442,6 +447,9 @@ impl Preset {
 		.fetch_optional(&mut *tx)
 		.await?
 		.ok_or(PresetError::NotFound)?;
+		if shared && Tool::any_personal(&mut *tx, &preset.tool_ids).await? {
+			return Err(PresetError::ToolsNotAllowed);
+		}
 		sqlx::query("DELETE FROM model_preset_shares WHERE preset_id = $1").bind(id).execute(&mut *tx).await?;
 		sqlx::query(
 			"INSERT INTO model_preset_shares (preset_id, team_id, user_id, role) \

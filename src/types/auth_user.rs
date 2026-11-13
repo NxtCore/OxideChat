@@ -19,11 +19,7 @@ impl AuthUser {
 	///
 	/// Returns `InsufficientPermissions` when the permission is missing and a server error when the lookup fails.
 	pub async fn require(&self, pool: &PgPool, permission: &str) -> Result<(), AppError> {
-		if self.0.check_permission(pool, permission).await? {
-			Ok(())
-		} else {
-			Err(ErrorCode::InsufficientPermissions.into())
-		}
+		self.require_permissions(pool, permission).await.map(|_| ())
 	}
 
 	/// Checks a permission like [`AuthUser::require`] and returns every permission the user holds, for callers that

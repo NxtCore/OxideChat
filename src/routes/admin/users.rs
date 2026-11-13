@@ -6,7 +6,7 @@ use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
 use crate::types::{
 	AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, ReplaceAssignmentsRequest, Role, RoleError,
-	UpdateUserRequest, User, json_ok,
+	Team, UpdateUserRequest, User, json_ok,
 };
 use crate::utils::auth::{SESSION_COOKIE_NAME, hash_password, validate_email, validate_password, validate_username};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
@@ -126,7 +126,7 @@ pub async fn create_user(State(state): State<Arc<JobState>>, actor: AuthUser, Js
 	new_user.set_roles(&state.db, &req.roles).await.map_err(AppError::database)?;
 
 	if let Some(team_ids) = &req.team_ids {
-		new_user.set_teams(&state.db, team_ids).await.map_err(AppError::database)?;
+		Team::set_user_teams(&state.db, &new_user.id, team_ids).await.map_err(AppError::database)?;
 	}
 
 	AuditLog::log(&state.db, LogEvent::UserRegistered, Some(actor.id), Some(EntityType::User), Some(new_user.id));
@@ -183,7 +183,7 @@ pub async fn delete_user(State(state): State<Arc<JobState>>, actor: AuthUser, Pa
 
 	AuditLog::log(&state.db, LogEvent::UserDeleted, Some(actor.id), Some(EntityType::User), Some(id));
 
-	if !target.delete(&state.db).await.map_err(AppError::database)? {
+	if !target.delete(&state.db).await? {
 		return Err(ErrorCode::UserNotFound.into());
 	}
 

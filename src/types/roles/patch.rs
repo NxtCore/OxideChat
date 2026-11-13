@@ -69,6 +69,25 @@ async fn check_not_locked_out(tx: &mut Transaction<'_, Postgres>, held_before: b
 	if granted && (held || !held_before) { Ok(()) } else { Err(RoleError::LockOut) }
 }
 
+impl Role {
+	/// Serializes with role edits and returns whether some user holds `admin.roles.edit` before `user_roles` change.
+	///
+	/// # Errors
+	/// Returns the database error when the lock or the lookup fails.
+	pub(crate) async fn lock_managers(tx: &mut Transaction<'_, Postgres>) -> Result<bool, RoleError> {
+		sqlx::query("LOCK TABLE role_permissions IN SHARE ROW EXCLUSIVE MODE").execute(&mut **tx).await?;
+		Ok(role_managers(tx).await?.1)
+	}
+
+	/// Checks after a change to `user_roles` that someone can still manage roles if someone could before.
+	///
+	/// # Errors
+	/// Returns [`RoleError::LockOut`] when nobody could manage roles any more.
+	pub(crate) async fn check_managers_kept(tx: &mut Transaction<'_, Postgres>, held_before: bool) -> Result<(), RoleError> {
+		check_not_locked_out(tx, held_before).await
+	}
+}
+
 async fn audit(tx: &mut Transaction<'_, Postgres>, event: &str, actor_id: &Uuid, role_id: &Uuid, metadata: Value) -> Result<(), sqlx::Error> {
 	let entry = AuditEntry {
 		event,

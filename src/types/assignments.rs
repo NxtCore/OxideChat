@@ -112,8 +112,14 @@ pub struct AssignmentTarget {
 
 impl From<(String, Uuid, String, bool)> for AssignmentTarget {
 	fn from((kind, id, label, inherited): (String, Uuid, String, bool)) -> Self {
+		(AssignmentKind::from_stored(&kind), id, label, inherited).into()
+	}
+}
+
+impl From<(AssignmentKind, Uuid, String, bool)> for AssignmentTarget {
+	fn from((kind, id, label, inherited): (AssignmentKind, Uuid, String, bool)) -> Self {
 		Self {
-			kind: AssignmentKind::from_stored(&kind),
+			kind,
 			id: Some(id),
 			label,
 			inherited,

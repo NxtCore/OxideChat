@@ -9,7 +9,8 @@ const ROLE_SELECT: &str = "SELECT r.id, r.name, r.is_builtin, \
 	FROM roles r \
 	LEFT JOIN role_permissions rp ON rp.role_id = r.id \
 	LEFT JOIN permissions p ON p.id = rp.permission_id \
-	WHERE ($1::uuid IS NULL OR r.id = $1) 	AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM user_roles held WHERE held.role_id = r.id AND held.user_id = $2)) \
+	WHERE ($1::uuid IS NULL OR r.id = $1) \
+	AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM user_roles held WHERE held.role_id = r.id AND held.user_id = $2)) \
 	GROUP BY r.id \
 	ORDER BY r.is_builtin DESC, lower(r.name)";
 

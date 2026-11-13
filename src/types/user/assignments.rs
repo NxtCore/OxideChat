@@ -40,17 +40,7 @@ impl User {
 			kinds,
 			single: false,
 			roles: Vec::new(),
-			targets: role_targets
-				.chain(team_targets)
-				.map(|(kind, id, label, inherited)| AssignmentTarget {
-					kind,
-					id: Some(id),
-					label,
-					inherited,
-					owner: false,
-					role: None,
-				})
-				.collect(),
+			targets: role_targets.chain(team_targets).map(AssignmentTarget::from).collect(),
 		}
 	}
 
@@ -92,7 +82,7 @@ impl User {
 			actor.check_role_change(&mut *tx, &current_names, &requested_names).await?;
 		}
 
-		let (roles_removed, roles_added) = self.replace_roles(&mut tx, &role_ids).await?;
+		let (roles_removed, roles_added) = self.replace_roles(&mut tx, &role_ids, roles_change).await?;
 		let (teams_left, teams_joined) = Team::replace_user_teams(&mut tx, &self.id, &team_ids).await?;
 		if !(roles_removed.is_empty() && roles_added.is_empty() && teams_left.is_empty() && teams_joined.is_empty()) {
 			let entry = AuditEntry {
@@ -111,7 +101,11 @@ impl User {
 		Ok(())
 	}
 
-	async fn replace_roles(&self, tx: &mut Transaction<'_, Postgres>, role_ids: &[Uuid]) -> Result<(Vec<Uuid>, Vec<Uuid>), sqlx::Error> {
+	async fn replace_roles(&self, tx: &mut Transaction<'_, Postgres>, role_ids: &[Uuid], changed: bool) -> Result<(Vec<Uuid>, Vec<Uuid>), RoleError> {
+		if !changed {
+			return Ok((Vec::new(), Vec::new()));
+		}
+		let held_before = Role::lock_managers(tx).await?;
 		let removed = sqlx::query_scalar("DELETE FROM user_roles WHERE user_id = $1 AND role_id <> ALL($2) RETURNING role_id")
 			.bind(self.id)
 			.bind(role_ids)
@@ -124,6 +118,7 @@ impl User {
 		.bind(role_ids)
 		.fetch_all(&mut **tx)
 		.await?;
+		Role::check_managers_kept(tx, held_before).await?;
 		Ok((removed, added))
 	}
 }
