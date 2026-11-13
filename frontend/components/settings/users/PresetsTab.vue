@@ -2,7 +2,7 @@
 	<SettingsUsersSection
 		:title="t('presets_title')"
 		:description="t('presets_description')"
-		to="/settings/admin-presets"
+		to="/settings/presets?tab=all"
 		:link-label="t('manage_presets')"
 		:empty-title="presets.length ? undefined : t('presets_empty')"
 		:empty-hint="t('presets_empty_hint')"

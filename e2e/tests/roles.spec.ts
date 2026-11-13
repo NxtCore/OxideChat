@@ -40,8 +40,9 @@ test.describe('roles and permissions', () => {
 		const created = (await api.get<Role[]>('/api/v1/admin/roles')).find(role => role.name === NAME);
 		expect(created).toMatchObject({is_builtin: false, permissions: ['admin.roles.view', 'admin.users.view'], user_count: 0});
 
-		const before = await api.get<{roles: string[]}>(`/api/v1/admin/users/${seed.memberId}`);
-		await api.put(`/api/v1/admin/users/${seed.memberId}/roles`, {roles: [...before.roles, NAME]});
+		const assignmentsUrl = `/api/v1/admin/users/${seed.memberId}/assignments`;
+		const before = (await api.get<{targets: {kind: string; id: string}[]}>(assignmentsUrl)).targets.map(({kind, id}) => ({kind, id}));
+		await api.put(assignmentsUrl, {targets: [...before, {kind: 'role', id: created!.id}]});
 		const member = await browser.newContext({baseURL, storageState: AUTH_FILES.member});
 		try {
 			const memberPage = await member.newPage();
@@ -73,7 +74,7 @@ test.describe('roles and permissions', () => {
 			expect(afterDelete.permissions).not.toContain('admin.users.view');
 		} finally {
 			await member.close();
-			await api.put(`/api/v1/admin/users/${seed.memberId}/roles`, {roles: before.roles});
+			await api.put(assignmentsUrl, {targets: before});
 		}
 	});
 

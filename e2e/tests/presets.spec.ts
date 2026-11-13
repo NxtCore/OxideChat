@@ -211,4 +211,26 @@ test.describe('presets', () => {
 			await api.delete(`/api/v1/admin/teams/${team.id}`);
 		}
 	});
+
+	test('admins see every preset under the All presets tab and members do not', async ({page, browser, baseURL, t, seed}) => {
+		const member = await browser.newContext({baseURL, storageState: AUTH_FILES.member});
+		const name = uniqueName('MemberOwn');
+		const memberPage = await member.newPage();
+		const created = await (await memberPage.request.post('/api/v1/presets', {data: {slug: slugFor(name), name, base_model_id: seed.model.id}})).json();
+		try {
+			await page.goto('/settings/admin-presets');
+			await expect(page).toHaveURL(/\/settings\/presets\?tab=all$/);
+			const row = page.locator(`[data-testid="admin-preset-row"][data-preset-key="${created.key}"]`);
+			await expect(row).toBeVisible();
+			await row.getByTestId('admin-preset-enabled').click();
+			await expect(page.getByText(t('presets.admin.saved')).first()).toBeVisible();
+			expect((await (await memberPage.request.get(`/api/v1/presets/${created.id}`)).json()).disabled_by_admin).toBe(true);
+
+			await memberPage.goto('/settings/presets');
+			await expect(memberPage.getByTestId('presets-tab-all')).toHaveCount(0);
+		} finally {
+			await memberPage.request.delete(`/api/v1/presets/${created.id}`);
+			await member.close();
+		}
+	});
 });

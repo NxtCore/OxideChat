@@ -11,7 +11,7 @@ const ADMIN_PAGES = [
 	'/settings/providers',
 	'/settings/tools',
 	'/settings/presets',
-	'/settings/admin-presets',
+	'/settings/presets?tab=all',
 	'/settings/models',
 	'/settings/teams',
 	'/settings/budgets',

@@ -94,8 +94,6 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/users/{id}/overview", get(users::get_user_overview))
 		.route("/api/v1/admin/users/{id}/assignments", get(users::get_user_assignments).put(users::replace_user_assignments))
 		.route("/api/v1/admin/users/{id}/sessions/{session_id}", delete(users::revoke_user_session))
-		.route("/api/v1/admin/users/{id}/roles", put(users::set_user_roles))
-		.route("/api/v1/admin/users/{id}/teams", put(users::set_user_teams))
 		.route("/api/v1/admin/users/{id}/password", put(users::reset_password))
 		// Admin Roles
 		.route("/api/v1/admin/roles", get(roles::list_roles).post(roles::create_role))

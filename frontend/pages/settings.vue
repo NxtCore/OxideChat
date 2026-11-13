@@ -57,7 +57,7 @@ const groups = [
 		tabs: [
 			{id: 'profile', label: 'settings.tabs.profile', icon: User, permission: 'settings.profile.view'},
 			{id: 'usage', label: 'settings.analytics.my_usage', icon: Activity, permission: 'settings.profile.view'},
-			{id: 'presets', label: 'settings.tabs.presets', icon: Wand2, permission: SETTINGS_PRESETS_EDIT},
+			{id: 'presets', label: 'settings.tabs.presets', icon: Wand2, permission: [SETTINGS_PRESETS_EDIT, ADMIN_PRESETS_VIEW]},
 			{id: 'appearance', label: 'settings.tabs.appearance', icon: Palette, permission: SETTINGS_APPEARANCE_EDIT},
 			{id: 'sessions', label: 'settings.tabs.sessions', icon: MonitorSmartphone, permission: SETTINGS_SESSIONS_VIEW},
 		],
@@ -69,7 +69,6 @@ const groups = [
 			{id: 'providers', label: 'settings.tabs.providers', icon: Cpu, permission: ADMIN_PROVIDERS_VIEW},
 			{id: 'models', label: 'settings.tabs.models', icon: Bot, permission: ADMIN_PROVIDERS_VIEW},
 			{id: 'tools', label: 'settings.tabs.tools', icon: Package, permission: ADMIN_TOOLS_VIEW},
-			{id: 'admin-presets', label: 'settings.tabs.admin_presets', icon: Wand2, permission: ADMIN_PRESETS_VIEW},
 		],
 	},
 	{
@@ -95,7 +94,7 @@ const groups = [
 ];
 
 const visibleGroups = computed(() =>
-	groups.map(group => ({...group, tabs: group.tabs.filter(tab => store.hasPermission(tab.permission))})).filter(group => group.tabs.length > 0)
+	groups.map(group => ({...group, tabs: group.tabs.filter(tab => [tab.permission].flat().some(permission => store.hasPermission(permission)))})).filter(group => group.tabs.length > 0)
 );
 
 const activeTab = computed(() => {

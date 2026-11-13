@@ -18,7 +18,9 @@
 				</ShadTabsList>
 			</ShadTabs>
 
-			<div v-if="currentTab === 'mine' && rows.length === 0" class="flex flex-col items-center rounded-xl border border-dashed border-border px-6 py-12 text-center" data-testid="presets-empty">
+			<SettingsPresetsAdminList v-if="currentTab === 'all'" />
+
+			<div v-else-if="currentTab === 'mine' && rows.length === 0" class="flex flex-col items-center rounded-xl border border-dashed border-border px-6 py-12 text-center" data-testid="presets-empty">
 				<Wand2 class="mb-4 h-10 w-10 text-primary" />
 				<p class="font-medium text-foreground">{{ t('empty_title') }}</p>
 				<p class="mt-1 max-w-md text-sm text-muted-foreground">{{ t('empty_description') }}</p>
@@ -119,9 +121,10 @@
 import {Copy, CopyPlus, Eye, Loader2, MessageSquare, MoreHorizontal, Pencil, Plus, Trash2, Wand2} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import {usePresetStore} from '~/stores/presetStore';
+import {ADMIN_PRESETS_VIEW} from '~/types/generated/permissions';
 import type {PresetResponse, PresetScope} from '~/types/presets';
 
-type PresetTab = 'mine' | 'team' | 'organization' | 'shared';
+type PresetTab = 'mine' | 'team' | 'organization' | 'shared' | 'all';
 
 const TAB_SCOPES: Partial<Record<PresetTab, PresetScope>> = {mine: 'personal', team: 'team', organization: 'installation'};
 
@@ -143,11 +146,12 @@ const visibleTabs = computed<PresetTab[]>(() => {
 	if ((scopes.value?.teams.length ?? 0) > 0 || has('team')) tabs.push('team');
 	if (scopes.value?.installation || has('installation')) tabs.push('organization');
 	if (presetStore.presets.some(preset => preset.shared)) tabs.push('shared');
+	if (store.hasPermission(ADMIN_PRESETS_VIEW)) tabs.push('all');
 	return tabs;
 });
 
 const queryTab = route.query.tab as PresetTab | undefined;
-const currentTab = ref<PresetTab>(queryTab && (queryTab in TAB_SCOPES || queryTab === 'shared') ? queryTab : 'mine');
+const currentTab = ref<PresetTab>(queryTab && (queryTab in TAB_SCOPES || queryTab === 'shared' || (queryTab === 'all' && store.hasPermission(ADMIN_PRESETS_VIEW))) ? queryTab : 'mine');
 
 watch(currentTab, tab => router.replace({query: tab === 'mine' ? {} : {tab}}));
 
@@ -157,7 +161,7 @@ const canCreate = computed(() => {
 	if (!scopes.value) return false;
 	if (currentTab.value === 'team') return scopes.value.teams.length > 0;
 	if (currentTab.value === 'organization') return scopes.value.installation;
-	if (currentTab.value === 'shared') return false;
+	if (currentTab.value === 'shared' || currentTab.value === 'all') return false;
 	return scopes.value.personal;
 });
 

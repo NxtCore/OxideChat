@@ -5,8 +5,8 @@
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
 use crate::types::{
-	AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, ReplaceAssignmentsRequest, Role, RoleActor, RoleError, SetUserRolesRequest,
-	SetUserTeamsRequest, UpdateUserRequest, User, json_ok,
+	AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, ReplaceAssignmentsRequest, Role, RoleActor, RoleError,
+	UpdateUserRequest, User, json_ok,
 };
 use crate::utils::auth::{SESSION_COOKIE_NAME, hash_password, validate_email, validate_password, validate_username};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
@@ -209,56 +209,6 @@ pub async fn delete_user(State(state): State<Arc<JobState>>, actor: AuthUser, Pa
 	}
 
 	Ok((StatusCode::NO_CONTENT, "").into_response())
-}
-
-/// Replace the full role set for a user. Admins cannot change their own roles.
-pub async fn set_user_roles(State(state): State<Arc<JobState>>, actor: AuthUser, Path(id): Path<Uuid>, Json(req): Json<SetUserRolesRequest>) -> Result<Response, AppError> {
-	let permissions = actor.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
-
-	if actor.id == id {
-		return Err(ErrorCode::Forbidden.into());
-	}
-
-	let target = User::find_by_id(&state.db, &id).await.map_err(AppError::database)?.ok_or(ErrorCode::UserNotFound)?;
-
-	for role_name in &req.roles {
-		if !Role::exists(&state.db, role_name).await.map_err(AppError::database)? {
-			return Err(ErrorCode::NotFound.into());
-		}
-	}
-	let role_actor = RoleActor {
-		id: &actor.id,
-		permissions: &permissions,
-	};
-	let current = target.roles(&state.db).await?;
-	role_actor.check_role_change(&state.db, &current, &req.roles).await?;
-
-	target.set_roles(&state.db, &req.roles).await.map_err(AppError::database)?;
-
-	AuditLog::log(&state.db, LogEvent::RoleAssigned, Some(actor.id), Some(EntityType::User), Some(id));
-
-	let response = target.to_response(&state.db).await.map_err(AppError::database)?;
-
-	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())
-}
-
-pub async fn set_user_teams(State(state): State<Arc<JobState>>, actor: AuthUser, Path(id): Path<Uuid>, Json(req): Json<SetUserTeamsRequest>) -> Result<Response, AppError> {
-	let permissions = actor.require_permissions(&state.db, ADMIN_USERS_EDIT).await?;
-
-	let target = User::find_by_id(&state.db, &id).await.map_err(AppError::database)?.ok_or(ErrorCode::UserNotFound)?;
-	let role_actor = RoleActor {
-		id: &actor.id,
-		permissions: &permissions,
-	};
-	role_actor.check_outranks(&state.db, &target).await?;
-
-	target.set_teams(&state.db, &req.team_ids).await.map_err(AppError::database)?;
-
-	AuditLog::log(&state.db, LogEvent::UserUpdated, Some(actor.id), Some(EntityType::User), Some(id));
-
-	let response = target.to_response(&state.db).await.map_err(AppError::database)?;
-
-	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())
 }
 
 /// Reset a user's password.
