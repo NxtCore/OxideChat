@@ -1,5 +1,5 @@
 use crate::types::user::User;
-use crate::types::{Role, RoleError};
+use crate::types::{CreateAdminUserRequest, Role, RoleError, Team};
 use sqlx::PgPool;
 
 impl User {
@@ -31,6 +31,27 @@ impl User {
 		Ok(result.rows_affected() > 0)
 	}
 
+	/// Creates a local account with its defaults, roles and teams in one transaction; nothing is stored when a step fails.
+	///
+	/// # Errors
+	/// Returns the database error when a statement fails, for example a foreign key violation for a team that does not exist.
+	pub async fn create_with_assignments(pool: &PgPool, request: &CreateAdminUserRequest, password_hash: &str) -> Result<Self, sqlx::Error> {
+		let mut tx = pool.begin().await?;
+		let user = Self::create(&mut *tx, &request.email, &request.username, password_hash).await?;
+		user.initialize_defaults(&mut tx).await?;
+		sqlx::query("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name = ANY($2)")
+			.bind(user.id)
+			.bind(&request.roles)
+			.execute(&mut *tx)
+			.await?;
+		if let Some(team_ids) = &request.team_ids {
+			Team::replace_user_teams(&mut tx, &user.id, team_ids).await?;
+		}
+		tx.commit().await?;
+		Ok(user)
+	}
+
+	#[cfg(test)]
 	pub async fn set_roles(&self, pool: &PgPool, role_names: &[String]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
 

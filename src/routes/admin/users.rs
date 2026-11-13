@@ -6,7 +6,7 @@ use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::consts::{ADMIN_USERS_EDIT, ADMIN_USERS_VIEW};
 use crate::types::{
 	AdminResetPasswordRequest, AppError, AuthUser, CreateAdminUserRequest, JobState, ListUsersQuery, PageQuery, ReplaceAssignmentsRequest, Role, RoleError,
-	Team, UpdateUserRequest, User, json_ok,
+	UpdateUserRequest, User, json_ok,
 };
 use crate::utils::auth::{SESSION_COOKIE_NAME, hash_password, validate_email, validate_password, validate_username};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
@@ -120,14 +120,9 @@ pub async fn create_user(State(state): State<Arc<JobState>>, actor: AuthUser, Js
 	let role_actor = actor.role_actor(&permissions);
 	role_actor.check_role_change(&state.db, &[], &req.roles).await?;
 
-	let new_user = User::create(&state.db, &req.email, &req.username, &password_hash).await.map_err(AppError::database)?;
-	new_user.initialize_defaults(&state.db).await.map_err(AppError::database)?;
-
-	new_user.set_roles(&state.db, &req.roles).await.map_err(AppError::database)?;
-
-	if let Some(team_ids) = &req.team_ids {
-		Team::set_user_teams(&state.db, &new_user.id, team_ids).await.map_err(AppError::database)?;
-	}
+	let new_user = User::create_with_assignments(&state.db, &req, &password_hash)
+		.await
+		.map_err(|error| AppError::foreign_key_or(error, ErrorCode::ValidationFailed))?;
 
 	AuditLog::log(&state.db, LogEvent::UserRegistered, Some(actor.id), Some(EntityType::User), Some(new_user.id));
 
@@ -181,11 +176,11 @@ pub async fn delete_user(State(state): State<Arc<JobState>>, actor: AuthUser, Pa
 	let role_actor = actor.role_actor(&permissions);
 	role_actor.check_outranks(&state.db, &target).await?;
 
-	AuditLog::log(&state.db, LogEvent::UserDeleted, Some(actor.id), Some(EntityType::User), Some(id));
-
 	if !target.delete(&state.db).await? {
 		return Err(ErrorCode::UserNotFound.into());
 	}
+
+	AuditLog::log(&state.db, LogEvent::UserDeleted, Some(actor.id), Some(EntityType::User), Some(id));
 
 	Ok((StatusCode::NO_CONTENT, "").into_response())
 }

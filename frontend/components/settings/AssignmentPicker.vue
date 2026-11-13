@@ -186,7 +186,7 @@ const props = withDefaults(
 	{testId: 'assignments', roles: () => []},
 );
 
-const emit = defineEmits<{'update:modelValue': [targets: AssignmentTarget[]]}>();
+const emit = defineEmits<{'update:modelValue': [targets: AssignmentTarget[]]; search: [term: string]}>();
 
 const ICONS: Record<AssignmentKind, unknown> = {user: User, team: Building2, role: Shield, key: KeyRound, everyone: Globe};
 
@@ -195,6 +195,7 @@ const t = (key: string, args?: Record<string, string>) => store.getTranslation(`
 
 const open = ref(false);
 const search = ref('');
+watch(search, term => emit('search', term.trim()));
 const filter = ref<AssignmentKind | null>(null);
 const pending = ref<AssignmentOption | null>(null);
 const openKind = ref<AssignmentKind | null>(null);

@@ -386,7 +386,8 @@ impl Budget {
 	/// Returns an error when a target does not exist or a change cannot be stored or audited; nothing is changed then.
 	pub async fn replace_assignments(&self, pool: &PgPool, actor_id: &Uuid, team_ids: &[Uuid], user_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
-		let current: Vec<(Option<Uuid>, Option<Uuid>)> = sqlx::query_as("SELECT team_id, user_id FROM budget_assignments WHERE budget_id = $1 AND api_key_id IS NULL FOR UPDATE")
+		sqlx::query("SELECT id FROM budgets WHERE id = $1 FOR UPDATE").bind(self.id).execute(&mut *tx).await?;
+		let current: Vec<(Option<Uuid>, Option<Uuid>)> = sqlx::query_as("SELECT team_id, user_id FROM budget_assignments WHERE budget_id = $1 AND api_key_id IS NULL")
 			.bind(self.id)
 			.fetch_all(&mut *tx)
 			.await?;

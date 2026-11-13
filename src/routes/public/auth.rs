@@ -37,7 +37,7 @@ fn hash_new_password(password: &str) -> Result<String, ErrorCode> {
 }
 
 async fn finish_signup(state: &JobState, cookies: &Cookies, user: &User) -> Result<(), AppError> {
-	user.initialize_defaults(&state.db).await.map_err(AppError::database)?;
+	user.initialize_defaults(&mut *state.db.acquire().await?).await.map_err(AppError::database)?;
 	create_session(&state.db, cookies, &user.id).await.map_err(AppError::database)
 }
 

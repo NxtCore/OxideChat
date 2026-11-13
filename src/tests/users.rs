@@ -44,7 +44,7 @@ mod overview {
 	async fn member(pool: &PgPool) -> TestResult<User> {
 		let id = create_user(pool).await?;
 		let user = find(pool, &id).await?;
-		user.initialize_defaults(pool).await?;
+		user.initialize_defaults(&mut *pool.acquire().await?).await?;
 		user.set_roles(pool, &["user".to_owned()]).await?;
 		Ok(user)
 	}

@@ -81,6 +81,7 @@
 						:note="t('sharing_note')"
 						test-id="preset-sharing"
 						@update:model-value="targets => replaceAssignment(assignmentPath, targets)"
+						@search="searchShareUsers"
 					/>
 					<p v-if="usersNeedView" class="flex items-start gap-2 text-xs text-muted-foreground" data-testid="preset-sharing-users-hidden">
 						<Info class="mt-px h-3.5 w-3.5 shrink-0" />
@@ -285,19 +286,26 @@ function describeShare(target: AssignmentOption) {
 	return t(`share_effect.${target.kind}`, {name: target.label});
 }
 
-async function loadShareUsers() {
+const SHARE_USER_PAGE_SIZE = 50;
+let shareSearchTimer: ReturnType<typeof setTimeout> | undefined;
+let shareSearchTerm = '';
+
+async function loadShareUsers(search = '') {
 	if (!storedAssignment.value?.kinds.includes('user')) return;
-	const options: AssignmentOption[] = [];
+	shareSearchTerm = search;
 	try {
-		for (let page = 1; ; page++) {
-			const list = await adminUsers({page, size: 200});
-			options.push(...list.items.map(user => ({kind: 'user' as const, id: user.id, label: user.username || user.email})));
-			if (!list.has_more) break;
-		}
+		const list = await adminUsers({page: 1, size: SHARE_USER_PAGE_SIZE, ...(search ? {search} : {})});
+		if (shareSearchTerm === search) shareUsers.value = list.items.map(user => ({kind: 'user' as const, id: user.id, label: user.username || user.email}));
 	} catch (e: any) {
 		store.toast(store.getTranslation('assignments.load_error'), {type: 'error', description: errorMessage(e, '')});
 	}
-	shareUsers.value = options;
+}
+
+onBeforeUnmount(() => clearTimeout(shareSearchTimer));
+
+function searchShareUsers(term: string) {
+	clearTimeout(shareSearchTimer);
+	shareSearchTimer = setTimeout(() => loadShareUsers(term), 250);
 }
 
 function describeScope(target: AssignmentOption) {

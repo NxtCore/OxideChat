@@ -22,7 +22,7 @@ impl Team {
 			.map(|s| format!("%{}%", Self::escape_like_pattern(s)))
 	}
 
-	pub async fn ensure_default_membership(pool: &PgPool, user_id: &Uuid) -> Result<(), sqlx::Error> {
+	pub async fn ensure_default_membership(executor: impl sqlx::PgExecutor<'_>, user_id: &Uuid) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
 			INSERT INTO team_members (team_id, user_id)
@@ -31,7 +31,7 @@ impl Team {
 			"#,
 		)
 		.bind(user_id)
-		.execute(pool)
+		.execute(executor)
 		.await?;
 		Ok(())
 	}
@@ -541,6 +541,7 @@ impl Team {
 		Ok(map)
 	}
 
+	#[cfg(test)]
 	pub async fn set_user_teams(pool: &PgPool, user_id: &Uuid, team_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
 		Self::replace_user_teams(&mut tx, user_id, team_ids).await?;

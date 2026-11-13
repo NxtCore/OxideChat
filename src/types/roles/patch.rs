@@ -64,11 +64,6 @@ async fn role_managers(tx: &mut Transaction<'_, Postgres>) -> Result<(bool, bool
 	Ok((!managing.is_empty(), managing.contains(&true)))
 }
 
-async fn check_not_locked_out(tx: &mut Transaction<'_, Postgres>, held_before: bool) -> Result<(), RoleError> {
-	let (granted, held) = role_managers(tx).await?;
-	if granted && (held || !held_before) { Ok(()) } else { Err(RoleError::LockOut) }
-}
-
 impl Role {
 	/// Serializes with role edits and returns whether some user holds `admin.roles.edit` before `user_roles` change.
 	///
@@ -79,12 +74,14 @@ impl Role {
 		Ok(role_managers(tx).await?.1)
 	}
 
-	/// Checks after a change to `user_roles` that someone can still manage roles if someone could before.
+	/// Checks after a change to roles or `user_roles` that some role still grants `admin.roles.edit` and that someone can
+	/// still manage roles if someone could before.
 	///
 	/// # Errors
 	/// Returns [`RoleError::LockOut`] when nobody could manage roles any more.
 	pub(crate) async fn check_managers_kept(tx: &mut Transaction<'_, Postgres>, held_before: bool) -> Result<(), RoleError> {
-		check_not_locked_out(tx, held_before).await
+		let (granted, held) = role_managers(tx).await?;
+		if granted && (held || !held_before) { Ok(()) } else { Err(RoleError::LockOut) }
 	}
 }
 
@@ -172,7 +169,7 @@ impl Role {
 			.await
 			.map_err(map_write_error)?;
 		replace_permissions(&mut tx, id, &permissions).await?;
-		check_not_locked_out(&mut tx, held_before).await?;
+		Self::check_managers_kept(&mut tx, held_before).await?;
 		let metadata = json!({
 			"name": name,
 			"permissions": permissions,
@@ -198,7 +195,7 @@ impl Role {
 		}
 		let (_, held_before) = role_managers(&mut tx).await?;
 		sqlx::query("DELETE FROM roles WHERE id = $1").bind(id).execute(&mut *tx).await?;
-		check_not_locked_out(&mut tx, held_before).await?;
+		Self::check_managers_kept(&mut tx, held_before).await?;
 		let metadata = json!({ "name": before.name, "permissions": before.permissions, "user_count": before.user_count });
 		audit(&mut tx, EVENT_DELETED, actor.id, id, metadata).await?;
 		tx.commit().await?;

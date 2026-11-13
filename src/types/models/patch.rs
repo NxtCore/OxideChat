@@ -43,6 +43,7 @@ impl Model {
 	/// Returns an error when the model or a team does not exist or a change cannot be stored or audited; nothing is changed then.
 	pub async fn replace_assignments(pool: &sqlx::PgPool, actor_id: &Uuid, model_id: &Uuid, team_ids: &[Uuid]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;
+		sqlx::query("SELECT id FROM models WHERE id = $1 FOR UPDATE").bind(model_id).execute(&mut *tx).await?;
 		let removed: Vec<Uuid> = sqlx::query_scalar("DELETE FROM team_model_access WHERE model_id = $1 AND team_id <> ALL($2) RETURNING team_id")
 			.bind(model_id)
 			.bind(team_ids)

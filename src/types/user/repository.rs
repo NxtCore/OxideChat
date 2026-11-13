@@ -1,7 +1,7 @@
 use crate::types::user::rows::{CountRow, PermissionNameRow, RoleNameRow, UserRoleRow};
 use crate::types::user::{User, UserListResponse, UserResponse};
 use crate::types::{BaseType, Page, PageQuery, PreferencesResponse, Team, UserPreferences};
-use sqlx::{PgExecutor, PgPool};
+use sqlx::{PgConnection, PgExecutor, PgPool};
 use uuid::Uuid;
 
 impl User {
@@ -65,7 +65,7 @@ impl User {
 		Ok(count.count > 0)
 	}
 
-	pub async fn create(pool: &PgPool, email: &str, username: &str, password_hash: &str) -> Result<Self, sqlx::Error> {
+	pub async fn create(executor: impl PgExecutor<'_>, email: &str, username: &str, password_hash: &str) -> Result<Self, sqlx::Error> {
 		sqlx::query_as(
 			"INSERT INTO users (email, username, password_hash, auth_method)
              VALUES ($1, $2, $3, 'local')
@@ -74,18 +74,18 @@ impl User {
 		.bind(email)
 		.bind(username)
 		.bind(password_hash)
-		.fetch_one(pool)
+		.fetch_one(executor)
 		.await
 	}
 
-	pub async fn initialize_defaults(&self, pool: &PgPool) -> Result<(), sqlx::Error> {
+	pub async fn initialize_defaults(&self, conn: &mut PgConnection) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			"INSERT INTO user_preferences (user_id, default_model_key, favorite_model_keys, streaming_animation, use_remend)
              VALUES ($1, NULL, '[]', 'fade', true)
              ON CONFLICT (user_id) DO NOTHING",
 		)
 		.bind(self.id)
-		.execute(pool)
+		.execute(&mut *conn)
 		.await?;
 
 		sqlx::query(
@@ -94,10 +94,10 @@ impl User {
              ON CONFLICT (user_id, name) DO NOTHING",
 		)
 		.bind(self.id)
-		.execute(pool)
+		.execute(&mut *conn)
 		.await?;
 
-		Team::ensure_default_membership(pool, &self.id).await?;
+		Team::ensure_default_membership(conn, &self.id).await?;
 
 		Ok(())
 	}

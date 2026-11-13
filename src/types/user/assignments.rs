@@ -64,16 +64,14 @@ impl User {
 		let role_ids = request.ids(AssignmentKind::Role);
 		let team_ids = request.ids(AssignmentKind::Team);
 		let mut tx = pool.begin().await?;
+		let held_before = Role::lock_managers(&mut tx).await?;
 		sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(self.id).execute(&mut *tx).await?;
 		let current = Role::list_for_user(&mut *tx, &self.id).await?;
 		let roles_change = current.len() != role_ids.len() || current.iter().any(|role| !role_ids.contains(&role.id));
 		if roles_change && actor.id == &self.id {
 			return Err(RoleError::OwnRoles);
 		}
-		let memberships = Team::memberships_for_user(&mut *tx, &self.id).await?;
-		let leaves = memberships.iter().any(|team| !team.is_default && !team_ids.contains(&team.id));
-		let joins = team_ids.iter().any(|id| memberships.iter().all(|team| team.id != *id));
-		if roles_change || leaves || joins {
+		if roles_change || self.teams_change(&mut tx, &team_ids).await? {
 			actor.check_outranks(&mut *tx, self).await?;
 		}
 		if roles_change {
@@ -82,30 +80,41 @@ impl User {
 			actor.check_role_change(&mut *tx, &current_names, &requested_names).await?;
 		}
 
-		let (roles_removed, roles_added) = self.replace_roles(&mut tx, &role_ids, roles_change).await?;
-		let (teams_left, teams_joined) = Team::replace_user_teams(&mut tx, &self.id, &team_ids).await?;
-		if !(roles_removed.is_empty() && roles_added.is_empty() && teams_left.is_empty() && teams_joined.is_empty()) {
-			let entry = AuditEntry {
-				event: EVENT_USER_ASSIGNMENTS_UPDATED,
-				actor_id: actor.id,
-				target_type: AUDIT_USER_TARGET,
-				target_id: &self.id,
-				metadata: json!({
-					"roles": { "added": roles_added, "removed": roles_removed },
-					"teams": { "added": teams_joined, "removed": teams_left },
-				}),
-			};
-			AuditLog::write(&mut tx, entry).await?;
-		}
+		let roles = self.replace_roles(&mut tx, &role_ids, roles_change, held_before).await?;
+		let teams = Team::replace_user_teams(&mut tx, &self.id, &team_ids).await?;
+		self.audit_assignments(&mut tx, actor.id, roles, teams).await?;
 		tx.commit().await?;
 		Ok(())
 	}
 
-	async fn replace_roles(&self, tx: &mut Transaction<'_, Postgres>, role_ids: &[Uuid], changed: bool) -> Result<(Vec<Uuid>, Vec<Uuid>), RoleError> {
+	async fn audit_assignments(&self, tx: &mut Transaction<'_, Postgres>, actor_id: &Uuid, roles: (Vec<Uuid>, Vec<Uuid>), teams: (Vec<Uuid>, Vec<Uuid>)) -> Result<(), sqlx::Error> {
+		let ((roles_removed, roles_added), (teams_left, teams_joined)) = (roles, teams);
+		if roles_removed.is_empty() && roles_added.is_empty() && teams_left.is_empty() && teams_joined.is_empty() {
+			return Ok(());
+		}
+		let entry = AuditEntry {
+			event: EVENT_USER_ASSIGNMENTS_UPDATED,
+			actor_id,
+			target_type: AUDIT_USER_TARGET,
+			target_id: &self.id,
+			metadata: json!({
+				"roles": { "added": roles_added, "removed": roles_removed },
+				"teams": { "added": teams_joined, "removed": teams_left },
+			}),
+		};
+		AuditLog::write(tx, entry).await
+	}
+
+	async fn teams_change(&self, tx: &mut Transaction<'_, Postgres>, team_ids: &[Uuid]) -> Result<bool, sqlx::Error> {
+		let memberships = Team::memberships_for_user(&mut **tx, &self.id).await?;
+		let leaves = memberships.iter().any(|team| !team.is_default && !team_ids.contains(&team.id));
+		Ok(leaves || team_ids.iter().any(|id| memberships.iter().all(|team| team.id != *id)))
+	}
+
+	async fn replace_roles(&self, tx: &mut Transaction<'_, Postgres>, role_ids: &[Uuid], changed: bool, held_before: bool) -> Result<(Vec<Uuid>, Vec<Uuid>), RoleError> {
 		if !changed {
 			return Ok((Vec::new(), Vec::new()));
 		}
-		let held_before = Role::lock_managers(tx).await?;
 		let removed = sqlx::query_scalar("DELETE FROM user_roles WHERE user_id = $1 AND role_id <> ALL($2) RETURNING role_id")
 			.bind(self.id)
 			.bind(role_ids)

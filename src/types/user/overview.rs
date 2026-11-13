@@ -47,16 +47,14 @@ impl User {
 	/// # Errors
 	/// Returns the database error when a query fails.
 	pub async fn overview(&self, pool: &PgPool, actor: &RoleActor<'_>, session: Option<&Uuid>) -> Result<UserOverviewResponse, sqlx::Error> {
-		let (roles, teams, all_permissions, model_access, presets, budgets, keys, sessions) = tokio::try_join!(
-			Role::list_for_user(pool, &self.id),
-			Team::memberships_for_user(pool, &self.id),
-			Role::list_permissions(pool),
-			when(actor.holds(ADMIN_TEAMS_VIEW), Team::model_access_for_user(pool, &self.id)),
-			when(actor.holds(ADMIN_PRESETS_VIEW), Preset::admin_list_visible_to(pool, &self.id)),
-			when(actor.holds(ADMIN_BUDGETS_VIEW), Budget::evaluate(pool, BudgetSubject::user(self.id))),
-			when(actor.holds(ADMIN_DEVELOPER_VIEW), GatewayAdminKeyResponse::list_for_user(pool, &self.id)),
-			Self::list_sessions(pool, &self.id, session),
-		)?;
+		let roles = Role::list_for_user(pool, &self.id).await?;
+		let teams = Team::memberships_for_user(pool, &self.id).await?;
+		let all_permissions = Role::list_permissions(pool).await?;
+		let model_access = when(actor.holds(ADMIN_TEAMS_VIEW), Team::model_access_for_user(pool, &self.id)).await?;
+		let presets = when(actor.holds(ADMIN_PRESETS_VIEW), Preset::admin_list_visible_to(pool, &self.id)).await?;
+		let budgets = when(actor.holds(ADMIN_BUDGETS_VIEW), Budget::evaluate(pool, BudgetSubject::user(self.id))).await?;
+		let keys = when(actor.holds(ADMIN_DEVELOPER_VIEW), GatewayAdminKeyResponse::list_for_user(pool, &self.id)).await?;
+		let sessions = Self::list_sessions(pool, &self.id, session).await?;
 		let permissions = EffectivePermission::resolve(all_permissions, &roles);
 		Ok(UserOverviewResponse {
 			profile: UserProfileResponse {

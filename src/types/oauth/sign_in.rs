@@ -81,7 +81,7 @@ impl OAuthProvider {
 		}
 		let username = User::unique_username(pool, &username_for(info)).await?;
 		let user = User::create_from_oauth(pool, email, &username, info).await?;
-		user.initialize_defaults(pool).await?;
+		user.initialize_defaults(&mut *pool.acquire().await?).await?;
 		Ok((user, SignInKind::Created))
 	}
 }
