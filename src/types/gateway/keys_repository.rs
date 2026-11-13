@@ -10,7 +10,7 @@ use crate::types::{Budget, BudgetSubject, Team};
 use crate::utils::auth::hash_password;
 use chrono::{DateTime, Duration, Utc};
 use rand::{Rng, distributions::Alphanumeric, rngs::OsRng};
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde_json::{Value, json};
 use sqlx::{PgConnection, PgPool, Postgres, Transaction, types::Json};
 use std::collections::{HashMap, HashSet};
@@ -656,8 +656,9 @@ impl GatewayModelResponse {
 				COALESCE(sys_mc.input_modalities, m.input_modalities, '[]'::jsonb) AS input_modalities,
 				COALESCE(sys_mc.output_modalities, m.output_modalities, '[]'::jsonb) AS output_modalities,
 				COALESCE(sys_mc.context_length, m.context_length) AS context_length,
-				(mpo.pricing->>'input')::numeric AS price_input,
-				(mpo.pricing->>'output')::numeric AS price_output,
+				NULL::numeric AS price_input,
+				NULL::numeric AS price_output,
+				mpo.pricing AS override_pricing,
 				g.team_ids
 			FROM granted g
 			JOIN models m ON m.id = g.model_id
@@ -673,9 +674,10 @@ impl GatewayModelResponse {
 		let catalog = crate::ai::catalog();
 		for model in &mut models {
 			model.id = public_model_id(&model.provider, &model.model_id);
-			if model.price_input.is_none() && model.price_output.is_none() {
-				(model.price_input, model.price_output) = ModelPricing::catalog_rates(&catalog, &model.provider, &model.provider_kind, &model.model_id).await;
-			}
+			let sheet = ModelPricing::effective_sheet(&catalog, &model.provider, &model.provider_kind, &model.model_id, model.override_pricing.as_ref()).await;
+			model.price_input = sheet.as_ref().and_then(|sheet| sheet.rates.input).and_then(Decimal::from_f64);
+			model.price_output = sheet.as_ref().and_then(|sheet| sheet.rates.output).and_then(Decimal::from_f64);
+			model.price = sheet.as_ref().and_then(crate::types::models::PriceSheet::summary);
 		}
 		Ok(models)
 	}

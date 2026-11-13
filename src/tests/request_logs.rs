@@ -604,6 +604,8 @@ mod finalization {
 			usage: usage(),
 			finish_reason: Some(FinishReason::Length),
 			time_to_first_token: Some(Duration::from_millis(321)),
+			started_at: std::time::SystemTime::now(),
+			service_tier: None,
 		}
 	}
 

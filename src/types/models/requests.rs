@@ -33,10 +33,10 @@ pub struct AdminModelPatchBody {
 	pub extra_settings: Option<Option<Value>>,
 	pub reasoning_effort: Option<Option<String>>,
 	pub reasoning_budget_tokens: Option<Option<u32>>,
-	pub pricing: Option<omniference::catalog::ModelPricing>,
+	pub pricing: Option<super::PriceSheet>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ModelPricingOverrideRequest {
-	pub pricing: omniference::catalog::ModelPricing,
+	pub pricing: super::PriceSheet,
 }

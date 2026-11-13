@@ -536,7 +536,11 @@ mod teams {
 			.execute(&pool)
 			.await?;
 		sqlx::query("INSERT INTO team_model_access (team_id, model_id) VALUES ($1, $2)").bind(closed_team).bind(fast_id).execute(&pool).await?;
-		crate::types::models::ModelPricing::store_override(&pool, &fast_id, &serde_json::json!({"input": 2.5, "output": 10})).await?;
+		sqlx::query("INSERT INTO model_pricing_overrides (model_id, pricing) VALUES ($1, $2)")
+			.bind(fast_id)
+			.bind(serde_json::json!({"input": 2.5, "output": 10}))
+			.execute(&pool)
+			.await?;
 
 		let models = GatewayModelResponse::list_for_user(&pool, &user_id).await?;
 		assert_eq!(models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(), vec!["acme/fast", "acme/plain"]);

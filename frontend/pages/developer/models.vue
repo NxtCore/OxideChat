@@ -82,8 +82,15 @@
 							</td>
 							<td class="whitespace-nowrap px-3 py-2 text-muted-foreground">{{ model.provider }}</td>
 							<td class="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">{{ formatContext(model.context_length) }}</td>
-							<td class="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">{{ formatPrice(model.price_input) }}</td>
-							<td class="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">{{ formatPrice(model.price_output) }}</td>
+							<td class="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground" :data-testid="`model-price-input-${model.id}`">
+								{{ model.price ? formatRange(model.price.input) : formatPrice(model.price_input) }}
+							</td>
+							<td class="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">
+								<span class="inline-flex items-center justify-end gap-1.5">
+									{{ model.price ? formatRange(model.price.output) : formatPrice(model.price_output) }}
+									<PricingSpecialRates :summary="model.price" />
+								</span>
+							</td>
 							<td class="px-3 py-2">
 								<div class="flex gap-1.5 text-muted-foreground">
 									<component :is="feature.icon" v-for="feature in FEATURES.filter(entry => entry.matches(model))" :key="feature.id" class="h-3.5 w-3.5" :aria-label="store.getTranslation(feature.label)" />

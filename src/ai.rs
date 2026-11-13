@@ -79,8 +79,9 @@ async fn build_engine(pool: &PgPool, cost_sink: Arc<OxideCostQueue>, routing: Ar
 
 /// Loads every manual model price into the engine's catalog, so Omniference prices requests with it.
 async fn load_pricing_overrides(pool: &PgPool, engine: &OmniferenceEngine) {
-	match ModelPricing::engine_overrides(pool).await {
-		Ok(overrides) => engine.service().catalog().replace_pricing_overrides(overrides).await,
+	let catalog = engine.service().catalog();
+	match ModelPricing::engine_overrides(pool, &catalog).await {
+		Ok(overrides) => catalog.replace_pricing_overrides(overrides).await,
 		Err(error) => tracing::error!("Failed to load manual model prices: {error}"),
 	}
 }

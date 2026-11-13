@@ -1,5 +1,6 @@
 //! Handler error type shared by all routes.
 
+use crate::types::models::PriceSheetError;
 use crate::types::{GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError, RoleError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
@@ -32,6 +33,9 @@ pub enum AppError {
 	/// A role could not be saved, deleted or found.
 	#[error(transparent)]
 	Role(#[from] RoleError),
+	/// A model price could not be saved.
+	#[error(transparent)]
+	Pricing(#[from] PriceSheetError),
 }
 
 /// Returns true when the database rejected a statement because of a unique constraint.
@@ -80,6 +84,9 @@ impl AppError {
 			Self::GatewayAdmin(error) => admin_error_code(error),
 			Self::Preset(error) => preset_error_code(error),
 			Self::Role(error) => role_error_code(error),
+			Self::Pricing(PriceSheetError::NotFound) => ErrorCode::NotFound,
+			Self::Pricing(PriceSheetError::Database(_)) => ErrorCode::InternalError,
+			Self::Pricing(_) => ErrorCode::ValidationFailed,
 		}
 	}
 }
@@ -106,7 +113,10 @@ impl IntoResponse for AppError {
 		if code.status().is_server_error() {
 			tracing::error!(error = %self, "request failed");
 		}
-		ErrorBuilder::new(code).build()
+		match &self {
+			Self::Pricing(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
+			_ => ErrorBuilder::new(code).build(),
+		}
 	}
 }
 

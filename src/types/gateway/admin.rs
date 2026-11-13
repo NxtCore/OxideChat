@@ -51,6 +51,12 @@ pub const EVENT_BUDGET_UPDATED: &str = "budget_updated";
 pub const EVENT_BUDGET_DELETED: &str = "budget_deleted";
 /// Audit event written when a user's budget assignment changes.
 pub const EVENT_USER_BUDGET_UPDATED: &str = "user_budget_updated";
+/// Audit target type of model events.
+pub const AUDIT_MODEL_TARGET: &str = "model";
+/// Audit event written when a model's manual price is set or changed.
+pub const EVENT_MODEL_PRICING_UPDATED: &str = "model_pricing_updated";
+/// Audit event written when a model's manual price is removed.
+pub const EVENT_MODEL_PRICING_DELETED: &str = "model_pricing_deleted";
 /// Audit event written when the roles or teams of a user change.
 pub const EVENT_USER_ASSIGNMENTS_UPDATED: &str = "user_assignments_updated";
 

@@ -53,6 +53,7 @@ import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
 import {sanitizeSvg} from '@/composables/useMarkdown';
 import {ADMIN_TEAMS_VIEW} from '~/types/generated/permissions';
+import type {ModelPricing} from '~/types/generated/ModelPricing';
 
 const store = useMainStore();
 const iconStore = useIconsStore();
@@ -64,7 +65,7 @@ const model = ref<Record<string, any> | null>(null);
 const loading = ref(true);
 const currentTab = ref('general');
 const originalData = ref<string>('');
-const pricing = ref<Record<string, any> | null>(null);
+const pricing = ref<ModelPricing | null>(null);
 
 const canViewAccess = computed(() => store.hasPermission(ADMIN_TEAMS_VIEW));
 const tabs = computed(() => [
@@ -98,7 +99,7 @@ const formData = reactive({
 	sampling: Object.fromEntries(samplingKeys.map(key => [key, null])) as Record<(typeof samplingKeys)[number], any>,
 	reasoning_effort: null as string | null,
 	reasoning_budget_tokens: null as number | null,
-	pricing: {input: '0', output: '0', reasoning: '', cache_read: '', cache_write: ''},
+	pricing: draftFromSheet(null),
 });
 
 const settingsForm = useSettingsForm({
@@ -138,15 +139,8 @@ function populateForm(data: Record<string, any>) {
 
 async function loadPricing() {
 	try {
-		pricing.value = (await modelPricing(modelId)) as Record<string, any>;
-		const override = pricing.value?.override_pricing ?? null;
-		formData.pricing = {
-			input: String(override?.input ?? pricing.value?.effective_input ?? 0),
-			output: String(override?.output ?? pricing.value?.effective_output ?? 0),
-			reasoning: override?.reasoning != null ? String(override.reasoning) : '',
-			cache_read: override?.cache_read != null ? String(override.cache_read) : '',
-			cache_write: override?.cache_write != null ? String(override.cache_write) : '',
-		};
+		pricing.value = (await modelPricing(modelId)) as ModelPricing;
+		formData.pricing = draftFromSheet(pricing.value?.override_pricing);
 	} catch (e) {
 		console.error(e);
 	}
@@ -188,18 +182,12 @@ async function removePricingOverride() {
 }
 
 function buildPricingPayload(): Record<string, any> {
-	const optional = (value: string): number | undefined => (value.trim() === '' ? undefined : Number(value));
-	const prices = {
-		input: Number(formData.pricing.input || 0),
-		output: Number(formData.pricing.output || 0),
-		reasoning: optional(formData.pricing.reasoning),
-		cache_read: optional(formData.pricing.cache_read),
-		cache_write: optional(formData.pricing.cache_write),
-	};
-	if (!Object.values(prices).every(price => price === undefined || (Number.isFinite(price) && price >= 0))) {
-		throw new Error(store.getTranslation('settings.models.editor.pricing_invalid'));
+	try {
+		return sheetFromDraft(formData.pricing);
+	} catch (error) {
+		if (error instanceof PricingDraftError) throw new Error(store.getTranslation(error.message));
+		throw error;
 	}
-	return {...prices, tiers: []};
 }
 
 function buildPatchPayload(): Record<string, any> {
@@ -232,7 +220,13 @@ function buildPatchPayload(): Record<string, any> {
 }
 
 async function saveModel() {
-	await patchAdminModel(modelId, buildPatchPayload());
+	try {
+		await patchAdminModel(modelId, buildPatchPayload());
+	} catch (error: any) {
+		const reason = error?.data?.errors?.[0]?.details?.reason ?? error?.data?.details?.reason;
+		if (reason) throw new Error(store.getTranslation(`pricing.error.${reason}`));
+		throw error;
+	}
 	model.value = (await adminModel(modelId)) as Record<string, any>;
 	populateForm(model.value);
 	await loadPricing();

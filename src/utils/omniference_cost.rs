@@ -198,7 +198,7 @@ impl OxideCostQueue {
 	fn queue_record(&self, record: CostRecord) {
 		let provider = record.provider.clone();
 		let model = record.model.clone();
-		if self.sender.send(CostQueueMessage::Record(record, Utc::now())).is_err() {
+		if self.sender.send(CostQueueMessage::Record(Box::new(record), Utc::now())).is_err() {
 			tracing::error!(provider, model, "asynchronous cost sink stopped before cost could be recorded");
 		}
 	}
@@ -225,6 +225,8 @@ impl CostSink for OxideCostQueue {
 			usage: UsageBreakdown::default(),
 			finish_reason: None,
 			time_to_first_token: None,
+			started_at: std::time::SystemTime::now(),
+			service_tier: None,
 		});
 	}
 
@@ -238,7 +240,7 @@ impl CostSink for OxideCostQueue {
 }
 
 enum CostQueueMessage {
-	Record(CostRecord, DateTime<Utc>),
+	Record(Box<CostRecord>, DateTime<Utc>),
 	Shutdown(oneshot::Sender<()>),
 }
 
