@@ -5,7 +5,6 @@ mod tests {
 	#[test]
 	fn test_log_event_as_str() {
 		assert_eq!(LogEvent::UserLogin.as_str(), "user_login");
-		assert_eq!(LogEvent::RoleAssigned.as_str(), "role_assigned");
 	}
 
 	#[test]

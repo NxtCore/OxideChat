@@ -39,6 +39,10 @@ pub struct PresetResponse {
 	pub disabled_by_admin: bool,
 	pub has_gateway_usage: bool,
 	pub can_edit: bool,
+	/// Whether the viewer may delete the preset and change who it is shared with.
+	pub can_manage: bool,
+	/// Whether the viewer only sees the preset because it was shared with them.
+	pub shared: bool,
 	pub unavailable: Option<PresetUnavailable>,
 	pub updated_at: DateTime<Utc>,
 }
@@ -103,7 +107,9 @@ impl PresetResponse {
 	/// Builds the response for `viewer`; the instructions are hidden from viewers who may not see them.
 	#[must_use]
 	pub fn build(preset: Preset, base: Option<PresetBaseModel>, viewer: &PresetActor) -> Self {
-		let can_edit = viewer.can_manage(&preset);
+		let can_manage = viewer.can_manage(&preset);
+		let can_edit = viewer.can_edit(&preset);
+		let shared = !can_manage && !viewer.is_home(&preset);
 		let scope = preset.scope();
 		let team = preset.team_id.zip(preset.team_name.clone()).map(|(id, name)| PresetTeam { id, name });
 		let unavailable = if !preset.is_enabled {
@@ -139,6 +145,8 @@ impl PresetResponse {
 			disabled_by_admin: preset.disabled_by_admin,
 			has_gateway_usage: false,
 			can_edit,
+			can_manage,
+			shared,
 			unavailable,
 			updated_at: preset.updated_at,
 		}

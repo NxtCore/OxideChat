@@ -28,14 +28,3 @@ pub struct AdminResetPasswordRequest {
 	pub password: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct SetUserRolesRequest {
-	#[serde(default)]
-	pub roles: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SetUserTeamsRequest {
-	#[serde(default)]
-	pub team_ids: Vec<Uuid>,
-}

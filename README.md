@@ -21,3 +21,7 @@ This is an example coming from the following projects:
 - [T3 Chat](https://t3.chat/)
     - And resulting from a coding competion: [intern3 chat](https://github.com/intern3-chat/intern3-chat)
 - [OpenWeb UI](https://github.com/open-webui/open-webui)
+
+# License
+
+OxideChat is licensed under the [Apache License 2.0](LICENSE), except for the `ee/` directory, which has its own license (see [ee/README.md](ee/README.md)).

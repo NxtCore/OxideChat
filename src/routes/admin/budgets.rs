@@ -1,5 +1,5 @@
 use crate::types::consts::{ADMIN_BUDGETS_EDIT, ADMIN_BUDGETS_VIEW};
-use crate::types::{AppError, AuthUser, Budget, BudgetAssignmentRequest, BudgetResetRequest, CreateBudgetRequest, JobState, ListBudgetsQuery, PageQuery, UpdateBudgetRequest, json_ok};
+use crate::types::{AppError, AssignmentKind, AuthUser, Budget, BudgetResetRequest, CreateBudgetRequest, JobState, ListBudgetsQuery, PageQuery, ReplaceAssignmentsRequest, UpdateBudgetRequest, json_ok};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -73,40 +73,24 @@ pub async fn delete_budget(State(state): State<Arc<JobState>>, auth: AuthUser, P
 	Ok((StatusCode::NO_CONTENT, "").into_response())
 }
 
-pub async fn assign_budget(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<BudgetAssignmentRequest>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_BUDGETS_EDIT).await?;
-
-	if req.team_id.is_none() && req.user_id.is_none() {
-		return Err(ErrorCode::ValidationFailed.into());
-	}
-
-	let budget = Budget::find_by_id(&state.db, &id)
-		.await
-		.map_err(AppError::database)?
-		.ok_or(ErrorCode::NotFound)?;
-	budget
-		.assign(&state.db, &auth.id, &req)
-		.await
-		.map_err(AppError::database)?;
-	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).build())
-}
-
 pub async fn get_budget_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_BUDGETS_VIEW).await?;
 
-	let assignments = Budget::list_assignments(&state.db, &id)
-		.await
-		.map_err(AppError::database)?;
-	json_ok(assignments)
+	json_ok(Budget::assignments(&state.db, &id).await?)
 }
 
-pub async fn delete_assignment(State(state): State<Arc<JobState>>, auth: AuthUser, Path((budget_id, assignment_id)): Path<(Uuid, Uuid)>) -> Result<Response, AppError> {
+pub async fn replace_budget_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<ReplaceAssignmentsRequest>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_BUDGETS_EDIT).await?;
 
-	Budget::delete_assignment(&state.db, &auth.id, &budget_id, &assignment_id)
+	if !req.is_valid_for(&Budget::ASSIGNMENT_KINDS) {
+		return Err(ErrorCode::ValidationFailed.into());
+	}
+	let budget = Budget::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
+	budget
+		.replace_assignments(&state.db, &auth.id, &req.ids(AssignmentKind::Team), &req.ids(AssignmentKind::User))
 		.await
-		.map_err(AppError::database)?;
-	Ok((StatusCode::NO_CONTENT, "").into_response())
+		.map_err(|error| AppError::foreign_key_or(error, ErrorCode::ValidationFailed))?;
+	json_ok(Budget::assignments(&state.db, &id).await?)
 }
 
 pub async fn user_overview(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {

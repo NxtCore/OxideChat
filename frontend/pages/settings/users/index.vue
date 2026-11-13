@@ -42,9 +42,14 @@
 			<div
 				v-for="user in users"
 				:key="user.id"
-				class="rounded-lg border border-border bg-card px-4 py-3 flex items-center gap-4 transition-all hover:border-border/80"
+				class="rounded-lg border border-border bg-card flex items-center gap-4 pr-4 transition-all hover:border-primary/50 hover:bg-accent/10"
+				data-testid="user-row"
 			>
-				<div class="flex-1 min-w-0">
+				<NuxtLink
+					:to="`/settings/users/${user.id}`"
+					class="flex-1 min-w-0 rounded-lg py-3 pl-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					data-testid="user-row-link"
+				>
 					<div class="flex items-center gap-2 flex-wrap">
 						<span class="font-medium text-foreground">{{ user.username }}</span>
 						<span
@@ -70,7 +75,7 @@
 						<span class="text-border">·</span>
 						<span>{{ formatDate(user.created_at) }}</span>
 					</div>
-				</div>
+				</NuxtLink>
 
 				<div class="flex items-center gap-2 shrink-0">
 					<ShadButton
@@ -80,15 +85,6 @@
 						@click="router.push(`/settings/analytics?user_id=${user.id}`)"
 					>
 						<BarChart2 class="h-4 w-4" />
-					</ShadButton>
-					<ShadButton
-						variant="outline"
-						size="sm"
-						:disabled="user.id === store.auth.user?.id || !store.hasPermission(ADMIN_USERS_EDIT)"
-						:title="user.id === store.auth.user?.id ? store.getTranslation('settings.admin_users.cannot_modify_self') : ''"
-						@click="openEditDialog(user)"
-					>
-						<Pencil class="h-4 w-4" />
 					</ShadButton>
 					<ShadButton
 						variant="outline"
@@ -158,63 +154,6 @@
 			</ShadDialogContent>
 		</ShadDialog>
 
-		<ShadDialog v-model:open="editOpen">
-			<ShadDialogContent class="sm:max-w-[480px]">
-				<ShadDialogHeader>
-					<ShadDialogTitle>{{ store.getTranslation('settings.admin_users.edit_user') }}</ShadDialogTitle>
-					<ShadDialogDescription>{{ selectedUser?.username }}</ShadDialogDescription>
-				</ShadDialogHeader>
-				<div class="space-y-4 py-2">
-					<div class="space-y-2">
-						<ShadLabel for="edit-email">{{ store.getTranslation('settings.admin_users.field_email') }}</ShadLabel>
-						<ShadInput id="edit-email" v-model="editForm.email" type="email" />
-					</div>
-					<div class="space-y-2">
-						<ShadLabel for="edit-username">{{ store.getTranslation('settings.admin_users.field_username') }}</ShadLabel>
-						<ShadInput id="edit-username" v-model="editForm.username" type="text" />
-					</div>
-					<div class="space-y-2">
-						<ShadLabel>{{ store.getTranslation('settings.admin_users.field_roles') }}</ShadLabel>
-						<ShadSelect v-model="editForm.roles" multiple clearable>
-							<ShadSelectTrigger class="w-full">
-								<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.select_roles')" />
-							</ShadSelectTrigger>
-							<ShadSelectContent>
-								<ShadSelectItem v-for="role in availableRoles" :key="role.id" :value="role.name">{{ role.name }}</ShadSelectItem>
-							</ShadSelectContent>
-						</ShadSelect>
-					</div>
-					<div class="space-y-2">
-						<ShadLabel>{{ store.getTranslation('settings.admin_users.field_teams') }}</ShadLabel>
-						<ShadSelect v-model="editForm.team_ids" multiple>
-							<ShadSelectTrigger class="w-full">
-								<ShadSelectValue :placeholder="store.getTranslation('settings.admin_users.select_teams')" />
-							</ShadSelectTrigger>
-							<ShadSelectContent>
-								<ShadSelectItem v-for="team in availableTeams" :key="team.id" :value="team.id" :disabled="team.is_default">{{ team.name }}</ShadSelectItem>
-							</ShadSelectContent>
-						</ShadSelect>
-					</div>
-					<div v-if="selectedUser?.auth_method === 'local'" class="space-y-2 border-t border-border pt-4">
-						<ShadLabel for="edit-password">{{ store.getTranslation('settings.admin_users.reset_password') }}</ShadLabel>
-						<ShadInput
-							id="edit-password"
-							v-model="editForm.newPassword"
-							type="password"
-							:placeholder="store.getTranslation('settings.admin_users.reset_password_placeholder')"
-						/>
-					</div>
-				</div>
-				<ShadDialogFooter>
-					<ShadButton variant="outline" @click="editOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
-					<ShadButton @click="submitEdit" :disabled="saving">
-						<Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
-						{{ store.getTranslation('common.save') }}
-					</ShadButton>
-				</ShadDialogFooter>
-			</ShadDialogContent>
-		</ShadDialog>
-
 		<ShadDialog v-model:open="deleteOpen">
 			<ShadDialogContent class="sm:max-w-[420px]">
 				<ShadDialogHeader>
@@ -238,7 +177,7 @@
 <script setup lang="ts">
 import {ADMIN_USERS_EDIT} from '~/types/generated/permissions';
 import {ref, reactive, computed, watch, onMounted} from 'vue';
-import {Users, Plus, Pencil, Trash2, Loader2, BarChart2} from 'lucide-vue-next';
+import {Users, Plus, Trash2, Loader2, BarChart2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import type {TeamList, UserListResponse} from '~/types/chat';
 
@@ -256,7 +195,6 @@ const loading = ref(false);
 const saving = ref(false);
 
 const createOpen = ref(false);
-const editOpen = ref(false);
 const deleteOpen = ref(false);
 const selectedUser = ref<UserListResponse | null>(null);
 const teams = ref<TeamList[]>([]);
@@ -269,10 +207,8 @@ function ensureDefaultTeams(ids: string[]) {
 }
 
 const createForm = reactive({email: '', username: '', password: '', roles: [] as string[], team_ids: [] as string[]});
-const editForm = reactive({email: '', username: '', roles: [] as string[], team_ids: [] as string[], newPassword: ''});
 
 watch(() => createForm.team_ids, () => ensureDefaultTeams(createForm.team_ids));
-watch(() => editForm.team_ids, () => ensureDefaultTeams(editForm.team_ids));
 
 const availableRoles = computed(() => store.roles);
 const availableTeams = computed(() => teams.value);
@@ -329,16 +265,6 @@ function openCreateDialog() {
 	createOpen.value = true;
 }
 
-function openEditDialog(u: UserListResponse) {
-	selectedUser.value = u;
-	editForm.email = u.email;
-	editForm.username = u.username;
-	editForm.roles = [...u.roles];
-	editForm.team_ids = u.teams.map(team => team.id);
-	editForm.newPassword = '';
-	editOpen.value = true;
-}
-
 function openDeleteDialog(u: UserListResponse) {
 	selectedUser.value = u;
 	deleteOpen.value = true;
@@ -354,31 +280,6 @@ async function submitCreate() {
 	} catch (e: any) {
 		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
 		store.toast(store.getTranslation('settings.admin_users.create_error'), {type: 'error', description: errorMessage});
-	} finally {
-		saving.value = false;
-	}
-}
-
-async function submitEdit() {
-	if (!selectedUser.value) return;
-	saving.value = true;
-	try {
-		await updateAdminUser(selectedUser.value.id, {email: editForm.email, username: editForm.username});
-
-		await updateAdminUser(selectedUser.value.id, {roles: editForm.roles}, '/roles');
-
-		await updateAdminUser(selectedUser.value.id, {team_ids: editForm.team_ids}, '/teams');
-
-		if (editForm.newPassword) {
-			await updateAdminUser(selectedUser.value.id, {password: editForm.newPassword}, '/password');
-		}
-
-		store.toast(store.getTranslation('settings.admin_users.edit_success'), {type: 'success'});
-		editOpen.value = false;
-		await loadUsers();
-	} catch (e: any) {
-		const errorMessage = e?.data?.errors?.[0]?.message || e?.message || '';
-		store.toast(store.getTranslation('settings.admin_users.edit_error'), {type: 'error', description: errorMessage});
 	} finally {
 		saving.value = false;
 	}

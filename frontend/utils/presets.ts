@@ -74,6 +74,7 @@ export function presetToRequest(preset: PresetResponse): SavePresetRequest {
 	};
 }
 
-export function presetScopeLabel(preset: {scope: PresetScope; team: PresetTeam | null}, translate: (key: string) => string): string {
+export function presetScopeLabel(preset: {scope: PresetScope; team: PresetTeam | null; shared?: boolean}, translate: (key: string) => string): string {
+	if (preset.shared) return translate('presets.scope.shared');
 	return preset.scope === 'team' && preset.team ? preset.team.name : translate(`presets.scope.${preset.scope}`);
 }

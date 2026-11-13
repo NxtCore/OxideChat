@@ -86,23 +86,6 @@
 					<template #fallback><Wand2 class="h-1/2 w-1/2 text-primary" /></template>
 				</ImagePicker>
 			</div>
-
-			<div v-if="scopeOptions" class="space-y-1.5">
-				<ShadLabel>{{ t('scope') }}</ShadLabel>
-				<ShadSelect :model-value="scopeValue" @update:model-value="value => emit('scope', String(value))">
-					<ShadSelectTrigger data-testid="preset-scope">
-						<ShadSelectValue />
-					</ShadSelectTrigger>
-					<ShadSelectContent>
-						<ShadSelectItem v-for="option in scopeOptions" :key="option.value" :value="option.value" :data-testid="`preset-scope-${option.value}`">{{ option.label }}</ShadSelectItem>
-					</ShadSelectContent>
-				</ShadSelect>
-				<p class="text-xs text-muted-foreground">{{ t('scope_choose_description') }}</p>
-			</div>
-			<div v-else class="rounded-lg border border-border bg-muted/30 p-3">
-				<p class="text-sm font-medium text-foreground">{{ t('scope') }}: {{ scopeLabel }}</p>
-				<p class="text-xs text-muted-foreground">{{ t('scope_description') }}</p>
-			</div>
 		</div>
 	</div>
 </template>
@@ -118,9 +101,6 @@ const props = defineProps<{
 	form: Record<string, any>;
 	slugStatus: SlugStatus;
 	baseModelKey: string | null;
-	scopeLabel: string;
-	scopeOptions: {value: string; label: string}[] | null;
-	scopeValue: string;
 	slugRenamed: boolean;
 	enabledLocked: boolean;
 	disabled?: boolean;
@@ -131,7 +111,6 @@ const emit = defineEmits<{
 	slug: [value: string];
 	'base-key': [value: string | null];
 	base: [model: ModelList | null];
-	scope: [value: string];
 }>();
 
 const store = useMainStore();

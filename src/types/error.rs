@@ -1,6 +1,6 @@
 //! Handler error type shared by all routes.
 
-use crate::types::{GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError};
+use crate::types::{GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError, RoleError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::response::{IntoResponse, Response};
@@ -29,6 +29,9 @@ pub enum AppError {
 	/// A preset could not be saved or found.
 	#[error(transparent)]
 	Preset(#[from] PresetError),
+	/// A role could not be saved, deleted or found.
+	#[error(transparent)]
+	Role(#[from] RoleError),
 }
 
 /// Returns true when the database rejected a statement because of a unique constraint.
@@ -53,6 +56,13 @@ impl AppError {
 		if is_unique_violation(&error) { Self::Code(code) } else { Self::Database(error) }
 	}
 
+	/// Maps a foreign key violation (a referenced row does not exist) to `code`, any other database failure to an internal error.
+	#[must_use]
+	pub fn foreign_key_or(error: sqlx::Error, code: ErrorCode) -> Self {
+		let missing = error.as_database_error().is_some_and(sqlx::error::DatabaseError::is_foreign_key_violation);
+		if missing { Self::Code(code) } else { Self::Database(error) }
+	}
+
 	/// Wraps a database failure so it renders `DatabaseError` and is logged.
 	#[must_use]
 	pub fn database(error: sqlx::Error) -> Self {
@@ -69,6 +79,7 @@ impl AppError {
 			Self::GatewayKey(error) => key_error_code(error),
 			Self::GatewayAdmin(error) => admin_error_code(error),
 			Self::Preset(error) => preset_error_code(error),
+			Self::Role(error) => role_error_code(error),
 		}
 	}
 }
@@ -142,5 +153,20 @@ fn preset_error_code(error: &PresetError) -> ErrorCode {
 		PresetError::NotFound => ErrorCode::NotFound,
 		PresetError::Forbidden => ErrorCode::InsufficientPermissions,
 		PresetError::Database(_) => ErrorCode::InternalError,
+	}
+}
+
+fn role_error_code(error: &RoleError) -> ErrorCode {
+	match error {
+		RoleError::InvalidName => ErrorCode::RoleNameInvalid,
+		RoleError::NameTaken => ErrorCode::RoleNameTaken,
+		RoleError::UnknownPermission => ErrorCode::RolePermissionUnknown,
+		RoleError::Protected => ErrorCode::RoleProtected,
+		RoleError::PermissionNotHeld => ErrorCode::RolePermissionNotHeld,
+		RoleError::Outranked => ErrorCode::InsufficientPermissions,
+		RoleError::OwnRoles => ErrorCode::Forbidden,
+		RoleError::LockOut => ErrorCode::RoleLockOut,
+		RoleError::NotFound => ErrorCode::NotFound,
+		RoleError::Database(_) => ErrorCode::InternalError,
 	}
 }

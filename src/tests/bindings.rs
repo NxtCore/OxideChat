@@ -42,7 +42,12 @@ mod tests {
 			ProviderResponse,
 			AnalyticsRow,
 			ApiKeyAnalyticsRow,
-			BudgetAssignmentInfo,
+			AssignmentKind,
+			AssignmentRef,
+			AssignmentRole,
+			AssignmentTarget,
+			AssignmentsResponse,
+			ReplaceAssignmentsRequest,
 			BudgetResetEventResponse,
 			BudgetResetRequest,
 			BudgetResponse,
@@ -99,12 +104,20 @@ mod tests {
 			UserBudgetOverviewResponse,
 			UserBudgetStatus,
 			TeamRole,
+			RoleResponse,
+			PermissionResponse,
+			SaveRoleRequest,
 			UserListResponse,
+			UserOverviewResponse,
 			UserResponse,
 			WorkspaceDeleteAction,
 			WorkspaceResponse,
 		);
 
+		write_permissions()
+	}
+
+	fn write_permissions() -> Result<(), Box<dyn Error>> {
 		let mut permissions = String::new();
 		for (name, value) in ALL {
 			writeln!(permissions, "export const {name} = '{value}';")?;

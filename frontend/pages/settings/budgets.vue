@@ -251,75 +251,23 @@
 
 						<div class="rounded-lg border border-border bg-card p-4">
 							<h3 class="mb-3 text-sm font-semibold text-foreground">{{ store.getTranslation('settings.budgets.assignments') }}</h3>
-							<div v-if="budgetStore.assignments.length" class="mb-3 space-y-2">
-								<div v-for="a in budgetStore.assignments" :key="a.id" class="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
-									<div class="flex min-w-0 items-center gap-2">
-										<component :is="a.team_id ? Building2 : User" class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-										<span class="truncate font-medium">{{ a.team_name ?? a.user_label ?? '-' }}</span>
-										<span class="shrink-0 text-xs text-muted-foreground">{{ a.team_id ? store.getTranslation('settings.budgets.team') : store.getTranslation('settings.budgets.user') }}</span>
-									</div>
-									<div class="flex items-center gap-1">
-										<ShadButton v-if="canEdit" variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-destructive" @click="openReset({assignment_id: a.id}, a.team_name ?? a.user_label ?? selected.name)">
-											<RotateCcw class="h-4 w-4" />
-										</ShadButton>
-										<ShadButton v-if="canEdit" variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-destructive" @click="removeAssignment(a)">
-											<X class="h-4 w-4" />
-										</ShadButton>
-									</div>
-								</div>
-							</div>
-							<p v-else class="mb-3 text-sm text-muted-foreground">{{ store.getTranslation('settings.budgets.no_assignments') }}</p>
-
-							<div v-if="canEdit" class="grid gap-3 md:grid-cols-2">
-								<div class="space-y-1.5">
-									<ShadLabel>{{ store.getTranslation('settings.budgets.assign_team') }}</ShadLabel>
-									<ShadPopover v-model:open="teamPickerOpen">
-										<ShadPopoverTrigger as-child>
-											<ShadButton variant="outline" class="w-full justify-between font-normal" @click="teamPickerOpen = true">
-												<span class="truncate" :class="selectedTeamId ? 'text-foreground' : 'text-muted-foreground'">
-													{{ selectedTeamId ? (teams.find(t => t.id === selectedTeamId)?.name ?? selectedTeamId) : store.getTranslation('settings.budgets.pick_team') }}
-												</span>
-												<ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
-											</ShadButton>
-										</ShadPopoverTrigger>
-										<ShadPopoverContent class="w-72 p-2" align="start">
-											<ShadInput v-model="teamSearch" :placeholder="store.getTranslation('settings.teams.search')" class="mb-2 h-8 text-sm" />
-											<div class="max-h-52 space-y-0.5 overflow-y-auto">
-												<button v-for="t in filteredTeams" :key="t.id" type="button" class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" :class="selectedTeamId === t.id ? 'bg-accent text-accent-foreground' : 'text-foreground'" @click="selectedTeamId = t.id; teamPickerOpen = false; teamSearch = ''">
-													<Check v-if="selectedTeamId === t.id" class="h-3.5 w-3.5 shrink-0" />
-													<span v-else class="h-3.5 w-3.5 shrink-0" />
-													<span class="truncate">{{ t.name }}</span>
-												</button>
-											</div>
-										</ShadPopoverContent>
-									</ShadPopover>
-									<ShadButton :disabled="!selectedTeamId" size="sm" class="w-full" @click="assignTeam">{{ store.getTranslation('settings.budgets.assign_team') }}</ShadButton>
-								</div>
-
-								<div class="space-y-1.5">
-									<ShadLabel>{{ store.getTranslation('settings.budgets.assign_user') }}</ShadLabel>
-									<ShadPopover v-model:open="userPickerOpen">
-										<ShadPopoverTrigger as-child>
-											<ShadButton variant="outline" class="w-full justify-between font-normal" @click="userPickerOpen = true">
-												<span class="truncate" :class="selectedUserId ? 'text-foreground' : 'text-muted-foreground'">
-													{{ selectedUserId ? (users.find(u => u.id === selectedUserId)?.label ?? selectedUserId) : store.getTranslation('settings.budgets.pick_user') }}
-												</span>
-												<ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
-											</ShadButton>
-										</ShadPopoverTrigger>
-										<ShadPopoverContent class="w-72 p-2" align="start">
-											<ShadInput v-model="userSearch" :placeholder="store.getTranslation('settings.admin_users.search')" class="mb-2 h-8 text-sm" />
-											<div class="max-h-52 space-y-0.5 overflow-y-auto">
-												<button v-for="u in filteredUsers" :key="u.id" type="button" class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" :class="selectedUserId === u.id ? 'bg-accent text-accent-foreground' : 'text-foreground'" @click="selectedUserId = u.id; userPickerOpen = false; userSearch = ''">
-													<Check v-if="selectedUserId === u.id" class="h-3.5 w-3.5 shrink-0" />
-													<span v-else class="h-3.5 w-3.5 shrink-0" />
-													<span class="truncate">{{ u.label }}</span>
-												</button>
-											</div>
-										</ShadPopoverContent>
-									</ShadPopover>
-									<ShadButton :disabled="!selectedUserId" size="sm" class="w-full" @click="assignUser">{{ store.getTranslation('settings.budgets.assign_user') }}</ShadButton>
-								</div>
+							<SettingsAssignmentPicker
+								v-if="assignmentData"
+								:model-value="assignmentData.targets"
+								:options="assignmentOptions"
+								:kinds="assignmentData.kinds"
+								:disabled="!canEdit"
+								:description="store.getTranslation(`settings.budgets.assign.description_${selected.kind}`)"
+								:describe="describeAssignment"
+								:empty-title="store.getTranslation('settings.budgets.assign.empty_title')"
+								:empty-hint="store.getTranslation('settings.budgets.assign.empty_hint')"
+								:note="store.getTranslation(`settings.budgets.assign.note_${selected.kind}`)"
+								test-id="budget-assignments"
+								@update:model-value="saveAssignments"
+							/>
+							<div v-else class="space-y-2">
+								<ShadSkeleton class="h-4 w-2/3" />
+								<ShadSkeleton class="h-12 w-full" />
 							</div>
 						</div>
 					</div>
@@ -436,10 +384,11 @@
 
 <script setup lang="ts">
 import {ADMIN_BUDGETS_EDIT} from '~/types/generated/permissions';
-import {Building2, Check, ChevronDown, ChevronsUpDown, Loader2, Plus, RefreshCcw, RotateCcw, Trash2, User, X} from 'lucide-vue-next';
+import {ChevronDown, Loader2, Plus, RefreshCcw, RotateCcw, Trash2} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useBudgetStore} from '@/stores/budgetStore';
-import type {Budget, BudgetAssignmentInfo, BudgetPayload, BudgetResetEvent, BudgetResetPayload, EffectiveBudget, UserBudgetOverview} from '~/types/budgets';
+import type {Budget, BudgetPayload, BudgetResetEvent, BudgetResetPayload, EffectiveBudget, UserBudgetOverview} from '~/types/budgets';
+import type {AssignmentOption, AssignmentTarget} from '~/types/assignments';
 import type {TeamList} from '~/types/chat';
 
 interface UserEntry {
@@ -448,6 +397,7 @@ interface UserEntry {
 }
 
 const store = useMainStore();
+const route = useRoute();
 const budgetStore = useBudgetStore();
 
 const loading = ref(false);
@@ -457,14 +407,9 @@ const teams = ref<TeamList[]>([]);
 const users = ref<UserEntry[]>([]);
 const expandedUsers = ref(new Set<string>());
 
-const teamPickerOpen = ref(false);
-const userPickerOpen = ref(false);
-const teamSearch = ref('');
-const userSearch = ref('');
+const {data: assignmentData, load: loadAssignments, replace: replaceAssignments} = useAssignments();
 const userOverviewSearch = ref('');
 const teamOverviewSearch = ref('');
-const selectedTeamId = ref<string | null>(null);
-const selectedUserId = ref<string | null>(null);
 const resetOpen = ref(false);
 const resetPayload = ref<BudgetResetPayload>({});
 const resetLabel = ref('');
@@ -496,15 +441,10 @@ const settingsForm = useSettingsForm({
 	save: saveBudget,
 });
 
-const filteredTeams = computed(() => {
-	const q = teamSearch.value.toLowerCase();
-	return q ? teams.value.filter(t => t.name.toLowerCase().includes(q)) : teams.value;
-});
-
-const filteredUsers = computed(() => {
-	const q = userSearch.value.toLowerCase();
-	return q ? users.value.filter(u => u.label.toLowerCase().includes(q)) : users.value;
-});
+const assignmentOptions = computed<AssignmentOption[]>(() => [
+	...users.value.map(user => ({kind: 'user' as const, id: user.id, label: user.label})),
+	...teams.value.map(team => ({kind: 'team' as const, id: team.id, label: team.name})),
+]);
 
 const filteredUserOverview = computed(() => {
 	const q = userOverviewSearch.value.trim().toLowerCase();
@@ -536,9 +476,7 @@ async function loadBudget(budget: Budget) {
 	selected.value = budget;
 	fillForm(budget);
 	settingsForm.markSaved();
-	selectedTeamId.value = null;
-	selectedUserId.value = null;
-	await budgetStore.fetchAssignments(budget.id);
+	await loadAssignments(assignmentsPath(budget.id));
 }
 
 function decisionClass(decision: string) {
@@ -588,7 +526,6 @@ async function confirmReset() {
 			reason: resetReason.value || null,
 		});
 		resetOpen.value = false;
-		if (selected.value) await budgetStore.fetchAssignments(selected.value.id);
 		store.toast(store.getTranslation('settings.budgets.reset_success'), {type: 'success'});
 	} catch {
 		store.toast(store.getTranslation('settings.budgets.reset_error'), {type: 'error'});
@@ -646,39 +583,17 @@ async function deleteBudget() {
 	}
 }
 
-async function assignTeam() {
-	if (!selected.value || !selectedTeamId.value) return;
-	try {
-		await budgetStore.assignBudget(selected.value.id, {team_id: selectedTeamId.value});
-		selectedTeamId.value = null;
-		await loadOperationalData();
-		store.toast(store.getTranslation('settings.budgets.assign_success'), {type: 'success'});
-	} catch {
-		store.toast(store.getTranslation('settings.budgets.assign_error'), {type: 'error'});
-	}
+function describeAssignment(target: AssignmentOption) {
+	const key = target.kind === 'team' ? `team_${selected.value?.kind}` : 'user';
+	return store.getTranslation(`settings.budgets.assign.effect_${key}`);
 }
 
-async function assignUser() {
-	if (!selected.value || !selectedUserId.value) return;
-	try {
-		await budgetStore.assignBudget(selected.value.id, {user_id: selectedUserId.value});
-		selectedUserId.value = null;
-		await loadOperationalData();
-		store.toast(store.getTranslation('settings.budgets.assign_success'), {type: 'success'});
-	} catch {
-		store.toast(store.getTranslation('settings.budgets.assign_error'), {type: 'error'});
-	}
+function assignmentsPath(budgetId: string) {
+	return `/api/v1/admin/budgets/${budgetId}/assignments`;
 }
 
-async function removeAssignment(a: BudgetAssignmentInfo) {
-	if (!selected.value) return;
-	try {
-		await budgetStore.removeAssignment(selected.value.id, a.id);
-		await loadOperationalData();
-		store.toast(store.getTranslation('settings.budgets.remove_success'), {type: 'success'});
-	} catch {
-		store.toast(store.getTranslation('settings.budgets.remove_error'), {type: 'error'});
-	}
+async function saveAssignments(targets: AssignmentTarget[]) {
+	if (selected.value && (await replaceAssignments(assignmentsPath(selected.value.id), targets))) await loadOperationalData();
 }
 
 async function loadTeamsAndUsers() {
@@ -702,7 +617,9 @@ onMounted(async () => {
 	loading.value = true;
 	try {
 		await Promise.all([budgetStore.fetchBudgets(), loadTeamsAndUsers(), loadOperationalData()]);
-		if (budgetStore.budgets[0]) await loadBudget(budgetStore.budgets[0]);
+		const wanted = budgetStore.budgets.find(budget => budget.id === route.query.budget);
+		if (wanted) activeTab.value = 'budgets';
+		if (wanted ?? budgetStore.budgets[0]) await loadBudget(wanted ?? budgetStore.budgets[0]);
 	} finally {
 		loading.value = false;
 	}

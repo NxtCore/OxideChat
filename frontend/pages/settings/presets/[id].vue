@@ -9,8 +9,13 @@
 				<Wand2 v-else class="h-5 w-5 text-primary" />
 			</div>
 		</template>
-		<template v-if="!isNew && canEdit" #actions>
-			<ShadButton variant="outline" data-testid="preset-editor-delete" @click="deleteOpen = true">
+		<template #actions>
+			<ShadButton v-if="sharedWith" variant="outline" :title="t('sharing_title')" data-testid="preset-sharing-badge" @click="currentTab = 'sharing'">
+				<component :is="SCOPE_ICONS[sharedWith.kind]" class="h-4 w-4" />
+				<span class="max-w-40 truncate">{{ scopeName(sharedWith) }}</span>
+				<span v-if="shareCount" class="rounded-full bg-muted px-1.5 text-xs text-muted-foreground" data-testid="preset-sharing-count">+{{ shareCount }}</span>
+			</ShadButton>
+			<ShadButton v-if="!isNew && canManage" variant="outline" data-testid="preset-editor-delete" @click="deleteOpen = true">
 				<Trash2 class="h-4 w-4" />
 				{{ store.getTranslation('presets.settings.delete') }}
 			</ShadButton>
@@ -42,9 +47,6 @@
 					:form="form"
 					:slug-status="slugStatus"
 					:base-model-key="baseModelKey"
-					:scope-label="scopeLabel"
-					:scope-options="isNew ? scopeOptions : null"
-					:scope-value="scopeChoice"
 					:slug-renamed="slugRenamed"
 					:enabled-locked="enabledLocked"
 					:disabled="!canEdit"
@@ -52,8 +54,40 @@
 					@slug="onSlugInput"
 					@base-key="value => (baseModelKey = value)"
 					@base="onBaseSelected"
-					@scope="value => (scopeChoice = value)"
 				/>
+				<div v-show="currentTab === 'sharing'" class="space-y-3">
+					<h3 class="text-base font-semibold text-foreground">{{ t('sharing_title') }}</h3>
+					<SettingsAssignmentPicker
+						v-if="isNew"
+						single
+						:model-value="assignment"
+						:options="assignmentOptions"
+						:kinds="[]"
+						:description="t('owner_description')"
+						:describe="describeScope"
+						:note="t('owner_note')"
+						test-id="preset-scope"
+						@update:model-value="targets => (newAssignment = targets)"
+					/>
+					<SettingsAssignmentPicker
+						v-else
+						:model-value="assignment"
+						:options="shareOptions"
+						:kinds="storedAssignment?.kinds ?? []"
+						:roles="storedAssignment?.roles ?? []"
+						:disabled="!storedAssignment?.kinds.length"
+						:description="t(canManage ? 'sharing_description' : 'scope_description')"
+						:describe="describeShare"
+						:note="t('sharing_note')"
+						test-id="preset-sharing"
+						@update:model-value="targets => replaceAssignment(assignmentPath, targets)"
+						@search="searchShareUsers"
+					/>
+					<p v-if="usersNeedView" class="flex items-start gap-2 text-xs text-muted-foreground" data-testid="preset-sharing-users-hidden">
+						<Info class="mt-px h-3.5 w-3.5 shrink-0" />
+						{{ t('users_need_view') }}
+					</p>
+				</div>
 				<div v-show="currentTab === 'instructions'" class="space-y-4">
 					<SettingsModelsPromptTab :form="form" title-key="presets.editor.instructions_title" description-key="presets.editor.instructions_description" />
 					<div class="flex items-center justify-between rounded-lg border border-border p-3">
@@ -75,9 +109,11 @@
 </template>
 
 <script setup lang="ts">
-import {AlertTriangle, ArrowLeft, Loader2, Trash2, Wand2} from 'lucide-vue-next';
+import {AlertTriangle, ArrowLeft, Building2, Globe, Info, Loader2, Trash2, User, Wand2} from 'lucide-vue-next';
+import {ADMIN_USERS_VIEW} from '~/types/generated/permissions';
 import {useMainStore} from '~/stores';
 import {usePresetStore} from '~/stores/presetStore';
+import type {AssignmentOption, AssignmentTarget} from '~/types/assignments';
 import type {ModelList} from '~/types/chat';
 import type {PresetResponse, PresetUnavailable, SavePresetRequest} from '~/types/presets';
 import type {SlugStatus} from '~/components/settings/presets/GeneralTab.vue';
@@ -89,9 +125,10 @@ const presetStore = usePresetStore();
 const route = useRoute();
 const router = useRouter();
 
-const t = (key: string) => store.getTranslation(`presets.editor.${key}`);
+const t = (key: string, args?: Record<string, string>) => store.getTranslation(`presets.editor.${key}`, args);
 
-const tabs = ['general', 'instructions', 'parameters', 'tools', 'starters'] as const;
+const tabs = ['general', 'sharing', 'instructions', 'parameters', 'tools', 'starters'] as const;
+const SCOPE_ICONS: Record<string, unknown> = {user: User, team: Building2, everyone: Globe};
 const samplingKeys = ['temperature', 'max_tokens', 'top_p', 'top_k', 'frequency_penalty', 'presence_penalty', 'seed', 'stop', 'logprobs', 'top_logprobs', 'parallel_tool_calls'] as const;
 
 const presetId = route.params.id as string;
@@ -123,18 +160,44 @@ const form = reactive({
 	starters: ['', '', '', ''] as string[],
 });
 
-const scopeChoice = ref('');
-const scopeOptions = computed(() => {
+const {data: storedAssignment, load: loadAssignment, replace: replaceAssignment} = useAssignments();
+const newAssignment = ref<AssignmentTarget[]>([]);
+const scopeTarget = computed<AssignmentTarget[]>(() => {
+	const current = preset.value;
+	if (!current) return [];
+	if (current.scope === 'team' && current.team) return [{kind: 'team', id: current.team.id, label: current.team.name, inherited: false, owner: true, role: null}];
+	if (current.scope === 'installation') return [{kind: 'everyone', id: null, label: '', inherited: false, owner: true, role: null}];
+	return [{kind: 'user', id: null, label: store.getTranslation('presets.scope.personal'), inherited: false, owner: true, role: null}];
+});
+const draftAssignment = computed<AssignmentTarget[]>(() =>
+	newAssignment.value.map(target => ({...(assignmentOptions.value.find(option => option.kind === target.kind && (target.kind !== 'team' || option.id === target.id)) ?? target), inherited: false, owner: true, role: null})),
+);
+const assignment = computed(() => (isNew ? draftAssignment.value : (storedAssignment.value?.targets ?? scopeTarget.value)));
+const sharedWith = computed(() => assignment.value.find(target => target.owner) ?? null);
+const shareCount = computed(() => assignment.value.filter(target => !target.owner).length);
+const shareUsers = ref<AssignmentOption[]>([]);
+const shareOptions = computed<AssignmentOption[]>(() => {
 	const scopes = presetStore.scopes;
 	if (!scopes) return [];
 	return [
-		...(scopes.personal ? [{value: 'personal', label: store.getTranslation('presets.scope.personal')}] : []),
-		...scopes.teams.map(team => ({value: `team:${team.id}`, label: team.name})),
-		...(scopes.installation ? [{value: 'installation', label: store.getTranslation('presets.scope.installation')}] : []),
+		...(scopes.installation ? [{kind: 'everyone' as const, id: null, label: ''}] : []),
+		...scopes.teams.map(team => ({kind: 'team' as const, id: team.id, label: team.name})),
+		...shareUsers.value,
 	];
 });
-const canEdit = computed(() => (isNew ? scopeOptions.value.length > 0 : !!preset.value?.can_edit));
-const scopeLabel = computed(() => (preset.value ? presetScopeLabel(preset.value, store.getTranslation) : ''));
+const assignmentPath = `/api/v1/presets/${presetId}/assignments`;
+const assignmentOptions = computed<AssignmentOption[]>(() => {
+	const scopes = presetStore.scopes;
+	if (!scopes) return [];
+	return [
+		...(scopes.personal ? [{kind: 'user' as const, id: store.auth.user?.id ?? null, label: store.getTranslation('presets.scope.personal')}] : []),
+		...scopes.teams.map(team => ({kind: 'team' as const, id: team.id, label: team.name})),
+		...(scopes.installation ? [{kind: 'everyone' as const, id: null, label: ''}] : []),
+	];
+});
+const canEdit = computed(() => (isNew ? assignmentOptions.value.length > 0 : !!preset.value?.can_edit));
+const canManage = computed(() => isNew || !!preset.value?.can_manage);
+const usersNeedView = computed(() => !isNew && canManage.value && !!presetStore.scopes?.installation && !store.hasPermission(ADMIN_USERS_VIEW));
 const slugRenamed = computed(() => !!preset.value?.has_gateway_usage && preset.value.slug !== form.slug);
 const enabledLocked = computed(() => !!preset.value?.disabled_by_admin && !presetStore.scopes?.installation);
 const unavailable = computed<PresetUnavailable | null>(() => (preset.value?.unavailable === 'disabled' ? null : (preset.value?.unavailable ?? null)));
@@ -201,14 +264,60 @@ function buildRequest(): SavePresetRequest {
 }
 
 function scopeRequest(): Pick<SavePresetRequest, 'scope' | 'team_id'> {
-	if (scopeChoice.value.startsWith('team:')) return {scope: 'team', team_id: scopeChoice.value.slice(5)};
-	return {scope: scopeChoice.value === 'installation' ? 'installation' : 'personal'};
+	const target = newAssignment.value[0];
+	if (target?.kind === 'team' && target.id) return {scope: 'team', team_id: target.id};
+	return {scope: target?.kind === 'everyone' ? 'installation' : 'personal'};
 }
 
-function initialScope() {
-	const options = scopeOptions.value.map(option => option.value);
-	const requested = route.query.scope === 'team' ? options.find(value => value.startsWith('team:')) : (route.query.scope as string | undefined);
-	scopeChoice.value = requested && options.includes(requested) ? requested : (options[0] ?? '');
+function isOwnScope(target: AssignmentOption) {
+	return target.kind === 'user' && (!target.id || target.id === store.auth.user?.id);
+}
+
+function scopeName(target: AssignmentOption) {
+	if (preset.value?.shared) return store.getTranslation('presets.scope.shared');
+	if (target.kind === 'everyone') return store.getTranslation('assignments.everyone');
+	return isOwnScope(target) ? store.getTranslation('presets.scope.personal') : target.label;
+}
+
+function describeShare(target: AssignmentOption) {
+	if ('owner' in target && target.owner && preset.value?.shared) return t('owner_effect.shared');
+	if ('role' in target && target.role === 'editor') return t(`share_effect.${target.kind}_editor`, {name: target.label});
+	if (assignment.value.some(current => current.owner && current.kind === target.kind && current.id === target.id)) return t(`owner_effect.${isOwnScope(target) ? 'personal' : target.kind}`, {name: target.label});
+	return t(`share_effect.${target.kind}`, {name: target.label});
+}
+
+const SHARE_USER_PAGE_SIZE = 50;
+let shareSearchTimer: ReturnType<typeof setTimeout> | undefined;
+let shareSearchTerm = '';
+
+async function loadShareUsers(search = '') {
+	if (!storedAssignment.value?.kinds.includes('user')) return;
+	shareSearchTerm = search;
+	try {
+		const list = await adminUsers({page: 1, size: SHARE_USER_PAGE_SIZE, ...(search ? {search} : {})});
+		if (shareSearchTerm === search) shareUsers.value = list.items.map(user => ({kind: 'user' as const, id: user.id, label: user.username || user.email}));
+	} catch (e: any) {
+		store.toast(store.getTranslation('assignments.load_error'), {type: 'error', description: errorMessage(e, '')});
+	}
+}
+
+onBeforeUnmount(() => clearTimeout(shareSearchTimer));
+
+function searchShareUsers(term: string) {
+	clearTimeout(shareSearchTimer);
+	shareSearchTimer = setTimeout(() => loadShareUsers(term), 250);
+}
+
+function describeScope(target: AssignmentOption) {
+	if (target.kind === 'team') return target.label ? t('sharing_effect.team', {team: target.label}) : t('sharing_effect.team_any');
+	if (target.kind === 'everyone') return t('sharing_effect.everyone');
+	return isOwnScope(target) ? t('sharing_effect.personal') : t('sharing_effect.owner', {name: target.label});
+}
+
+function initialAssignment() {
+	const kind = route.query.scope === 'team' ? 'team' : route.query.scope === 'installation' ? 'everyone' : 'user';
+	const option = assignmentOptions.value.find(candidate => candidate.kind === kind) ?? assignmentOptions.value[0];
+	newAssignment.value = option ? [{...option, inherited: false, owner: true, role: null}] : [];
 }
 
 function applyPreset(loaded: PresetResponse) {
@@ -283,7 +392,7 @@ function onDeleted() {
 onMounted(async () => {
 	if (isNew) {
 		await presetStore.ensureScopes();
-		initialScope();
+		initialAssignment();
 		settingsForm.markSaved();
 		const draft = presetStore.draft;
 		presetStore.draft = null;
@@ -299,7 +408,11 @@ onMounted(async () => {
 	}
 	try {
 		applyPreset(await presetStore.fetchPreset(presetId));
-		if (preset.value?.disabled_by_admin) await presetStore.ensureScopes();
+		if (preset.value?.can_edit) {
+			await Promise.all([presetStore.ensureScopes(), loadAssignment(assignmentPath)]);
+			await loadShareUsers();
+		}
+		else if (preset.value?.disabled_by_admin) await presetStore.ensureScopes();
 		slugStatus.value = 'available';
 		settingsForm.markSaved();
 	} catch {

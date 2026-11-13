@@ -10,6 +10,7 @@ pub mod oauth_providers;
 pub mod presets;
 pub mod provider_billing;
 pub mod providers;
+pub mod roles;
 pub mod teams;
 pub mod tools;
 pub mod upstream_providers;
@@ -71,9 +72,8 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/budgets/{id}", patch(budgets::update_budget).delete(budgets::delete_budget))
 		.route(
 			"/api/v1/admin/budgets/{id}/assignments",
-			get(budgets::get_budget_assignments).post(budgets::assign_budget),
+			get(budgets::get_budget_assignments).put(budgets::replace_budget_assignments),
 		)
-		.route("/api/v1/admin/budgets/{id}/assignments/{assignment_id}", delete(budgets::delete_assignment))
 		.route("/api/v1/admin/analytics", get(analytics::get_analytics))
 		.route("/api/v1/admin/gateway/keys", get(gateway::list_keys))
 		.route("/api/v1/admin/gateway/keys/{id}", get(gateway::get_key))
@@ -91,14 +91,20 @@ pub fn router() -> Router<Arc<JobState>> {
 		// Admin Users
 		.route("/api/v1/admin/users", get(users::list_users).post(users::create_user))
 		.route("/api/v1/admin/users/{id}", get(users::get_user).put(users::update_user).delete(users::delete_user))
-		.route("/api/v1/admin/users/{id}/roles", put(users::set_user_roles))
-		.route("/api/v1/admin/users/{id}/teams", put(users::set_user_teams))
+		.route("/api/v1/admin/users/{id}/overview", get(users::get_user_overview))
+		.route("/api/v1/admin/users/{id}/assignments", get(users::get_user_assignments).put(users::replace_user_assignments))
+		.route("/api/v1/admin/users/{id}/sessions/{session_id}", delete(users::revoke_user_session))
 		.route("/api/v1/admin/users/{id}/password", put(users::reset_password))
+		// Admin Roles
+		.route("/api/v1/admin/roles", get(roles::list_roles).post(roles::create_role))
+		.route("/api/v1/admin/roles/{id}", put(roles::update_role).delete(roles::delete_role))
+		.route("/api/v1/admin/permissions", get(roles::list_permissions))
 		// Admin Models
 		.route("/api/v1/admin/models", get(models::list_models))
 		.route("/api/v1/admin/image-models", get(models::list_image_models))
 		.route("/api/v1/admin/image-model-providers", get(models::list_image_model_providers))
 		.route("/api/v1/admin/models/{id}", get(models::get_model).patch(models::patch_model))
+		.route("/api/v1/admin/models/{id}/assignments", get(models::get_model_assignments).put(models::replace_model_assignments))
 		.route("/api/v1/admin/models/{id}/pricing", get(models::get_model_pricing).put(models::put_model_pricing).delete(models::delete_model_pricing))
 		.route("/api/v1/admin/models/{id}/provider-options", get(catalog::list_provider_options))
 		.route("/api/v1/admin/models/{id}/provider-options/refresh", post(catalog::refresh_provider_options))

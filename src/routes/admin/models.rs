@@ -1,5 +1,5 @@
-use crate::types::consts::{ADMIN_PROVIDERS_EDIT, ADMIN_PROVIDERS_VIEW};
-use crate::types::{AppError, AuthUser, JobState, PageQuery};
+use crate::types::consts::{ADMIN_PROVIDERS_EDIT, ADMIN_PROVIDERS_VIEW, ADMIN_TEAMS_EDIT, ADMIN_TEAMS_VIEW};
+use crate::types::{AppError, AssignmentKind, AuthUser, JobState, PageQuery, ReplaceAssignmentsRequest, json_ok};
 use crate::types::models::{AdminModelPatchBody, Model, ModelListParams, ModelPricing, ModelPricingOverrideRequest};
 use crate::types::models_configs::{ModelConfig, ModelConfigPatchField};
 use crate::utils::images::{image_url, is_data_uri, store_from_data_uri};
@@ -252,4 +252,29 @@ pub async fn patch_model(State(state): State<Arc<JobState>>, auth: AuthUser, Pat
 	}
 
 	Ok(ResponseBuilder::<()>::new(ResponseBody::Empty).build())
+}
+
+/// GET /api/v1/admin/models/:id/assignments
+///
+/// The teams that may use the model.
+pub async fn get_model_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TEAMS_VIEW).await?;
+
+	json_ok(Model::assignments(&state.db, &id).await?)
+}
+
+/// PUT /api/v1/admin/models/:id/assignments
+///
+/// Replaces the teams that have their own grant for the model; it changes team access, so it needs the teams permission.
+pub async fn replace_model_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<ReplaceAssignmentsRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_TEAMS_EDIT).await?;
+
+	if !req.is_valid_for(&Model::ASSIGNMENT_KINDS) {
+		return Err(ErrorCode::ValidationFailed.into());
+	}
+	Model::find_by_id(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
+	Model::replace_assignments(&state.db, &auth.id, &id, &req.ids(AssignmentKind::Team))
+		.await
+		.map_err(|error| AppError::foreign_key_or(error, ErrorCode::ValidationFailed))?;
+	json_ok(Model::assignments(&state.db, &id).await?)
 }

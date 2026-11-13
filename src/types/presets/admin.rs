@@ -52,7 +52,16 @@ impl Preset {
 		Self::admin_rows(pool, query, None).await
 	}
 
-	async fn admin_rows(pool: &PgPool, query: &AdminPresetQuery, id: Option<&Uuid>) -> Result<Vec<AdminPresetResponse>, sqlx::Error> {
+	/// The presets one user can see (their own, their teams', the installation's and those shared with them), as admins list them.
+	///
+	/// # Errors
+	/// Returns the database error when a query fails.
+	pub async fn admin_list_visible_to(pool: &PgPool, user_id: &Uuid) -> Result<Vec<AdminPresetResponse>, sqlx::Error> {
+		let ids: Vec<Uuid> = Self::list_for_user(pool, user_id).await?.iter().map(|preset| preset.id).collect();
+		Self::admin_rows(pool, &AdminPresetQuery::default(), Some(&ids)).await
+	}
+
+	async fn admin_rows(pool: &PgPool, query: &AdminPresetQuery, ids: Option<&[Uuid]>) -> Result<Vec<AdminPresetResponse>, sqlx::Error> {
 		let rows = sqlx::query_as::<_, AdminPresetRow>(
 			"SELECT p.id, p.slug, p.scope, p.name, p.icon, p.team_id, t.name AS team_name, p.owner_id, u.username AS owner_username, \
 			        m.display_name AS base_model_name, p.is_enabled, p.updated_at \
@@ -60,12 +69,12 @@ impl Preset {
 			 LEFT JOIN teams t ON t.id = p.team_id \
 			 LEFT JOIN users u ON u.id = p.owner_id \
 			 LEFT JOIN models m ON m.id = p.base_model_id \
-			 WHERE p.deleted_at IS NULL AND ($1::text IS NULL OR p.scope = $1) AND ($2::uuid IS NULL OR p.team_id = $2) AND ($3::uuid IS NULL OR p.id = $3) \
+			 WHERE p.deleted_at IS NULL AND ($1::text IS NULL OR p.scope = $1) AND ($2::uuid IS NULL OR p.team_id = $2) AND ($3::uuid[] IS NULL OR p.id = ANY($3)) \
 			 ORDER BY lower(p.name), p.slug",
 		)
 		.bind(query.scope.map(PresetScope::as_str))
 		.bind(query.team_id)
-		.bind(id)
+		.bind(ids)
 		.fetch_all(pool)
 		.await?;
 		Ok(rows.into_iter().map(AdminPresetResponse::from).collect())
@@ -99,7 +108,7 @@ impl Preset {
 		.ok_or(PresetError::NotFound)?;
 		audit(&mut tx, EVENT_ADMIN_UPDATED, actor_id, &preset).await?;
 		tx.commit().await?;
-		Self::admin_rows(pool, &AdminPresetQuery::default(), Some(&preset.id))
+		Self::admin_rows(pool, &AdminPresetQuery::default(), Some(&[preset.id]))
 			.await?
 			.pop()
 			.ok_or(PresetError::NotFound)

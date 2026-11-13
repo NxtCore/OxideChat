@@ -606,7 +606,7 @@ mod team_budget_audit {
 		assert!(result.is_err());
 		let stored: Option<Uuid> = sqlx::query_scalar("SELECT budget_id FROM teams WHERE id = $1").bind(team.id).fetch_one(&pool).await?;
 		assert_eq!(stored, Some(budget));
-		assert_eq!(Budget::list_assignments(&pool, &budget).await?.len(), 1);
+		assert_eq!(Budget::assignments(&pool, &budget).await?.targets.len(), 1);
 		assert_eq!(team_events(&pool, team.id).await?.len(), 1);
 		Ok(())
 	}
@@ -620,7 +620,7 @@ mod team_budget_audit {
 		assert!(result.is_err());
 		let stored: Option<Uuid> = sqlx::query_scalar("SELECT budget_id FROM teams WHERE id = $1").bind(team.id).fetch_one(&pool).await?;
 		assert_eq!(stored, None);
-		assert!(Budget::list_assignments(&pool, &budget).await?.is_empty());
+		assert!(Budget::assignments(&pool, &budget).await?.targets.is_empty());
 		assert!(team_events(&pool, team.id).await?.is_empty());
 		Ok(())
 	}
@@ -630,8 +630,7 @@ mod team_budget_audit {
 		let (admin, team) = admin_and_team(&pool).await?;
 		let budget_id = create_budget(&pool, "10", "block").await?;
 		let budget = Budget::find_by_id(&pool, &budget_id).await?.ok_or("budget")?;
-		let request = BudgetAssignmentRequest { team_id: Some(team.id), user_id: None };
-		budget.assign(&pool, &admin, &request).await?;
+		budget.replace_assignments(&pool, &admin, &[team.id], &[]).await?;
 		let events = team_events(&pool, team.id).await?;
 		assert_eq!(events.len(), 1);
 		assert_eq!(events[0].0, "team_budget_updated");
@@ -642,9 +641,9 @@ mod team_budget_audit {
 	async fn deleting_a_team_assignment_is_audited(pool: PgPool) -> TestResult {
 		let (admin, team) = admin_and_team(&pool).await?;
 		let budget = create_budget(&pool, "10", "block").await?;
-		let assignment = assign(&pool, budget, None, Some(team.id), None).await?;
-		Budget::delete_assignment(&pool, &admin, &budget, &assignment).await?;
-		assert!(Budget::list_assignments(&pool, &budget).await?.is_empty());
+		assign(&pool, budget, None, Some(team.id), None).await?;
+		Budget::find_by_id(&pool, &budget).await?.ok_or("budget")?.replace_assignments(&pool, &admin, &[], &[]).await?;
+		assert!(Budget::assignments(&pool, &budget).await?.targets.is_empty());
 		let events = team_events(&pool, team.id).await?;
 		assert_eq!(events.len(), 1);
 		assert_eq!(events[0].1, Some(admin));
@@ -657,10 +656,11 @@ mod team_budget_audit {
 	async fn failed_audit_keeps_the_team_assignment(pool: PgPool) -> TestResult {
 		let (admin, team) = admin_and_team(&pool).await?;
 		let budget = create_budget(&pool, "10", "block").await?;
-		let assignment = assign(&pool, budget, None, Some(team.id), None).await?;
+		assign(&pool, budget, None, Some(team.id), None).await?;
 		sqlx::query("ALTER TABLE audit_logs ADD CONSTRAINT audit_always_fails CHECK (event <> 'team_budget_updated')").execute(&pool).await?;
-		assert!(Budget::delete_assignment(&pool, &admin, &budget, &assignment).await.is_err());
-		assert_eq!(Budget::list_assignments(&pool, &budget).await?.len(), 1);
+		let stored = Budget::find_by_id(&pool, &budget).await?.ok_or("budget")?;
+		assert!(stored.replace_assignments(&pool, &admin, &[], &[]).await.is_err());
+		assert_eq!(Budget::assignments(&pool, &budget).await?.targets.len(), 1);
 		Ok(())
 	}
 
@@ -833,13 +833,52 @@ mod budget_audit {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn replacing_assignments_swaps_targets_and_keeps_one_budget_per_kind(pool: PgPool) -> TestResult {
+		let admin = create_user(&pool).await?;
+		let user = insert_user(&pool, "budget-user").await?;
+		let other = insert_user(&pool, "other-user").await?;
+		let first = Budget::create(&pool, &admin, &create_request()).await?;
+		let second = Budget::create(&pool, &admin, &create_request()).await?;
+		first.replace_assignments(&pool, &admin, &[], &[user, other]).await?;
+		first.replace_assignments(&pool, &admin, &[], &[other]).await?;
+		let response = Budget::assignments(&pool, &first.id).await?;
+		assert_eq!(response.kinds, vec![AssignmentKind::User, AssignmentKind::Team]);
+		assert_eq!(response.targets.iter().map(|target| (target.kind, target.id)).collect::<Vec<_>>(), vec![(AssignmentKind::User, Some(other))]);
+
+		second.replace_assignments(&pool, &admin, &[], &[other]).await?;
+		assert!(Budget::assignments(&pool, &first.id).await?.targets.is_empty());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn an_unknown_target_changes_nothing(pool: PgPool) -> TestResult {
+		let admin = create_user(&pool).await?;
+		let user = insert_user(&pool, "budget-user").await?;
+		let budget = Budget::create(&pool, &admin, &create_request()).await?;
+		budget.replace_assignments(&pool, &admin, &[], &[user]).await?;
+		assert!(budget.replace_assignments(&pool, &admin, &[Uuid::new_v4()], &[]).await.is_err());
+		assert_eq!(Budget::assignments(&pool, &budget.id).await?.targets.len(), 1);
+		Ok(())
+	}
+
+	#[test]
+	fn a_replace_request_only_takes_allowed_kinds_with_ids() {
+		let request = |kind, id| ReplaceAssignmentsRequest { targets: vec![AssignmentRef { kind, id, role: None }] };
+		let id = Some(Uuid::new_v4());
+		assert!(request(AssignmentKind::Team, id).is_valid_for(&Budget::ASSIGNMENT_KINDS));
+		assert!(!request(AssignmentKind::Role, id).is_valid_for(&Budget::ASSIGNMENT_KINDS));
+		assert!(!request(AssignmentKind::Team, None).is_valid_for(&Budget::ASSIGNMENT_KINDS));
+		assert!(!request(AssignmentKind::Everyone, id).is_valid_for(&[AssignmentKind::Everyone]));
+		assert!(request(AssignmentKind::Everyone, None).is_valid_for(&[AssignmentKind::Everyone]));
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn assigning_and_removing_a_user_budget_is_audited(pool: PgPool) -> TestResult {
 		let admin = create_user(&pool).await?;
 		let user = insert_user(&pool, "budget-user").await?;
 		let budget = Budget::create(&pool, &admin, &create_request()).await?;
-		budget.assign(&pool, &admin, &BudgetAssignmentRequest { team_id: None, user_id: Some(user) }).await?;
-		let assignment = Budget::list_assignments(&pool, &budget.id).await?.first().map(|row| row.id).ok_or("assignment")?;
-		Budget::delete_assignment(&pool, &admin, &budget.id, &assignment).await?;
+		budget.replace_assignments(&pool, &admin, &[], &[user]).await?;
+		budget.replace_assignments(&pool, &admin, &[], &[]).await?;
 
 		let rows = events(&pool, user).await?;
 		assert_eq!(rows.len(), 2);

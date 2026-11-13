@@ -22,13 +22,7 @@ impl Team {
 			.map(|s| format!("%{}%", Self::escape_like_pattern(s)))
 	}
 
-	pub async fn default_id(pool: &PgPool) -> Result<Uuid, sqlx::Error> {
-		sqlx::query_scalar("SELECT id FROM teams WHERE is_default = true ORDER BY created_at ASC LIMIT 1")
-			.fetch_one(pool)
-			.await
-	}
-
-	pub async fn ensure_default_membership(pool: &PgPool, user_id: &Uuid) -> Result<(), sqlx::Error> {
+	pub async fn ensure_default_membership(executor: impl sqlx::PgExecutor<'_>, user_id: &Uuid) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
 			INSERT INTO team_members (team_id, user_id)
@@ -37,7 +31,7 @@ impl Team {
 			"#,
 		)
 		.bind(user_id)
-		.execute(pool)
+		.execute(executor)
 		.await?;
 		Ok(())
 	}
@@ -248,7 +242,7 @@ impl Team {
 		let user_ids: Vec<Uuid> = req.members.iter().map(|member| member.user_id).collect();
 		self.replace_members(&mut tx, &user_ids).await?;
 		self.apply_member_roles(&mut tx, actor_id, &req.members).await?;
-		let (before_providers, before_models) = self.stored_model_access(&mut tx).await?;
+		let (before_providers, before_models) = Self::stored_model_access(&mut tx, &self.id).await?;
 		if sorted_unique(&req.provider_ids) != before_providers || sorted_unique(&req.model_ids) != before_models {
 			self.apply_model_access(&mut tx, actor_id, &req.provider_ids, &req.model_ids).await?;
 		}
@@ -396,20 +390,21 @@ impl Team {
 		Ok(())
 	}
 
-	async fn stored_model_access(&self, tx: &mut Transaction<'_, Postgres>) -> Result<(Vec<Uuid>, Vec<Uuid>), sqlx::Error> {
+	/// The provider and model IDs a team has its own grant for, each sorted.
+	pub(crate) async fn stored_model_access(tx: &mut Transaction<'_, Postgres>, team_id: &Uuid) -> Result<(Vec<Uuid>, Vec<Uuid>), sqlx::Error> {
 		let provider_ids = sqlx::query_scalar("SELECT provider_id FROM team_model_access WHERE team_id = $1 AND provider_id IS NOT NULL ORDER BY provider_id")
-			.bind(self.id)
+			.bind(team_id)
 			.fetch_all(&mut **tx)
 			.await?;
 		let model_ids = sqlx::query_scalar("SELECT model_id FROM team_model_access WHERE team_id = $1 AND model_id IS NOT NULL ORDER BY model_id")
-			.bind(self.id)
+			.bind(team_id)
 			.fetch_all(&mut **tx)
 			.await?;
 		Ok((provider_ids, model_ids))
 	}
 
 	async fn apply_model_access(&self, tx: &mut Transaction<'_, Postgres>, actor_id: &Uuid, provider_ids: &[Uuid], model_ids: &[Uuid]) -> Result<(), sqlx::Error> {
-		let (before_providers, before_models) = self.stored_model_access(tx).await?;
+		let (before_providers, before_models) = Self::stored_model_access(tx, &self.id).await?;
 		self.replace_model_access(tx, provider_ids, model_ids).await?;
 		let metadata = serde_json::json!({
 			"before": { "provider_ids": before_providers, "model_ids": before_models },
@@ -546,30 +541,11 @@ impl Team {
 		Ok(map)
 	}
 
+	#[cfg(test)]
 	pub async fn set_user_teams(pool: &PgPool, user_id: &Uuid, team_ids: &[Uuid]) -> Result<(), sqlx::Error> {
-		let default_id = Self::default_id(pool).await?;
-		let mut ids = Vec::with_capacity(team_ids.len() + 1);
-		ids.push(default_id);
-		for id in team_ids {
-			if !ids.contains(id) {
-				ids.push(*id);
-			}
-		}
-
 		let mut tx = pool.begin().await?;
-		sqlx::query("DELETE FROM team_members WHERE user_id = $1 AND team_id <> ALL($2)")
-			.bind(user_id)
-			.bind(&ids)
-			.execute(&mut *tx)
-			.await?;
-		let mut builder = QueryBuilder::<Postgres>::new("INSERT INTO team_members (team_id, user_id) ");
-		builder.push_values(&ids, |mut row, team_id| {
-			row.push_bind(team_id).push_bind(user_id);
-		});
-		builder.push(" ON CONFLICT DO NOTHING");
-		builder.build().execute(&mut *tx).await?;
-		tx.commit().await?;
-		Ok(())
+		Self::replace_user_teams(&mut tx, user_id, team_ids).await?;
+		tx.commit().await
 	}
 
 	pub async fn user_can_use_model(pool: &PgPool, user_id: &Uuid, model_id: &Uuid) -> Result<bool, sqlx::Error> {

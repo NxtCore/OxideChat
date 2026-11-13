@@ -1,6 +1,6 @@
 //! Authenticated user extractor for handlers.
 
-use crate::types::{AppError, RequestContext, User};
+use crate::types::{AppError, RequestContext, RoleActor, User};
 use crate::utils::response::ErrorCode;
 use axum::{extract::FromRequestParts, http::request::Parts};
 use sqlx::PgPool;
@@ -19,11 +19,28 @@ impl AuthUser {
 	///
 	/// Returns `InsufficientPermissions` when the permission is missing and a server error when the lookup fails.
 	pub async fn require(&self, pool: &PgPool, permission: &str) -> Result<(), AppError> {
-		if self.0.check_permission(pool, permission).await? {
-			Ok(())
+		self.require_permissions(pool, permission).await.map(|_| ())
+	}
+
+	/// Checks a permission like [`AuthUser::require`] and returns every permission the user holds, for callers that
+	/// need both.
+	///
+	/// # Errors
+	///
+	/// Returns `InsufficientPermissions` when the permission is missing and a server error when the lookup fails.
+	pub async fn require_permissions(&self, pool: &PgPool, permission: &str) -> Result<Vec<String>, AppError> {
+		let permissions = self.0.permissions(pool).await?;
+		if permissions.iter().any(|held| User::permission_matches(held, permission)) {
+			Ok(permissions)
 		} else {
 			Err(ErrorCode::InsufficientPermissions.into())
 		}
+	}
+
+	/// The user as a [`RoleActor`] holding `permissions`, as returned by [`AuthUser::require_permissions`].
+	#[must_use]
+	pub fn role_actor<'a>(&'a self, permissions: &'a [String]) -> RoleActor<'a> {
+		RoleActor { id: &self.id, permissions }
 	}
 }
 

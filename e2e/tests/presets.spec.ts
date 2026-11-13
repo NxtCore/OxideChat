@@ -176,8 +176,12 @@ test.describe('presets', () => {
 			await sourceRow.getByTestId('preset-row-menu').click();
 			await page.getByTestId('preset-row-duplicate').click();
 			await expect(page).toHaveURL(/\/settings\/presets\/new$/);
-			await page.getByTestId('preset-scope').click();
-			await page.getByTestId(`preset-scope-team:${team.id}`).click();
+			await page.getByTestId('preset-sharing-badge').click();
+			await page.getByTestId('preset-scope-kind-team').click();
+			await page.getByTestId('preset-scope-select').click();
+			await page.getByTestId(`preset-scope-option-team:${team.id}`).click();
+			await expect(page.getByTestId('preset-sharing-badge')).toHaveText(team.name);
+			await page.getByTestId('preset-tab-general').click();
 			await page.getByTestId('preset-name').fill(name);
 			await expect(page.getByTestId('preset-slug-status')).toHaveAttribute('data-status', 'available');
 			await page.getByTestId('settings-save-bar-save').click();
@@ -205,6 +209,28 @@ test.describe('presets', () => {
 			if (sharedId) await api.delete(`/api/v1/presets/${sharedId}`);
 			await api.delete(`/api/v1/presets/${source.id}`);
 			await api.delete(`/api/v1/admin/teams/${team.id}`);
+		}
+	});
+
+	test('admins see every preset under the All presets tab and members do not', async ({page, browser, baseURL, t, seed}) => {
+		const member = await browser.newContext({baseURL, storageState: AUTH_FILES.member});
+		const name = uniqueName('MemberOwn');
+		const memberPage = await member.newPage();
+		const created = await (await memberPage.request.post('/api/v1/presets', {data: {slug: slugFor(name), name, base_model_id: seed.model.id}})).json();
+		try {
+			await page.goto('/settings/admin-presets');
+			await expect(page).toHaveURL(/\/settings\/presets\?tab=all$/);
+			const row = page.locator(`[data-testid="admin-preset-row"][data-preset-key="${created.key}"]`);
+			await expect(row).toBeVisible();
+			await row.getByTestId('admin-preset-enabled').click();
+			await expect(page.getByText(t('presets.admin.saved')).first()).toBeVisible();
+			expect((await (await memberPage.request.get(`/api/v1/presets/${created.id}`)).json()).disabled_by_admin).toBe(true);
+
+			await memberPage.goto('/settings/presets');
+			await expect(memberPage.getByTestId('presets-tab-all')).toHaveCount(0);
+		} finally {
+			await memberPage.request.delete(`/api/v1/presets/${created.id}`);
+			await member.close();
 		}
 	});
 });

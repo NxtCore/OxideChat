@@ -18,7 +18,9 @@
 				</ShadTabsList>
 			</ShadTabs>
 
-			<div v-if="currentTab === 'mine' && rows.length === 0" class="flex flex-col items-center rounded-xl border border-dashed border-border px-6 py-12 text-center" data-testid="presets-empty">
+			<SettingsPresetsAdminList v-if="currentTab === 'all' && store.hasPermission(ADMIN_PRESETS_VIEW)" />
+
+			<div v-else-if="currentTab === 'mine' && rows.length === 0" class="flex flex-col items-center rounded-xl border border-dashed border-border px-6 py-12 text-center" data-testid="presets-empty">
 				<Wand2 class="mb-4 h-10 w-10 text-primary" />
 				<p class="font-medium text-foreground">{{ t('empty_title') }}</p>
 				<p class="mt-1 max-w-md text-sm text-muted-foreground">{{ t('empty_description') }}</p>
@@ -55,7 +57,7 @@
 					<NuxtLink :to="`/settings/presets/${preset.id}`" class="min-w-0 flex-1">
 						<div class="flex flex-wrap items-center gap-2">
 							<span class="font-medium text-foreground">{{ preset.name }}</span>
-							<span v-if="preset.scope === 'team'" class="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary" data-testid="preset-row-scope">
+							<span v-if="preset.scope === 'team' || preset.shared" class="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary" data-testid="preset-row-scope">
 								{{ presetScopeLabel(preset, store.getTranslation) }}
 							</span>
 							<span v-if="preset.unavailable" class="rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
@@ -98,7 +100,7 @@
 								<CopyPlus class="mr-2 h-4 w-4" />
 								{{ t('duplicate') }}
 							</ShadDropdownMenuItem>
-							<template v-if="preset.can_edit">
+							<template v-if="preset.can_manage">
 								<ShadDropdownMenuSeparator class="bg-border" />
 								<ShadDropdownMenuItem data-testid="preset-row-delete" class="text-destructive focus:bg-destructive/10" @click="pendingDelete = preset">
 									<Trash2 class="mr-2 h-4 w-4" />
@@ -119,11 +121,12 @@
 import {Copy, CopyPlus, Eye, Loader2, MessageSquare, MoreHorizontal, Pencil, Plus, Trash2, Wand2} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import {usePresetStore} from '~/stores/presetStore';
+import {ADMIN_PRESETS_VIEW} from '~/types/generated/permissions';
 import type {PresetResponse, PresetScope} from '~/types/presets';
 
-type PresetTab = 'mine' | 'team' | 'organization';
+type PresetTab = 'mine' | 'team' | 'organization' | 'shared' | 'all';
 
-const TAB_SCOPES: Record<PresetTab, PresetScope> = {mine: 'personal', team: 'team', organization: 'installation'};
+const TAB_SCOPES: Partial<Record<PresetTab, PresetScope>> = {mine: 'personal', team: 'team', organization: 'installation'};
 
 const store = useMainStore();
 const presetStore = usePresetStore();
@@ -138,24 +141,27 @@ const scopes = computed(() => presetStore.scopes);
 const hasAnyScope = computed(() => !!scopes.value && (scopes.value.personal || scopes.value.teams.length > 0 || scopes.value.installation));
 
 const visibleTabs = computed<PresetTab[]>(() => {
-	const has = (scope: PresetScope) => presetStore.presets.some(preset => preset.scope === scope);
+	const has = (scope: PresetScope) => presetStore.presets.some(preset => preset.scope === scope && !preset.shared);
 	const tabs: PresetTab[] = ['mine'];
 	if ((scopes.value?.teams.length ?? 0) > 0 || has('team')) tabs.push('team');
 	if (scopes.value?.installation || has('installation')) tabs.push('organization');
+	if (presetStore.presets.some(preset => preset.shared)) tabs.push('shared');
+	if (store.hasPermission(ADMIN_PRESETS_VIEW)) tabs.push('all');
 	return tabs;
 });
 
 const queryTab = route.query.tab as PresetTab | undefined;
-const currentTab = ref<PresetTab>(queryTab && queryTab in TAB_SCOPES ? queryTab : 'mine');
+const currentTab = ref<PresetTab>(queryTab && (queryTab in TAB_SCOPES || queryTab === 'shared' || queryTab === 'all') ? queryTab : 'mine');
 
 watch(currentTab, tab => router.replace({query: tab === 'mine' ? {} : {tab}}));
 
-const rows = computed(() => presetStore.presets.filter(preset => preset.scope === TAB_SCOPES[currentTab.value]));
+const rows = computed(() => presetStore.presets.filter(preset => (currentTab.value === 'shared' ? preset.shared : !preset.shared && preset.scope === TAB_SCOPES[currentTab.value])));
 
 const canCreate = computed(() => {
 	if (!scopes.value) return false;
 	if (currentTab.value === 'team') return scopes.value.teams.length > 0;
 	if (currentTab.value === 'organization') return scopes.value.installation;
+	if (currentTab.value === 'shared' || currentTab.value === 'all') return false;
 	return scopes.value.personal;
 });
 

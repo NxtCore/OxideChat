@@ -9,4 +9,12 @@ import type { PresetUnavailable } from "./PresetUnavailable";
 /**
  * A preset as its viewer sees it, with its base model as the model picker lists it.
  */
-export type PresetResponse = { id: string, key: string, slug: string, scope: PresetScope, team: PresetTeam | null, name: string, description: string | null, icon: string | null, base_model_id: string | null, base_model: ModelList | null, system_prompt: string | null, sampling: PresetSampling, reasoning: PresetReasoning, tool_ids: Array<string>, tools_locked: boolean, starters: Array<string>, prompt_visible: boolean, is_enabled: boolean, disabled_by_admin: boolean, has_gateway_usage: boolean, can_edit: boolean, unavailable: PresetUnavailable | null, updated_at: string, };
+export type PresetResponse = { id: string, key: string, slug: string, scope: PresetScope, team: PresetTeam | null, name: string, description: string | null, icon: string | null, base_model_id: string | null, base_model: ModelList | null, system_prompt: string | null, sampling: PresetSampling, reasoning: PresetReasoning, tool_ids: Array<string>, tools_locked: boolean, starters: Array<string>, prompt_visible: boolean, is_enabled: boolean, disabled_by_admin: boolean, has_gateway_usage: boolean, can_edit: boolean, 
+/**
+ * Whether the viewer may delete the preset and change who it is shared with.
+ */
+can_manage: boolean, 
+/**
+ * Whether the viewer only sees the preset because it was shared with them.
+ */
+shared: boolean, unavailable: PresetUnavailable | null, updated_at: string, };

@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import 'dayjs/locale/de';
 import type {Base, Role, UserPreferences, UserResponse as User} from '~/types/chat';
 import {useThemeStore} from './theme';
+import type {RoleResponse} from '~/types/generated/RoleResponse';
 
 dayjs.extend(localizedFormat);
 
@@ -130,6 +131,13 @@ export const useMainStore = defineStore('main', {
 					this.bootState = 'online';
 				}
 			}
+		},
+		setRoles(roles: RoleResponse[]) {
+			if (!this.base) return;
+			const createdAt = new Map(this.base.roles.map(role => [role.id, role.created_at]));
+			this.base.roles = roles
+				.map(({id, name, is_builtin}) => ({id, name, is_builtin, created_at: createdAt.get(id) ?? new Date().toISOString()}))
+				.sort((a, b) => a.name.localeCompare(b.name));
 		},
 		async refreshChatProviderSelector() {
 			try {

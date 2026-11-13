@@ -42,6 +42,7 @@
 				:pricing="pricing"
 				@remove-override="removePricingOverride"
 			/>
+			<SettingsModelsAccessTab v-if="canViewAccess" v-show="currentTab === 'access'" :model-id="modelId" :active="currentTab === 'access'" />
 		</template>
 	</SettingsPage>
 </template>
@@ -51,6 +52,7 @@ import {ArrowLeft, Loader2, Bot} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 import {useIconsStore} from '@/stores/icons';
 import {sanitizeSvg} from '@/composables/useMarkdown';
+import {ADMIN_TEAMS_VIEW} from '~/types/generated/permissions';
 
 const store = useMainStore();
 const iconStore = useIconsStore();
@@ -64,12 +66,14 @@ const currentTab = ref('general');
 const originalData = ref<string>('');
 const pricing = ref<Record<string, any> | null>(null);
 
-const tabs = [
+const canViewAccess = computed(() => store.hasPermission(ADMIN_TEAMS_VIEW));
+const tabs = computed(() => [
 	{key: 'general', label: 'settings.models.editor.general_info'},
 	{key: 'prompt', label: 'settings.models.editor.core_prompt'},
 	{key: 'parameters', label: 'settings.models.editor.parameters'},
 	{key: 'providers', label: 'settings.models.editor.providers'},
-];
+	...(canViewAccess.value ? [{key: 'access', label: 'settings.models.editor.access'}] : []),
+]);
 
 const samplingKeys = [
 	'temperature',

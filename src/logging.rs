@@ -45,7 +45,6 @@ pub enum LogEvent {
 	UserLogout,
 
 	// User Management
-	RoleAssigned,
 	UserUpdated,
 	UserDeleted,
 
@@ -78,7 +77,6 @@ impl LogEvent {
 			Self::UserLogin => "user_login",
 			Self::UserLoginFailed => "user_login_failed",
 			Self::UserLogout => "user_logout",
-			Self::RoleAssigned => "role_assigned",
 			Self::UserUpdated => "user_updated",
 			Self::UserDeleted => "user_deleted",
 			Self::AdminSetup => "admin_setup",
