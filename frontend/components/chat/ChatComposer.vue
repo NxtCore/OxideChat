@@ -44,11 +44,15 @@
 					@paste="handlePaste"
 				/>
 
-				<div class="flex items-center justify-between px-2 py-1">
-					<div class="flex items-center gap-1">
+				<div class="flex items-center justify-between gap-1 px-2 py-1">
+					<div class="flex min-w-0 flex-1 items-center gap-1">
 						<button
 							v-if="supportsImages"
-							class="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted transition-colors"
+							type="button"
+							data-testid="composer-attach-image"
+							class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors"
+							:aria-label="store.getTranslation('chat.composer.attach_image')"
+							:title="store.getTranslation('chat.composer.attach_image')"
 							:disabled="chatStore.isStreaming"
 							@click="triggerImageUpload"
 						>
@@ -56,19 +60,16 @@
 						</button>
 						<input ref="fileInputRef" type="file" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
 						<ModelSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
-						<ReasoningSelector
-							v-if="modelStore.hasConfigurableReasoningCapability(modelStore.selectedModel)"
-							class="border-none! bg-transparent! shadow-none! hover:bg-muted/50"
-						/>
-						<ToolSelector v-if="modelStore.hasToolCapability(modelStore.selectedModel)" />
-						<SamplingSelector />
-						<ProviderSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
+						<ToolSelector v-if="modelStore.hasToolCapability(modelStore.selectedModel)" class="shrink-0" />
+						<ChatSettingsMenu />
 					</div>
 
-					<div class="flex items-center gap-2">
+					<div class="flex shrink-0 items-center gap-1.5">
 						<ContextLimitIndicator />
 						<ShadButton
+							data-testid="composer-send"
 							class="h-8 w-8 rounded-full bg-primary p-0 text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-50"
+							:aria-label="store.getTranslation('chat.composer.send')"
 							:disabled="!canSend"
 							@click="sendMessage"
 						>
@@ -93,11 +94,9 @@ import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useMainStore} from '~/stores';
 import ModelSelector from './ModelSelector.vue';
-import ReasoningSelector from './ReasoningSelector.vue';
 import ContextLimitIndicator from './ContextLimitIndicator.vue';
 import ToolSelector from './ToolSelector.vue';
-import ProviderSelector from './ProviderSelector.vue';
-import SamplingSelector from './SamplingSelector.vue';
+import ChatSettingsMenu from './ChatSettingsMenu.vue';
 import McpManagerDialog from '../mcp/McpManagerDialog.vue';
 
 const emit = defineEmits<{send: (content: string, parts?: any[]) => void}>();

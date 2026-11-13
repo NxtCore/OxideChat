@@ -4,7 +4,7 @@ import {uniqueName} from './support/gateway';
 import {MOCK_LLM_KEY, MOCK_LLM_URL} from './support/constants';
 
 async function openPicker(page: Page) {
-	await page.locator('button[aria-haspopup="dialog"]').filter({has: page.locator('svg[class*="chevron-down"]')}).first().click();
+	await page.getByTestId('model-selector').click();
 }
 
 async function scrollToEnd(page: Page) {

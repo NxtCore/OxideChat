@@ -1,31 +1,34 @@
 <template>
 	<Popover v-model:open="isOpen">
 		<PopoverTrigger as-child>
-			<button :class="cn('flex items-center gap-2 px-2 py-1 rounded-md hover:bg-accent transition-colors', props.class)">
+			<button
+				data-testid="model-selector"
+				:title="fullName"
+				:aria-label="fullName"
+				:class="cn('flex min-w-0 items-center gap-2 px-2 py-1 rounded-md hover:bg-accent transition-colors', props.class)"
+			>
 				<img
 					v-if="modelStore.selectedModel?.icon"
 					:src="modelStore.selectedModel?.icon"
-					class="h-4 w-4 mt-0.5 flex items-center justify-center rounded-md bg-muted overflow-hidden"
+					class="h-4 w-4 mt-0.5 shrink-0 flex items-center justify-center rounded-md bg-muted overflow-hidden"
 				/>
-				<Wand2 v-else-if="modelStore.selectedModel?.preset" class="h-4 w-4 text-primary" />
+				<Wand2 v-else-if="modelStore.selectedModel?.preset" class="h-4 w-4 shrink-0 text-primary" />
 				<div
 					v-else-if="iconStore.getProviderIcon(modelStore.selectedModel?.provider.name, modelStore.selectedModel?.model_id)?.type === 'svg'"
-					class="h-4 w-4 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
+					class="h-4 w-4 shrink-0 flex items-center justify-center [&>svg]:h-full [&>svg]:w-full [&>svg]:display-block"
 					v-html="providerIconHtml(modelStore.selectedModel?.provider.name, modelStore.selectedModel?.model_id)"
 				/>
 				<div
 					v-else-if="iconStore.getProviderIcon(modelStore.selectedModel?.provider.name, modelStore.selectedModel?.model_id)?.type === 'png'"
-					class="h-4 w-4 flex items-center justify-center"
+					class="h-4 w-4 shrink-0 flex items-center justify-center"
 				>
 					<img :src="iconStore.getProviderIcon(modelStore.selectedModel?.provider.name, modelStore.selectedModel?.model_id)?.icon" alt="Provider icon" />
 				</div>
-				<span class="max-w-37.5 truncate text-xs font-medium">
-					{{ modelStore.selectedModel?.display_name || store.getTranslation('chat.model_selector.select_model') }}
-				</span>
-				<ChevronDown class="h-3 w-3 text-muted-foreground" />
+				<span class="min-w-0 truncate text-xs font-medium" data-testid="model-selector-label">{{ shortName }}</span>
+				<ChevronDown class="h-3 w-3 shrink-0 text-muted-foreground" />
 			</button>
 		</PopoverTrigger>
-		<PopoverContent class="w-130 p-0 overflow-hidden" align="start" :side-offset="8">
+		<PopoverContent class="w-130 max-w-[calc(100vw-1rem)] p-0 overflow-hidden" align="start" :side-offset="8">
 			<div class="flex h-100">
 				<div class="flex-1 flex flex-col overflow-hidden">
 					<div class="p-2 border-b border-border flex items-center gap-2">
@@ -309,6 +312,13 @@ function providerIconHtml(providerName: string | undefined, modelId?: string): s
 	}
 	return html;
 }
+const fullName = computed(() => modelStore.selectedModel?.display_name || store.getTranslation('chat.model_selector.select_model'));
+const shortName = computed(() => {
+	const model = modelStore.selectedModel;
+	if (!model || model.preset) return fullName.value;
+	return model.display_name.replace(/^[^:]+:\s+/, '') || model.display_name;
+});
+
 const isOpen = ref(false);
 const activeRow = ref<string | null>(null);
 const {

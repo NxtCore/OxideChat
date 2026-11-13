@@ -15,7 +15,7 @@ async function navigate(page: Page, path: string) {
 }
 
 async function sendInNewChat(page: Page, t: (key: string) => string, modelName: string) {
-	await page.locator('button[aria-haspopup="dialog"]').filter({has: page.locator('svg[class*="chevron-down"]')}).first().click();
+	await page.getByTestId('model-selector').click();
 	const search = page.getByPlaceholder(t('chat.model_selector.search_models'));
 	await search.fill(modelName);
 	await page.getByText(modelName, {exact: true}).last().click();
@@ -73,7 +73,7 @@ test('main views do not repeat or refetch /api/v1 requests', async ({page, t, se
 	await step('switch to first chat again', () => navigate(page, firstChat));
 	const afterSwitches = all.length;
 
-	const modelPicker = page.locator('button[aria-haspopup="dialog"]').filter({has: page.locator('svg[class*="chevron-down"]')}).first();
+	const modelPicker = page.getByTestId('model-selector');
 	await step('open model picker', () => modelPicker.click());
 	await page.keyboard.press('Escape');
 	await step('reopen model picker', () => modelPicker.click());

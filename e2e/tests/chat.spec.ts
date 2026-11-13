@@ -5,7 +5,7 @@ import {uniqueName} from './support/gateway';
 import {createBrokenProvider} from './support/providers';
 
 async function pickModel(page: Page, t: (key: string) => string, displayName: string) {
-	await page.locator('button[aria-haspopup="dialog"]').filter({has: page.locator('svg[class*="chevron-down"]')}).first().click();
+	await page.getByTestId('model-selector').click();
 	const search = page.getByPlaceholder(t('chat.model_selector.search_models'));
 	await search.fill(displayName);
 	await page.getByText(displayName, {exact: true}).last().click();

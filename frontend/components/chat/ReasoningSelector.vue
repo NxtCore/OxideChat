@@ -2,6 +2,7 @@
 	<div v-if="!isTokenBudget" class="space-y-2">
 		<ShadSelect v-model="effortLevel" @update:modelValue="handleEffortChange" :disabled="modelStore.isReasoningRequired">
 			<ShadSelectTrigger
+				data-testid="reasoning-selector"
 				:class="
 					cn(
 						'w-auto',
@@ -11,9 +12,7 @@
 				"
 			>
 				<Brain class="h-4 w-4" />
-				<span v-if="modelStore.reasoningEffort && modelStore.reasoningEffort !== 'none'" class="text-xs font-medium">
-					{{ displayLabel }}
-				</span>
+				<span class="text-xs font-medium">{{ displayLabel }}</span>
 			</ShadSelectTrigger>
 			<ShadSelectContent>
 				<ShadSelectGroup>
@@ -29,6 +28,7 @@
 			<PopoverTrigger as-child>
 				<ShadButton
 					variant="outline"
+					data-testid="reasoning-selector"
 					:class="
 						cn(
 							'w-auto justify-between font-normal',
