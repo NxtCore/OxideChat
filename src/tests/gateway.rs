@@ -136,6 +136,8 @@ pub mod support {
 				},
 				enabled: true,
 				catalog_provider_slug: None,
+				profile: None,
+				resolved_profile: None,
 			},
 			model_id: "test-model".to_string(),
 			input_modalities: Vec::new(),
@@ -607,6 +609,168 @@ mod estimate {
 		assert!(unknown.estimate_tokens(&external, Some(100), 1).is_err());
 		Ok(())
 	}
+
+	fn fields(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+		value.as_object().cloned().unwrap_or_default()
+	}
+
+	#[test]
+	fn media_estimates_count_the_units_each_kind_is_billed_by() -> TestResult {
+		let inference = GatewayInference {
+			model_id: Uuid::nil(),
+			engine_model_id: String::new(),
+			public_model_id: String::new(),
+			provider_name: String::new(),
+			max_output_tokens: None,
+			context_length: None,
+			budget: BudgetAdmission::default(),
+			preset: None,
+		};
+		let policy = GatewayRatePolicy::default();
+		let estimate = |kind: MediaKind, body: serde_json::Value| inference.media_estimate(&policy, kind, &fields(body)).tokens();
+		let one_request = UnitEstimate {
+			requests: 1,
+			..UnitEstimate::default()
+		};
+
+		let embeddings = estimate(MediaKind::Embeddings, serde_json::json!({"model": "m", "input": "hello"}));
+		assert!(embeddings.input > 0);
+		assert_eq!((embeddings.output, embeddings.units), (0, one_request));
+		let rerank = estimate(MediaKind::Rerank, serde_json::json!({"model": "m", "query": "q", "documents": ["a", "b"]}));
+		assert_eq!(rerank.units, UnitEstimate { searches: 1, ..one_request });
+
+		let image = estimate(MediaKind::Image { images: 1 }, serde_json::json!({"model": "m", "prompt": "a cat", "n": "2"}));
+		assert_eq!((image.units.requests, image.output), (2, 16_000));
+		assert!(image.input > 6_000);
+		assert_eq!(estimate(MediaKind::Image { images: 0 }, serde_json::json!({"model": "m", "prompt": "a cat"})).units.requests, 1);
+
+		let transcription = estimate(MediaKind::Transcription { audio_bytes: 10_001 }, serde_json::json!({"model": "m", "prompt": "names: Oxide"}));
+		assert_eq!((transcription.units.audio_seconds, transcription.units.input_audio_tokens, transcription.output), (6, 150, 48));
+		let speech = estimate(MediaKind::Speech, serde_json::json!({"model": "m", "input": "héllo", "voice": "alloy"}));
+		assert_eq!((speech.units.characters, speech.units.output_audio_tokens, speech.output), (5, 10, 0));
+
+		let decision_with_image = fields(serde_json::json!({"model": "m", "input": [{"type": "input_image", "image_url": "https://example.com/cat.png"}]}));
+		assert!(inference.media_estimate(&policy, MediaKind::Decision, &decision_with_image).limiter_tokens().is_ok());
+		let mut limited = GatewayRatePolicy::default();
+		limited.key_rules.push(rule(1, GatewayRuleMetric::Tokens, 1_000_000, 60));
+		assert!(inference.media_estimate(&limited, MediaKind::Decision, &decision_with_image).limiter_tokens().is_err());
+		assert_eq!(inference.media_estimate(&limited, MediaKind::Speech, &fields(serde_json::json!({"model": "m", "input": "hi"}))).limiter_tokens()?, speech_input_tokens());
+		Ok(())
+	}
+
+	fn speech_input_tokens() -> u64 {
+		let body = serde_json::to_vec(&serde_json::json!({"model": "m", "input": "hi"})).unwrap_or_default();
+		TokenEstimate::input_for_bytes(body.len() as u64)
+	}
+
+	#[test]
+	fn every_inference_route_is_found_by_its_path() {
+		for route in GatewayRoute::INFERENCE {
+			assert_eq!(GatewayRoute::for_path(&format!("/openai/v1{}", route.path)).usage_type, route.usage_type);
+		}
+		assert_eq!(GatewayRoute::for_path("/openai/v1/audio/translations").usage_type, "gateway.translations");
+		assert_eq!(GatewayRoute::for_path("/openai/v1/unknown").usage_type, GatewayRoute::CHAT.usage_type);
+		assert!(GatewayRoute::CHAT.accepts_presets() && GatewayRoute::RESPONSES.accepts_presets());
+		assert!(GatewayRoute::INFERENCE[2..].iter().all(|route| !route.accepts_presets()));
+	}
+}
+
+#[cfg(test)]
+mod forms {
+	use super::support::TestResult;
+	use crate::types::GatewayForm;
+	use ::axum::Router;
+	use ::axum::body::{Body, to_bytes};
+	use ::axum::extract::{DefaultBodyLimit, Request};
+	use ::axum::routing::post;
+	use serde_json::json;
+	use tower::ServiceExt;
+
+	const BOUNDARY: &str = "test-boundary";
+
+	fn form_body(audio: &[u8]) -> Vec<u8> {
+		let text = |name: &str, value: &str| format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n");
+		let mut body = [text("model", "Whisper"), text("include[]", "logprobs"), text("include[]", "segments")].concat().into_bytes();
+		body.extend_from_slice(format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").as_bytes());
+		body.extend_from_slice(audio);
+		body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+		body
+	}
+
+	fn form_request(audio: &[u8]) -> TestResult<Request> {
+		Ok(::axum::http::Request::builder()
+			.method("POST")
+			.uri("/")
+			.header("content-type", format!("multipart/form-data; boundary={BOUNDARY}"))
+			.body(Body::from(form_body(audio)))?)
+	}
+
+	#[tokio::test]
+	async fn a_form_keeps_its_files_and_gets_the_resolved_model() -> TestResult {
+		let mut form = GatewayForm::read(form_request(b"AUDIO")?).await?;
+		assert_eq!(form.text("model").as_deref(), Some("Whisper"));
+		assert_eq!(form.files(&["file"]), (1, 5));
+		let fields = form.fields(&["file"]);
+		assert_eq!(fields.get("include[]"), Some(&json!(["logprobs", "segments"])));
+		assert!(!fields.contains_key("file"));
+
+		form.set_text("model", "openai/whisper-1");
+		let mut multipart = form.into_multipart().await?;
+		let mut parts = Vec::new();
+		while let Some(field) = multipart.next_field().await? {
+			let name = field.name().unwrap_or_default().to_owned();
+			let file_name = field.file_name().map(str::to_owned);
+			let content_type = field.content_type().map(str::to_owned);
+			parts.push((name, file_name, content_type, String::from_utf8_lossy(&field.bytes().await?).into_owned()));
+		}
+		let text = |name: &str, value: &str| (name.to_owned(), None, None, value.to_owned());
+		assert_eq!(
+			parts,
+			[
+				text("include[]", "logprobs"),
+				text("include[]", "segments"),
+				("file".to_owned(), Some("speech.mp3".to_owned()), Some("audio/mpeg".to_owned()), "AUDIO".to_owned()),
+				text("model", "openai/whisper-1"),
+			]
+		);
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn a_rebuilt_form_keeps_the_routes_body_limit() -> TestResult {
+		let handler = |request: Request| async move {
+			let Ok(form) = GatewayForm::read(request).await else {
+				return "read failed".to_owned();
+			};
+			let Ok(mut multipart) = form.into_multipart().await else {
+				return "rebuild failed".to_owned();
+			};
+			let mut audio = 0;
+			while let Ok(Some(field)) = multipart.next_field().await {
+				let is_file = field.name() == Some("file");
+				match field.bytes().await {
+					Ok(bytes) if is_file => audio = bytes.len(),
+					Ok(_) => {}
+					Err(_) => return "too large".to_owned(),
+				}
+			}
+			audio.to_string()
+		};
+		let router = Router::new().route("/", post(handler)).layer(DefaultBodyLimit::max(8 * 1024 * 1024));
+		let audio = vec![7_u8; 3 * 1024 * 1024];
+		let response = router.oneshot(form_request(&audio)?).await?;
+		let body = to_bytes(response.into_body(), 100).await?;
+		assert_eq!(String::from_utf8_lossy(&body), audio.len().to_string());
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn a_request_that_is_not_a_form_is_refused() -> TestResult {
+		let request = ::axum::http::Request::builder().method("POST").uri("/").header("content-type", "application/json").body(Body::from("{}"))?;
+		let refused = GatewayForm::read(request).await.err().ok_or("a JSON body is not a form")?;
+		assert!(refused.status.is_client_error());
+		Ok(())
+	}
 }
 
 #[cfg(test)]
@@ -766,6 +930,26 @@ mod models {
 		let teams = GatewayTeamResponse::list_for_user(&pool, &user_id).await?;
 		assert_eq!(teams[0].models, vec!["openai/gpt-4.1-nano".to_string()]);
 		Ok(())
+	}
+
+	#[test]
+	fn listed_models_carry_their_omniference_type() {
+		let codes = |codes: &[&str]| codes.iter().map(ToString::to_string).collect::<Vec<String>>();
+		assert_eq!(model_type(&codes(&["TOOLS"]), &codes(&["TEXT"])), "chat");
+		assert_eq!(model_type(&[], &[]), "chat");
+		assert_eq!(model_type(&codes(&["EMBEDDINGS"]), &codes(&["EMBEDDINGS"])), "embedding");
+		assert_eq!(model_type(&codes(&["SPEECH_TO_TEXT"]), &codes(&["TEXT"])), "transcription");
+		assert_eq!(model_type(&codes(&["TEXT_TO_SPEECH"]), &codes(&["AUDIO"])), "speech");
+		assert_eq!(model_type(&codes(&["IMAGE_GENERATION"]), &codes(&["IMAGE"])), "image");
+		let listed = omniference::types::providers::OpenAIModel::from(GatewayModel {
+			provider_name: "OpenAI".to_string(),
+			model_id: "text-embedding-3-small".to_string(),
+			created_at: chrono::Utc::now(),
+			capabilities: sqlx::types::Json(codes(&["EMBEDDINGS"])),
+			output_modalities: sqlx::types::Json(codes(&["EMBEDDINGS"])),
+		});
+		assert_eq!(listed.model_type.as_deref(), Some("embedding"));
+		assert_eq!(listed.capabilities, codes(&["EMBEDDINGS"]));
 	}
 
 	#[test]
@@ -941,6 +1125,109 @@ mod http {
 		state.db.close().await;
 		let response = send(&router, "GET", MODELS_PATH, Some(&token)).await?;
 		assert_error(response, 500).await?;
+		Ok(())
+	}
+
+	async fn post(router: &Router, path: &str, token: &str, (content_type, body): (&str, Vec<u8>)) -> TestResult<Response> {
+		let request = Request::builder()
+			.method("POST")
+			.uri(path)
+			.header("authorization", format!("Bearer {token}"))
+			.header("content-type", content_type)
+			.body(Body::from(body))?;
+		Ok(router.clone().oneshot(request).await?)
+	}
+
+	fn json_request(body: &Value) -> (&'static str, Vec<u8>) {
+		("application/json", body.to_string().into_bytes())
+	}
+
+	fn audio_form(model: &str, audio_bytes: usize) -> (&'static str, Vec<u8>) {
+		let mut body = format!("--b\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{model}\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").into_bytes();
+		body.resize(body.len() + audio_bytes, 0);
+		body.extend_from_slice(b"\r\n--b--\r\n");
+		("multipart/form-data; boundary=b", body)
+	}
+
+	async fn logged(pool: &PgPool) -> TestResult<Vec<(String, Option<i32>, String)>> {
+		Ok(sqlx::query_as("SELECT request_type, status_code, public_model_id FROM gateway_request_logs ORDER BY request_type").fetch_all(pool).await?)
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn models_can_be_filtered_by_type(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let team_id = create_team(&pool, user_id, "Typed Team", true).await?;
+		let (provider_id, _) = create_provider_model(&pool, "Typed", "chatty").await?;
+		sqlx::query("INSERT INTO models (provider_id, model_id, display_name, capabilities, output_modalities, is_enabled) VALUES ($1, 'embedder', 'Embedder', '[\"EMBEDDINGS\"]', '[\"EMBEDDINGS\"]', true)")
+			.bind(provider_id)
+			.execute(&pool)
+			.await?;
+		let (_, token) = create_key(&pool, user_id, team_id, json!(["inference:read"])).await?;
+		let (router, _) = router(pool).await?;
+		let ids = |value: Value| value["data"].as_array().map(|models| models.iter().map(|model| model["id"].to_string()).collect::<Vec<String>>()).unwrap_or_default();
+
+		let embeddings = send(&router, "GET", "/openai/v1/models?type=embedding", Some(&token)).await?;
+		assert_eq!(embeddings.status().as_u16(), 200);
+		assert_eq!(ids(json_body(embeddings).await?), ["\"typed/embedder\""]);
+		let chat = send(&router, "GET", "/openai/v1/models?type=chat", Some(&token)).await?;
+		assert_eq!(ids(json_body(chat).await?), ["\"typed/chatty\""]);
+		let all = send(&router, "GET", MODELS_PATH, Some(&token)).await?;
+		assert_eq!(ids(json_body(all).await?).len(), 2);
+		let unknown = send(&router, "GET", "/openai/v1/models?type=video", Some(&token)).await?;
+		let unknown = assert_error(unknown, 400).await?;
+		assert_eq!(unknown["error"]["code"], "invalid_type");
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn non_chat_routes_check_the_model_before_calling_the_provider(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (_, token) = create_key_in_new_team(&pool, user_id, json!(["inference:write"])).await?;
+		let (router, _) = router(pool.clone()).await?;
+
+		let missing = post(&router, "/openai/v1/embeddings", &token, json_request(&json!({"input": "hello"}))).await?;
+		assert_eq!(assert_error(missing, 400).await?["error"]["code"], "missing_required_parameter");
+		let not_a_form = post(&router, "/openai/v1/audio/transcriptions", &token, json_request(&json!({"model": "absent/model"}))).await?;
+		assert_eq!(assert_error(not_a_form, 400).await?["error"]["code"], "invalid_request_body");
+		assert!(logged(&pool).await?.is_empty());
+
+		let requests = [
+			("/openai/v1/embeddings", json_request(&json!({"model": "absent/model", "input": "hello"}))),
+			("/openai/v1/rerank", json_request(&json!({"model": "absent/model", "query": "q", "documents": ["a"]}))),
+			("/openai/v1/decisions", json_request(&json!({"model": "absent/model", "input": "hi", "questions": []}))),
+			("/openai/v1/images/generations", json_request(&json!({"model": "absent/model", "prompt": "a cat"}))),
+			("/openai/v1/audio/speech", json_request(&json!({"model": "absent/model", "input": "hi", "voice": "alloy"}))),
+			("/openai/v1/audio/transcriptions", audio_form("absent/model", 16)),
+			("/openai/v1/audio/translations", audio_form("absent/model", 3 * 1024 * 1024)),
+		];
+		for (path, body) in requests {
+			let response = post(&router, path, &token, body).await?;
+			assert_eq!(assert_error(response, 404).await?["error"]["code"], "model_not_found", "{path}");
+		}
+		let types: Vec<String> = logged(&pool).await?.into_iter().map(|(request_type, status, model)| format!("{request_type} {status:?} {model}")).collect();
+		assert_eq!(
+			types,
+			[
+				"gateway.decisions Some(404) absent/model",
+				"gateway.embeddings Some(404) absent/model",
+				"gateway.image_generations Some(404) absent/model",
+				"gateway.rerank Some(404) absent/model",
+				"gateway.speech Some(404) absent/model",
+				"gateway.transcriptions Some(404) absent/model",
+				"gateway.translations Some(404) absent/model",
+			]
+		);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_rejected_key_is_logged_under_the_route_it_called(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (_, token) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
+		let (router, _) = router(pool.clone()).await?;
+		let response = post(&router, "/openai/v1/audio/speech", &token, json_request(&json!({"model": "any/model", "input": "hi"}))).await?;
+		assert_error(response, 403).await?;
+		assert_eq!(logged(&pool).await?, [("gateway.speech".to_owned(), Some(403), String::new())]);
 		Ok(())
 	}
 

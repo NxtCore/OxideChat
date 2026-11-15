@@ -1,4 +1,5 @@
 use super::{SessionResponse, User};
+use crate::utils::encryption::hex_encode;
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, PgPool};
@@ -15,7 +16,7 @@ impl User {
 	/// The session ID is the login cookie's value, so clients only ever see this hash of it.
 	#[must_use]
 	pub fn session_public_id(session_id: &Uuid) -> String {
-		format!("{:x}", Sha256::digest(session_id.as_bytes()))
+		hex_encode(&Sha256::digest(session_id.as_bytes()))
 	}
 
 	async fn active_sessions(pool: &PgPool, user_id: &Uuid) -> Result<Vec<SessionRow>, sqlx::Error> {

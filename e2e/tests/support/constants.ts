@@ -6,6 +6,9 @@ export const MOCK_LLM_KEY = 'mock-key';
 
 export const MOCK_PRICING = {input: 10, output: 20};
 
+/** Usage the stand-in reports for its non-chat models, served under `${MOCK_LLM_URL}/media`. */
+export const MEDIA_USAGE = {embeddingTokens: 7, rerankTokens: 11, searchUnits: 1, decisionTokens: 42, imageInput: 13, imageOutput: 170, transcriptSeconds: 12};
+
 const realKey = process.env.E2E_LLM_API_KEY || '';
 
 export const LLM = realKey

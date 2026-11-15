@@ -55,10 +55,7 @@ fn title_messages(conversation: String) -> Vec<OmniMessage> {
 }
 
 async fn reserve(job: &TitleJob, model_id: &Uuid, conversation: &str) -> Option<BudgetAdmission> {
-	let estimate = TokenEstimate {
-		input: TokenEstimate::input_for_bytes((TITLE_PROMPT.len() + conversation.len()) as u64),
-		output: u64::from(TITLE_OUTPUT_TOKENS),
-	};
+	let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes((TITLE_PROMPT.len() + conversation.len()) as u64), u64::from(TITLE_OUTPUT_TOKENS));
 	match job
 		.state
 		.budget_ledger

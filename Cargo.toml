@@ -10,8 +10,8 @@ keywords = ["chat", "axum", "websocket", "postgres"]
 categories = ["web-programming"]
 
 [dependencies]
-axum = { version = "0.8" }
-tokio = { version = "1.48", features = ["full"] }
+axum = { version = "0.8.9" }
+tokio = { version = "1.54", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sqlx = { version = "0.9", features = [
@@ -25,35 +25,36 @@ sqlx = { version = "0.9", features = [
     "rust_decimal",
 ] }
 dotenv = { version = "0.15" }
-argon2 = { version = "0.5" }
-uuid = { version = "1.0", features = ["serde", "v4"] }
+argon2 = { version = "0.6" }
+uuid = { version = "1.29", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tower-cookies = { version = "0.11" }
-arc-swap = "1.7.1"
-oauth2 = "5"
-reqwest = { version = "0.12", default-features = false, features = [
-    "rustls-tls",
+arc-swap = "1.9.5"
+oauth2 = { version = "5", default-features = false }
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
     "json",
     "multipart",
+    "stream",
 ] }
-tower-http = { version = "0.6", features = ["cors"] }
-omniference = { version = "0.5" }
-aes-gcm = "0.10"
-rand = "0.8"
-rust_decimal = { version = "1.39.0", features = ["db-postgres", "serde"] }
-futures-util = "0.3.31"
+tower-http = { version = "0.7", features = ["cors"] }
+omniference = { version = "0.6" }
+aes-gcm = "0.11"
+rand = "0.10"
+rust_decimal = { version = "1.43.0", features = ["db-postgres", "serde"] }
+futures-util = "0.3.34"
 http-body = "1"
 async-stream = "0.3.6"
-tokio-util = "0.7.17"
+tokio-util = "0.7.20"
 extism = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-sha2 = "0.10"
-base64 = "0.22"
+sha2 = "0.11"
+base64 = "0.23"
 thiserror = "2"
 async-trait = "0.1"
 anyhow = "1"
-infer = "0.16"
+infer = "0.22"
 
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }
@@ -88,6 +89,6 @@ unsafe_code = "warn"
 missing_docs = "allow"
 
 [dev-dependencies]
-tokio = { version = "1.48", features = ["test-util"] }
-tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1.54", features = ["test-util"] }
+tower = { version = "0.5.3", features = ["util"] }
 ts-rs = { version = "12.0.1", features = ["uuid-impl", "chrono-impl", "serde-json-impl", "no-serde-warnings"] }

@@ -204,9 +204,12 @@ impl GatewayModel {
 			SELECT DISTINCT
 				p.name AS "provider_name!",
 				m.model_id,
-				m.created_at
+				m.created_at,
+				COALESCE(sys_mc.capabilities, m.capabilities, '[]'::jsonb) AS "capabilities!: Json<Vec<String>>",
+				COALESCE(sys_mc.output_modalities, m.output_modalities, '[]'::jsonb) AS "output_modalities!: Json<Vec<String>>"
 			FROM models m
 			JOIN providers p ON p.id = m.provider_id
+			LEFT JOIN model_configs sys_mc ON sys_mc.model_id = m.id AND sys_mc.owner_id IS NULL
 			WHERE m.is_enabled = TRUE
 			  AND p.is_enabled = TRUE
 			  AND EXISTS (
@@ -241,6 +244,8 @@ impl GatewayModel {
 						object: Some("model".to_string()),
 						created: Some(u64::try_from(preset.updated_at.timestamp()).unwrap_or_default()),
 						owned_by: Some(RESERVED_PROVIDER_NAME.to_string()),
+						model_type: Some("chat".to_string()),
+						capabilities: Vec::new(),
 					}),
 			);
 		}

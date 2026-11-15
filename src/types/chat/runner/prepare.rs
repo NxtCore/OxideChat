@@ -105,10 +105,7 @@ fn output_estimate(model: &Model) -> u64 {
 }
 
 async fn admit(state: &JobState, user_id: Uuid, model: &Model, prompt_bytes: u64) -> Result<BudgetAdmission, TurnError> {
-	let estimate = TokenEstimate {
-		input: TokenEstimate::input_for_bytes(prompt_bytes),
-		output: output_estimate(model),
-	};
+	let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes(prompt_bytes), output_estimate(model));
 	match state.budget_ledger.reserve_for_model(&state.db, BudgetSubject::user(user_id), &model.id, estimate).await {
 		Ok(admission) => Ok(admission),
 		Err(BudgetError::Exceeded) => Err(TurnError::new("budget_exceeded", "Budget exceeded for this model")),

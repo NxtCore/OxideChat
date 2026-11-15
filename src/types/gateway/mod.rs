@@ -4,6 +4,7 @@ mod admin_keys;
 mod admin_teams;
 mod body;
 mod estimate;
+mod form;
 mod keys;
 mod keys_repository;
 mod limiter;
@@ -13,7 +14,8 @@ mod repository;
 
 pub(crate) use body::ReservedBody;
 pub use admin::*;
-pub use estimate::GatewayEstimate;
+pub use estimate::{GatewayEstimate, MediaKind};
+pub use form::{GatewayForm, GatewayFormError};
 pub use keys::*;
 pub use limiter::*;
 pub use policy::*;
@@ -26,6 +28,7 @@ use axum::response::Response;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use omniference::types::providers::OpenAIModel;
+use omniference::types::{DiscoveredModel, Modality, ModelCapabilities, ProviderKind as OmniProviderKind};
 use sqlx::types::Json;
 use uuid::Uuid;
 
@@ -50,6 +53,16 @@ pub const CONCURRENT_LIMIT_HEADER: &str = "x-oxide-concurrent-limit";
 /// Response header carrying the remaining concurrency.
 pub const CONCURRENT_REMAINING_HEADER: &str = "x-oxide-concurrent-remaining";
 
+// Request Types
+
+/// Query of the gateway model listing.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct GatewayModelsQuery {
+	/// Keeps models of this primary type (`chat`, `embedding`, ...), one of [`omniference::types::MODEL_TYPES`].
+	#[serde(rename = "type")]
+	pub model_type: Option<String>,
+}
+
 // Response Types
 
 /// Enabled provider model exposed through the OpenAI-compatible gateway.
@@ -58,6 +71,8 @@ pub struct GatewayModel {
 	pub provider_name: String,
 	pub model_id: String,
 	pub created_at: DateTime<Utc>,
+	pub capabilities: Json<Vec<String>>,
+	pub output_modalities: Json<Vec<String>>,
 }
 
 /// Public gateway id of a stored model.
@@ -75,13 +90,36 @@ pub fn public_model_id(provider_name: &str, model_id: &str) -> String {
 
 impl From<GatewayModel> for OpenAIModel {
 	fn from(model: GatewayModel) -> Self {
+		let model_type = model_type(&model.capabilities.0, &model.output_modalities.0);
 		Self {
 			id: public_model_id(&model.provider_name, &model.model_id),
 			object: Some("model".to_string()),
 			created: Some(model.created_at.timestamp().max(0) as u64),
 			owned_by: Some(model.provider_name),
+			model_type: Some(model_type.to_string()),
+			capabilities: model.capabilities.0,
 		}
 	}
+}
+
+/// The primary kind Omniference reports for a model with these stored capabilities and output
+/// modalities (`chat`, `embedding`, `transcription`, ...), one of [`omniference::types::MODEL_TYPES`].
+#[must_use]
+pub fn model_type(capabilities: &[String], output_modalities: &[String]) -> &'static str {
+	DiscoveredModel {
+		id: String::new(),
+		name: String::new(),
+		provider_name: String::new(),
+		provider_kind: OmniProviderKind::OpenAICompat,
+		input_modalities: Vec::new(),
+		output_modalities: output_modalities.iter().filter_map(|code| Modality::from_code(code)).collect(),
+		context_length: None,
+		max_tokens: None,
+		capabilities: capabilities.iter().filter_map(|code| ModelCapabilities::from_code(code)).collect(),
+		pricing: None,
+		reasoning_budget: None,
+	}
+	.model_type()
 }
 
 // Internal Types

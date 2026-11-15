@@ -32,6 +32,10 @@ Without a key, the suite falls back to `scripts/mock-llm.mjs`, an OpenAI-compati
 rejects wrong API keys like a real provider. It runs the same specs and is useful for forks or offline
 work, but it cannot catch provider-specific problems.
 
+The stand-in always runs, also with a key: under `/media` it serves non-chat models (embeddings, rerank,
+decisions, images, speech to text and text to speech), which `gateway-media.spec.ts` adds as its own
+provider to check that every non-chat gateway route is billed and logged like chat.
+
 ## How dynamic costs are checked
 
 Token counts and prices are not hardcoded. Each test reads the usage the provider returned, then checks:

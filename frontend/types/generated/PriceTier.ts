@@ -3,4 +3,20 @@
 /**
  * Rates that apply once the prompt has at least `min_context_tokens` input tokens.
  */
-export type PriceTier = { min_context_tokens: number, input?: number, output?: number, cache_read?: number, cache_write?: number, reasoning?: number, input_audio?: number, output_audio?: number, };
+export type PriceTier = { min_context_tokens: number, input?: number, output?: number, cache_read?: number, cache_write?: number, reasoning?: number, input_audio?: number, output_audio?: number, 
+/**
+ * USD per second of audio input (speech to text).
+ */
+per_audio_second?: number, 
+/**
+ * USD per input character (text to speech).
+ */
+per_character?: number, 
+/**
+ * USD per request.
+ */
+per_request?: number, 
+/**
+ * USD per search (rerank).
+ */
+per_search?: number, };

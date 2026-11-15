@@ -101,16 +101,15 @@ mod tests {
 	mod password {
 		use argon2::{
 			Argon2,
-			password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+			password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
 		};
 
 		#[test]
 		fn password_hashing_works() {
 			let password = "test_password_123";
-			let salt = SaltString::generate(&mut OsRng);
 			let argon2 = Argon2::default();
 
-			let hash = argon2.hash_password(password.as_bytes(), &salt).unwrap();
+			let hash = argon2.hash_password(password.as_bytes()).unwrap();
 			let hash_str = hash.to_string();
 
 			// Verify the hash
@@ -122,10 +121,9 @@ mod tests {
 		fn wrong_password_fails_verification() {
 			let password = "correct_password";
 			let wrong_password = "wrong_password";
-			let salt = SaltString::generate(&mut OsRng);
 			let argon2 = Argon2::default();
 
-			let hash = argon2.hash_password(password.as_bytes(), &salt).unwrap();
+			let hash = argon2.hash_password(password.as_bytes()).unwrap();
 			let hash_str = hash.to_string();
 
 			let parsed_hash = PasswordHash::new(&hash_str).unwrap();

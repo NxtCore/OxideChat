@@ -16,7 +16,8 @@ pub async fn refresh_exchange_rates(pool: &PgPool) -> Result<bool, String> {
 		.timeout(Duration::from_secs(20))
 		.send()
 		.await
-		.and_then(reqwest::Response::error_for_status)
+		.map_err(|error| format!("ECB rates request failed: {error}"))?
+		.error_for_status()
 		.map_err(|error| format!("ECB rates request failed: {error}"))?
 		.text()
 		.await

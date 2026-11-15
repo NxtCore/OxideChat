@@ -895,7 +895,7 @@ mod gateway {
 		assign(&pool, budget, Some(fixture.user_id), None, None).await?;
 		let ledger = BudgetLedger::spawn();
 		let context = context(&pool, Some(fixture.user_id), fixture.team_id).await?;
-		let tokens = TokenEstimate { input: 0, output: 1 };
+		let tokens = TokenEstimate::text(0, 1);
 		let inference = GatewayModel::resolve_inference(&pool, &context, "presets/paid-preset").await?;
 		let admitted = GatewayModel::authorize_inference(&pool, &ledger, &context, inference, tokens).await?;
 		assert_eq!(admitted.model_id, fixture.model_id);
@@ -905,6 +905,29 @@ mod gateway {
 		let inference = GatewayModel::resolve_inference(&pool, &context, "presets/paid-preset").await?;
 		let blocked = GatewayModel::authorize_inference(&pool, &ledger, &context, inference, tokens).await;
 		assert!(matches!(blocked, Err(GatewayModelAccessError::BudgetExceeded)));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn presets_are_only_called_on_chat_routes(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		Preset::create(&pool, &personal(team.member_id), for_model("member-own", team.model_id)).await?;
+		let context = context(&pool, Some(team.member_id), team.team_id).await?;
+		let state = crate::tests::gateway::support::job_state(pool.clone());
+		for (route, accepted) in [(GatewayRoute::CHAT, true), (GatewayRoute::RESPONSES, true), (GatewayRoute::EMBEDDINGS, false), (GatewayRoute::SPEECH, false)] {
+			let scope = GatewayRequestScope {
+				db: &pool,
+				context: &context,
+				log: RequestLogContext::start(),
+				usage_type: route.usage_type,
+				streaming: false,
+			};
+			let estimate = |inference: &mut GatewayInference| inference.media_estimate(&context.policy, MediaKind::Embeddings, &serde_json::Map::new());
+			match crate::routes::gateway::admit_inference(&state, scope, route, "presets/member-own", estimate).await {
+				Ok(admitted) => assert!(accepted && admitted.inference.preset.is_some(), "{}", route.path),
+				Err(response) => assert!(!accepted && response.status().as_u16() == 404, "{}", route.path),
+			}
+		}
 		Ok(())
 	}
 }

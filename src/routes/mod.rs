@@ -14,6 +14,9 @@ use axum::{
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 
+/// Largest image edit or audio upload the gateway accepts, the limit `OpenAI` documents for both.
+const GATEWAY_UPLOAD_LIMIT_BYTES: usize = 25 * 1024 * 1024;
+
 /// Builds the complete API router backed by shared [`Arc<JobState>`] state.
 ///
 /// The returned router includes public, administrative, and OpenAI-compatible
@@ -22,9 +25,20 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 	let openai_read_router = Router::new()
 		.route("/models", get(public::openai::list_models))
 		.route_layer(from_fn_with_state(state.clone(), crate::routes::gateway::authenticate_read));
+	let upload_router = Router::new()
+		.route("/images/edits", post(public::openai::image_edits))
+		.route("/audio/transcriptions", post(public::openai::transcriptions))
+		.route("/audio/translations", post(public::openai::translations))
+		.layer(DefaultBodyLimit::max(GATEWAY_UPLOAD_LIMIT_BYTES));
 	let openai_write_router = Router::new()
 		.route("/chat/completions", post(public::openai::chat_completions))
 		.route("/responses", post(public::openai::responses))
+		.route("/embeddings", post(public::openai::embeddings))
+		.route("/rerank", post(public::openai::rerank))
+		.route("/decisions", post(public::openai::decisions))
+		.route("/images/generations", post(public::openai::image_generations))
+		.route("/audio/speech", post(public::openai::speech))
+		.merge(upload_router)
 		.route_layer(from_fn_with_state(state.clone(), crate::routes::gateway::authenticate_write));
 	let openai_router = openai_read_router
 		.merge(openai_write_router)

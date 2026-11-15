@@ -6,15 +6,17 @@ use crate::types::{
 	GatewayRun, INFERENCE_READ_SCOPE, PRESET_METADATA_KEY, INFERENCE_WRITE_SCOPE, JobState, PUBLIC_MODEL_METADATA_KEY, REQUEST_ID_METADATA_KEY, RESERVATION_METADATA_KEY, RequestLog, RequestLogContext,
 	RequestLogErrorCategory, RequestLogFailure, RequestLogOwner, RequestLogTrace, STARTED_AT_METADATA_KEY, STREAMING_METADATA_KEY, TEAM_ID_HEADER,
 };
-use axum::extract::{Request, State};
+use axum::extract::{Extension, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use omniference::server::SkinAwareJson;
 use omniference::skins::{OpenAIChatSkin, OpenAIErrorHandler, OpenAIResponsesSkin, SkinContext, SkinErrorHandler, SkinRequestMetadata, openai_error_response};
+use omniference::types::MODEL_TYPES;
 use omniference::types::providers::OpenAIModelsResponse;
 use omniference::types::providers::openai::{OpenAIChatRequest, OpenAIResponsesRequestPayload};
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -67,14 +69,24 @@ async fn authenticate_owned(state: &JobState, headers: &HeaderMap, scope: &str) 
 	Ok(context)
 }
 
-/// Lists the models visible to an authorized gateway API key.
-pub async fn run_models(state: &JobState, context: &GatewayAuthContext) -> Response {
+pub mod media;
+
+/// Lists the models visible to an authorized gateway API key, only those of `model_type` when set.
+pub async fn run_models(state: &JobState, context: &GatewayAuthContext, model_type: Option<&str>) -> Response {
+	if model_type.is_some_and(|model_type| !MODEL_TYPES.contains(&model_type)) {
+		return error_response(StatusCode::BAD_REQUEST, translation("gateway.errors.invalid_type"), "invalid_request_error", "invalid_type");
+	}
 	match GatewayModel::list_for_context(&state.db, context).await {
-		Ok(models) => axum::Json(OpenAIModelsResponse {
-			object: Some("list".to_string()),
-			data: models,
-		})
-		.into_response(),
+		Ok(mut models) => {
+			if let Some(model_type) = model_type {
+				models.retain(|model| model.model_type.as_deref() == Some(model_type));
+			}
+			axum::Json(OpenAIModelsResponse {
+				object: Some("list".to_string()),
+				data: models,
+			})
+			.into_response()
+		}
 		Err(error) => {
 			tracing::error!(%error, "failed to list gateway models");
 			error_response(
@@ -89,17 +101,25 @@ pub async fn run_models(state: &JobState, context: &GatewayAuthContext) -> Respo
 
 /// Runs an authorized `OpenAI` chat request.
 pub async fn run_chat(request: OpenAIChatRequest, inference: GatewayInference, run: GatewayRun<'_>) -> Response {
+	run_skin(inference, run, SkinAwareJson(request), OpenAIChatSkin::handle_chat).await
+}
+
+/// Runs an authorized request through an Omniference skin handler with the request's `oxide_*`
+/// metadata, logs an upstream failure and ties the budget reservation to the response body.
+pub async fn run_skin<B, F, Fut>(inference: GatewayInference, run: GatewayRun<'_>, body: B, handler: F) -> Response
+where
+	F: FnOnce(State<SkinContext>, Option<Extension<SkinRequestMetadata>>, B) -> Fut,
+	Fut: Future<Output = Response>,
+{
 	let metadata = request_metadata(&run, &inference);
-	let engine = ai::get();
-	let skin_context = SkinContext::with_service(engine.service().clone());
-	let response = OpenAIChatSkin::handle_chat(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(request)).await;
+	let skin_context = SkinContext::with_service(ai::get().service().clone());
+	let response = handler(State(skin_context), Some(Extension(metadata)), body).await;
 	log_upstream_failure(&run.scope, &inference, response.status()).await;
 	inference.finish(response, &run.scope)
 }
 
 /// Runs an authorized `OpenAI` responses request.
 pub async fn run_responses(request: OpenAIResponsesRequestPayload, inference: GatewayInference, run: GatewayRun<'_>) -> Response {
-	let metadata = request_metadata(&run, &inference);
 	let raw_request = match serde_json::to_value(request) {
 		Ok(raw_request) => raw_request,
 		Err(error) => {
@@ -118,11 +138,7 @@ pub async fn run_responses(request: OpenAIResponsesRequestPayload, inference: Ga
 			return response;
 		}
 	};
-	let engine = ai::get();
-	let skin_context = SkinContext::with_service(engine.service().clone());
-	let response = OpenAIResponsesSkin::handle_responses(State(skin_context), Some(axum::Extension(metadata)), SkinAwareJson(raw_request)).await;
-	log_upstream_failure(&run.scope, &inference, response.status()).await;
-	inference.finish(response, &run.scope)
+	run_skin(inference, run, SkinAwareJson(raw_request), OpenAIResponsesSkin::handle_responses).await
 }
 
 /// Records every failed upstream response, including passed-through client errors, as a request log row.
@@ -180,6 +196,7 @@ pub struct AdmittedInference<'a> {
 
 /// Resolves the model, reserves budget and passes the rate limiter, in that order.
 ///
+/// Presets are chat models, so only routes that accept them resolve one.
 /// `estimate` receives the resolved model and returns the request's token bounds.
 /// Every refusal is logged and returned as the response to send.
 pub async fn admit_inference<'a>(
@@ -193,6 +210,9 @@ pub async fn admit_inference<'a>(
 		Ok(inference) => inference,
 		Err(error) => return Err(Box::new(reject_model_access(&scope, None, error, requested).await)),
 	};
+	if inference.preset.is_some() && !route.accepts_presets() {
+		return Err(Box::new(reject_model_access(&scope, None, GatewayModelAccessError::NotFound, requested).await));
+	}
 	let estimate = estimate(&mut inference);
 	if let Err(error) = GatewayModel::reserve_budget(scope.db, &state.budget_ledger, scope.context, &mut inference, estimate.tokens()).await {
 		return Err(Box::new(reject_model_access(&scope, Some(&inference), error, requested).await));
@@ -230,11 +250,7 @@ async fn authenticate_request(state: &JobState, mut request: Request, next: Next
 			let (response, owner) = *rejection;
 			let log = request.extensions().get::<RequestLogContext>().copied();
 			if let (Some(owner), Some(log)) = (owner.filter(|_| scope == INFERENCE_WRITE_SCOPE), log) {
-				let route = if request.uri().path().ends_with(GatewayRoute::RESPONSES.path) {
-					GatewayRoute::RESPONSES
-				} else {
-					GatewayRoute::CHAT
-				};
+				let route = GatewayRoute::for_path(request.uri().path());
 				log_auth_rejection(state, (log, route), owner, response.status()).await;
 			}
 			return response;
