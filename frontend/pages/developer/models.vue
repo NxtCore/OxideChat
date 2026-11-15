@@ -25,6 +25,13 @@
 						<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 						<ShadInput v-model="query" class="pl-9" autocomplete="off" data-testid="model-search" :placeholder="store.getTranslation('developer.model_search.placeholder')" :aria-label="store.getTranslation('developer.model_search.placeholder')" />
 					</div>
+					<ShadSelect v-if="types.length > 1" v-model="typeFilter">
+						<ShadSelectTrigger class="w-full md:w-44" data-testid="model-type-filter" :aria-label="store.getTranslation('developer.models.type')"><ShadSelectValue /></ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem value="all">{{ store.getTranslation('developer.models.all_types') }}</ShadSelectItem>
+							<ShadSelectItem v-for="type in types" :key="type" :value="type">{{ typeLabel(type) }}</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
 					<ShadSelect v-if="providers.length > 1" v-model="providerFilter">
 						<ShadSelectTrigger class="w-full md:w-44" :aria-label="store.getTranslation('developer.models.provider')"><ShadSelectValue /></ShadSelectTrigger>
 						<ShadSelectContent>
@@ -61,7 +68,7 @@
 				{{ store.getTranslation('developer.model_search.empty') }}
 			</p>
 			<div v-else class="overflow-x-auto rounded-lg border border-border bg-card">
-				<table class="w-full min-w-[760px] text-sm">
+				<table class="w-full min-w-[860px] text-sm">
 					<thead>
 						<tr class="border-b border-border text-left text-xs text-muted-foreground">
 							<th v-for="column in COLUMNS" :key="column.id" class="px-3 py-2 font-medium" :class="column.numeric ? 'text-right' : ''" :aria-sort="sortBy === column.id ? (sortDescending ? 'descending' : 'ascending') : undefined">
@@ -79,6 +86,9 @@
 							<td class="max-w-80 px-3 py-2">
 								<p class="truncate font-medium text-foreground" :title="model.display_name">{{ model.display_name }}</p>
 								<p class="truncate font-mono text-xs text-muted-foreground" :title="model.id">{{ model.id }}</p>
+							</td>
+							<td class="whitespace-nowrap px-3 py-2">
+								<span class="rounded-md border border-border px-1.5 py-0.5 text-xs text-muted-foreground" :title="routesForType(model.type).join(', ')" :data-testid="`model-type-${model.id}`">{{ typeLabel(model.type) }}</span>
 							</td>
 							<td class="whitespace-nowrap px-3 py-2 text-muted-foreground">{{ model.provider }}</td>
 							<td class="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">{{ formatContext(model.context_length) }}</td>
@@ -101,7 +111,7 @@
 									<ShadButton variant="ghost" size="icon" class="h-7 w-7" :aria-label="store.getTranslation('developer.models.copy_id')" :title="store.getTranslation('developer.models.copy_id')" @click="store.copyToClipboard(model.id)">
 										<Copy class="h-3.5 w-3.5" />
 									</ShadButton>
-									<ShadButton as-child variant="ghost" size="icon" class="h-7 w-7" :title="store.getTranslation('developer.models.try')">
+									<ShadButton v-if="model.type === 'chat'" as-child variant="ghost" size="icon" class="h-7 w-7" :title="store.getTranslation('developer.models.try')">
 										<NuxtLink :to="{path: '/developer/playground', query: {model: model.id}}" :aria-label="store.getTranslation('developer.models.try')">
 											<FlaskConical class="h-3.5 w-3.5" />
 										</NuxtLink>
@@ -123,7 +133,7 @@ import {useMainStore} from '@/stores';
 import {useDeveloperStore} from '@/stores/developerStore';
 import type {DeveloperModel} from '~/types/developer';
 
-type SortColumn = 'name' | 'provider' | 'context' | 'input' | 'output';
+type SortColumn = 'name' | 'type' | 'provider' | 'context' | 'input' | 'output';
 
 const FEATURES = [
 	{id: 'tools', label: 'developer.models.filter_tools', icon: Wrench, matches: (model: DeveloperModel) => model.capabilities.includes('TOOLS')},
@@ -134,6 +144,7 @@ const FEATURES = [
 
 const COLUMNS: {id: SortColumn; label: string; numeric?: boolean}[] = [
 	{id: 'name', label: 'developer.models.name'},
+	{id: 'type', label: 'developer.models.type'},
 	{id: 'provider', label: 'developer.models.provider'},
 	{id: 'context', label: 'developer.models.context', numeric: true},
 	{id: 'input', label: 'developer.models.input', numeric: true},
@@ -146,9 +157,16 @@ const developer = useDeveloperStore();
 const query = ref('');
 const providerFilter = ref('all');
 const teamFilter = ref('all');
+const typeFilter = ref('all');
 const active = ref(new Set<string>());
 const sortBy = ref<SortColumn>('name');
 const sortDescending = ref(false);
+
+const types = computed(() => [...new Set(developer.models.map(model => model.type))].sort((a, b) => typeLabel(a).localeCompare(typeLabel(b))));
+
+function typeLabel(type: string): string {
+	return store.getTranslation(`developer.model_type.${type}`);
+}
 
 const providers = computed(() => [...new Set(developer.models.map(model => model.provider))].sort((a, b) => a.localeCompare(b)));
 
@@ -159,6 +177,7 @@ function knownPrice(value: string | null): number | null {
 
 function sortValue(model: DeveloperModel, column: SortColumn): string | number | null {
 	if (column === 'name') return model.display_name;
+	if (column === 'type') return typeLabel(model.type);
 	if (column === 'provider') return model.provider;
 	if (column === 'context') return model.context_length;
 	return knownPrice(column === 'input' ? model.price_input : model.price_output);
@@ -170,6 +189,7 @@ const visible = computed(() => {
 	const direction = sortDescending.value ? -1 : 1;
 	return developer.models
 		.filter(model => !needle || `${model.display_name} ${model.id}`.toLowerCase().includes(needle))
+		.filter(model => typeFilter.value === 'all' || model.type === typeFilter.value)
 		.filter(model => providerFilter.value === 'all' || model.provider === providerFilter.value)
 		.filter(model => teamFilter.value === 'all' || model.team_ids.includes(teamFilter.value))
 		.filter(model => features.every(feature => feature.matches(model)))

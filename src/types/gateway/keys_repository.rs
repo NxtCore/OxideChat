@@ -674,6 +674,7 @@ impl GatewayModelResponse {
 		let catalog = crate::ai::catalog();
 		for model in &mut models {
 			model.id = public_model_id(&model.provider, &model.model_id);
+			model.model_type = super::model_type(&model.capabilities, &model.output_modalities);
 			let sheet = ModelPricing::effective_sheet(&catalog, &model.provider, &model.provider_kind, &model.model_id, model.override_pricing.as_ref()).await;
 			model.price_input = sheet.as_ref().and_then(|sheet| sheet.rates.input).and_then(Decimal::from_f64);
 			model.price_output = sheet.as_ref().and_then(|sheet| sheet.rates.output).and_then(Decimal::from_f64);

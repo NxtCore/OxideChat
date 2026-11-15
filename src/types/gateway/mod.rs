@@ -104,18 +104,28 @@ impl From<GatewayModel> for OpenAIModel {
 
 /// The primary kind Omniference reports for a model with these stored capabilities and output
 /// modalities (`chat`, `embedding`, `transcription`, ...), one of [`omniference::types::MODEL_TYPES`].
+///
+/// Like Omniference's discovery, an embeddings or image output modality adds its capability, so an
+/// admin's modality override changes the type too.
 #[must_use]
 pub fn model_type(capabilities: &[String], output_modalities: &[String]) -> &'static str {
+	let output_modalities: Vec<Modality> = output_modalities.iter().filter_map(|code| Modality::from_code(code)).collect();
+	let mut capabilities: Vec<ModelCapabilities> = capabilities.iter().filter_map(|code| ModelCapabilities::from_code(code)).collect();
+	for (modality, capability) in [(Modality::Embeddings, ModelCapabilities::Embeddings), (Modality::Image, ModelCapabilities::ImageGeneration)] {
+		if output_modalities.contains(&modality) && !capabilities.contains(&capability) {
+			capabilities.push(capability);
+		}
+	}
 	DiscoveredModel {
 		id: String::new(),
 		name: String::new(),
 		provider_name: String::new(),
 		provider_kind: OmniProviderKind::OpenAICompat,
 		input_modalities: Vec::new(),
-		output_modalities: output_modalities.iter().filter_map(|code| Modality::from_code(code)).collect(),
+		output_modalities,
 		context_length: None,
 		max_tokens: None,
-		capabilities: capabilities.iter().filter_map(|code| ModelCapabilities::from_code(code)).collect(),
+		capabilities,
 		pricing: None,
 		reasoning_budget: None,
 	}

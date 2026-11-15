@@ -11,6 +11,13 @@
 				</ShadButton>
 			</div>
 		</div>
+		<p class="mb-2 mt-4 text-xs text-muted-foreground">{{ store.getTranslation('developer.endpoints.routes') }}</p>
+		<ul class="grid gap-x-6 gap-y-1 sm:grid-cols-2" data-testid="gateway-routes">
+			<li v-for="route in GATEWAY_ROUTES" :key="route.path" class="flex min-w-0 items-baseline gap-2 text-xs" :data-testid="`gateway-route-${route.path.slice(1).replaceAll('/', '-')}`">
+				<code class="shrink-0 font-mono text-foreground"><span class="text-muted-foreground">{{ route.method }}</span> {{ route.path }}</code>
+				<span class="truncate text-muted-foreground">{{ store.getTranslation(route.type ? `developer.model_type.${route.type}` : 'developer.endpoints.models') }}</span>
+			</li>
+		</ul>
 	</div>
 </template>
 

@@ -23,7 +23,7 @@ function file(name: string, mimeType: string, size: number) {
 }
 
 test.describe('OpenAI gateway: non-chat models', () => {
-	test('every non-chat route is admitted, billed and logged like chat', async ({page, api, seed}) => {
+	test('every non-chat route is admitted, billed and logged like chat', async ({page, t, api, seed}) => {
 		const provider = await api.post('/api/v1/admin/providers', {kind: 'OPENAI_COMPAT', name: uniqueName('Media'), base_url: `${MOCK_LLM_URL}/media`, api_key: MOCK_LLM_KEY});
 		const key = await createKeyViaApi(api, seed.teamId, uniqueName('media-key'));
 		try {
@@ -36,6 +36,8 @@ test.describe('OpenAI gateway: non-chat models', () => {
 				expect(model, `${native} among the synced models`).toBeTruthy();
 				await api.put(`/api/v1/admin/models/${model!.id}/pricing`, {pricing: {...price, tiers: []}});
 				ids[native] = model!.model_id;
+				if (native === 'mock-embed') await api.patch(`/api/v1/admin/models/${model!.id}`, {output_modalities: ['EMBEDDINGS']});
+				if (native === 'mock-image') await api.patch(`/api/v1/admin/models/${model!.id}`, {output_modalities: ['IMAGE']});
 			}
 
 			const auth = {authorization: `Bearer ${key.token}`};
@@ -115,6 +117,21 @@ test.describe('OpenAI gateway: non-chat models', () => {
 				expect(log.status, route.path).toBe('success');
 				expect(Number(log.cost_total), route.path).toBeCloseTo(route.cost, 9);
 			}
+
+			await page.goto('/developer/keys');
+			await expect(page.getByTestId('gateway-route-embeddings')).toContainText(t('developer.model_type.embedding'));
+			await expect(page.getByTestId('gateway-route-audio-speech')).toContainText(t('developer.model_type.speech'));
+
+			await page.goto('/developer/models');
+			const tryLink = (id: string) => page.getByTestId(`model-row-${id}`).getByRole('link', {name: t('developer.models.try')});
+			await expect(page.getByTestId(`model-type-${ids['mock-embed']}`)).toHaveText(t('developer.model_type.embedding'));
+			await expect(page.getByTestId(`model-type-${seed.model.publicId}`)).toHaveText(t('developer.model_type.chat'));
+			await expect(tryLink(seed.model.publicId)).toHaveCount(1);
+			await expect(tryLink(ids['mock-embed'])).toHaveCount(0);
+			await page.getByTestId('model-type-filter').click();
+			await page.getByRole('option', {name: t('developer.model_type.image'), exact: true}).click();
+			await expect(page.locator('[data-testid^="model-row-"]')).toHaveCount(1);
+			await expect(page.getByTestId(`model-row-${ids['mock-image']}`)).toBeVisible();
 		} finally {
 			await api.post(`/api/v1/developer/keys/${key.id}/revoke`);
 			await api.delete(`/api/v1/admin/providers/${provider.id}`);
