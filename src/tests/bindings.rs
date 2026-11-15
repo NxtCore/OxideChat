@@ -13,7 +13,7 @@ mod tests {
 	use std::fs;
 	use ts_rs::{Config, Dummy, TS};
 
-	const OUT_DIR: &str = "frontend/types/generated";
+	const OUT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/frontend/types/generated");
 
 	#[test]
 	fn generate_frontend_types() -> Result<(), Box<dyn Error>> {
