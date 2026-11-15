@@ -47,12 +47,12 @@ impl ProviderKind {
 	pub fn to_omni_kind(&self) -> OmniProviderKind {
 		match self {
 			Self::Openai => OmniProviderKind::OpenAI,
-			Self::OpenaiCompat => OmniProviderKind::OpenAICompat,
+			Self::OpenaiCompat | Self::Mistral => OmniProviderKind::OpenAICompat,
 			Self::Anthropic => OmniProviderKind::Anthropic,
 			Self::Google => OmniProviderKind::Google,
 			Self::Openrouter => OmniProviderKind::OpenRouter,
 			Self::Custom => OmniProviderKind::Custom("CUSTOM".to_string()),
-			Self::Cortecs | Self::Mistral => OmniProviderKind::OpenAI,
+			Self::Cortecs => OmniProviderKind::OpenAI,
 		}
 	}
 

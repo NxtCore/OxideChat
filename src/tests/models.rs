@@ -642,6 +642,15 @@ mod catalog_pricing {
 		Ok(())
 	}
 
+	#[test]
+	fn mistral_runs_on_the_openai_compatible_adapter_with_its_vendor_profile() -> TestResult {
+		let config = omniference::catalog::providers::resolve_provider(catalog_provider("Mistral", &ProviderKind::Mistral))?;
+		assert_eq!(config.endpoint.kind, omniference::types::ProviderKind::OpenAICompat);
+		assert_eq!(config.vendor_slug(), Some("mistral"));
+		assert_eq!(config.resolved_profile.and_then(|resolved| resolved.profile.dialect.clone()).as_deref(), Some("mistral"));
+		Ok(())
+	}
+
 	#[sqlx::test(migrations = "./migrations")]
 	async fn a_model_without_a_manual_price_reports_the_models_dev_price(pool: PgPool) -> TestResult {
 		let reference = models_dev("gpt-5").await?;
@@ -654,7 +663,7 @@ mod catalog_pricing {
 		assert_eq!(pricing.effective, pricing.catalog);
 		assert_eq!(Some(pricing.effective_input), pricing.reported_input);
 
-		let tokens = crate::types::TokenEstimate { input: 1_000_000, output: 0 };
+		let tokens = crate::types::TokenEstimate::text(1_000_000, 0);
 		assert_eq!(ModelPricing::estimate_cost(&pool, &served.model_id, tokens).await?, pricing.effective_input);
 		assert!(!ModelPricing::is_free(&pool, &served.model_id).await?);
 		assert!(ModelPricing::priced_model_ids(&pool).await?.contains(&served.model_id));
@@ -748,7 +757,7 @@ mod catalog_pricing {
 		let tier_input = tier.input.ok_or("tier has no input rate")?;
 		let served = serve(&pool, "gpt-5.4").await?;
 
-		let tokens = crate::types::TokenEstimate { input: u64::from(tier.min_context_tokens), output: 0 };
+		let tokens = crate::types::TokenEstimate::text(u64::from(tier.min_context_tokens), 0);
 		let estimate = ModelPricing::estimate_cost(&pool, &served.model_id, tokens).await?;
 		let expected = Decimal::from_f64(tier_input * f64::from(tier.min_context_tokens) / 1_000_000.0).ok_or("decimal")?;
 		assert_eq!(estimate.round_dp(6), expected.round_dp(6));
@@ -794,6 +803,33 @@ mod catalog_pricing {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn an_estimate_prices_only_the_units_the_model_has_rates_for(pool: PgPool) -> TestResult {
+		let served = serve(&pool, "in-house-whisper").await?;
+		let actor = create_user(&pool).await?;
+		let per_unit = PriceSheet {
+			rates: PriceRates {
+				per_audio_second: Some(0.25),
+				per_request: Some(0.5),
+				..rates(0.0, 0.0)
+			},
+			tiers: Some(Vec::new()),
+			..PriceSheet::default()
+		};
+		ModelPricing::save_override(&pool, &served.model_id, per_unit, &actor).await?;
+		let mut estimate = crate::types::TokenEstimate::text(1_000, 0);
+		estimate.units = crate::types::UnitEstimate {
+			input_audio_tokens: 1_500,
+			audio_seconds: 60,
+			characters: 400,
+			requests: 1,
+			searches: 2,
+			..crate::types::UnitEstimate::default()
+		};
+		assert_eq!(ModelPricing::estimate_cost(&pool, &served.model_id, estimate).await?, Decimal::new(155, 1));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn a_model_the_catalog_does_not_know_has_no_price_and_counts_as_priced(pool: PgPool) -> TestResult {
 		let served = serve(&pool, "in-house-model").await?;
 		let actor = create_user(&pool).await?;
@@ -801,7 +837,7 @@ mod catalog_pricing {
 		let pricing = ModelPricing::effective(&pool, &served.model_id).await?.ok_or("model missing")?;
 		assert_eq!((pricing.reported_input, pricing.reported_output), (None, None));
 		assert_eq!(pricing.effective_input, Decimal::ZERO);
-		let tokens = crate::types::TokenEstimate { input: 1_000, output: 1_000 };
+		let tokens = crate::types::TokenEstimate::text(1_000, 1_000);
 		assert_eq!(ModelPricing::estimate_cost(&pool, &served.model_id, tokens).await?, Decimal::ZERO);
 		assert!(!ModelPricing::is_free(&pool, &served.model_id).await?);
 		assert!(ModelPricing::priced_model_ids(&pool).await?.contains(&served.model_id));
@@ -889,6 +925,32 @@ mod price_sheets {
 		assert_eq!(engine.windows.len(), 1);
 		assert_eq!(PriceSheet::from_engine(&engine).over(None).to_engine(), Some(engine));
 		assert!(PriceSheet::default().to_engine().is_none());
+		Ok(())
+	}
+
+	#[test]
+	fn unit_rates_survive_the_engine_round_trip_and_fall_back_to_the_catalog() -> TestResult {
+		let catalog = PriceSheet {
+			rates: PriceRates {
+				per_character: Some(0.000_015),
+				per_request: Some(0.01),
+				..rates(0.0, 0.0)
+			},
+			..PriceSheet::default()
+		};
+		let engine = catalog.to_engine().ok_or("priced sheet")?;
+		assert_eq!(engine.per_character, Some(0.000_015));
+		assert_eq!(PriceSheet::from_engine(&engine).rates, catalog.rates);
+
+		let sheet = PriceSheet {
+			rates: PriceRates { per_request: Some(0.02), ..PriceRates::default() },
+			..PriceSheet::default()
+		};
+		let merged = sheet.over(Some(&catalog));
+		assert_eq!(merged.rates.per_character, Some(0.000_015));
+		assert_eq!(merged.rates.per_request, Some(0.02));
+		assert!(merged.rates.charges_per_unit());
+		assert!(!rates(0.0, 0.0).charges_per_unit());
 		Ok(())
 	}
 

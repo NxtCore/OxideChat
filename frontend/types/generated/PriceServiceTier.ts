@@ -4,4 +4,20 @@ import type { PriceTier } from "./PriceTier";
 /**
  * Rates for requests that run on one service tier (`flex`, `priority`, `batch`, ...).
  */
-export type PriceServiceTier = { tiers: Array<PriceTier>, input?: number, output?: number, cache_read?: number, cache_write?: number, reasoning?: number, input_audio?: number, output_audio?: number, };
+export type PriceServiceTier = { tiers: Array<PriceTier>, input?: number, output?: number, cache_read?: number, cache_write?: number, reasoning?: number, input_audio?: number, output_audio?: number, 
+/**
+ * USD per second of audio input (speech to text).
+ */
+per_audio_second?: number, 
+/**
+ * USD per input character (text to speech).
+ */
+per_character?: number, 
+/**
+ * USD per request.
+ */
+per_request?: number, 
+/**
+ * USD per search (rerank).
+ */
+per_search?: number, };

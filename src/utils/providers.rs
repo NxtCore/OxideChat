@@ -35,6 +35,8 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 		},
 		enabled: true,
 		catalog_provider_slug: provider.kind.catalog_slug(),
+		profile: None,
+		resolved_profile: None,
 	};
 
 	let engine = OF_ENGINE.get().ok_or_else(|| "AI engine not initialized".to_string())?.load();

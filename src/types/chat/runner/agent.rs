@@ -206,10 +206,7 @@ impl AgentRun {
 	}
 
 	async fn reserve_step(&self) -> Result<Option<BudgetReservation>, StepError> {
-		let estimate = TokenEstimate {
-			input: TokenEstimate::input_for_bytes(prompt_bytes(&self.current_messages)),
-			output: self.output_estimate,
-		};
+		let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes(prompt_bytes(&self.current_messages)), self.output_estimate);
 		match self.state.budget_ledger.reserve_for_model(&self.state.db, BudgetSubject::user(self.user_id), &self.model_id, estimate).await {
 			Ok(admission) => Ok(admission.reservation),
 			Err(BudgetError::Exceeded) => Err(StepError::BUDGET_EXCEEDED),

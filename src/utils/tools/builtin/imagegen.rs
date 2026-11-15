@@ -3,18 +3,15 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use futures_util::StreamExt;
 use omniference::types::{ImageInput, ImageOperation, ImageOptions, ImageRequestIR, ImageResponse, ModelRef};
 use reqwest::{Client, Url, header::CONTENT_TYPE, redirect::Policy};
-use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{net::IpAddr, time::Duration};
+use std::{collections::BTreeMap, net::IpAddr, time::Duration};
 use uuid::Uuid;
 
 use super::super::executor::{ToolContext, ToolError, ToolExecutor};
 use crate::ai::provider_to_config;
-use crate::types::budgets::Budget;
-use crate::types::models::{Model, ModelPricing};
+use crate::types::models::Model;
 use crate::types::providers::{Provider, ProviderKind};
-use crate::types::usage::{UsageEvent, UsageEventRecord};
 use crate::utils::images::{safe_image_mime, store_image};
 
 #[derive(Debug, Deserialize)]
@@ -140,32 +137,6 @@ impl ImageGenExecutor {
 	}
 
 	#[allow(clippy::cognitive_complexity)]
-	async fn record_usage(&self, ctx: &ToolContext, model: &Model, usage: &omniference::types::ImageUsage) {
-		let Some(db) = ctx.db.as_ref() else { return };
-		let Some(user_id) = ctx.user_id else { return };
-		let input_tokens = usage.input_tokens.min(i32::MAX as u64) as i32;
-		let output_tokens = usage.output_tokens.min(i32::MAX as u64) as i32;
-		let mut record = UsageEventRecord {
-			user_id: Some(&user_id),
-			team_id: Budget::primary_team_id(db, &user_id).await.ok().flatten(),
-			api_key_id: None,
-			model_id: &model.id,
-			preset_id: None,
-			provider_id: &model.provider_id,
-			request_type: "image",
-			input_tokens,
-			output_tokens,
-			reasoning_tokens: 0,
-			cost_total: Decimal::ZERO,
-		};
-		if let Err(error) = ModelPricing::price(db, usage.provider_cost, 0.0, &mut record).await {
-			tracing::error!(%error, "Failed to price image generation usage");
-		}
-		if let Err(error) = UsageEvent::record(db, record).await {
-			tracing::error!(%error, "Failed to record image generation usage event");
-		}
-	}
-
 	async fn store_response(&self, response: ImageResponse, ctx: &ToolContext, caption: &str) -> Result<Value, ToolError> {
 		let db = ctx.db.as_ref().ok_or_else(|| ToolError::Internal("Database not available".to_string()))?;
 		let image = response.images.into_iter().next().ok_or_else(|| ToolError::ExecutionFailed("Image provider returned no images".to_string()))?;
@@ -218,10 +189,23 @@ impl ToolExecutor for ImageGenExecutor {
 			request_id: None,
 			input_images,
 			options,
+			mask: None,
+			raw_request: None,
+			metadata: usage_metadata(ctx, &model),
 		};
 		let engine = crate::ai::get();
 		let response = engine.image(request).await.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-		self.record_usage(ctx, &model, &response.usage).await;
 		self.store_response(response, ctx, &caption).await
 	}
+}
+
+fn usage_metadata(ctx: &ToolContext, model: &Model) -> BTreeMap<String, String> {
+	let Some(user_id) = ctx.user_id else {
+		return BTreeMap::new();
+	};
+	BTreeMap::from([
+		("oxide_user_id".to_string(), user_id.to_string()),
+		("oxide_model_id".to_string(), model.id.to_string()),
+		("oxide_request_type".to_string(), "image".to_string()),
+	])
 }

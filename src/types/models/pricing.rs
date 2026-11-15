@@ -10,7 +10,8 @@ const WEEK_MINUTES: u32 = 7 * DAY_MINUTES;
 
 // Request and Response Types
 
-/// Rates in USD per million tokens. An unset rate falls back to the layer below.
+/// Token rates in USD per million tokens and `per_*` rates in USD per unit. An unset rate falls back
+/// to the layer below.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct PriceRates {
@@ -35,6 +36,22 @@ pub struct PriceRates {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	#[cfg_attr(test, ts(optional))]
 	pub output_audio: Option<f64>,
+	/// USD per second of audio input (speech to text).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[cfg_attr(test, ts(optional))]
+	pub per_audio_second: Option<f64>,
+	/// USD per input character (text to speech).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[cfg_attr(test, ts(optional))]
+	pub per_character: Option<f64>,
+	/// USD per request.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[cfg_attr(test, ts(optional))]
+	pub per_request: Option<f64>,
+	/// USD per search (rerank).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[cfg_attr(test, ts(optional))]
+	pub per_search: Option<f64>,
 }
 
 /// Rates that apply once the prompt has at least `min_context_tokens` input tokens.
@@ -195,7 +212,17 @@ impl PriceRates {
 			reasoning: self.reasoning.or(below.reasoning),
 			input_audio: self.input_audio.or(below.input_audio),
 			output_audio: self.output_audio.or(below.output_audio),
+			per_audio_second: self.per_audio_second.or(below.per_audio_second),
+			per_character: self.per_character.or(below.per_character),
+			per_request: self.per_request.or(below.per_request),
+			per_search: self.per_search.or(below.per_search),
 		}
+	}
+
+	/// Whether any per-unit rate (audio second, character, request, search) is above zero.
+	#[must_use]
+	pub fn charges_per_unit(&self) -> bool {
+		[self.per_audio_second, self.per_character, self.per_request, self.per_search].into_iter().flatten().any(|rate| rate > 0.0)
 	}
 }
 

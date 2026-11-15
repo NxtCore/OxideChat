@@ -6,7 +6,6 @@ use sqlx::{Postgres, Transaction};
 use std::time::SystemTime;
 use crate::types::BaseType;
 use crate::types::PolicyResolver;
-use crate::types::UsageEventRecord;
 use crate::types::{Page, PageQuery};
 use crate::types::models::ProviderTab;
 use crate::types::presets::is_reserved_model_id;
@@ -853,53 +852,45 @@ impl ModelPricing {
 		AuditLog::write(tx, entry).await
 	}
 
-	/// Sets `record.cost_total`: the provider-reported cost when present, else the model's price, else `fallback_cost`.
-	///
-	/// # Errors
-	/// Returns an error when the price cannot be loaded.
-	pub async fn price(pool: &sqlx::PgPool, provider_cost: Option<f64>, fallback_cost: f64, record: &mut UsageEventRecord<'_>) -> Result<(), sqlx::Error> {
-		record.cost_total = match provider_cost.and_then(Decimal::from_f64) {
-			Some(cost) => cost,
-			None => Self::usage_cost(pool, record.model_id, record.input_tokens, record.output_tokens, record.reasoning_tokens)
-				.await?
-				.unwrap_or_else(|| Decimal::from_f64(fallback_cost).unwrap_or(Decimal::ZERO)),
-		};
-		Ok(())
-	}
-
 	fn charges(&self) -> bool {
 		let positive = |range: &PriceRange| range.max > 0.0;
 		let Some(effective) = self.effective.as_ref() else {
 			return false;
 		};
 		let reasoning = effective.price.rates.reasoning.is_some_and(|rate| rate > 0.0);
-		reasoning || effective.summary.as_ref().is_some_and(|summary| positive(&summary.input) || positive(&summary.output))
-	}
-
-	async fn usage_cost(pool: &sqlx::PgPool, model_id: &Uuid, input_tokens: i32, output_tokens: i32, reasoning_tokens: i32) -> Result<Option<Decimal>, sqlx::Error> {
-		let Some(pricing) = Self::effective(pool, model_id).await?.and_then(|pricing| pricing.pricing) else {
-			return Ok(None);
-		};
-		let tokens = |count: i32| u32::try_from(count).unwrap_or(0);
-		let usage = omniference::catalog::UsageBreakdown {
-			input_tokens: tokens(input_tokens),
-			output_tokens: tokens(output_tokens),
-			reasoning_tokens: tokens(reasoning_tokens),
-			..Default::default()
-		};
-		Ok(omniference::catalog::compute_cost(Some(&pricing), &usage, SystemTime::now(), None)
-			.ok()
-			.and_then(|cost| Decimal::from_f64(cost.total)))
+		reasoning || effective.price.rates.charges_per_unit() || effective.summary.as_ref().is_some_and(|summary| positive(&summary.input) || positive(&summary.output))
 	}
 
 	/// Prices an estimate for a model at the current time, at the context tier the estimated prompt
-	/// reaches; unpriced models estimate to zero.
+	/// reaches; unpriced models estimate to zero. A unit the model has no rate for is left out, so a
+	/// model priced in tokens is not refused for its estimated audio seconds or characters.
 	///
 	/// # Errors
 	/// Returns an error when pricing cannot be loaded.
 	pub async fn estimate_cost(pool: &sqlx::PgPool, model_id: &Uuid, tokens: crate::types::TokenEstimate) -> Result<Decimal, sqlx::Error> {
-		let clamp = |value: u64| i32::try_from(value).unwrap_or(i32::MAX);
-		Ok(Self::usage_cost(pool, model_id, clamp(tokens.input), clamp(tokens.output), 0).await?.unwrap_or(Decimal::ZERO))
+		let Some(pricing) = Self::effective(pool, model_id).await?.and_then(|pricing| pricing.pricing) else {
+			return Ok(Decimal::ZERO);
+		};
+		let clamp = |value: u64| u32::try_from(value).unwrap_or(u32::MAX);
+		let now = SystemTime::now();
+		let rates = pricing.resolve(clamp(tokens.input), now, None);
+		let units = tokens.units;
+		let priced = |rate: Option<f64>, count: u64| if rate.is_some() { count } else { 0 };
+		let usage = omniference::catalog::UsageBreakdown {
+			input_tokens: clamp(tokens.input),
+			output_tokens: clamp(tokens.output),
+			input_audio_tokens: clamp(priced(rates.input_audio, units.input_audio_tokens)),
+			output_audio_tokens: clamp(priced(rates.output_audio, units.output_audio_tokens)),
+			input_audio_seconds: priced(rates.per_audio_second, units.audio_seconds) as f64,
+			input_characters: priced(rates.per_character, units.characters),
+			requests: units.requests,
+			searches: clamp(priced(rates.per_search, u64::from(units.searches))),
+			..Default::default()
+		};
+		Ok(omniference::catalog::compute_cost(Some(&pricing), &usage, now, None)
+			.ok()
+			.and_then(|cost| Decimal::from_f64(cost.total))
+			.unwrap_or(Decimal::ZERO))
 	}
 
 	/// Whether a known price is zero; models without a price are not free.

@@ -72,9 +72,38 @@ impl BudgetSubject {
 pub struct TokenEstimate {
 	pub input: u64,
 	pub output: u64,
+	pub units: UnitEstimate,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// Conservative non-text usage of a request, priced only by models that have a rate for it.
+pub struct UnitEstimate {
+	pub input_audio_tokens: u64,
+	pub output_audio_tokens: u64,
+	pub audio_seconds: u64,
+	pub characters: u64,
+	pub requests: u32,
+	pub searches: u32,
 }
 
 impl TokenEstimate {
+	#[must_use]
+	/// Text-only bounds without any per-unit usage.
+	pub const fn text(input: u64, output: u64) -> Self {
+		Self {
+			input,
+			output,
+			units: UnitEstimate {
+				input_audio_tokens: 0,
+				output_audio_tokens: 0,
+				audio_seconds: 0,
+				characters: 0,
+				requests: 0,
+				searches: 0,
+			},
+		}
+	}
+
 	#[must_use]
 	/// Conservative input tokens for a request body of the given size.
 	pub fn input_for_bytes(bytes: u64) -> u64 {

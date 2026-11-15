@@ -1235,7 +1235,7 @@ mod unlogged_failures {
 	async fn the_models_route_is_not_an_inference_request_and_stays_unlogged(pool: PgPool) -> TestResult {
 		let (user_id, context) = context(&pool).await?;
 		let state = crate::tests::gateway::support::job_state(pool.clone());
-		let response = crate::routes::gateway::run_models(&state, &context).await;
+		let response = crate::routes::gateway::run_models(&state, &context, None).await;
 		assert_eq!(response.status().as_u16(), 200);
 		let filter = RequestLogFilter {
 			user_id: Some(user_id),

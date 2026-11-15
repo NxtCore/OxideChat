@@ -7,7 +7,7 @@ import type {PriceTier} from '~/types/generated/PriceTier';
 import type {PriceWeekday} from '~/types/generated/PriceWeekday';
 import type {PriceWindow} from '~/types/generated/PriceWindow';
 
-export const RATE_FIELDS = ['input', 'output', 'cache_read', 'cache_write', 'reasoning', 'input_audio', 'output_audio'] as const;
+export const RATE_FIELDS = ['input', 'output', 'cache_read', 'cache_write', 'reasoning', 'input_audio', 'output_audio', 'per_audio_second', 'per_character', 'per_request', 'per_search'] as const;
 export type RateField = (typeof RATE_FIELDS)[number];
 export const WEEKDAYS: PriceWeekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 

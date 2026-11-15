@@ -354,7 +354,7 @@ mod budgets {
 
 	async fn authorize(pool: &PgPool, ledger: &BudgetLedger, context: &GatewayAuthContext, output: u64) -> Result<GatewayInference, GatewayModelAccessError> {
 		let inference = GatewayModel::resolve_inference(pool, context, "budget provider/paid").await?;
-		GatewayModel::authorize_inference(pool, ledger, context, inference, TokenEstimate { input: 0, output }).await
+		GatewayModel::authorize_inference(pool, ledger, context, inference, TokenEstimate::text(0, output)).await
 	}
 
 	#[sqlx::test(migrations = "./migrations")]

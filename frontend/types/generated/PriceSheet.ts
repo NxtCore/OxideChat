@@ -7,4 +7,20 @@ import type { PriceWindow } from "./PriceWindow";
  * A model price. As an override, every unset rate and every unset list (`null` or missing) falls
  * back to the catalog price; an empty list replaces the catalog's with none.
  */
-export type PriceSheet = { tiers?: Array<PriceTier>, service_tiers?: { [key in string]: PriceServiceTier }, windows?: Array<PriceWindow>, input?: number, output?: number, cache_read?: number, cache_write?: number, reasoning?: number, input_audio?: number, output_audio?: number, };
+export type PriceSheet = { tiers?: Array<PriceTier>, service_tiers?: { [key in string]: PriceServiceTier }, windows?: Array<PriceWindow>, input?: number, output?: number, cache_read?: number, cache_write?: number, reasoning?: number, input_audio?: number, output_audio?: number, 
+/**
+ * USD per second of audio input (speech to text).
+ */
+per_audio_second?: number, 
+/**
+ * USD per input character (text to speech).
+ */
+per_character?: number, 
+/**
+ * USD per request.
+ */
+per_request?: number, 
+/**
+ * USD per search (rerank).
+ */
+per_search?: number, };

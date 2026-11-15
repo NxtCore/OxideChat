@@ -90,7 +90,7 @@ pub mod support {
 	}
 
 	pub fn tokens(output: u64) -> TokenEstimate {
-		TokenEstimate { input: 0, output }
+		TokenEstimate::text(0, output)
 	}
 
 	pub async fn authorize(pool: &PgPool, ledger: &BudgetLedger, context: &GatewayAuthContext, estimate: TokenEstimate) -> Result<GatewayInference, GatewayModelAccessError> {

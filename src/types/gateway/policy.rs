@@ -89,6 +89,47 @@ impl GatewayRoute {
 		path: "/responses",
 		usage_type: "gateway.responses",
 	};
+	pub const EMBEDDINGS: Self = Self::inference("/embeddings", "gateway.embeddings");
+	pub const RERANK: Self = Self::inference("/rerank", "gateway.rerank");
+	pub const DECISIONS: Self = Self::inference("/decisions", "gateway.decisions");
+	pub const IMAGE_GENERATIONS: Self = Self::inference("/images/generations", "gateway.image_generations");
+	pub const IMAGE_EDITS: Self = Self::inference("/images/edits", "gateway.image_edits");
+	pub const TRANSCRIPTIONS: Self = Self::inference("/audio/transcriptions", "gateway.transcriptions");
+	pub const TRANSLATIONS: Self = Self::inference("/audio/translations", "gateway.translations");
+	pub const SPEECH: Self = Self::inference("/audio/speech", "gateway.speech");
+	/// Every inference route, used to name the route of a request rejected before its handler ran.
+	pub const INFERENCE: [Self; 10] = [
+		Self::CHAT,
+		Self::RESPONSES,
+		Self::EMBEDDINGS,
+		Self::RERANK,
+		Self::DECISIONS,
+		Self::IMAGE_GENERATIONS,
+		Self::IMAGE_EDITS,
+		Self::TRANSCRIPTIONS,
+		Self::TRANSLATIONS,
+		Self::SPEECH,
+	];
+
+	const fn inference(path: &'static str, usage_type: &'static str) -> Self {
+		Self {
+			class: GatewayRouteClass::Inference,
+			path,
+			usage_type,
+		}
+	}
+
+	#[must_use]
+	/// The inference route a request path ends with; chat when none matches.
+	pub fn for_path(path: &str) -> Self {
+		Self::INFERENCE.into_iter().find(|route| path.ends_with(route.path)).unwrap_or(Self::CHAT)
+	}
+
+	#[must_use]
+	/// Whether presets, which are chat models, may be called on this route.
+	pub fn accepts_presets(self) -> bool {
+		self.path == Self::CHAT.path || self.path == Self::RESPONSES.path
+	}
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]

@@ -110,6 +110,8 @@ pub fn catalog_provider(name: &str, kind: &ProviderKind) -> ProviderConfig {
 		},
 		enabled: true,
 		catalog_provider_slug: kind.catalog_slug(),
+		profile: None,
+		resolved_profile: None,
 	}
 }
 
@@ -158,6 +160,8 @@ pub fn provider_to_config(provider: &Provider) -> Result<ProviderConfig, crate::
 		},
 		enabled: provider.is_enabled,
 		catalog_provider_slug: provider.kind.catalog_slug(),
+		profile: None,
+		resolved_profile: None,
 	})
 }
 
