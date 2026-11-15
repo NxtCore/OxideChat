@@ -13,6 +13,25 @@ export function maskedKey(key: DeveloperKey): string {
 
 export const GATEWAY_ENDPOINTS = [{id: 'openai', label: 'developer.endpoints.openai', path: '/openai/v1'}];
 
+/** Every route under a gateway base URL and the model type it serves; `/models` lists them all. */
+export const GATEWAY_ROUTES = [
+	{method: 'POST', path: '/chat/completions', type: 'chat'},
+	{method: 'POST', path: '/responses', type: 'chat'},
+	{method: 'POST', path: '/embeddings', type: 'embedding'},
+	{method: 'POST', path: '/rerank', type: 'reranking'},
+	{method: 'POST', path: '/decisions', type: 'decision'},
+	{method: 'POST', path: '/images/generations', type: 'image'},
+	{method: 'POST', path: '/images/edits', type: 'image'},
+	{method: 'POST', path: '/audio/transcriptions', type: 'transcription'},
+	{method: 'POST', path: '/audio/translations', type: 'transcription'},
+	{method: 'POST', path: '/audio/speech', type: 'speech'},
+	{method: 'GET', path: '/models', type: null},
+] as const;
+
+export function routesForType(type: string): string[] {
+	return GATEWAY_ROUTES.filter(route => route.type === type).map(route => `${route.method} ${route.path}`);
+}
+
 export function gatewayBaseUrl(): string {
 	return `${window.location.origin}/openai/v1`;
 }

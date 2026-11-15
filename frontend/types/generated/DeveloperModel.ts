@@ -4,7 +4,12 @@ import type { PriceSummary } from "./PriceSummary";
 /**
  * A model the caller can reach through the gateway, and the teams that grant it.
  */
-export type DeveloperModel = { id: string, model_id: string, display_name: string, provider: string, capabilities: Array<string>, input_modalities: Array<string>, output_modalities: Array<string>, context_length: number | null, price_input: string | null, price_output: string | null, 
+export type DeveloperModel = { id: string, model_id: string, display_name: string, provider: string, 
+/**
+ * Omniference's primary kind of the model (`chat`, `embedding`, `transcription`, ...), which
+ * decides the gateway route that serves it.
+ */
+type: string, capabilities: Array<string>, input_modalities: Array<string>, output_modalities: Array<string>, context_length: number | null, price_input: string | null, price_output: string | null, 
 /**
  * Price ranges and special rates of the price the model is billed at.
  */

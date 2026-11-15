@@ -190,7 +190,8 @@ const {renderStreaming} = useMarkdown();
 
 const usableKeys = computed(() => developer.activeKeys.filter(key => key.scopes.includes('inference:write')));
 const selectedKey = computed(() => developer.keys.find(key => key.id === keyId.value));
-const models = computed(() => (selectedKey.value ? (developer.teamById(selectedKey.value.team_id)?.models ?? []) : []));
+const nonChatModels = computed(() => new Set(developer.models.filter(model => model.type !== 'chat').map(model => model.id)));
+const models = computed(() => (selectedKey.value ? (developer.teamById(selectedKey.value.team_id)?.models ?? []).filter(id => !nonChatModels.value.has(id)) : []));
 const savedToken = computed(() => developer.sessionTokens[keyId.value] ?? '');
 const missingHint = computed(() => {
 	if (!keyId.value) return store.getTranslation('developer.playground.pick_key');

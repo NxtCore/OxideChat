@@ -205,6 +205,11 @@ pub struct GatewayModelResponse {
 	pub model_id: String,
 	pub display_name: String,
 	pub provider: String,
+	/// Omniference's primary kind of the model (`chat`, `embedding`, `transcription`, ...), which
+	/// decides the gateway route that serves it.
+	#[sqlx(skip)]
+	#[serde(rename = "type")]
+	pub model_type: &'static str,
 	#[serde(skip)]
 	#[cfg_attr(test, ts(skip))]
 	pub provider_kind: crate::types::providers::ProviderKind,

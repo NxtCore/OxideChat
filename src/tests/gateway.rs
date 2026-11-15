@@ -941,6 +941,9 @@ mod models {
 		assert_eq!(model_type(&codes(&["SPEECH_TO_TEXT"]), &codes(&["TEXT"])), "transcription");
 		assert_eq!(model_type(&codes(&["TEXT_TO_SPEECH"]), &codes(&["AUDIO"])), "speech");
 		assert_eq!(model_type(&codes(&["IMAGE_GENERATION"]), &codes(&["IMAGE"])), "image");
+		assert_eq!(model_type(&[], &codes(&["EMBEDDINGS"])), "embedding");
+		assert_eq!(model_type(&[], &codes(&["IMAGE"])), "image");
+		assert_eq!(model_type(&codes(&["TOOLS"]), &codes(&["TEXT", "IMAGE"])), "chat");
 		let listed = omniference::types::providers::OpenAIModel::from(GatewayModel {
 			provider_name: "OpenAI".to_string(),
 			model_id: "text-embedding-3-small".to_string(),
