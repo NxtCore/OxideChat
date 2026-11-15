@@ -1,11 +1,11 @@
 //! Encryption utilities for credentials using AES-256-GCM.
 
 use aes_gcm::{
-	Aes256Gcm, Nonce,
-	aead::{Aead, KeyInit, Payload},
+	Aes256Gcm,
+	aead::{Aead, KeyInit, Nonce, Payload},
 };
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use rand::{RngCore, rngs::OsRng};
+use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::{
 	fs::{self, OpenOptions},
@@ -98,7 +98,7 @@ pub fn init() -> Result<KeySource, EncryptionError> {
 fn set_key(key: &EncryptionKey) -> Result<(), EncryptionError> {
 	let key_id = key_id(key);
 	let state = CipherState {
-		cipher: Aes256Gcm::new(key.as_ref().into()),
+		cipher: Aes256Gcm::new(key.into()),
 		key_id,
 	};
 	CIPHER.set(state).map_err(|_| EncryptionError::AlreadyInitialized)?;
@@ -130,7 +130,7 @@ pub fn encrypt_api_key(plaintext: &str) -> Result<String, EncryptionError> {
 	let ciphertext = state
 		.cipher
 		.encrypt(
-			Nonce::from_slice(&nonce),
+			(&nonce).into(),
 			Payload {
 				msg: plaintext.as_bytes(),
 				aad: ASSOCIATED_DATA,
@@ -282,7 +282,7 @@ fn decrypt_current(value: &str, state: &CipherState) -> Result<String, Encryptio
 	let plaintext = state
 		.cipher
 		.decrypt(
-			Nonce::from_slice(nonce),
+			as_nonce(nonce)?,
 			Payload {
 				msg: ciphertext,
 				aad: ASSOCIATED_DATA,
@@ -299,10 +299,7 @@ fn decrypt_legacy(value: &str, state: &CipherState) -> Result<String, Encryption
 	}
 	let split_at = envelope.len() - NONCE_SIZE;
 	let (ciphertext, nonce) = envelope.split_at(split_at);
-	let plaintext = state
-		.cipher
-		.decrypt(Nonce::from_slice(nonce), ciphertext)
-		.map_err(|_| EncryptionError::DecryptionFailed)?;
+	let plaintext = state.cipher.decrypt(as_nonce(nonce)?, ciphertext).map_err(|_| EncryptionError::DecryptionFailed)?;
 	String::from_utf8(plaintext).map_err(|_| EncryptionError::InvalidPlaintext)
 }
 
@@ -324,7 +321,7 @@ fn read_key_file(path: &Path) -> Result<EncryptionKey, EncryptionError> {
 
 fn create_key_file(path: &Path) -> Result<(EncryptionKey, KeySource), EncryptionError> {
 	let mut key = [0u8; 32];
-	OsRng.fill_bytes(&mut key);
+	rand::rng().fill_bytes(&mut key);
 	let encoded = hex_encode(&key);
 	let mut options = OpenOptions::new();
 	options.write(true).create_new(true);
@@ -356,7 +353,8 @@ fn decode_key(value: &str) -> Result<EncryptionKey, ()> {
 	Ok(key)
 }
 
-fn hex_encode(data: &[u8]) -> String {
+#[must_use]
+pub fn hex_encode(data: &[u8]) -> String {
 	let mut output = String::with_capacity(data.len() * 2);
 	for byte in data {
 		use std::fmt::Write;
@@ -391,8 +389,12 @@ fn hex_digit(value: u8) -> Result<u8, ()> {
 	}
 }
 
+fn as_nonce(bytes: &[u8]) -> Result<&Nonce<Aes256Gcm>, EncryptionError> {
+	bytes.try_into().map_err(|_| EncryptionError::InvalidFormat)
+}
+
 fn random_nonce() -> [u8; NONCE_SIZE] {
 	let mut nonce = [0u8; NONCE_SIZE];
-	OsRng.fill_bytes(&mut nonce);
+	rand::rng().fill_bytes(&mut nonce);
 	nonce
 }

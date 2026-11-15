@@ -9,7 +9,7 @@ use crate::types::models::ModelPricing;
 use crate::types::{Budget, BudgetSubject, Team};
 use crate::utils::auth::hash_password;
 use chrono::{DateTime, Duration, Utc};
-use rand::{Rng, distributions::Alphanumeric, rngs::OsRng};
+use rand::{RngExt, distr::Alphanumeric};
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde_json::{Value, json};
 use sqlx::{PgConnection, PgPool, Postgres, Transaction, types::Json};
@@ -91,7 +91,7 @@ impl RuleColumns {
 impl IssuedSecret {
 	async fn generate() -> Result<Self, GatewayKeyError> {
 		let id = Uuid::new_v4();
-		let secret: String = OsRng.sample_iter(&Alphanumeric).take(SECRET_LENGTH).map(char::from).collect();
+		let secret: String = rand::rng().sample_iter(Alphanumeric).take(SECRET_LENGTH).map(char::from).collect();
 		let last_four = secret[SECRET_LENGTH - 4..].to_owned();
 		let prefix = format!("oxc_{}", id.simple());
 		let token = format!("{prefix}_{secret}");

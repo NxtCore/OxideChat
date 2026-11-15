@@ -5,7 +5,7 @@ mod credential_encryption {
 		encrypt_secret_value, init_for_test, mask_object_values, mask_schema_secrets,
 	};
 	use aes_gcm::{
-		Aes256Gcm, Nonce,
+		Aes256Gcm,
 		aead::{Aead, KeyInit},
 	};
 	use std::fmt::Write;
@@ -18,9 +18,9 @@ mod credential_encryption {
 		assert_eq!(decrypt_api_key(&encrypted)?, "provider-secret");
 		assert_eq!(decrypt_api_key("existing-plaintext")?, "existing-plaintext");
 		let nonce = [0x24; 12];
-		let cipher = Aes256Gcm::new([0x42; 32].as_ref().into());
+		let cipher = Aes256Gcm::new((&[0x42; 32]).into());
 		let mut legacy = cipher
-			.encrypt(Nonce::from_slice(&nonce), b"legacy-secret".as_ref())
+			.encrypt((&nonce).into(), b"legacy-secret".as_ref())
 			.map_err(|_| EncryptionError::EncryptionFailed)?;
 		legacy.extend_from_slice(&nonce);
 		let legacy = legacy.iter().fold(String::from("enc:"), |mut encoded, byte| {

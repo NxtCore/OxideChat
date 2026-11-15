@@ -1,6 +1,6 @@
 use argon2::{
 	Algorithm, Argon2, Params, Version,
-	password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+	password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
 };
 use chrono::{Duration, Utc};
 use sqlx::postgres::PgPool;
@@ -28,8 +28,7 @@ fn argon2() -> Argon2<'static> {
 
 /// Hash a password using Argon2id.
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
-	let salt = SaltString::generate(&mut OsRng);
-	let hash = argon2().hash_password(password.as_bytes(), &salt)?;
+	let hash = argon2().hash_password(password.as_bytes())?;
 	Ok(hash.to_string())
 }
 

@@ -8,8 +8,10 @@ use std::env;
 use crate::types::oauth::{OAuthEndpoints, OAuthProvider, OAuthState, OAuthUserInfo, ResolvedEndpoints};
 use crate::utils::outbound::{self, OutboundError};
 use oauth2::basic::BasicClient;
+use oauth2::{AsyncHttpClient, HttpClientError, HttpRequest, HttpResponse};
 use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl};
 use serde::Deserialize;
+use std::pin::Pin;
 
 type ProviderClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
@@ -89,11 +91,31 @@ pub async fn exchange_code(provider: &OAuthProvider, code: &str, state: &OAuthSt
 	let token_result = client
 		.exchange_code(AuthorizationCode::new(code.to_string()))
 		.set_pkce_verifier(PkceCodeVerifier::new(state.pkce_verifier.clone()))
-		.request_async(&http_client)
+		.request_async(&OAuthHttpClient(http_client))
 		.await
 		.map_err(|e| OAuthError::TokenExchange(e.to_string()))?;
 
 	Ok(token_result.access_token().secret().clone())
+}
+
+struct OAuthHttpClient(reqwest::Client);
+
+impl<'c> AsyncHttpClient<'c> for OAuthHttpClient {
+	type Error = HttpClientError<reqwest::Error>;
+	type Future = Pin<Box<dyn Future<Output = Result<HttpResponse, Self::Error>> + Send + 'c>>;
+
+	fn call(&'c self, request: HttpRequest) -> Self::Future {
+		Box::pin(send_oauth_request(&self.0, request))
+	}
+}
+
+async fn send_oauth_request(client: &reqwest::Client, request: HttpRequest) -> Result<HttpResponse, HttpClientError<reqwest::Error>> {
+	let response = client.execute(request.try_into().map_err(Box::new)?).await.map_err(Box::new)?;
+	let mut builder = oauth2::http::Response::builder().status(response.status()).version(response.version());
+	for (name, value) in response.headers() {
+		builder = builder.header(name, value);
+	}
+	Ok(builder.body(response.bytes().await.map_err(Box::new)?.to_vec())?)
 }
 
 /// Fetch the user's profile from the provider and read it through the claim mapping.

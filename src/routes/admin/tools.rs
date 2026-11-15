@@ -1,6 +1,7 @@
 use crate::types::consts::{ADMIN_TOOLS_EDIT, ADMIN_TOOLS_VIEW};
 use crate::types::tools::*;
 use crate::types::{AppError, AuthUser, JobState, json_ok};
+use crate::utils::encryption::hex_encode;
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use crate::utils::tools::{ToolContext, ToolError, ToolExecutor};
 use axum::{
@@ -93,7 +94,7 @@ pub async fn upload_wasm(State(state): State<Arc<JobState>>, auth: AuthUser, Jso
 
 	let mut hasher = Sha256::new();
 	hasher.update(&blob);
-	let hash = format!("{:x}", hasher.finalize());
+	let hash = hex_encode(&hasher.finalize());
 
 	let existing = WasmBlob::find_by_hash(&state.db, &hash, None).await?;
 	let created = existing.is_none();
