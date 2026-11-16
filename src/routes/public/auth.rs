@@ -5,7 +5,7 @@ use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
 	extract::{ConnectInfo, State},
-	http::StatusCode,
+	http::{HeaderMap, StatusCode},
 	response::Response,
 };
 use std::net::SocketAddr;
@@ -91,10 +91,11 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 pub async fn login(
 	State(state): State<Arc<JobState>>,
 	ConnectInfo(addr): ConnectInfo<SocketAddr>,
+	headers: HeaderMap,
 	cookies: Cookies,
 	Json(payload): Json<LoginRequest>,
 ) -> Result<Response, AppError> {
-	let ip = addr.ip();
+	let ip = crate::middleware::forwarded_ip(&headers).and_then(|value| value.parse().ok()).unwrap_or_else(|| addr.ip());
 	if !state.login_limiter.allow(ip, &payload.email).await {
 		AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
 		return Err(ErrorCode::RateLimited.into());

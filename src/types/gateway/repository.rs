@@ -59,7 +59,10 @@ impl From<ResolvedModel> for GatewayInference {
 	}
 }
 
-static DUMMY_SECRET_HASH: LazyLock<String> = LazyLock::new(|| hash_password("oxide-gateway-invalid-secret").unwrap_or_default());
+// Each Argon2 verification takes 64 MiB and a core, so more at once than cores only costs memory.
+static VERIFY_PERMITS: LazyLock<tokio::sync::Semaphore> = LazyLock::new(|| tokio::sync::Semaphore::new(std::thread::available_parallelism().map_or(4, std::num::NonZero::get)));
+
+static DUMMY_SECRET_HASH:LazyLock<String> = LazyLock::new(|| hash_password("oxide-gateway-invalid-secret").unwrap_or_default());
 
 impl GatewayCredential {
 	/// Authenticates a gateway token and returns its enabled team-pinned context.
@@ -97,7 +100,8 @@ impl GatewayCredential {
 		let hash = credential.as_ref().map_or(DUMMY_SECRET_HASH.as_str(), |value| value.secret_hash.as_str());
 		let secret = parsed.map_or_else(String::new, |parsed| parsed.secret.to_owned());
 		let hash = hash.to_owned();
-		let verified = tokio::task::spawn_blocking(move || verify_password(&secret, &hash).unwrap_or(false))
+		let _permit = VERIFY_PERMITS.acquire().await.map_err(|_| GatewayAuthFailure::from(GatewayAuthError::Unavailable))?;
+		let verified =tokio::task::spawn_blocking(move || verify_password(&secret, &hash).unwrap_or(false))
 			.await
 			.map_err(|_| GatewayAuthFailure::from(GatewayAuthError::Unavailable))?;
 		let Some(credential) = credential.filter(|_| verified) else {

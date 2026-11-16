@@ -299,6 +299,20 @@ mod tests {
 		}
 
 		#[sqlx::test]
+		async fn linking_removes_the_unverified_password_and_its_sessions(pool: PgPool) -> TestResult {
+			let owner = crate::tests::support::insert_user(&pool, "sam").await?;
+			let session = uuid::Uuid::new_v4();
+			crate::types::User::insert_session(&pool, session, &owner, chrono::Utc::now() + chrono::Duration::days(1)).await?;
+			let provider = provider(&pool, request("keycloak")).await?;
+			sign_in(&pool, &provider, &info(&provider, "1", "sam@example.com", Some(true))).await?;
+
+			let password: Option<String> = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1").bind(owner).fetch_one(&pool).await?;
+			assert_eq!(password, None);
+			assert!(crate::types::User::find_by_session(&pool, &session).await?.is_none());
+			Ok(())
+		}
+
+		#[sqlx::test]
 		async fn a_verified_email_links_to_the_existing_account(pool: PgPool) -> TestResult {
 			let owner = crate::tests::support::insert_user(&pool, "sam").await?;
 			let provider = provider(&pool, request("keycloak")).await?;

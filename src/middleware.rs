@@ -4,7 +4,7 @@ use crate::utils::rate_limit;
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use axum::{
 	extract::{ConnectInfo, Request, State},
-	http::{HeaderName, HeaderValue, Method, header},
+	http::{HeaderMap, HeaderName, HeaderValue, Method, header},
 	middleware::Next,
 	response::Response,
 };
@@ -37,14 +37,20 @@ pub async fn load_current_user(
 	}
 }
 
+/// Returns the first `X-Forwarded-For` value when `TRUST_PROXY=true`.
+#[must_use]
+pub fn forwarded_ip(headers: &HeaderMap) -> Option<&str> {
+	if !*TRUST_PROXY {
+		return None;
+	}
+	let forwarded = headers.get("x-forwarded-for")?.to_str().ok()?;
+	forwarded.split(',').next().map(str::trim).filter(|first| !first.is_empty())
+}
+
 /// Returns the client IP, honoring `X-Forwarded-For` only when `TRUST_PROXY=true`.
 #[must_use]
 pub fn client_ip(request: &Request) -> String {
-	if *TRUST_PROXY
-		&& let Some(forwarded) = request.headers().get("x-forwarded-for").and_then(|value| value.to_str().ok())
-		&& let Some(first) = forwarded.split(',').next().map(str::trim)
-		&& !first.is_empty()
-	{
+	if let Some(first) = forwarded_ip(request.headers()) {
 		return first.to_string();
 	}
 	request
