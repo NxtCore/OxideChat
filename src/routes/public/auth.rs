@@ -71,6 +71,9 @@ pub async fn register(State(state): State<Arc<JobState>>, cookies: Cookies, Json
 	if !User::any_exist(&state.db).await.map_err(AppError::database)? {
 		return Err(ErrorCode::SetupRequired.into());
 	}
+	if !crate::config::Config::get().registration().enabled {
+		return Err(ErrorCode::RegistrationDisabled.into());
+	}
 
 	validate_credentials(&payload.email, &payload.username, &payload.password)?;
 	let password_hash = hash_new_password(&payload.password)?;

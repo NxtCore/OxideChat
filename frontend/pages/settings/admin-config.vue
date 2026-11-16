@@ -18,6 +18,10 @@
 				</ImagePicker>
 			</SettingsRow>
 
+			<SettingsRow :label="store.getTranslation('settings.admin_config.registration')" :hint="store.getTranslation('settings.admin_config.registration_hint')">
+				<ShadSwitch v-model="form.registration.enabled" :disabled="!canEdit || settingsForm.saving" data-testid="config-registration" />
+			</SettingsRow>
+
 			<SettingsRow :label="store.getTranslation('settings.admin_config.provider_selector.label')" :hint="store.getTranslation('settings.admin_config.provider_selector.hint')">
 				<ShadSwitch v-model="form.provider_routing.selector_enabled" :disabled="!canEdit || settingsForm.saving" data-testid="config-provider-selector" />
 			</SettingsRow>
@@ -122,6 +126,9 @@ const form = reactive({
 	instance: {
 		name: store.base?.instance.name ?? '',
 		icon_id: store.base?.instance.icon_id ?? null,
+	},
+	registration: {
+		enabled: store.base?.registration.enabled ?? true,
 	},
 	title_generation: {
 		enabled: store.base?.title_generation.enabled ?? false,

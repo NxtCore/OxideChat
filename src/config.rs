@@ -6,7 +6,7 @@
 //! - Supports reloading configuration at runtime
 
 use crate::i18n::Language;
-use crate::types::{ProviderRoutingSettings, ThemeCssVars, TitleGeneration, UpdateGlobalConfigRequest};
+use crate::types::{ProviderRoutingSettings, Registration, ThemeCssVars, TitleGeneration, UpdateGlobalConfigRequest};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
@@ -37,6 +37,8 @@ pub struct ConfigValues {
 	pub instance_icon_id: Option<Uuid>,
 	/// Generated chat titles; off by default.
 	pub title_generation: TitleGeneration,
+	/// Local sign-up with email and password.
+	pub registration: Registration,
 }
 
 impl Default for ConfigValues {
@@ -49,6 +51,7 @@ impl Default for ConfigValues {
 			instance_name: None,
 			instance_icon_id: None,
 			title_generation: TitleGeneration::default(),
+			registration: Registration::default(),
 		}
 	}
 }
@@ -148,6 +151,12 @@ impl Config {
 		self.values.load().title_generation
 	}
 
+	/// Get the local registration setting.
+	#[must_use]
+	pub fn registration(&self) -> Registration {
+		self.values.load().registration
+	}
+
 	/// Store the given settings in one transaction and reload config.
 	///
 	/// # Errors
@@ -176,6 +185,9 @@ impl Config {
 		}
 		if let Some(language) = req.language {
 			Self::upsert_config(&mut **tx, "language", language.as_str()).await?;
+		}
+		if let Some(registration) = req.registration {
+			Self::upsert_config(&mut **tx, "registration_enabled", if registration.enabled { "true" } else { "false" }).await?;
 		}
 		if let Some(instance) = &req.instance {
 			Self::set_or_clear(tx, "instance_name", instance.name.as_ref()).await?;
@@ -243,6 +255,7 @@ impl Config {
 				"instance_name" => values.instance_name = Some(row.value),
 				"instance_icon_id" => values.instance_icon_id = Uuid::parse_str(&row.value).ok(),
 				"title_generation_enabled" => values.title_generation.enabled = row.value == "true",
+				"registration_enabled" => values.registration.enabled = row.value == "true",
 				"title_model_id" => values.title_generation.model_id = Uuid::parse_str(&row.value).ok(),
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}

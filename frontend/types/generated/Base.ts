@@ -3,6 +3,7 @@ import type { ChatProviderSelectorResponse } from "./ChatProviderSelectorRespons
 import type { Instance } from "./Instance";
 import type { ProviderRoutingSettings } from "./ProviderRoutingSettings";
 import type { PublicOAuthProvider } from "./PublicOAuthProvider";
+import type { Registration } from "./Registration";
 import type { Role } from "./Role";
 import type { ThemeCssVars } from "./ThemeCssVars";
 import type { TitleGeneration } from "./TitleGeneration";
@@ -39,4 +40,8 @@ instance: Instance,
 /**
  * Whether chats get a generated title after their first reply.
  */
-title_generation: TitleGeneration, };
+title_generation: TitleGeneration, 
+/**
+ * Whether visitors may create an account with email and password.
+ */
+registration: Registration, };

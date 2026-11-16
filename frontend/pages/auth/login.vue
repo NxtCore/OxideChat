@@ -34,7 +34,7 @@
 								<Loader2 v-if="loading" class="h-4 w-4 animate-spin" />
 								{{ loading ? store.getTranslation('auth.login.submitting') : store.getTranslation('auth.login.submit') }}
 							</ShadButton>
-							<p class="text-center text-sm text-muted-foreground">
+							<p v-if="store.base?.registration.enabled" class="text-center text-sm text-muted-foreground" data-testid="login-register-link">
 								{{ store.getTranslation('auth.login.no_account') }}
 								<NuxtLink to="/auth/register" class="underline underline-offset-4 hover:text-primary">{{
 									store.getTranslation('auth.login.sign_up')

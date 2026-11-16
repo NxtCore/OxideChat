@@ -130,6 +130,7 @@ pub enum ErrorCode {
 	ApiKeyTeamAdminRequired,
 	ApiKeyServiceAccountForbidden,
 	RoleProtected,
+	RegistrationDisabled,
 	RolePermissionNotHeld,
 
 	// 404 Not Found
@@ -207,7 +208,7 @@ impl ErrorCode {
 			| Self::OAuthStateMismatch
 			| Self::OAuthTokenError
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
-			Self::Forbidden | Self::InsufficientPermissions | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden | Self::RoleProtected | Self::RolePermissionNotHeld => StatusCode::FORBIDDEN,
+			Self::Forbidden | Self::InsufficientPermissions | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden | Self::RoleProtected | Self::RolePermissionNotHeld | Self::RegistrationDisabled => StatusCode::FORBIDDEN,
 			Self::NotFound | Self::UserNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
 			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled | Self::PresetSlugTaken | Self::RoleNameTaken | Self::RoleLockOut => StatusCode::CONFLICT,
 			Self::RateLimited | Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
@@ -283,6 +284,7 @@ impl ErrorCode {
 			Self::RoleNameInvalid => "roles.errors.name_invalid",
 			Self::RolePermissionUnknown => "roles.errors.permission_unknown",
 			Self::RoleProtected => "roles.errors.protected",
+			Self::RegistrationDisabled => "auth.errors.registration_disabled",
 			Self::RolePermissionNotHeld => "roles.errors.permission_not_held",
 
 			Self::RateLimited => "errors.rate_limited",
@@ -360,6 +362,7 @@ impl ErrorCode {
 			Self::RoleNameInvalid => "role_name_invalid",
 			Self::RolePermissionUnknown => "role_permission_unknown",
 			Self::RoleProtected => "role_protected",
+			Self::RegistrationDisabled => "registration_disabled",
 			Self::RolePermissionNotHeld => "role_permission_not_held",
 
 			Self::RateLimited => "rate_limited",
