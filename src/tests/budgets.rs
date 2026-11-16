@@ -453,6 +453,50 @@ mod scope {
 }
 
 #[cfg(test)]
+mod image_tool {
+	use super::support::*;
+	use crate::types::*;
+	use crate::utils::tools::builtin::imagegen::reserve_budget;
+	use crate::utils::tools::{ToolContext, ToolError};
+	use sqlx::PgPool;
+	use std::sync::Arc;
+
+	fn ctx(pool: &PgPool, fixture: &Fixture, ledger: Option<BudgetLedger>) -> ToolContext {
+		ToolContext {
+			user_id: Some(fixture.user_id),
+			db: Some(Arc::new(pool.clone())),
+			budget_ledger: ledger,
+			..ToolContext::default()
+		}
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn an_exhausted_budget_refuses_the_image_and_a_reservation_is_made_otherwise(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool, 1_000_000.0).await?;
+		let budget = create_budget(&pool, "10", "block").await?;
+		assign(&pool, budget, Some(fixture.user_id), None, None).await?;
+		let ctx = ctx(&pool, &fixture, Some(BudgetLedger::spawn()));
+		let estimate = image_tool_estimate(100, 0);
+
+		let admission = reserve_budget(&ctx, &fixture.model_id, estimate).await.map_err(|error| error.to_string())?;
+		assert!(admission.reservation.is_some());
+		drop(admission);
+
+		spend(&pool, &fixture, None, 10).await?;
+		assert!(matches!(reserve_budget(&ctx, &fixture.model_id, estimate).await, Err(ToolError::ExecutionFailed(_))));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_user_request_without_a_ledger_fails_closed(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool, 1_000_000.0).await?;
+		let ctx = ctx(&pool, &fixture, None);
+		assert!(matches!(reserve_budget(&ctx, &fixture.model_id, image_tool_estimate(100, 0)).await, Err(ToolError::Internal(_))));
+		Ok(())
+	}
+}
+
+#[cfg(test)]
 mod keys {
 	use crate::tests::support::paged;
 	use super::support::*;

@@ -184,6 +184,7 @@ pub async fn test_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(
 		timeout_ms: Some(30000),
 		function_name: req.function_name.clone(),
 		db: Some(Arc::new(state.db.clone())),
+		budget_ledger: None,
 	};
 
 	let start = std::time::Instant::now();

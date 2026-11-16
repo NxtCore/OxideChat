@@ -380,7 +380,7 @@ impl AgentRun {
 	}
 
 	async fn run_server_tool(&self, call: &ToolCall) -> ToolOutput {
-		match execute_tool_by_name(&self.state.db, &self.state.mcp_pool, self.user_id, &call.name, call.args.clone()).await {
+		match execute_tool_by_name(&self.state, self.user_id, &call.name, call.args.clone()).await {
 			Ok(result) => ToolOutput {
 				output: result.output,
 				error: None,

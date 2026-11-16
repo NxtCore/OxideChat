@@ -14,7 +14,7 @@ mod repository;
 
 pub(crate) use body::ReservedBody;
 pub use admin::*;
-pub use estimate::{GatewayEstimate, MediaKind};
+pub use estimate::{GatewayEstimate, MediaKind, image_tool_estimate};
 pub use form::{GatewayForm, GatewayFormError};
 pub use keys::*;
 pub use limiter::*;

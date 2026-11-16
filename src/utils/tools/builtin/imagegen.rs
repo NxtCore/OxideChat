@@ -12,6 +12,7 @@ use super::super::executor::{ToolContext, ToolError, ToolExecutor};
 use crate::ai::provider_to_config;
 use crate::types::models::Model;
 use crate::types::providers::{Provider, ProviderKind};
+use crate::types::{BUDGET_RESERVATION_METADATA_KEY, BudgetAdmission, BudgetError, BudgetSubject, TokenEstimate, image_tool_estimate};
 use crate::utils::images::{safe_image_mime, store_image};
 
 #[derive(Debug, Deserialize)]
@@ -93,7 +94,9 @@ impl ImageGenExecutor {
 		if let Some(id) = value.strip_prefix("/api/v1/images/") {
 			let db = ctx.db.as_ref().ok_or_else(|| ToolError::Internal("Database not available".to_string()))?;
 			let id = Uuid::parse_str(id).map_err(|_| ToolError::InvalidInput("Invalid image ID".to_string()))?;
-			let (bytes, mime) = crate::utils::images::get_image(db, id).await.map_err(ToolError::Internal)?.ok_or_else(|| ToolError::InvalidInput("Image not found".to_string()))?;
+			let not_found = || ToolError::InvalidInput("Image not found".to_string());
+			let user_id = ctx.user_id.ok_or_else(not_found)?;
+			let (bytes, mime) = crate::utils::images::get_image_for_user(db, id, user_id).await.map_err(ToolError::Internal)?.ok_or_else(not_found)?;
 			let media_type = safe_image_mime(&bytes, &mime).ok_or_else(|| ToolError::InvalidInput("Unsupported image content".to_string()))?;
 			return Ok(ImageInput { bytes, media_type: media_type.to_string() });
 		}
@@ -180,6 +183,7 @@ impl ToolExecutor for ImageGenExecutor {
 				(input.prompt, vec![self.input_image(&reference, ctx).await?], ImageOptions::default())
 			}
 		};
+		let admission = reserve_budget(ctx, &model.id, image_tool_estimate(prompt.len() as u64, input_images.len() as u64)).await?;
 		let caption = prompt.clone();
 		let provider_config = provider_to_config(&provider).map_err(|error| ToolError::Internal(error.to_string()))?;
 		let request = ImageRequestIR {
@@ -191,21 +195,49 @@ impl ToolExecutor for ImageGenExecutor {
 			options,
 			mask: None,
 			raw_request: None,
-			metadata: usage_metadata(ctx, &model),
+			metadata: usage_metadata(ctx, &model, &admission),
 		};
 		let engine = crate::ai::get();
 		let response = engine.image(request).await.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+		drop(admission);
 		self.store_response(response, ctx, &caption).await
 	}
 }
 
-fn usage_metadata(ctx: &ToolContext, model: &Model) -> BTreeMap<String, String> {
+/// Reserves the estimated cost of one image request against the user's budgets.
+///
+/// A call without a user (the admin tool test) reserves nothing.
+///
+/// # Errors
+/// Returns an error when a blocking budget is exhausted or the budget cannot be checked.
+pub(crate) async fn reserve_budget(ctx: &ToolContext, model_id: &Uuid, estimate: TokenEstimate) -> Result<BudgetAdmission, ToolError> {
+	let Some(user_id) = ctx.user_id else {
+		return Ok(BudgetAdmission::default());
+	};
+	let unavailable = || ToolError::Internal("Budget could not be checked".to_string());
+	let db = ctx.db.as_ref().ok_or_else(unavailable)?;
+	let ledger = ctx.budget_ledger.as_ref().ok_or_else(unavailable)?;
+	match ledger.reserve_for_model(db, BudgetSubject::user(user_id), model_id, estimate).await {
+		Ok(admission) => Ok(admission),
+		Err(BudgetError::Exceeded) => Err(ToolError::ExecutionFailed("The user's budget is used up, so no image was generated".to_string())),
+		Err(error) => {
+			tracing::error!(%error, "failed to check budget for image tool");
+			Err(unavailable())
+		}
+	}
+}
+
+fn usage_metadata(ctx: &ToolContext, model: &Model, admission: &BudgetAdmission) -> BTreeMap<String, String> {
 	let Some(user_id) = ctx.user_id else {
 		return BTreeMap::new();
 	};
-	BTreeMap::from([
+	let mut metadata = BTreeMap::from([
 		("oxide_user_id".to_string(), user_id.to_string()),
 		("oxide_model_id".to_string(), model.id.to_string()),
 		("oxide_request_type".to_string(), "image".to_string()),
-	])
+	]);
+	if let Some(reservation) = &admission.reservation {
+		metadata.insert(BUDGET_RESERVATION_METADATA_KEY.to_string(), reservation.id.to_string());
+	}
+	metadata
 }
