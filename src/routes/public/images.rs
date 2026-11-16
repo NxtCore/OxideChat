@@ -6,7 +6,7 @@
 
 use crate::config::Config;
 use crate::types::{AppError, AuthUser, JobState, RequestContext, UploadImageRequest, UploadImageResponse, json_ok};
-use crate::utils::images::{get_image, image_url, safe_image_mime, store_from_data_uri};
+use crate::utils::images::{get_image, get_image_for_user, image_url, safe_image_mime, store_from_data_uri};
 use crate::utils::response::ErrorCode;
 use axum::{
 	Json,
@@ -39,12 +39,13 @@ pub async fn upload_image(State(state): State<Arc<JobState>>, user: AuthUser, Js
 /// GET /api/v1/images/:id
 pub async fn serve_image(State(state): State<Arc<JobState>>, Extension(RequestContext { user }): Extension<RequestContext>, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	let is_instance_icon = Config::get().instance_icon_id() == Some(id);
-	if user.is_none() && !is_instance_icon {
-		return Err(ErrorCode::NotAuthenticated.into());
-	}
+	let found = match (is_instance_icon, user) {
+		(true, _) => get_image(&state.db, id).await,
+		(false, Some(user)) => get_image_for_user(&state.db, id, user.id).await,
+		(false, None) => return Err(ErrorCode::NotAuthenticated.into()),
+	};
 
-	let (data, mime_type) = get_image(&state.db, id)
-		.await
+	let (data, mime_type) = found
 		.map_err(|e| {
 			tracing::error!(image_id = %id, error = %e, "failed to retrieve image");
 			ErrorCode::InternalError

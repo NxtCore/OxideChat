@@ -27,7 +27,7 @@ export function useImageUpload() {
 		if (file.size > IMAGE_UPLOAD_MAX_BYTES) throw new ImageUploadError('image_picker.errors.size');
 		uploading.value = true;
 		try {
-			const response = await postImage(await readAsDataUrl(file));
+			const response = await postImage(await readAsDataUrl(file), 'icon');
 			if (!response.ok) throw new ImageUploadError('image_picker.errors.upload');
 			return (await response.json()) as UploadedImage;
 		} catch (error) {

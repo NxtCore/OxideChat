@@ -222,7 +222,7 @@ pub(super) async fn model_request(model_key: &str) -> Result<(ChatRequestIR, boo
 async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Message>) -> Result<ChatRequestIR, TurnError> {
 	let req = inputs.req;
 	let (mut ir, vision) = model_request(&inputs.model.model_id).await?;
-	ir.messages = get_omni_messages(db, messages, vision).await;
+	ir.messages = get_omni_messages(db, inputs.user.id, messages, vision).await;
 	ir.metadata.insert("user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), inputs.chat_id.to_string());
 	ir.metadata.insert("oxide_user_id".to_string(), inputs.user.id.to_string());
