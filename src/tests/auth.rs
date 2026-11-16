@@ -177,6 +177,18 @@ mod tests {
 		}
 
 		#[tokio::test]
+		async fn has_room_does_not_count_and_sees_what_allow_counted() {
+			let limiter = RateLimiter::spawn();
+			for _ in 0..10 {
+				assert!(limiter.has_room("key", 2, Duration::from_secs(60)).await);
+			}
+			assert!(limiter.allow("key", 2, Duration::from_secs(60)).await);
+			assert!(limiter.has_room("key", 2, Duration::from_secs(60)).await);
+			assert!(limiter.allow("key", 2, Duration::from_secs(60)).await);
+			assert!(!limiter.has_room("key", 2, Duration::from_secs(60)).await);
+		}
+
+		#[tokio::test]
 		async fn keys_are_independent() {
 			let limiter = RateLimiter::spawn();
 			assert!(limiter.allow("a", 1, Duration::from_secs(60)).await);
