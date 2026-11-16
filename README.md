@@ -38,7 +38,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Back up the database first. Database migrations run automatically on start; if one fails, or takes longer than 30 seconds, the container exits and the logs (`docker compose logs oxidechat`) say why. Downgrading after a migration is not supported: restore the backup instead.
+Back up the database first. Images older than 0.4.2 kept the generated key inside the container at `/app/.data/master.key`: before updating from one, copy it out (`docker compose cp oxidechat:/app/.data/master.key .`) and set its content as `ENCRYPTION_KEY`. Database migrations run automatically on start; if one fails, or takes longer than 30 seconds, the container exits and the logs (`docker compose logs oxidechat`) say why. Downgrading after a migration is not supported: restore the backup instead.
 
 ## Reverse proxy and security
 
