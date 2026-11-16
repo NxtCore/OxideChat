@@ -173,7 +173,7 @@ async fn run_mcp(state: &JobState, tool: &Tool, req: &TestToolRequest) -> Result
 }
 
 pub async fn test_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(tool_id): Path<Uuid>, Json(req): Json<TestToolRequest>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_TOOLS_VIEW).await?;
+	auth.require(&state.db, ADMIN_TOOLS_EDIT).await?;
 
 	let tool = Tool::find_by_id_system(&state.db, &tool_id).await?.ok_or(ErrorCode::NotFound)?;
 	let tool_settings = Tool::effective_settings_for_user(&state.db, &tool_id, None)
