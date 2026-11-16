@@ -16,6 +16,7 @@ pub mod images;
 pub mod logging;
 pub mod login_limit;
 pub mod mcp;
+pub mod middleware;
 pub mod models;
 pub mod oauth;
 pub mod presets;

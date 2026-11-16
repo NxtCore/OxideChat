@@ -72,8 +72,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd -g 1000 app \
     && useradd -u 1000 -g app -s /bin/bash -m app \
     && mkdir -p /var/cache/nginx /var/log/nginx /var/lib/nginx /run /tmp/nginx \
-    && mkdir -p /app/uploads/images \
-    && chown -R app:app /var/cache/nginx /var/log/nginx /var/lib/nginx /run /tmp/nginx /app/uploads
+    && mkdir -p /app/uploads/images /app/data \
+    && chown -R app:app /var/cache/nginx /var/log/nginx /var/lib/nginx /run /tmp/nginx /app/uploads /app/data
 
 COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun
 
@@ -88,12 +88,12 @@ RUN printf '%s\n' \
     '#!/bin/bash' \
     'set -e' \
     '' \
-    '# Start Rust API in background (port 3001 to avoid conflict with nginx)' \
-    'PORT=3001 ./oxidechat &' \
+    '# Only nginx listens publicly; it overwrites X-Forwarded-For with the real client IP' \
+    'HOST=127.0.0.1 PORT=3001 TRUST_PROXY=true ./oxidechat &' \
     'API_PID=$!' \
     '' \
     '# Start Nuxt SSR server in background' \
-    'cd /app/.output && bun server/index.mjs &' \
+    'cd /app/.output && NITRO_HOST=127.0.0.1 NITRO_PORT=3000 NUXT_BASE_URL=http://127.0.0.1:3001 bun server/index.mjs &' \
     'NUXT_PID=$!' \
     '' \
     '# Start nginx in foreground' \
@@ -110,14 +110,14 @@ RUN printf '%s\n' \
 
 USER app
 
-# Image storage configuration:
-# IMAGE_STORAGE_TYPE=database (default) | file
-# IMAGE_STORAGE_PATH=/app/uploads/images (default for file storage)
-VOLUME ["/app/uploads"]
+# /app/data holds master.key (credential encryption) unless ENCRYPTION_KEY is set; losing it makes stored provider keys unreadable.
+# /app/uploads holds images when IMAGE_STORAGE_TYPE=file.
+ENV OXIDECHAT_DATA_DIR=/app/data
+VOLUME ["/app/data", "/app/uploads"]
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8080/api/v1/health || exit 1
 
 CMD ["/app/start.sh"]

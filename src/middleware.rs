@@ -50,7 +50,7 @@ pub fn client_ip(request: &Request) -> String {
 	request
 		.extensions()
 		.get::<ConnectInfo<SocketAddr>>()
-		.map(|connect_info| connect_info.0.to_string())
+		.map(|connect_info| connect_info.0.ip().to_string())
 		.unwrap_or_else(|| "unknown".to_string())
 }
 
