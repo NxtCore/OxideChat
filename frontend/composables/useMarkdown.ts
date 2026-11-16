@@ -11,7 +11,28 @@ import DOMPurify from 'dompurify';
 import {Marked} from 'marked';
 import remend from 'remend';
 
+// Inline styles the syntax highlighter writes: colours and font variants only, nothing that moves or resizes an element.
+const SAFE_STYLE = /^(?:\s*(?:color|background-color|font-style|font-weight|text-decoration|--shiki-[\w-]+)\s*:\s*[#\w\s(),.%-]+;?)*\s*$/i;
+
+/**
+ * Sanitize rendered markdown, which contains model output.
+ *
+ * Beyond DOMPurify's defaults this drops everything a model could use to draw
+ * its own interface inside a message: style sheets, forms and form fields
+ * (task-list checkboxes stay, disabled), and inline styles other than the
+ * highlighter's colours.
+ */
 function sanitize(html: string): string {
+	DOMPurify.addHook('uponSanitizeElement', (node, data) => {
+		if (data.tagName === 'input' && (node as Element).getAttribute('type') !== 'checkbox') {
+			node.parentNode?.removeChild(node);
+		}
+	});
+	DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
+		if (data.attrName === 'style' && !SAFE_STYLE.test(data.attrValue)) {
+			data.keepAttr = false;
+		}
+	});
 	DOMPurify.addHook('afterSanitizeAttributes', node => {
 		if (node.tagName === 'A' && node.hasAttribute('href')) {
 			const href = node.getAttribute('href') || '';
@@ -19,14 +40,22 @@ function sanitize(html: string): string {
 				node.removeAttribute('href');
 			}
 		}
+		if (node.tagName === 'INPUT') {
+			node.setAttribute('disabled', '');
+			node.removeAttribute('name');
+		}
 	});
 
 	const result = DOMPurify.sanitize(html, {
 		ADD_ATTR: ['data-language', 'data-previewable', 'title', 'src', 'alt'],
 		ADD_TAGS: ['button', 'img'],
+		FORBID_TAGS: ['style', 'form', 'textarea', 'select'],
+		FORBID_ATTR: ['action', 'formaction'],
 		ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
 	});
 
+	DOMPurify.removeHook('uponSanitizeElement');
+	DOMPurify.removeHook('uponSanitizeAttribute');
 	DOMPurify.removeHook('afterSanitizeAttributes');
 	return result;
 }
