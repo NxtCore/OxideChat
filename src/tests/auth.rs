@@ -153,6 +153,19 @@ mod tests {
 		}
 	}
 
+	mod login_password {
+		use crate::utils::auth::{hash_password, verify_login_password};
+
+		#[test]
+		fn only_the_right_password_of_an_account_with_a_password_verifies() {
+			let hash = hash_password("Sup3r$ecret-pass").unwrap();
+			assert!(verify_login_password("Sup3r$ecret-pass", Some(&hash)));
+			assert!(!verify_login_password("wrong", Some(&hash)));
+			assert!(!verify_login_password("Sup3r$ecret-pass", None));
+			assert!(!verify_login_password("oxide-login-no-such-account", None));
+		}
+	}
+
 	mod rate_limit {
 		use crate::utils::rate_limit::RateLimiter;
 		use std::time::Duration;

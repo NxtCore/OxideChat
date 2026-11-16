@@ -1,6 +1,6 @@
 use crate::logging::{AuditLog, EntityType, LogEvent};
 use crate::types::{AppError, AuthResponse, JobState, LoginRequest, RegisterRequest, SetupRequest, User, is_unique_violation};
-use crate::utils::auth::{SESSION_COOKIE_NAME, create_session, hash_password, validate_email, validate_password, validate_username, verify_password};
+use crate::utils::auth::{SESSION_COOKIE_NAME, create_session, hash_password, validate_email, validate_password, validate_username, verify_login_password};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -104,22 +104,14 @@ pub async fn login(
 		return Err(ErrorCode::RateLimited.into());
 	}
 
-	let Some(user) = User::find_by_email(&state.db, &payload.email).await.map_err(AppError::database)? else {
+	let found = User::find_by_email(&state.db, &payload.email).await.map_err(AppError::database)?;
+	let password_hash = found.as_ref().and_then(|user| user.password_hash.as_deref());
+	let verified = verify_login_password(&payload.password, password_hash);
+	let Some(user) = found.filter(|_| verified) else {
 		state.login_limiter.record_failure(ip, &payload.email);
 		AuditLog::log(&state.db, LogEvent::UserLoginFailed, None, None, None);
 		return Err(ErrorCode::InvalidCredentials.into());
 	};
-
-	let Some(password_hash) = &user.password_hash else {
-		state.login_limiter.record_failure(ip, &payload.email);
-		return Err(ErrorCode::ExternalAuthRequired.into());
-	};
-
-	if !verify_password(&payload.password, password_hash).map_err(|_| ErrorCode::InternalError)? {
-		state.login_limiter.record_failure(ip, &payload.email);
-		AuditLog::log(&state.db, LogEvent::UserLoginFailed, Some(user.id), Some(EntityType::User), Some(user.id));
-		return Err(ErrorCode::InvalidCredentials.into());
-	}
 
 	create_session(&state.db, &cookies, &user.id).await.map_err(AppError::database)?;
 
