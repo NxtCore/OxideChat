@@ -253,8 +253,10 @@ export function extractCodeForPreview(element: HTMLElement): {code: string; lang
  *
  * Security contract: the returned string embeds untrusted, model-generated
  * HTML/SVG/JavaScript and must only ever be rendered inside a sandboxed
- * context with an opaque origin (an iframe with sandbox="allow-scripts"
- * and no allow-same-origin, or a blob: URL opened in a new tab). It must
+ * context with an opaque origin: an iframe with sandbox="allow-scripts"
+ * and no allow-same-origin. A blob: URL is NOT such a context: a blob
+ * page has the origin of the page that created it, so use
+ * `wrapPreviewInSandbox` before opening the preview in its own tab. It must
  * never be inserted into the main document (e.g. via v-html) or written
  * into a same-origin window, otherwise generated scripts could access the
  * app's origin, cookies, and APIs.
@@ -290,4 +292,18 @@ try {
 	}
 
 	return `<pre>${escapeHtml(code)}</pre>`;
+}
+
+/**
+ * Wrap preview HTML in a document whose only content is a sandboxed iframe.
+ *
+ * The wrapper is safe to open from a blob: URL: the untrusted HTML runs in
+ * the iframe's opaque origin, not in the origin of the blob page.
+ */
+export function wrapPreviewInSandbox(previewHtml: string): string {
+	return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><style>html,body{margin:0;height:100%}iframe{display:block;width:100%;height:100%;border:0}</style></head>
+<body><iframe sandbox="allow-scripts" srcdoc="${escapeHtml(previewHtml)}"></iframe></body>
+</html>`;
 }

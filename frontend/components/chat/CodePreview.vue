@@ -60,7 +60,7 @@
 
 <script setup lang="ts">
 import {Copy, Check, X} from 'lucide-vue-next';
-import {generatePreviewHtml} from '~/composables/useMarkdown';
+import {generatePreviewHtml, wrapPreviewInSandbox} from '~/composables/useMarkdown';
 import {useMainStore} from '~/stores';
 
 const store = useMainStore();
@@ -97,7 +97,7 @@ function copyCode() {
 }
 
 function openInNewTab() {
-	const blob = new Blob([previewHtml.value], {type: 'text/html'});
+	const blob = new Blob([wrapPreviewInSandbox(previewHtml.value)], {type: 'text/html'});
 	const url = URL.createObjectURL(blob);
 	const win = window.open(url, '_blank', 'noopener');
 	if (!win) {
