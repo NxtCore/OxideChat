@@ -30,6 +30,23 @@ mod tests {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn a_new_password_ends_every_session_of_that_user_only(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let other_id = create_user(&pool).await?;
+		add_session(&pool, &user_id, 1).await?;
+		add_session(&pool, &user_id, 1).await?;
+		add_session(&pool, &other_id, 1).await?;
+		let user = User::find_by_id(&pool, &user_id).await?.ok_or("user")?;
+
+		user.set_password(&pool, "new-hash").await?;
+
+		let left = |id: Uuid| sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sessions WHERE user_id = $1").bind(id).fetch_one(&pool);
+		assert_eq!(left(user_id).await?, 0);
+		assert_eq!(left(other_id).await?, 1);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn revoke_ends_only_the_owners_session(pool: PgPool) -> TestResult {
 		let owner = create_user(&pool).await?;
 		let stranger = create_user(&pool).await?;

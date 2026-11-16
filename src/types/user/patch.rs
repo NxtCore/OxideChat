@@ -85,12 +85,19 @@ impl User {
 		Ok(())
 	}
 
+	/// Sets a new password and signs the user out everywhere, so whoever knew the old one loses access.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when a write fails; nothing is changed then.
 	pub async fn set_password(&self, pool: &PgPool, password_hash: &str) -> Result<(), sqlx::Error> {
+		let mut tx = pool.begin().await?;
 		sqlx::query("UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1")
 			.bind(self.id)
 			.bind(password_hash)
-			.execute(pool)
+			.execute(&mut *tx)
 			.await?;
-		Ok(())
+		sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(self.id).execute(&mut *tx).await?;
+		tx.commit().await
 	}
 }
