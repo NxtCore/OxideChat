@@ -46,6 +46,9 @@ pub async fn create_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Jso
 pub async fn update_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(tool_id): Path<Uuid>, Json(req): Json<UpdateToolRequest>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_TOOLS_EDIT).await?;
 
+	if Tool::update_redirects_secrets(&state.db, &tool_id, &req).await? {
+		return Err(ErrorCode::SecretRequiredForNewHost.into());
+	}
 	let (tool, functions) = Tool::update_system(&state.db, &tool_id, &req).await?.ok_or(ErrorCode::NotFound)?;
 	json_ok(ToolResponse::from_tool_with_functions(tool, functions))
 }
@@ -135,10 +138,9 @@ async fn run_http(state: &JobState, tool: &Tool, req: &TestToolRequest, ctx: &To
 		None => None,
 	};
 
-	let url = match &function_entrypoint {
-		Some(entrypoint) if entrypoint.starts_with("http") => entrypoint.clone(),
-		Some(entrypoint) => format!("{}{}", config.url.trim_end_matches('/'), entrypoint),
-		None => config.url.clone(),
+	let url = match crate::utils::tools::http::function_url(&config.url, function_entrypoint.as_deref()) {
+		Ok(url) => url,
+		Err(error) => return Ok(Err(error)),
 	};
 
 	let http_config = crate::utils::tools::http::HttpConfig {

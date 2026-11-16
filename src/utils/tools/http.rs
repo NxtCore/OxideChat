@@ -18,6 +18,20 @@ pub struct HttpConfig {
 	pub body_template: Option<String>,
 }
 
+/// The URL a function of an HTTP tool calls: the tool URL, with a relative entrypoint appended.
+///
+/// # Errors
+/// Returns `ToolError::InvalidInput` for an absolute entrypoint on another host than the tool URL,
+/// because the tool's headers are sent with the request.
+pub fn function_url(base_url: &str, entrypoint: Option<&str>) -> Result<String, ToolError> {
+	match entrypoint {
+		None => Ok(base_url.to_string()),
+		Some(entrypoint) if !entrypoint.starts_with("http") => Ok(format!("{}{}", base_url.trim_end_matches('/'), entrypoint)),
+		Some(entrypoint) if crate::utils::outbound::same_origin(base_url, entrypoint) => Ok(entrypoint.to_string()),
+		Some(_) => Err(ToolError::InvalidInput("Function entrypoint must stay on the tool's host".to_string())),
+	}
+}
+
 /// Executor for HTTP-based tools
 pub struct HttpExecutor {
 	name: String,

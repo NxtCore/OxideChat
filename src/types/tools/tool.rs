@@ -96,6 +96,22 @@ impl Tool {
 		Ok((tool, functions))
 	}
 
+	/// Whether an update would point a system HTTP tool at another host while keeping its stored header secrets.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the tool cannot be loaded.
+	pub async fn update_redirects_secrets(pool: &sqlx::PgPool, tool_id: &Uuid, request: &UpdateToolRequest) -> Result<bool, sqlx::Error> {
+		let Some(updated) = &request.source_config else {
+			return Ok(false);
+		};
+		let existing = sqlx::query_as::<_, (ToolSourceKind, Json<Value>)>("SELECT source_kind, source_config FROM tools WHERE id = $1 AND owner_id IS NULL")
+			.bind(tool_id)
+			.fetch_optional(pool)
+			.await?;
+		Ok(existing.is_some_and(|(kind, config)| kind == ToolSourceKind::Http && crate::utils::encryption::config_redirects_secrets(&config.0, updated, &["headers"])))
+	}
+
 	/// Update a system tool and its functions atomically.
 	///
 	/// # Errors

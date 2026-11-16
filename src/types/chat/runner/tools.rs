@@ -99,15 +99,7 @@ pub(super) async fn execute_tool_by_name(state: &JobState, user_id: Uuid, full_t
 				.revealed_source_config()
 				.map_err(|error| format!("Failed to decrypt HTTP tool credentials: {error}"))?;
 			let base_url = source_config.get("url").and_then(|v| v.as_str()).unwrap_or("");
-			let url = if let Some(entrypoint) = &function_entrypoint {
-				if entrypoint.starts_with("http") {
-					entrypoint.clone()
-				} else {
-					format!("{}{}", base_url.trim_end_matches('/'), entrypoint)
-				}
-			} else {
-				base_url.to_string()
-			};
+			let url = crate::utils::tools::http::function_url(base_url, function_entrypoint.as_deref()).map_err(|e| format!("{:?}", e))?;
 
 			let headers: HashMap<String, String> = source_config.get("headers").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
 

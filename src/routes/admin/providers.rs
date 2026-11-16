@@ -90,6 +90,10 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 	if req.reported_cost.as_ref().and_then(Option::as_ref).is_some_and(|cost| !cost.is_valid()) {
 		return Err(ErrorCode::ValidationFailed.into());
 	}
+	let existing = Provider::find_for_admin(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
+	if existing.redirects_secrets(base_url.as_deref(), req.api_key.is_some(), req.extra_headers.as_ref()) {
+		return Err(ErrorCode::SecretRequiredForNewHost.into());
+	}
 	let api_key = req.api_key.as_deref().map(encrypt_api_key).transpose().map_err(|error| {
 		tracing::error!("Failed to encrypt provider credential: {error}");
 		ErrorCode::InternalError

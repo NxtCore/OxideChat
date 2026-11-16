@@ -49,6 +49,15 @@ fn embedded_v4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
 	ip.to_ipv4()
 }
 
+/// Whether two URLs share scheme, host and port. URLs that cannot be parsed never match.
+#[must_use]
+pub fn same_origin(first: &str, second: &str) -> bool {
+	match (reqwest::Url::parse(first), reqwest::Url::parse(second)) {
+		(Ok(first), Ok(second)) => first.origin().is_tuple() && first.origin() == second.origin(),
+		_ => false,
+	}
+}
+
 /// Whether the address may be contacted.
 ///
 /// IPv6 addresses that carry an IPv4 address (mapped, compatible, 6to4, NAT64) are judged by that address,

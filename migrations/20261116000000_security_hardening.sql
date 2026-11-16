@@ -18,3 +18,8 @@ WHERE source IS DISTINCT FROM 'model_icon'
     )
     OR id::text = (SELECT value FROM app_config WHERE key = 'instance_icon_id')
   );
+
+INSERT INTO i18n_translations (language, key_path, value) VALUES
+    ('en', 'settings.errors.secret_required_for_new_host', 'The address points to a different host. Enter the key, secret or header values again so they are not sent there unnoticed.'),
+    ('de', 'settings.errors.secret_required_for_new_host', 'Die Adresse zeigt auf einen anderen Host. Gib Schlüssel, Secret oder Header-Werte erneut ein, damit sie nicht unbemerkt dorthin gesendet werden.')
+ON CONFLICT (language, key_path) DO NOTHING;

@@ -189,6 +189,34 @@ mod tests {
 		}
 	}
 
+	#[test]
+	fn function_entrypoints_stay_on_the_tool_host() {
+		use crate::utils::tools::http::function_url;
+
+		assert_eq!(function_url("https://api.example.com/v1/", None).unwrap(), "https://api.example.com/v1/");
+		assert_eq!(function_url("https://api.example.com/v1/", Some("/search")).unwrap(), "https://api.example.com/v1/search");
+		assert_eq!(function_url("https://api.example.com/v1", Some("https://api.example.com/v2/search")).unwrap(), "https://api.example.com/v2/search");
+		for foreign in ["https://evil.example/collect", "http://api.example.com/v1", "https://api.example.com:8443/v1", "https://api.example.com.evil.example/"] {
+			assert!(matches!(function_url("https://api.example.com/v1", Some(foreign)), Err(ToolError::InvalidInput(_))), "{foreign} must be refused");
+		}
+	}
+
+	#[test]
+	fn a_config_that_moves_host_must_not_keep_stored_secrets() {
+		use crate::utils::encryption::config_redirects_secrets;
+
+		let existing = json!({"url": "https://api.example.com/mcp", "headers": {"Authorization": "Bearer stored"}});
+		let moved_masked = json!({"url": "https://evil.example/mcp", "headers": {"Authorization": "***"}});
+		let moved_retyped = json!({"url": "https://evil.example/mcp", "headers": {"Authorization": "Bearer new"}});
+		let moved_without_headers = json!({"url": "https://evil.example/mcp"});
+		let same_host_masked = json!({"url": "https://api.example.com/other", "headers": {"Authorization": "***"}});
+
+		assert!(config_redirects_secrets(&existing, &moved_masked, &["headers", "env"]));
+		assert!(!config_redirects_secrets(&existing, &moved_retyped, &["headers", "env"]));
+		assert!(!config_redirects_secrets(&existing, &moved_without_headers, &["headers", "env"]));
+		assert!(!config_redirects_secrets(&existing, &same_host_masked, &["headers", "env"]));
+	}
+
 	#[tokio::test]
 	async fn redirect_responses_are_not_followed() {
 		let target = spawn_server(ok_response()).await;
