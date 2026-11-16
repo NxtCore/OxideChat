@@ -309,7 +309,7 @@ impl McpTransport for StreamableHttpTransport {
 			.json(&request)
 			.send()
 			.await
-			.map_err(|e| ToolError::McpError(format!("HTTP request failed: {e}")))?;
+			.map_err(|e| ToolError::McpError(format!("HTTP request failed: {}", e.without_url())))?;
 
 		if let Some(session_id) = response.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()) {
 			*self.session_id.lock().await = Some(session_id.to_string());
@@ -331,7 +331,10 @@ impl McpTransport for StreamableHttpTransport {
 			return Ok(empty_response(expected_id));
 		}
 
-		let body = response.text().await.map_err(|e| ToolError::McpError(format!("Failed to read response: {e}")))?;
+		let body = crate::utils::outbound::read_limited(response, super::http::MAX_TOOL_RESPONSE_BYTES)
+			.await
+			.map_err(|e| ToolError::McpError(format!("Failed to read response: {e}")))?;
+		let body = String::from_utf8_lossy(&body);
 
 		if content_type.contains("text/event-stream") {
 			return parse_sse_response(&body, expected_id);

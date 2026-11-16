@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use super::executor::{ToolContext, ToolError, ToolExecutor};
 
+/// Largest response body an HTTP tool may return.
+pub const MAX_TOOL_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+
 /// HTTP source configuration
 #[derive(Debug, Clone)]
 pub struct HttpConfig {
@@ -216,13 +219,13 @@ impl ToolExecutor for HttpExecutor {
 			None => request,
 		};
 
-		let response = request.send().await.map_err(|e| ToolError::HttpError(format!("HTTP request failed: {e}")))?;
+		let response = request.send().await.map_err(|e| ToolError::HttpError(format!("HTTP request failed: {}", e.without_url())))?;
 
 		let status = response.status();
-		let body = response
-			.text()
+		let body = crate::utils::outbound::read_limited(response, MAX_TOOL_RESPONSE_BYTES)
 			.await
 			.map_err(|e| ToolError::HttpError(format!("Failed to read response body: {e}")))?;
+		let body = String::from_utf8_lossy(&body).into_owned();
 
 		if !status.is_success() {
 			tracing::debug!(tool = %self.name, status = %status, body = %body, "HTTP tool upstream returned an error status");

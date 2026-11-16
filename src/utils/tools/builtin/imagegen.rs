@@ -1,11 +1,10 @@
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use futures_util::StreamExt;
 use omniference::types::{ImageInput, ImageOperation, ImageOptions, ImageRequestIR, ImageResponse, ModelRef};
 use reqwest::{Client, Url, header::CONTENT_TYPE, redirect::Policy};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, net::IpAddr, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 use uuid::Uuid;
 
 use super::super::executor::{ToolContext, ToolError, ToolExecutor};
@@ -14,6 +13,7 @@ use crate::types::models::Model;
 use crate::types::providers::{Provider, ProviderKind};
 use crate::types::{BUDGET_RESERVATION_METADATA_KEY, BudgetAdmission, BudgetError, BudgetSubject, TokenEstimate, image_tool_estimate};
 use crate::utils::images::{safe_image_mime, store_image};
+use crate::utils::outbound::{is_allowed_ip, read_limited};
 
 #[derive(Debug, Deserialize)]
 struct GenerateImageInput {
@@ -36,20 +36,6 @@ struct EditImageInput {
 const MAX_REMOTE_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 
 pub struct ImageGenExecutor;
-
-fn is_blocked_address(address: IpAddr) -> bool {
-	match address {
-		IpAddr::V4(address) => address.is_private() || address.is_loopback() || address.is_link_local() || address.is_multicast() || address.is_unspecified() || address.is_broadcast(),
-		IpAddr::V6(address) => {
-			address.to_ipv4_mapped().is_some_and(|address| is_blocked_address(IpAddr::V4(address)))
-				|| address.is_unique_local()
-				|| address.is_loopback()
-				|| address.is_unicast_link_local()
-				|| address.is_multicast()
-				|| address.is_unspecified()
-		}
-	}
-}
 
 impl ImageGenExecutor {
 	pub fn new() -> Result<Self, ToolError> {
@@ -109,7 +95,7 @@ impl ImageGenExecutor {
 		let host = url.host_str().ok_or_else(fetch_error)?.to_string();
 		let port = url.port_or_known_default().ok_or_else(fetch_error)?;
 		let addresses: Vec<_> = tokio::net::lookup_host((host.as_str(), port)).await.map_err(|_| fetch_error())?.collect();
-		if addresses.is_empty() || addresses.iter().any(|address| is_blocked_address(address.ip())) {
+		if addresses.is_empty() || addresses.iter().any(|address| !is_allowed_ip(address.ip(), false)) {
 			return Err(fetch_error());
 		}
 		let client = Client::builder()
@@ -119,22 +105,11 @@ impl ImageGenExecutor {
 			.build()
 			.map_err(|_| fetch_error())?;
 		let response = client.get(url).send().await.map_err(|_| fetch_error())?;
-		if !response.status().is_success() || response.remote_addr().is_some_and(|address| is_blocked_address(address.ip())) {
-			return Err(fetch_error());
-		}
-		if response.content_length().is_some_and(|length| length > MAX_REMOTE_IMAGE_BYTES as u64) {
+		if !response.status().is_success() || response.remote_addr().is_some_and(|address| !is_allowed_ip(address.ip(), false)) {
 			return Err(fetch_error());
 		}
 		let mime = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()).and_then(|value| value.split(';').next()).unwrap_or_default().to_string();
-		let mut bytes = Vec::with_capacity(response.content_length().unwrap_or(0).min(MAX_REMOTE_IMAGE_BYTES as u64) as usize);
-		let mut stream = response.bytes_stream();
-		while let Some(chunk) = stream.next().await {
-			let chunk = chunk.map_err(|_| fetch_error())?;
-			if bytes.len().saturating_add(chunk.len()) > MAX_REMOTE_IMAGE_BYTES {
-				return Err(fetch_error());
-			}
-			bytes.extend_from_slice(&chunk);
-		}
+		let bytes = read_limited(response, MAX_REMOTE_IMAGE_BYTES).await.map_err(|_| fetch_error())?;
 		let media_type = safe_image_mime(&bytes, &mime).ok_or_else(fetch_error)?;
 		Ok(ImageInput { bytes, media_type: media_type.to_string() })
 	}

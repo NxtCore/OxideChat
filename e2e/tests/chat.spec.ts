@@ -90,7 +90,7 @@ test.describe('web chat', () => {
 			await send(page, 'this will fail');
 			await expect(page.getByText('this will fail').first()).toBeVisible();
 			await expect(page.locator('.animate-spin')).toHaveCount(0, {timeout: 30_000});
-			await expect(page.getByText(/upstream provider error|not found/i).first()).toBeVisible();
+			await expect(page.getByText(/upstream provider error|not found/i).or(page.getByText(t('chat.errors.request_failed'))).first()).toBeVisible();
 		} finally {
 			await api.delete(`/api/v1/admin/providers/${broken.providerId}`);
 		}
