@@ -9,8 +9,9 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
+    # Reachable only from this host; your TLS proxy forwards to it. Publishing "8080:8080" exposes plain HTTP to the network.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - oxidechat-data:/app/data
       - oxidechat-uploads:/app/uploads
