@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use reqwest::{Client, RequestBuilder};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::time::Duration;
 
 use super::executor::{ToolContext, ToolError, ToolExecutor};
@@ -41,6 +42,35 @@ impl HttpExecutor {
 			.map_err(|e| ToolError::HttpError(format!("Failed to create HTTP client: {e}")))?;
 
 		Ok(Self { name, config, client })
+	}
+
+	/// Percent-encode everything but unreserved characters, so a value stays one path segment or one query value
+	fn encode_url_value(value: &str) -> String {
+		let mut encoded = String::with_capacity(value.len());
+		for byte in value.bytes() {
+			if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+				encoded.push(char::from(byte));
+			} else {
+				let _ = write!(encoded, "%{byte:02X}");
+			}
+		}
+		encoded
+	}
+
+	/// Substitute settings values raw and input values percent-encoded into a URL template
+	fn substitute_url(template: &str, settings: &Value, input: &Value) -> String {
+		let mut result = Self::substitute_template(template, settings, &Value::Null);
+		if let Value::Object(input_map) = input {
+			for (key, value) in input_map {
+				let placeholder = format!("{{{{input.{key}}}}}");
+				let text = match value {
+					Value::String(s) => Self::encode_url_value(s),
+					other => Self::encode_url_value(&other.to_string()),
+				};
+				result = result.replace(&placeholder, &text);
+			}
+		}
+		result
 	}
 
 	/// Substitute settings values into a string template
@@ -114,14 +144,17 @@ impl HttpExecutor {
 		Ok(parsed)
 	}
 
-	/// Substitute the URL template and verify the result stays on the configured origin
+	/// Substitute the URL template and verify the result stays on the configured origin and path depth
 	fn resolve_url(&self, settings: &Value, input: &Value) -> Result<String, ToolError> {
 		let base_text = Self::substitute_template(&self.config.url, settings, &Value::Null);
 		let base = Self::parse_http_url(&base_text)?;
-		let url = Self::substitute_template(&self.config.url, settings, input);
+		let url = Self::substitute_url(&self.config.url, settings, input);
 		let parsed = Self::parse_http_url(&url)?;
 		if parsed.origin() != base.origin() || parsed.username() != base.username() || parsed.password() != base.password() {
 			return Err(ToolError::InvalidInput("Tool URL must stay on the configured host".to_string()));
+		}
+		if parsed.path_segments().map(Iterator::count) != base.path_segments().map(Iterator::count) {
+			return Err(ToolError::InvalidInput("Tool URL must stay on the configured path".to_string()));
 		}
 		Ok(url)
 	}

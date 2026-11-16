@@ -164,6 +164,32 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn url_input_cannot_leave_its_path_segment_or_add_a_query() {
+		let server = spawn_server(ok_response()).await;
+		let url = format!("{}/items/{{{{input.id}}}}", server.base_url);
+		let executor = HttpExecutor::new("t".to_string(), http_config(&url, None, &[])).unwrap();
+
+		executor.execute(json!({ "id": "../../admin/users?all=1#" }), &ctx()).await.unwrap();
+		let raw = server.request.await.unwrap();
+		assert!(raw.contains("POST /items/..%2F..%2Fadmin%2Fusers%3Fall%3D1%23 "), "unexpected request line in: {raw}");
+
+		for dots in ["..", ".", "%2e%2e"] {
+			let server = spawn_server(ok_response()).await;
+			let url = format!("{}/items/{{{{input.id}}}}/details", server.base_url);
+			let executor = HttpExecutor::new("t".to_string(), http_config(&url, None, &[])).unwrap();
+			let result = executor.execute(json!({ "id": dots }), &ctx()).await;
+			if dots.starts_with('%') {
+				result.unwrap();
+				let raw = server.request.await.unwrap();
+				assert!(raw.contains("POST /items/%252e%252e/details "), "unexpected request line in: {raw}");
+			} else {
+				assert!(matches!(result, Err(ToolError::InvalidInput(_))), "input {dots:?} must be rejected");
+				assert_eq!(server.hits.load(Ordering::SeqCst), 0, "request must not be sent");
+			}
+		}
+	}
+
+	#[tokio::test]
 	async fn redirect_responses_are_not_followed() {
 		let target = spawn_server(ok_response()).await;
 		let redirect_response = http_response("302 Found", "", &format!("Location: {}/hook\r\n", target.base_url));
