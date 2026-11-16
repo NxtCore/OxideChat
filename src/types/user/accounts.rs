@@ -93,10 +93,14 @@ impl User {
 
 	/// Links a provider identity to this user.
 	///
+	/// Registration never verifies the email, so a password on the account may belong to someone who only
+	/// claimed the address: the password and every session are removed, and the provider is the way in from now on.
+	///
 	/// # Errors
 	///
-	/// Returns a database error when the insert fails.
+	/// Returns a database error when a write fails.
 	pub async fn link_identity(&self, pool: &PgPool, info: &OAuthUserInfo) -> Result<(), sqlx::Error> {
+		let mut tx = pool.begin().await?;
 		sqlx::query(
 			"INSERT INTO user_identities (user_id, provider, provider_user_id, provider_data)
 			 VALUES ($1, $2, $3, $4)",
@@ -105,9 +109,16 @@ impl User {
 		.bind(&info.provider)
 		.bind(&info.provider_user_id)
 		.bind(&info.raw_data)
-		.execute(pool)
+		.execute(&mut *tx)
 		.await?;
-		Ok(())
+		let cleared = sqlx::query("UPDATE users SET password_hash = NULL, updated_at = NOW() WHERE id = $1 AND password_hash IS NOT NULL")
+			.bind(self.id)
+			.execute(&mut *tx)
+			.await?;
+		if cleared.rows_affected() > 0 {
+			sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(self.id).execute(&mut *tx).await?;
+		}
+		tx.commit().await
 	}
 
 	/// Returns `base`, or `base` with the lowest free number appended when the name is taken.
