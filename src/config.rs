@@ -165,6 +165,7 @@ impl Config {
 		let mut tx = pool.begin().await?;
 		Self::store_settings(&mut tx, req).await?;
 		Self::store_title_generation(&mut tx, req.title_generation.as_ref()).await?;
+		Self::store_registration(&mut tx, req.registration).await?;
 		tx.commit().await?;
 		self.reload(pool).await
 	}
@@ -186,9 +187,6 @@ impl Config {
 		if let Some(language) = req.language {
 			Self::upsert_config(&mut **tx, "language", language.as_str()).await?;
 		}
-		if let Some(registration) = req.registration {
-			Self::upsert_config(&mut **tx, "registration_enabled", if registration.enabled { "true" } else { "false" }).await?;
-		}
 		if let Some(instance) = &req.instance {
 			Self::set_or_clear(tx, "instance_name", instance.name.as_ref()).await?;
 			let icon_id = instance.icon_id.map(|id| id.map(|id| id.to_string()));
@@ -196,6 +194,13 @@ impl Config {
 		}
 		let default_model_id = req.default_model_id.map(|id| id.map(|id| id.to_string()));
 		Self::set_or_clear(tx, "default_model_id", default_model_id.as_ref()).await
+	}
+
+	async fn store_registration(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, registration: Option<Registration>) -> Result<(), sqlx::Error> {
+		let Some(registration) = registration else {
+			return Ok(());
+		};
+		Self::upsert_config(&mut **tx, "registration_enabled", if registration.enabled { "true" } else { "false" }).await
 	}
 
 	async fn store_title_generation(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, title: Option<&TitleGeneration>) -> Result<(), sqlx::Error> {
