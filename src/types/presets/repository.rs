@@ -238,11 +238,6 @@ impl Preset {
 		Self::check_tools(pool, actor, shared, &request.tool_ids).await
 	}
 
-	/// Every model the preset runs on: its base model and the models of its levels.
-	fn model_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
-		self.base_model_id.into_iter().chain(self.levels.iter().map(|level| level.model_id))
-	}
-
 	async fn check_base_model(pool: &PgPool, actor: &PresetActor, base_model_id: &Uuid) -> Result<(), PresetError> {
 		let base_usable = Model::find_by_id(pool, base_model_id).await?.is_some_and(|model| model.is_enabled)
 			&& Model::can_user_use_model(pool, &actor.user_id, base_model_id).await?;

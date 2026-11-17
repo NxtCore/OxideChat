@@ -3969,6 +3969,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'presets.dismiss', 'Schließen'),
     ('en', 'presets.fallback_notice', 'The preset of this chat is no longer available. Continuing with {model}.'),
     ('de', 'presets.fallback_notice', 'Das Preset dieses Chats ist nicht mehr verfügbar. Es geht mit {model} weiter.'),
+    ('en', 'presets.level_fallback_notice', 'The level of this chat is no longer available. Continuing with {model}.'),
+    ('de', 'presets.level_fallback_notice', 'Die Stufe dieses Chats ist nicht mehr verfügbar. Es geht mit {model} weiter.'),
     ('en', 'presets.tools_locked', 'Tools are set by the preset {preset}.'),
     ('de', 'presets.tools_locked', 'Die Tools legt das Preset {preset} fest.'),
     ('en', 'presets.picker.tab', 'Presets'),

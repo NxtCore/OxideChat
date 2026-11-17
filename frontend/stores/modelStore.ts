@@ -8,7 +8,7 @@ export const useModelStore = defineStore('model', {
 	state: () => ({
 		models: [] as ModelList[],
 		selectedModel: null as ComposerModel | null,
-		presetFallbackNotice: null as string | null,
+		presetFallbackNotice: null as {key: string; model: string} | null,
 		modelsLoading: false,
 		stale: false,
 		contextTokens: 0,
@@ -184,7 +184,13 @@ export const useModelStore = defineStore('model', {
 						await this.resetComposerToDefaults();
 						model = this.selectedModel;
 					}
-					this.presetFallbackNotice = model?.display_name ?? null;
+					this.presetFallbackNotice = model ? {key: 'presets.fallback_notice', model: model.display_name} : null;
+				} else if (model?.preset) {
+					const wanted = splitPresetKey(modelKey).level;
+					if (wanted && model.level?.key !== wanted) {
+						const name = model.level ? presetLevelLabel(model.level, useMainStore().getTranslation) : model.display_name;
+						this.presetFallbackNotice = {key: 'presets.level_fallback_notice', model: name};
+					}
 				}
 				if (model && model.model_id !== this.selectedModel?.model_id) {
 					this.setSelectedModel(model);
@@ -290,13 +296,15 @@ export const useModelStore = defineStore('model', {
 			const fresh = presets.find(preset => preset.id === selected.preset!.id);
 			const model = fresh && !fresh.unavailable ? presetAsModel(fresh, selected.level?.key) : null;
 			if (!model) return;
-			if (model.model_id === selected.model_id) {
+			if (model.model_id === selected.model_id && !model.level) {
 				this.selectedModel = model;
 				return;
 			}
-			this.selectedProviderSlug = null;
-			this.providerOptions = [];
-			this.providerOptionsModelId = null;
+			if (model.model_id !== selected.model_id) {
+				this.selectedProviderSlug = null;
+				this.providerOptions = [];
+				this.providerOptionsModelId = null;
+			}
 			this.setSelectedModel(model);
 		},
 

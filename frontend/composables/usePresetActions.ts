@@ -28,6 +28,8 @@ export function usePresetActions() {
 		const model = modelStore.selectedModel;
 		const preset = model?.preset ?? null;
 		const chatSampling = chatStore.activeChat?.sampling ?? chatStore.draftSampling;
+		const usableLevels = preset?.levels.filter(level => !level.unavailable) ?? [];
+		const levels = usableLevels.length >= MIN_PRESET_LEVELS ? usableLevels : [];
 		const sampling: PresetSampling = {...(preset?.sampling ?? {})};
 		for (const key of SAMPLING_KEYS) {
 			const value = chatSampling[key];
@@ -39,13 +41,13 @@ export function usePresetActions() {
 			description: preset?.description ?? null,
 			icon: preset?.icon ?? null,
 			base_model_id: model ? baseModelId(model) : '',
-			base_model: preset?.base_model ?? model ?? null,
+			base_model: model?.level?.model ?? preset?.base_model ?? model ?? null,
 			system_prompt: preset?.system_prompt ?? null,
 			sampling,
-			reasoning: hasLevels(preset) ? {...preset!.reasoning} : {effort: modelStore.reasoningEffort ?? undefined, budget_tokens: modelStore.reasoningBudget ?? undefined},
-			levels: preset ? presetToRequest(preset).levels : [],
-			default_level: model?.level?.key ?? preset?.default_level ?? null,
-			level_models: preset?.levels.map(level => level.model) ?? [],
+			reasoning: levels.length > 0 ? {...preset!.reasoning} : {effort: modelStore.reasoningEffort ?? undefined, budget_tokens: modelStore.reasoningBudget ?? undefined},
+			levels: levels.map(levelToRequest),
+			default_level: levels.find(level => level.key === model?.level?.key)?.key ?? levels.find(level => level.key === preset?.default_level)?.key ?? null,
+			level_models: levels.map(level => level.model),
 			tool_ids: [...modelStore.enabledTools],
 			tools_locked: preset?.tools_locked ?? false,
 			starters: [...(preset?.starters ?? [])],

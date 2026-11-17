@@ -1081,6 +1081,16 @@ mod levels {
 		let states: Vec<(&str, Option<PresetUnavailable>)> = response.levels.iter().map(|level| (level.key.as_str(), level.unavailable)).collect();
 		assert_eq!(states, [("low", None), ("high", Some(PresetUnavailable::BaseModelUnavailable))]);
 		assert!(response.levels[0].model.is_some());
+
+		let (_, token) = insert_key(&pool, Some(team.member_id), team.team_id, json!(["inference:read", "inference:write"])).await?;
+		let context = GatewayCredential::authenticate(&pool, &token).await?;
+		let ids: Vec<String> = GatewayModel::list_for_context(&pool, &context).await?.into_iter().map(|model| model.id).filter(|id| id.starts_with("presets/partial")).collect();
+		assert_eq!(ids, ["presets/partial", "presets/partial:low"]);
+		let inference = GatewayModel::resolve_inference(&pool, &context, "presets/partial").await?;
+		assert_eq!(inference.model_id, team.model_id);
+		assert_eq!(inference.public_model_id, "presets/partial");
+		let gone = GatewayModel::resolve_inference(&pool, &context, "presets/partial:high").await;
+		assert!(matches!(gone, Err(GatewayModelAccessError::NotFound)));
 		Ok(())
 	}
 }

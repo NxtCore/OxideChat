@@ -1,5 +1,5 @@
 import type {ModelList} from '~/types/chat';
-import type {ComposerModel, PresetLevelResponse, PresetResponse, PresetScope, PresetTeam, SavePresetRequest} from '~/types/presets';
+import type {ComposerModel, PresetLevel, PresetLevelResponse, PresetResponse, PresetScope, PresetTeam, SavePresetRequest} from '~/types/presets';
 
 export const PRESET_KEY_PREFIX = 'presets/';
 
@@ -15,6 +15,10 @@ export const BUILTIN_LEVEL_KEYS = ['low', 'medium', 'high', 'max'] as const;
 
 export const presetsPath = '/api/v1/presets';
 
+const SLUG_PART = '[a-z0-9]([a-z0-9-]*[a-z0-9])?';
+const LEVEL_KEY_PATTERN = new RegExp(`^${SLUG_PART}$`);
+const PRESET_SLUG_PATTERN = new RegExp(`^${SLUG_PART}(/${SLUG_PART})*$`);
+
 export function isPresetKey(key: string | null | undefined): boolean {
 	return !!key && key.startsWith(PRESET_KEY_PREFIX);
 }
@@ -29,7 +33,7 @@ export function splitPresetKey(key: string): {key: string; level: string | null}
 }
 
 export function isValidLevelKey(key: string): boolean {
-	return key.length > 0 && key.length <= 32 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(key);
+	return key.length > 0 && key.length <= 32 && LEVEL_KEY_PATTERN.test(key);
 }
 
 export function presetLevelLabel(level: {key: string; label?: string | null}, translate: (key: string) => string): string {
@@ -67,14 +71,21 @@ export function hasLevels(preset: PresetResponse | null | undefined): boolean {
 	return !!preset && preset.levels.length > 0;
 }
 
+export function isLevelAvailable(level: PresetLevelResponse | undefined): level is PresetLevelResponse {
+	return !!level && !level.unavailable && !!level.model;
+}
+
+export function isLevelUsable(level: PresetLevelResponse | undefined): level is PresetLevelResponse {
+	return isLevelAvailable(level) && !level.model?.budget_blocked;
+}
+
 export function usableLevel(preset: PresetResponse, levelKey?: string | null): PresetLevelResponse | null {
-	const usable = (level: PresetLevelResponse | undefined) => (level && !level.unavailable && level.model ? level : null);
-	return (
-		usable(preset.levels.find(level => level.key === levelKey)) ??
-		usable(preset.levels.find(level => level.key === preset.default_level)) ??
-		preset.levels.find(level => !level.unavailable && level.model) ??
-		null
-	);
+	const candidates = [preset.levels.find(level => level.key === levelKey), preset.levels.find(level => level.key === preset.default_level), ...preset.levels];
+	return candidates.find(isLevelUsable) ?? candidates.find(isLevelAvailable) ?? null;
+}
+
+export function levelToRequest(level: PresetLevelResponse): PresetLevel {
+	return {key: level.key, label: level.label, hint: level.hint, model_id: level.model_id, reasoning: {...level.reasoning}};
 }
 
 function slugifyPart(part: string): string {
@@ -97,7 +108,7 @@ export function slugify(name: string): string {
 }
 
 export function isValidPresetSlug(slug: string): boolean {
-	return slug.length > 0 && slug.length <= 64 && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(slug);
+	return slug.length > 0 && slug.length <= 64 && PRESET_SLUG_PATTERN.test(slug);
 }
 
 export function presetAsModel(preset: PresetResponse, levelKey?: string | null): ComposerModel | null {
@@ -143,7 +154,7 @@ export function presetToRequest(preset: PresetResponse): SavePresetRequest {
 		system_prompt: preset.system_prompt,
 		sampling: {...preset.sampling},
 		reasoning: {...preset.reasoning},
-		levels: preset.levels.map(level => ({key: level.key, label: level.label, hint: level.hint, model_id: level.model_id, reasoning: {...level.reasoning}})),
+		levels: preset.levels.map(levelToRequest),
 		default_level: preset.default_level,
 		tool_ids: [...preset.tool_ids],
 		tools_locked: preset.tools_locked,

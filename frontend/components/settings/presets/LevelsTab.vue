@@ -183,7 +183,8 @@ function move(index: number, step: number) {
 	if (level) props.form.levels.splice(target, 0, level);
 }
 
-function setKey(level: LevelRow, key: string) {
+function setKey(level: LevelRow, value: string) {
+	const key = value.trim();
 	if (props.form.default_level === level.key && !isDuplicate(level)) props.form.default_level = key;
 	level.key = key;
 }

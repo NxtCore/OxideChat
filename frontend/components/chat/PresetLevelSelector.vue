@@ -118,7 +118,7 @@ function problem(level: PresetLevelResponse): string | null {
 }
 
 function isUsable(level: PresetLevelResponse) {
-	return !!level.model && !problem(level);
+	return isLevelUsable(level);
 }
 
 function select(key: string) {

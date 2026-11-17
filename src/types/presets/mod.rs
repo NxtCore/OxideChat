@@ -196,6 +196,31 @@ impl Preset {
 		self.levels.iter().find(|level| level.key == key)
 	}
 
+	/// Every model the preset runs on: its base model and the models of its levels.
+	pub fn model_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
+		self.base_model_id.into_iter().chain(self.levels.iter().map(|level| level.model_id))
+	}
+
+	/// The levels a key may run on, in the order to try them: the named level, or for a bare key the default level and then the others.
+	#[must_use]
+	pub fn level_candidates(&self, key: Option<&str>) -> Vec<Option<String>> {
+		if key.is_some() || self.levels.is_empty() {
+			return vec![key.map(str::to_string)];
+		}
+		let default = self.default_level.as_deref();
+		let others = self.levels.iter().map(|level| level.key.as_str()).filter(|level| Some(*level) != default);
+		default.into_iter().chain(others).map(|level| Some(level.to_string())).collect()
+	}
+
+	/// The model the preset runs on at level `key`, resolved like [`Preset::at_level`].
+	#[must_use]
+	pub fn model_at(&self, key: Option<&str>) -> Option<Uuid> {
+		if self.levels.is_empty() {
+			return self.base_model_id.filter(|_| key.is_none());
+		}
+		self.level(key).map(|level| level.model_id)
+	}
+
 	/// The preset as it runs at level `key`: its base model and reasoning become the level's.
 	///
 	/// Without levels only `None` resolves; with levels `None` picks the default level. Returns `None` for an unknown level.

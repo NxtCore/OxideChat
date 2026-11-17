@@ -237,7 +237,7 @@ impl GatewayModel {
 		let mut listed: Vec<OpenAIModel> = models.into_iter().map(OpenAIModel::from).collect();
 		let presets = Preset::list_for_gateway(pool, context).await?;
 		if !presets.is_empty() {
-			let model_ids: Vec<Uuid> = presets.iter().flat_map(|preset| preset.base_model_id.into_iter().chain(preset.levels.iter().map(|level| level.model_id))).collect();
+			let model_ids: Vec<Uuid> = presets.iter().flat_map(Preset::model_ids).collect();
 			let accessible: HashSet<Uuid> = Self::accessible_model_ids(pool, context, &model_ids).await?.into_iter().collect();
 			for preset in &presets {
 				let created = Some(u64::try_from(preset.updated_at.timestamp()).unwrap_or_default());
@@ -249,7 +249,7 @@ impl GatewayModel {
 					model_type: Some("chat".to_string()),
 					capabilities: Vec::new(),
 				};
-				if preset.base_model_id.is_some_and(|id| accessible.contains(&id)) {
+				if preset.model_ids().any(|id| accessible.contains(&id)) {
 					listed.push(entry(preset.key()));
 				}
 				let levels = preset.levels.iter().filter(|level| accessible.contains(&level.model_id));
@@ -281,22 +281,29 @@ impl GatewayModel {
 	}
 
 	async fn resolve_preset(pool: &PgPool, context: &GatewayAuthContext, slug: &str, level: Option<&str>) -> Result<Option<GatewayInference>, sqlx::Error> {
-		let Some(preset) = Preset::find_for_gateway(pool, context, slug).await?.and_then(|preset| preset.at_level(level)) else {
+		let Some(preset) = Preset::find_for_gateway(pool, context, slug).await? else {
 			return Ok(None);
 		};
-		let Some(base_id) = preset.base_model_id else {
-			return Ok(None);
-		};
-		let Some(model) = Self::resolve_model_by_id(pool, context, &base_id).await? else {
-			return Ok(None);
-		};
-		let mut inference = GatewayInference::from(model);
-		inference.public_model_id = match level {
+		let public_model_id = match level {
 			Some(level) => format!("{}{PRESET_LEVEL_SEPARATOR}{level}", preset.key()),
 			None => preset.key(),
 		};
-		inference.preset = Some(GatewayPreset::from(preset));
-		Ok(Some(inference))
+		for candidate in preset.level_candidates(level) {
+			let Some(model_id) = preset.model_at(candidate.as_deref()) else {
+				continue;
+			};
+			let Some(model) = Self::resolve_model_by_id(pool, context, &model_id).await? else {
+				continue;
+			};
+			let Some(preset) = preset.at_level(candidate.as_deref()) else {
+				return Ok(None);
+			};
+			let mut inference = GatewayInference::from(model);
+			inference.public_model_id = public_model_id;
+			inference.preset = Some(GatewayPreset::from(preset));
+			return Ok(Some(inference));
+		}
+		Ok(None)
 	}
 
 	/// Resolves one enabled provider/model identifier accessible to the context.
