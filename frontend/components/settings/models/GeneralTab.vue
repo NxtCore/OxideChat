@@ -33,7 +33,7 @@
 				<ShadLabel for="description">
 					{{ store.getTranslation('settings.models.editor.description') }}
 				</ShadLabel>
-				<ShadTextarea id="description" v-model="form.description" :placeholder="store.getTranslation('settings.models.editor.description_placeholder')" rows="3" />
+				<SettingsMarkdownField id="description" v-model="form.description" :placeholder="store.getTranslation('settings.models.editor.description_placeholder')" />
 			</div>
 
 			<div class="flex items-center justify-between rounded-lg border border-border p-3">

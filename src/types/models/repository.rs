@@ -159,6 +159,7 @@ impl Model {
 				p.name AS provider_name,
 				p.kind AS provider_kind,
 				COALESCE(user_mc.icon, sys_mc.icon) AS icon,
+				sys_mc.description,
 				COALESCE(user_mc.is_favorite, false) AS is_favorite
 			FROM models m
 			JOIN providers p ON m.provider_id = p.id
@@ -242,6 +243,7 @@ impl Model {
 				p.name AS provider_name,
 				p.kind AS provider_kind,
 				COALESCE(user_mc.icon, sys_mc.icon) AS icon,
+				sys_mc.description,
 				COALESCE(user_mc.is_favorite, false) AS is_favorite,
 				EXISTS (
 					SELECT 1

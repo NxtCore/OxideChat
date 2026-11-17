@@ -25,6 +25,7 @@ pub struct ModelListPublic {
 	pub is_enabled: bool,
 	pub provider: ProviderSlim,
 	pub icon: Option<String>,
+	pub description: Option<String>,
 	pub is_favorite: bool,
 	pub budget_blocked: bool,
 }

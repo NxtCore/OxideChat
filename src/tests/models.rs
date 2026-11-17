@@ -106,13 +106,21 @@ mod tests {
 
 		create_config(&pool, None, model_id, "system:model-one", "System Model", "system", Some("system-icon"), true).await;
 		create_config(&pool, Some(user_id), model_id, "user:model-one", "User Model", "user", Some("user-icon"), true).await;
+		sqlx::query("UPDATE model_configs SET description = '**System** description' WHERE owner_id IS NULL")
+			.execute(&pool)
+			.await
+			.unwrap();
 
 		let viewer = ModelViewer { user_id: &user_id };
 		let response = Model::list_for_user(&pool, viewer, &paged(1, 10), false, None, false, None).await.unwrap();
 		assert_eq!(response.items.len(), 1);
 		assert_eq!(response.items[0].capabilities, vec!["user"]);
 		assert_eq!(response.items[0].icon.as_deref(), Some("user-icon"));
+		assert_eq!(response.items[0].description.as_deref(), Some("**System** description"));
 		assert!(response.items[0].is_favorite);
+
+		let by_id = Model::list_public_for_user_by_ids(&pool, &user_id, &[model_id]).await.unwrap();
+		assert_eq!(by_id[0].0.description.as_deref(), Some("**System** description"));
 
 		let other_viewer = ModelViewer { user_id: &other_user_id };
 		let response = Model::list_for_user(&pool, other_viewer, &paged(1, 10), false, None, false, None).await.unwrap();
