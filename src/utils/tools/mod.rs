@@ -3,7 +3,7 @@
 //! This module provides the executor abstraction and implementations for
 //! different tool source types (WASM, MCP, HTTP, Builtin).
 
-mod builtin;
+pub(crate) mod builtin;
 mod executor;
 pub mod http;
 pub mod mcp;

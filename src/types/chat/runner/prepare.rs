@@ -5,7 +5,7 @@ use crate::types::models_configs::ModelConfig;
 use crate::i18n::I18n;
 use crate::types::presets::preset_slug;
 use crate::types::{
-	BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
+	BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, MessagePart, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
 	StreamingUserMessageCreate, TokenEstimate, UsageDetails, User,
 };
 use axum::response::{
@@ -69,12 +69,22 @@ fn internal(message: &'static str) -> impl FnOnce(sqlx::Error) -> TurnError {
 	}
 }
 
+/// Text bytes of the new message: its content plus the text of its parts.
+pub(crate) fn request_bytes(req: &StreamRequest) -> u64 {
+	let parts = req.parts.iter().flatten().map(|part| match part {
+		MessagePart::Text { text } | MessagePart::Reasoning { text } => text.len(),
+		MessagePart::ToolCall { name, arguments, .. } => name.len() + arguments.len(),
+		MessagePart::Image { .. } | MessagePart::ToolResult { .. } => 0,
+	});
+	(req.content.len() + parts.sum::<usize>()) as u64
+}
+
 async fn prompt_bytes(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, system_config: Option<&ModelConfig>, preset: Option<&Preset>) -> Result<u64, TurnError> {
 	let history_bytes = Message::active_prompt_bytes(db, chat_id).await.map_err(internal("Failed to check budget status"))?;
 	let system_bytes = system_config.and_then(|config| config.system_prompt.as_deref()).map_or(0, str::len);
 	let preset_bytes = preset.and_then(|preset| preset.system_prompt.as_deref()).map_or(0, str::len);
 	Ok(history_bytes
-		.saturating_add(req.content.len() as u64)
+		.saturating_add(request_bytes(req))
 		.saturating_add(system_bytes as u64)
 		.saturating_add(preset_bytes as u64))
 }

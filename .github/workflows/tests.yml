@@ -10,6 +10,9 @@ concurrency:
     group: tests-${{ github.ref }}
     cancel-in-progress: true
 
+permissions:
+    contents: read
+
 jobs:
     test:
         name: Clippy and Tests
@@ -32,15 +35,16 @@ jobs:
             DATABASE_URL: postgres://postgres:postgres@localhost:5432/oxidechat
         steps:
             - name: Checkout code
-              uses: actions/checkout@v4
+              uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
             - name: Install Rust
-              uses: dtolnay/rust-toolchain@stable
+              uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
               with:
+                  toolchain: stable
                   components: clippy
 
             - name: Cache cargo
-              uses: Swatinem/rust-cache@v2
+              uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
             - name: Install SQLx CLI
               run: cargo install sqlx-cli --no-default-features --features postgres --locked

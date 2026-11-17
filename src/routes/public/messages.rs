@@ -99,6 +99,11 @@ pub async fn delete_fork(State(state): State<Arc<JobState>>, user: AuthUser, Pat
 pub async fn branch_from_message(State(state): State<Arc<JobState>>, user: AuthUser, Path((chat_id, message_id)): Path<(Uuid, Uuid)>, Json(req): Json<BranchFromMessageRequest>) -> Result<Response, AppError> {
 	let source_chat = Chat::find_by_id_and_user(&state.db, &chat_id, &user.id).await?.ok_or(ErrorCode::NotFound)?;
 	let source_message = find_message(&state, &chat_id, &message_id).await?;
+	if let Some(workspace_id) = &req.workspace_id
+		&& !Chat::verify_workspace_belongs_to_user(&state.db, workspace_id, &user.id).await?
+	{
+		return Err(ErrorCode::NotFound.into());
+	}
 
 	let new_chat = Chat::create_branched(
 		&state.db,

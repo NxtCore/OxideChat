@@ -4,9 +4,13 @@ use async_trait::async_trait;
 use reqwest::{Client, RequestBuilder};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::time::Duration;
 
 use super::executor::{ToolContext, ToolError, ToolExecutor};
+
+/// Largest response body an HTTP tool may return.
+pub const MAX_TOOL_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 /// HTTP source configuration
 #[derive(Debug, Clone)]
@@ -15,6 +19,20 @@ pub struct HttpConfig {
 	pub method: String,
 	pub headers: HashMap<String, String>,
 	pub body_template: Option<String>,
+}
+
+/// The URL a function of an HTTP tool calls: the tool URL, with a relative entrypoint appended.
+///
+/// # Errors
+/// Returns `ToolError::InvalidInput` for an absolute entrypoint on another host than the tool URL,
+/// because the tool's headers are sent with the request.
+pub fn function_url(base_url: &str, entrypoint: Option<&str>) -> Result<String, ToolError> {
+	match entrypoint {
+		None => Ok(base_url.to_string()),
+		Some(entrypoint) if !entrypoint.starts_with("http") => Ok(format!("{}{}", base_url.trim_end_matches('/'), entrypoint)),
+		Some(entrypoint) if crate::utils::outbound::same_origin(base_url, entrypoint) => Ok(entrypoint.to_string()),
+		Some(_) => Err(ToolError::InvalidInput("Function entrypoint must stay on the tool's host".to_string())),
+	}
 }
 
 /// Executor for HTTP-based tools
@@ -41,6 +59,35 @@ impl HttpExecutor {
 			.map_err(|e| ToolError::HttpError(format!("Failed to create HTTP client: {e}")))?;
 
 		Ok(Self { name, config, client })
+	}
+
+	/// Percent-encode everything but unreserved characters, so a value stays one path segment or one query value
+	fn encode_url_value(value: &str) -> String {
+		let mut encoded = String::with_capacity(value.len());
+		for byte in value.bytes() {
+			if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+				encoded.push(char::from(byte));
+			} else {
+				let _ = write!(encoded, "%{byte:02X}");
+			}
+		}
+		encoded
+	}
+
+	/// Substitute settings values raw and input values percent-encoded into a URL template
+	fn substitute_url(template: &str, settings: &Value, input: &Value) -> String {
+		let mut result = Self::substitute_template(template, settings, &Value::Null);
+		if let Value::Object(input_map) = input {
+			for (key, value) in input_map {
+				let placeholder = format!("{{{{input.{key}}}}}");
+				let text = match value {
+					Value::String(s) => Self::encode_url_value(s),
+					other => Self::encode_url_value(&other.to_string()),
+				};
+				result = result.replace(&placeholder, &text);
+			}
+		}
+		result
 	}
 
 	/// Substitute settings values into a string template
@@ -114,14 +161,17 @@ impl HttpExecutor {
 		Ok(parsed)
 	}
 
-	/// Substitute the URL template and verify the result stays on the configured origin
+	/// Substitute the URL template and verify the result stays on the configured origin and path depth
 	fn resolve_url(&self, settings: &Value, input: &Value) -> Result<String, ToolError> {
 		let base_text = Self::substitute_template(&self.config.url, settings, &Value::Null);
 		let base = Self::parse_http_url(&base_text)?;
-		let url = Self::substitute_template(&self.config.url, settings, input);
+		let url = Self::substitute_url(&self.config.url, settings, input);
 		let parsed = Self::parse_http_url(&url)?;
 		if parsed.origin() != base.origin() || parsed.username() != base.username() || parsed.password() != base.password() {
 			return Err(ToolError::InvalidInput("Tool URL must stay on the configured host".to_string()));
+		}
+		if parsed.path_segments().map(Iterator::count) != base.path_segments().map(Iterator::count) {
+			return Err(ToolError::InvalidInput("Tool URL must stay on the configured path".to_string()));
 		}
 		Ok(url)
 	}
@@ -169,13 +219,13 @@ impl ToolExecutor for HttpExecutor {
 			None => request,
 		};
 
-		let response = request.send().await.map_err(|e| ToolError::HttpError(format!("HTTP request failed: {e}")))?;
+		let response = request.send().await.map_err(|e| ToolError::HttpError(format!("HTTP request failed: {}", e.without_url())))?;
 
 		let status = response.status();
-		let body = response
-			.text()
+		let body = crate::utils::outbound::read_limited(response, MAX_TOOL_RESPONSE_BYTES)
 			.await
 			.map_err(|e| ToolError::HttpError(format!("Failed to read response body: {e}")))?;
+		let body = String::from_utf8_lossy(&body).into_owned();
 
 		if !status.is_success() {
 			tracing::debug!(tool = %self.name, status = %status, body = %body, "HTTP tool upstream returned an error status");

@@ -107,12 +107,30 @@ pub async fn is_safe_stored_image(db: &PgPool, id: Uuid) -> Result<bool, String>
 	Ok(get_image(db, id).await?.is_some_and(|(data, mime_type)| safe_image_mime(&data, &mime_type).is_some()))
 }
 
-/// Retrieve an image by ID
+/// Retrieve an image by ID without checking who owns it.
+///
+/// Only for images that are not tied to a user's session, such as the instance icon; everything
+/// a user asks for goes through [`get_image_for_user`].
 ///
 /// Returns (data, `mime_type`) or None if not found.
 pub async fn get_image(db: &PgPool, id: Uuid) -> Result<Option<(Vec<u8>, String)>, String> {
 	let row = ImageContent::find(db, id).await.map_err(|e| format!("Failed to fetch image: {e}"))?;
+	read_content(row).await
+}
 
+/// Retrieve an image the user may read: one of their own, or an icon.
+///
+/// Returns (data, `mime_type`), or None if the image does not exist or belongs to someone else.
+///
+/// # Errors
+///
+/// Returns an error if the image cannot be read.
+pub async fn get_image_for_user(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<(Vec<u8>, String)>, String> {
+	let row = ImageContent::find_for_user(db, id, user_id).await.map_err(|e| format!("Failed to fetch image: {e}"))?;
+	read_content(row).await
+}
+
+async fn read_content(row: Option<ImageContent>) -> Result<Option<(Vec<u8>, String)>, String> {
 	match row {
 		Some(img) => {
 			let data = if let Some(data) = img.data {
@@ -140,13 +158,13 @@ pub async fn set_image_caption(db: &PgPool, id: Uuid, caption: &str) -> Result<(
 	ImageContent::set_caption(db, id, caption).await.map_err(|e| format!("Failed to set image caption: {e}"))
 }
 
-/// Retrieve the stored caption for an image, if any.
+/// Retrieve the stored caption for one of the user's images, if any.
 ///
 /// # Errors
 ///
 /// Returns an error when the database query fails.
-pub async fn image_caption(db: &PgPool, id: Uuid) -> Result<Option<String>, String> {
-	ImageContent::caption(db, id).await.map_err(|e| format!("Failed to fetch image caption: {e}"))
+pub async fn image_caption(db: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<String>, String> {
+	ImageContent::caption(db, id, user_id).await.map_err(|e| format!("Failed to fetch image caption: {e}"))
 }
 
 /// Parse a base64 data URI into (`mime_type`, `decoded_bytes`)

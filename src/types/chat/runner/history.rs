@@ -6,15 +6,26 @@ use uuid::Uuid;
 
 const MAX_HYDRATED_IMAGES: usize = 4;
 
+/// Whose history is being built and which of its images the model gets to see.
+struct ImageAccess<'a> {
+	db: &'a PgPool,
+	user_id: Uuid,
+	vision: bool,
+	hydrated_image_ids: &'a HashSet<String>,
+}
+
 /// Hydrate a stored image into content parts. `generated` distinguishes an assistant-
 /// generated image (gets an editable `image_id` handle) from a user-uploaded one.
-async fn hydrate_image(db: &PgPool, image_id: &str, vision: bool, generated: bool) -> Vec<ContentPart> {
+/// Images of other users are never loaded.
+async fn hydrate_image(access: &ImageAccess<'_>, image_id: &str, generated: bool) -> Vec<ContentPart> {
 	let Ok(uuid) = Uuid::parse_str(image_id) else {
 		return Vec::new();
 	};
+	let db = access.db;
+	let vision = access.vision && access.hydrated_image_ids.contains(image_id);
 	let mut parts = Vec::new();
 	if vision {
-		if let Ok(Some((data, mime))) = crate::utils::images::get_image(db, uuid).await {
+		if let Ok(Some((data, mime))) = crate::utils::images::get_image_for_user(db, uuid, access.user_id).await {
 			use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 			let data_uri = format!("data:{};base64,{}", mime, BASE64.encode(&data));
 			parts.push(ContentPart::ImageUrl { url: data_uri, mime: Some(mime) });
@@ -25,7 +36,7 @@ async fn hydrate_image(db: &PgPool, image_id: &str, vision: bool, generated: boo
 			)));
 		}
 	} else if generated {
-		let caption = crate::utils::images::image_caption(db, uuid).await.ok().flatten();
+		let caption = crate::utils::images::image_caption(db, uuid, access.user_id).await.ok().flatten();
 		let text = match caption {
 			Some(c) if !c.trim().is_empty() => format!(
 				"[An image was generated earlier (image_id: {image_id}) from the prompt: \"{}\". It is already displayed to the user. To modify it, call imagegen_edit with image_id \"{image_id}\".]",
@@ -91,12 +102,12 @@ fn recent_image_ids(messages: &[Message]) -> HashSet<String> {
 	hydrated_image_ids
 }
 
-async fn user_parts(db: &PgPool, stored_parts: Vec<MessagePart>, content: String, vision: bool, hydrated_image_ids: &HashSet<String>) -> Vec<ContentPart> {
+async fn user_parts(access: &ImageAccess<'_>, stored_parts: Vec<MessagePart>, content: String) -> Vec<ContentPart> {
 	let mut parts = Vec::new();
 	for part in stored_parts {
 		match part {
 			MessagePart::Text { text } => parts.push(ContentPart::Text(text)),
-			MessagePart::Image { image_id } => parts.extend(hydrate_image(db, &image_id, vision && hydrated_image_ids.contains(&image_id), false).await),
+			MessagePart::Image { image_id } => parts.extend(hydrate_image(access, &image_id, false).await),
 			_ => {}
 		}
 	}
@@ -106,13 +117,7 @@ async fn user_parts(db: &PgPool, stored_parts: Vec<MessagePart>, content: String
 	parts
 }
 
-async fn assistant_messages(
-	db: &PgPool,
-	stored_parts: Vec<MessagePart>,
-	execs: Option<&Vec<ToolExecutionResponse>>,
-	vision: bool,
-	hydrated_image_ids: &HashSet<String>,
-) -> Vec<OmniMessage> {
+async fn assistant_messages(access: &ImageAccess<'_>, stored_parts: Vec<MessagePart>, execs: Option<&Vec<ToolExecutionResponse>>) -> Vec<OmniMessage> {
 	let mut result = Vec::new();
 	let mut call_names: HashMap<String, String> = HashMap::new();
 	let mut unresolved_calls: Vec<String> = Vec::new();
@@ -122,7 +127,7 @@ async fn assistant_messages(
 		match part {
 			MessagePart::Text { text } => buffer.push(ContentPart::Text(text)),
 			MessagePart::Reasoning { .. } => {}
-			MessagePart::Image { image_id } => buffer.extend(hydrate_image(db, &image_id, vision && hydrated_image_ids.contains(&image_id), true).await),
+			MessagePart::Image { image_id } => buffer.extend(hydrate_image(access, &image_id, true).await),
 			MessagePart::ToolCall { id, name, arguments } => {
 				call_names.insert(id.clone(), name.clone());
 				unresolved_calls.push(id.clone());
@@ -155,8 +160,14 @@ async fn assistant_messages(
 	result
 }
 
-pub(super) async fn get_omni_messages(db: &PgPool, messages: Vec<Message>, vision: bool) -> Vec<OmniMessage> {
+pub(super) async fn get_omni_messages(db: &PgPool, user_id: Uuid, messages: Vec<Message>, vision: bool) -> Vec<OmniMessage> {
 	let hydrated_image_ids = if vision { recent_image_ids(&messages) } else { HashSet::new() };
+	let access = ImageAccess {
+		db,
+		user_id,
+		vision,
+		hydrated_image_ids: &hydrated_image_ids,
+	};
 	let assistant_ids: Vec<Uuid> = messages.iter().filter(|m| m.role == "assistant").map(|m| m.id).collect();
 	let executions = Message::tool_executions_for_messages(db, &assistant_ids).await.unwrap_or_default();
 
@@ -175,9 +186,9 @@ pub(super) async fn get_omni_messages(db: &PgPool, messages: Vec<Message>, visio
 		};
 
 		if is_assistant {
-			result.extend(assistant_messages(db, stored_parts, executions.get(&message_id), vision, &hydrated_image_ids).await);
+			result.extend(assistant_messages(&access, stored_parts, executions.get(&message_id)).await);
 		} else {
-			let parts = user_parts(db, stored_parts, m.content, vision, &hydrated_image_ids).await;
+			let parts = user_parts(&access, stored_parts, m.content).await;
 			result.push(OmniMessage {
 				role: Role::User,
 				parts,

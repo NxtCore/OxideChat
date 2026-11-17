@@ -1,4 +1,4 @@
-use crate::types::consts::{ADMIN_TEAMS_EDIT, ADMIN_TEAMS_VIEW};
+use crate::types::consts::{ADMIN_BUDGETS_EDIT, ADMIN_TEAMS_EDIT, ADMIN_TEAMS_VIEW};
 use crate::types::{AppError, AuthUser, CreateTeamRequest, JobState, ListTeamsQuery, PageQuery, SaveTeamRequest, Team, UpdateTeamBudgetRequest, UpdateTeamMemberRoleRequest, UpdateTeamMembersRequest, UpdateTeamModelsRequest, UpdateTeamRequest, json_ok};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
@@ -143,7 +143,7 @@ pub async fn set_team_models(State(state): State<Arc<JobState>>, auth: AuthUser,
 }
 
 pub async fn update_team_budget(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<UpdateTeamBudgetRequest>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_TEAMS_EDIT).await?;
+	auth.require(&state.db, ADMIN_BUDGETS_EDIT).await?;
 
 	let team = Team::find_by_id(&state.db, &id)
 		.await

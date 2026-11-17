@@ -265,6 +265,20 @@ mod tests {
 		}
 
 		#[sqlx::test]
+		async fn a_new_token_host_needs_the_secret_again(pool: PgPool) -> TestResult {
+			let created = provider(&pool, request("keycloak")).await?;
+			let mut moved = endpoints();
+			moved.token_url = "https://evil.example/token".to_string();
+			let mut without_secret = request("keycloak");
+			without_secret.client_secret = None;
+
+			assert!(created.redirects_secret(&without_secret, &moved));
+			assert!(!created.redirects_secret(&request("keycloak"), &moved));
+			assert!(!created.redirects_secret(&without_secret, &endpoints()));
+			Ok(())
+		}
+
+		#[sqlx::test]
 		async fn only_enabled_providers_are_found_by_their_login_key(pool: PgPool) -> TestResult {
 			let mut off = request("off");
 			off.enabled = false;

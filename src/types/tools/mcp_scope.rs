@@ -111,6 +111,13 @@ impl McpScope {
 			}
 		};
 
+		if let Some(config) = &req.connection_config {
+			let existing = McpServer::find_scoped(pool, id, self.owner_id()).await?.ok_or(ErrorCode::NotFound)?;
+			if crate::utils::encryption::config_redirects_secrets(&existing.connection_config, config, &["headers", "env"]) {
+				return Err(ErrorCode::SecretRequiredForNewHost.into());
+			}
+		}
+
 		let server = McpServer::update_scoped(pool, id, self.owner_id(), req.name.as_deref(), transport, req.connection_config.as_ref(), req.is_enabled)
 			.await?
 			.ok_or(ErrorCode::NotFound)?;

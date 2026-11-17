@@ -241,13 +241,16 @@ pub async fn authenticate_write(State(state): State<Arc<JobState>>, request: Req
 async fn authenticate_request(state: &JobState, mut request: Request, next: Next, scope: &str) -> Response {
 	let ip = crate::middleware::client_ip(&request);
 	let prefix = bearer_token_prefix(&request);
-	if let Some(response) = pre_auth_rate_limited(ip, prefix).await {
+	if let Some(response) = pre_auth_rate_limited(ip, prefix.as_deref()).await {
 		return response;
 	}
 	let context = match authenticate_owned(state, request.headers(), scope).await {
 		Ok(context) => context,
 		Err(rejection) => {
 			let (response, owner) = *rejection;
+			if response.status() == StatusCode::UNAUTHORIZED {
+				record_failed_authentication(prefix.as_deref()).await;
+			}
 			let log = request.extensions().get::<RequestLogContext>().copied();
 			if let (Some(owner), Some(log)) = (owner.filter(|_| scope == INFERENCE_WRITE_SCOPE), log) {
 				let route = GatewayRoute::for_path(request.uri().path());
@@ -265,14 +268,15 @@ async fn authenticate_request(state: &JobState, mut request: Request, next: Next
 
 /// Rate limits authentication attempts before any Argon2 verification runs.
 ///
-/// Limits apply per client IP and per bearer-token key prefix, so unauthenticated
-/// callers cannot force expensive password verifications at high rates.
-async fn pre_auth_rate_limited(ip: String, prefix: Option<String>) -> Option<Response> {
+/// Every request counts against its client IP. A bearer-token key prefix is refused only after
+/// too many failed authentications, so guessing a key's secret is slowed down while requests
+/// with the right secret are not capped here.
+async fn pre_auth_rate_limited(ip: String, prefix: Option<&str>) -> Option<Response> {
 	let limiter = crate::utils::rate_limit::global();
 	let window = crate::utils::rate_limit::RATE_LIMIT_WINDOW;
 	let ip_allowed = limiter.allow(&format!("gateway:ip:{ip}"), crate::utils::rate_limit::gateway_ip_limit(), window).await;
 	let key_allowed = match prefix {
-		Some(prefix) => limiter.allow(&format!("gateway:key:{prefix}"), crate::utils::rate_limit::gateway_key_limit(), window).await,
+		Some(prefix) => limiter.has_room(&format!("gateway:key:{prefix}"), crate::utils::rate_limit::gateway_key_limit(), window).await,
 		None => true,
 	};
 	if ip_allowed && key_allowed {
@@ -288,6 +292,16 @@ async fn pre_auth_rate_limited(ip: String, prefix: Option<String>) -> Option<Res
 		response.headers_mut().insert(header::RETRY_AFTER, value);
 	}
 	Some(response)
+}
+
+/// Counts a failed authentication against the key prefix it named.
+async fn record_failed_authentication(prefix: Option<&str>) {
+	if let Some(prefix) = prefix {
+		let limiter = crate::utils::rate_limit::global();
+		let _ = limiter
+			.allow(&format!("gateway:key:{prefix}"), crate::utils::rate_limit::gateway_key_limit(), crate::utils::rate_limit::RATE_LIMIT_WINDOW)
+			.await;
+	}
 }
 
 /// Extracts the `oxc_<key-id>` prefix of a bearer token, used as a rate-limit key.

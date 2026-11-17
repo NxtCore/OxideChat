@@ -229,6 +229,44 @@ mod tests {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn viewing_tools_or_editing_teams_does_not_run_tools_or_change_budgets(pool: PgPool) -> TestResult {
+		use axum::body::Body;
+		use axum::http::{Request, StatusCode};
+		use tower::ServiceExt;
+
+		crate::config::Config::init(&pool).await?;
+		crate::i18n::I18n::init(&pool).await;
+		let admin_held = admin_permissions();
+		let setup_id = create_user(&pool).await?;
+		let admin = RoleActor {
+			id: &setup_id,
+			permissions: &admin_held,
+		};
+		Role::create(&pool, &admin, &request("Desk", &["admin.tools.view", "admin.teams.edit"])).await?;
+		let desk_id = create_user(&pool).await?;
+		User::find_by_id(&pool, &desk_id).await?.ok_or("desk")?.set_roles(&pool, &["Desk".to_owned()]).await?;
+		let session = Uuid::new_v4();
+		User::insert_session(&pool, session, &desk_id, chrono::Utc::now() + chrono::Duration::days(1)).await?;
+		let team_id: Uuid = sqlx::query_scalar("INSERT INTO teams (name) VALUES ('Budgeted') RETURNING id").fetch_one(&pool).await?;
+		let tool_id = Uuid::new_v4();
+
+		let router = crate::routes::build_router(crate::tests::gateway::support::job_state(pool.clone()));
+		let send = |method: &'static str, uri: String, body: &'static str| {
+			Request::builder()
+				.method(method)
+				.uri(uri)
+				.header("content-type", "application/json")
+				.header("cookie", format!("{}={session}", crate::utils::auth::SESSION_COOKIE_NAME))
+				.body(Body::from(body))
+		};
+		let test = router.clone().oneshot(send("POST", format!("/api/v1/admin/tools/{tool_id}/test"), r#"{"input":{}}"#)?).await?;
+		assert_eq!(test.status(), StatusCode::FORBIDDEN);
+		let budget = router.oneshot(send("PATCH", format!("/api/v1/admin/teams/{team_id}/budget"), r#"{"budget_id":null}"#)?).await?;
+		assert_eq!(budget.status(), StatusCode::FORBIDDEN);
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn user_admins_cannot_edit_or_move_stronger_accounts(pool: PgPool) -> TestResult {
 		use axum::body::Body;
 		use axum::http::{Request, StatusCode};

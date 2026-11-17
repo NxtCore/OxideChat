@@ -45,6 +45,32 @@ mod tests {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn images_are_read_only_by_their_owner_unless_they_are_icons(pool: PgPool) -> crate::tests::gateway::support::TestResult {
+		use crate::tests::support::insert_user;
+		use crate::utils::images::{get_image_for_user, image_caption, set_image_caption};
+
+		let owner = insert_user(&pool, "image-owner").await?;
+		let stranger = insert_user(&pool, "image-stranger").await?;
+		let data_uri = format!("data:image/png;base64,{PNG_1X1}");
+
+		let private = store_from_data_uri(&pool, &data_uri, Some(owner), None).await?;
+		set_image_caption(&pool, private.id, "a private prompt").await?;
+		assert!(get_image_for_user(&pool, private.id, owner).await?.is_some());
+		assert!(get_image_for_user(&pool, private.id, stranger).await?.is_none());
+		assert_eq!(image_caption(&pool, private.id, owner).await?.as_deref(), Some("a private prompt"));
+		assert!(image_caption(&pool, private.id, stranger).await?.is_none());
+
+		let orphaned = store_from_data_uri(&pool, &data_uri, None, Some("upload")).await?;
+		assert!(get_image_for_user(&pool, orphaned.id, stranger).await?.is_none());
+
+		let icon = store_from_data_uri(&pool, &data_uri, Some(owner), Some("icon")).await?;
+		let model_icon = store_from_data_uri(&pool, &data_uri, None, Some("model_icon")).await?;
+		assert!(get_image_for_user(&pool, icon.id, stranger).await?.is_some());
+		assert!(get_image_for_user(&pool, model_icon.id, stranger).await?.is_some());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn store_from_data_uri_rejects_invalid_payloads_without_storing(pool: PgPool) {
 		assert!(store_from_data_uri(&pool, "not-a-data-uri", None, None).await.is_err());
 		assert!(store_from_data_uri(&pool, "data:image/png;base64,!!!not-base64!!!", None, None).await.is_err());

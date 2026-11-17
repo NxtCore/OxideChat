@@ -34,7 +34,7 @@ pub fn gateway_ip_limit() -> u64 {
 	*GATEWAY_IP_LIMIT
 }
 
-/// Per-token-prefix limit for gateway authentication attempts.
+/// Per-token-prefix limit for failed gateway authentication attempts.
 #[must_use]
 pub fn gateway_key_limit() -> u64 {
 	*GATEWAY_KEY_LIMIT
@@ -54,6 +54,7 @@ struct Message {
 	key: String,
 	limit: u64,
 	window: Duration,
+	count: bool,
 	reply: oneshot::Sender<bool>,
 }
 
@@ -81,6 +82,18 @@ impl RateLimiter {
 	/// A `limit` of `0` disables limiting for the key.
 	#[must_use]
 	pub async fn allow(&self, key: &str, limit: u64, window: Duration) -> bool {
+		self.ask(key, limit, window, true).await
+	}
+
+	/// Returns `true` when `key` is still below `limit`, without counting this call.
+	///
+	/// Pair it with [`RateLimiter::allow`] to count only some outcomes, such as failed attempts.
+	#[must_use]
+	pub async fn has_room(&self, key: &str, limit: u64, window: Duration) -> bool {
+		self.ask(key, limit, window, false).await
+	}
+
+	async fn ask(&self, key: &str, limit: u64, window: Duration, count: bool) -> bool {
 		if limit == 0 {
 			return true;
 		}
@@ -89,6 +102,7 @@ impl RateLimiter {
 			key: key.to_string(),
 			limit,
 			window,
+			count,
 			reply,
 		};
 		if self.requests.send(message).await.is_err() {
@@ -115,6 +129,11 @@ impl Owner {
 
 	fn check(&mut self, message: Message) {
 		let now = Instant::now();
+		if !message.count {
+			let full = self.windows.get(&message.key).is_some_and(|window| now < window.reset_at && window.count >= message.limit);
+			let _ = message.reply.send(!full);
+			return;
+		}
 		let allowed = match self.windows.entry(message.key) {
 			Entry::Occupied(mut entry) => {
 				let window = entry.get_mut();

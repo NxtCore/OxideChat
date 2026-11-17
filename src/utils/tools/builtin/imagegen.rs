@@ -1,18 +1,19 @@
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use futures_util::StreamExt;
 use omniference::types::{ImageInput, ImageOperation, ImageOptions, ImageRequestIR, ImageResponse, ModelRef};
 use reqwest::{Client, Url, header::CONTENT_TYPE, redirect::Policy};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, net::IpAddr, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 use uuid::Uuid;
 
 use super::super::executor::{ToolContext, ToolError, ToolExecutor};
 use crate::ai::provider_to_config;
 use crate::types::models::Model;
 use crate::types::providers::{Provider, ProviderKind};
+use crate::types::{BUDGET_RESERVATION_METADATA_KEY, BudgetAdmission, BudgetError, BudgetSubject, TokenEstimate, image_tool_estimate};
 use crate::utils::images::{safe_image_mime, store_image};
+use crate::utils::outbound::{is_allowed_ip, read_limited};
 
 #[derive(Debug, Deserialize)]
 struct GenerateImageInput {
@@ -35,20 +36,6 @@ struct EditImageInput {
 const MAX_REMOTE_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 
 pub struct ImageGenExecutor;
-
-fn is_blocked_address(address: IpAddr) -> bool {
-	match address {
-		IpAddr::V4(address) => address.is_private() || address.is_loopback() || address.is_link_local() || address.is_multicast() || address.is_unspecified() || address.is_broadcast(),
-		IpAddr::V6(address) => {
-			address.to_ipv4_mapped().is_some_and(|address| is_blocked_address(IpAddr::V4(address)))
-				|| address.is_unique_local()
-				|| address.is_loopback()
-				|| address.is_unicast_link_local()
-				|| address.is_multicast()
-				|| address.is_unspecified()
-		}
-	}
-}
 
 impl ImageGenExecutor {
 	pub fn new() -> Result<Self, ToolError> {
@@ -93,7 +80,9 @@ impl ImageGenExecutor {
 		if let Some(id) = value.strip_prefix("/api/v1/images/") {
 			let db = ctx.db.as_ref().ok_or_else(|| ToolError::Internal("Database not available".to_string()))?;
 			let id = Uuid::parse_str(id).map_err(|_| ToolError::InvalidInput("Invalid image ID".to_string()))?;
-			let (bytes, mime) = crate::utils::images::get_image(db, id).await.map_err(ToolError::Internal)?.ok_or_else(|| ToolError::InvalidInput("Image not found".to_string()))?;
+			let not_found = || ToolError::InvalidInput("Image not found".to_string());
+			let user_id = ctx.user_id.ok_or_else(not_found)?;
+			let (bytes, mime) = crate::utils::images::get_image_for_user(db, id, user_id).await.map_err(ToolError::Internal)?.ok_or_else(not_found)?;
 			let media_type = safe_image_mime(&bytes, &mime).ok_or_else(|| ToolError::InvalidInput("Unsupported image content".to_string()))?;
 			return Ok(ImageInput { bytes, media_type: media_type.to_string() });
 		}
@@ -106,7 +95,7 @@ impl ImageGenExecutor {
 		let host = url.host_str().ok_or_else(fetch_error)?.to_string();
 		let port = url.port_or_known_default().ok_or_else(fetch_error)?;
 		let addresses: Vec<_> = tokio::net::lookup_host((host.as_str(), port)).await.map_err(|_| fetch_error())?.collect();
-		if addresses.is_empty() || addresses.iter().any(|address| is_blocked_address(address.ip())) {
+		if addresses.is_empty() || addresses.iter().any(|address| !is_allowed_ip(address.ip(), false)) {
 			return Err(fetch_error());
 		}
 		let client = Client::builder()
@@ -116,22 +105,11 @@ impl ImageGenExecutor {
 			.build()
 			.map_err(|_| fetch_error())?;
 		let response = client.get(url).send().await.map_err(|_| fetch_error())?;
-		if !response.status().is_success() || response.remote_addr().is_some_and(|address| is_blocked_address(address.ip())) {
-			return Err(fetch_error());
-		}
-		if response.content_length().is_some_and(|length| length > MAX_REMOTE_IMAGE_BYTES as u64) {
+		if !response.status().is_success() || response.remote_addr().is_some_and(|address| !is_allowed_ip(address.ip(), false)) {
 			return Err(fetch_error());
 		}
 		let mime = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()).and_then(|value| value.split(';').next()).unwrap_or_default().to_string();
-		let mut bytes = Vec::with_capacity(response.content_length().unwrap_or(0).min(MAX_REMOTE_IMAGE_BYTES as u64) as usize);
-		let mut stream = response.bytes_stream();
-		while let Some(chunk) = stream.next().await {
-			let chunk = chunk.map_err(|_| fetch_error())?;
-			if bytes.len().saturating_add(chunk.len()) > MAX_REMOTE_IMAGE_BYTES {
-				return Err(fetch_error());
-			}
-			bytes.extend_from_slice(&chunk);
-		}
+		let bytes = read_limited(response, MAX_REMOTE_IMAGE_BYTES).await.map_err(|_| fetch_error())?;
 		let media_type = safe_image_mime(&bytes, &mime).ok_or_else(fetch_error)?;
 		Ok(ImageInput { bytes, media_type: media_type.to_string() })
 	}
@@ -180,6 +158,7 @@ impl ToolExecutor for ImageGenExecutor {
 				(input.prompt, vec![self.input_image(&reference, ctx).await?], ImageOptions::default())
 			}
 		};
+		let admission = reserve_budget(ctx, &model.id, image_tool_estimate(prompt.len() as u64, input_images.len() as u64)).await?;
 		let caption = prompt.clone();
 		let provider_config = provider_to_config(&provider).map_err(|error| ToolError::Internal(error.to_string()))?;
 		let request = ImageRequestIR {
@@ -191,21 +170,49 @@ impl ToolExecutor for ImageGenExecutor {
 			options,
 			mask: None,
 			raw_request: None,
-			metadata: usage_metadata(ctx, &model),
+			metadata: usage_metadata(ctx, &model, &admission),
 		};
 		let engine = crate::ai::get();
 		let response = engine.image(request).await.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+		drop(admission);
 		self.store_response(response, ctx, &caption).await
 	}
 }
 
-fn usage_metadata(ctx: &ToolContext, model: &Model) -> BTreeMap<String, String> {
+/// Reserves the estimated cost of one image request against the user's budgets.
+///
+/// A call without a user (the admin tool test) reserves nothing.
+///
+/// # Errors
+/// Returns an error when a blocking budget is exhausted or the budget cannot be checked.
+pub(crate) async fn reserve_budget(ctx: &ToolContext, model_id: &Uuid, estimate: TokenEstimate) -> Result<BudgetAdmission, ToolError> {
+	let Some(user_id) = ctx.user_id else {
+		return Ok(BudgetAdmission::default());
+	};
+	let unavailable = || ToolError::Internal("Budget could not be checked".to_string());
+	let db = ctx.db.as_ref().ok_or_else(unavailable)?;
+	let ledger = ctx.budget_ledger.as_ref().ok_or_else(unavailable)?;
+	match ledger.reserve_for_model(db, BudgetSubject::user(user_id), model_id, estimate).await {
+		Ok(admission) => Ok(admission),
+		Err(BudgetError::Exceeded) => Err(ToolError::ExecutionFailed("The user's budget is used up, so no image was generated".to_string())),
+		Err(error) => {
+			tracing::error!(%error, "failed to check budget for image tool");
+			Err(unavailable())
+		}
+	}
+}
+
+fn usage_metadata(ctx: &ToolContext, model: &Model, admission: &BudgetAdmission) -> BTreeMap<String, String> {
 	let Some(user_id) = ctx.user_id else {
 		return BTreeMap::new();
 	};
-	BTreeMap::from([
+	let mut metadata = BTreeMap::from([
 		("oxide_user_id".to_string(), user_id.to_string()),
 		("oxide_model_id".to_string(), model.id.to_string()),
 		("oxide_request_type".to_string(), "image".to_string()),
-	])
+	]);
+	if let Some(reservation) = &admission.reservation {
+		metadata.insert(BUDGET_RESERVATION_METADATA_KEY.to_string(), reservation.id.to_string());
+	}
+	metadata
 }

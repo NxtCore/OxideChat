@@ -6,7 +6,7 @@
 //! - Supports reloading configuration at runtime
 
 use crate::i18n::Language;
-use crate::types::{ProviderRoutingSettings, ThemeCssVars, TitleGeneration, UpdateGlobalConfigRequest};
+use crate::types::{ProviderRoutingSettings, Registration, ThemeCssVars, TitleGeneration, UpdateGlobalConfigRequest};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
@@ -37,6 +37,8 @@ pub struct ConfigValues {
 	pub instance_icon_id: Option<Uuid>,
 	/// Generated chat titles; off by default.
 	pub title_generation: TitleGeneration,
+	/// Local sign-up with email and password.
+	pub registration: Registration,
 }
 
 impl Default for ConfigValues {
@@ -49,6 +51,7 @@ impl Default for ConfigValues {
 			instance_name: None,
 			instance_icon_id: None,
 			title_generation: TitleGeneration::default(),
+			registration: Registration::default(),
 		}
 	}
 }
@@ -148,6 +151,12 @@ impl Config {
 		self.values.load().title_generation
 	}
 
+	/// Get the local registration setting.
+	#[must_use]
+	pub fn registration(&self) -> Registration {
+		self.values.load().registration
+	}
+
 	/// Store the given settings in one transaction and reload config.
 	///
 	/// # Errors
@@ -156,6 +165,7 @@ impl Config {
 		let mut tx = pool.begin().await?;
 		Self::store_settings(&mut tx, req).await?;
 		Self::store_title_generation(&mut tx, req.title_generation.as_ref()).await?;
+		Self::store_registration(&mut tx, req.registration).await?;
 		tx.commit().await?;
 		self.reload(pool).await
 	}
@@ -184,6 +194,13 @@ impl Config {
 		}
 		let default_model_id = req.default_model_id.map(|id| id.map(|id| id.to_string()));
 		Self::set_or_clear(tx, "default_model_id", default_model_id.as_ref()).await
+	}
+
+	async fn store_registration(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, registration: Option<Registration>) -> Result<(), sqlx::Error> {
+		let Some(registration) = registration else {
+			return Ok(());
+		};
+		Self::upsert_config(&mut **tx, "registration_enabled", if registration.enabled { "true" } else { "false" }).await
 	}
 
 	async fn store_title_generation(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, title: Option<&TitleGeneration>) -> Result<(), sqlx::Error> {
@@ -243,6 +260,7 @@ impl Config {
 				"instance_name" => values.instance_name = Some(row.value),
 				"instance_icon_id" => values.instance_icon_id = Uuid::parse_str(&row.value).ok(),
 				"title_generation_enabled" => values.title_generation.enabled = row.value == "true",
+				"registration_enabled" => values.registration.enabled = row.value == "true",
 				"title_model_id" => values.title_generation.model_id = Uuid::parse_str(&row.value).ok(),
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}

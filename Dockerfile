@@ -88,6 +88,15 @@ RUN printf '%s\n' \
     '#!/bin/bash' \
     'set -e' \
     '' \
+    '# Trust X-Forwarded-For only from the proxies the operator lists, e.g. TRUSTED_PROXIES=172.18.0.0/16,10.0.0.5' \
+    ': > /tmp/nginx/real_ip.conf' \
+    'for range in $(printf "%s" "${TRUSTED_PROXIES:-}" | tr "," " "); do' \
+    '  case "$range" in' \
+    '    *[!0-9a-fA-F:./]*) echo "Ignoring invalid TRUSTED_PROXIES entry: $range" >&2 ;;' \
+    '    *) echo "set_real_ip_from $range;" >> /tmp/nginx/real_ip.conf ;;' \
+    '  esac' \
+    'done' \
+    '' \
     '# Only nginx listens publicly; it overwrites X-Forwarded-For with the real client IP' \
     'HOST=127.0.0.1 PORT=3001 TRUST_PROXY=true ./oxidechat &' \
     'API_PID=$!' \
