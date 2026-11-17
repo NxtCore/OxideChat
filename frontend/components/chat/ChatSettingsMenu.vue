@@ -54,7 +54,7 @@ const open = ref(false);
 
 const effortKeys: Record<string, string> = {minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'extra_high'};
 
-const showReasoning = computed(() => modelStore.hasConfigurableReasoningCapability(modelStore.selectedModel));
+const showReasoning = computed(() => !modelStore.selectedModel?.level && modelStore.hasConfigurableReasoningCapability(modelStore.selectedModel));
 
 const reasoningLabel = computed(() => {
 	if (!showReasoning.value) return null;

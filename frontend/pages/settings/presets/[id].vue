@@ -49,12 +49,14 @@
 					:base-model-key="baseModelKey"
 					:slug-renamed="slugRenamed"
 					:enabled-locked="enabledLocked"
+					:levels-active="form.levels.length > 0"
 					:disabled="!canEdit"
 					@name="onNameInput"
 					@slug="onSlugInput"
 					@base-key="value => (baseModelKey = value)"
 					@base="onBaseSelected"
 				/>
+				<SettingsPresetsLevelsTab v-show="currentTab === 'levels'" :form="form" :slug="form.slug" :base-model="baseModel" :disabled="!canEdit" />
 				<div v-show="currentTab === 'sharing'" class="space-y-3">
 					<h3 class="text-base font-semibold text-foreground">{{ t('sharing_title') }}</h3>
 					<SettingsAssignmentPicker
@@ -115,7 +117,8 @@ import {useMainStore} from '~/stores';
 import {usePresetStore} from '~/stores/presetStore';
 import type {AssignmentOption, AssignmentTarget} from '~/types/assignments';
 import type {ModelList} from '~/types/chat';
-import type {PresetResponse, PresetUnavailable, SavePresetRequest} from '~/types/presets';
+import type {PresetLevel, PresetResponse, PresetUnavailable, SavePresetRequest} from '~/types/presets';
+import type {LevelRow} from '~/utils/presets';
 import type {SlugStatus} from '~/components/settings/presets/GeneralTab.vue';
 
 definePageMeta({key: route => route.fullPath});
@@ -127,7 +130,7 @@ const router = useRouter();
 
 const t = (key: string, args?: Record<string, string>) => store.getTranslation(`presets.editor.${key}`, args);
 
-const tabs = ['general', 'sharing', 'instructions', 'parameters', 'tools', 'starters'] as const;
+const tabs = ['general', 'levels', 'sharing', 'instructions', 'parameters', 'tools', 'starters'] as const;
 const SCOPE_ICONS: Record<string, unknown> = {user: User, team: Building2, everyone: Globe};
 const samplingKeys = ['temperature', 'max_tokens', 'top_p', 'top_k', 'frequency_penalty', 'presence_penalty', 'seed', 'stop', 'logprobs', 'top_logprobs', 'parallel_tool_calls'] as const;
 
@@ -158,6 +161,8 @@ const form = reactive({
 	tool_ids: [] as string[],
 	tools_locked: false,
 	starters: ['', '', '', ''] as string[],
+	levels: [] as LevelRow[],
+	default_level: null as string | null,
 });
 
 const {data: storedAssignment, load: loadAssignment, replace: replaceAssignment} = useAssignments();
@@ -218,13 +223,35 @@ const settingsForm = useSettingsForm({
 		if (!form.name.trim()) return 'presets.editor.name_required';
 		if (!isValidPresetSlug(form.slug)) return 'presets.editor.slug_invalid';
 		if (slugStatus.value === 'taken') return 'presets.editor.slug_taken';
+		if (form.levels.length > 0) return levelsProblem();
 		if (!form.base_model_id) return 'presets.editor.model_required';
 		return null;
 	},
 	save: savePreset,
 });
 
-function populate(source: SavePresetRequest) {
+function levelsProblem(): string | null {
+	const keys = form.levels.map(level => level.key.trim());
+	if (form.levels.length < MIN_PRESET_LEVELS) return 'presets.editor.levels_too_few';
+	if (keys.some(key => !isValidLevelKey(key)) || new Set(keys).size !== keys.length) return 'presets.editor.level_key_invalid';
+	if (form.levels.some(level => !level.model_id)) return 'presets.editor.level_model_required';
+	return null;
+}
+
+function levelRows(levels: PresetLevel[], models: (ModelList | null)[] = []): LevelRow[] {
+	return levels.map((level, index) => {
+		const model = models[index] ?? null;
+		return {
+			...levelRow(level.key, model),
+			label: level.label ?? '',
+			hint: level.hint ?? '',
+			model_id: level.model_id,
+			reasoning: {effort: level.reasoning.effort ?? null, budget_tokens: level.reasoning.budget_tokens ?? null},
+		};
+	});
+}
+
+function populate(source: SavePresetRequest, levelModels: (ModelList | null)[] = []) {
 	form.name = source.name;
 	form.slug = source.slug;
 	form.description = source.description ?? '';
@@ -240,22 +267,34 @@ function populate(source: SavePresetRequest) {
 	form.tool_ids = [...source.tool_ids];
 	form.tools_locked = source.tools_locked;
 	form.starters = [...source.starters, '', '', '', ''].slice(0, MAX_PRESET_STARTERS);
+	form.levels = levelRows(source.levels, levelModels);
+	form.default_level = source.default_level ?? form.levels[0]?.key ?? null;
 }
 
 function buildRequest(): SavePresetRequest {
 	const sampling = Object.fromEntries(samplingKeys.map(key => [key, form.sampling[key]]).filter(([, value]) => value !== null && !(Array.isArray(value) && value.length === 0)));
 	const optional = (value: string) => (value.trim() ? value.trim() : null);
+	const levels: PresetLevel[] = form.levels.map(level => ({
+		key: level.key.trim(),
+		label: optional(level.label),
+		hint: optional(level.hint),
+		model_id: level.model_id,
+		reasoning: {effort: level.reasoning.effort, budget_tokens: level.reasoning.budget_tokens},
+	}));
+	const defaultLevel = levels.find(level => level.key === form.default_level) ?? levels[0];
 	return {
 		slug: form.slug.trim(),
 		name: form.name.trim(),
 		description: optional(form.description),
 		icon: optional(form.icon ?? ''),
-		base_model_id: form.base_model_id,
+		base_model_id: defaultLevel?.model_id ?? form.base_model_id,
 		system_prompt: optional(form.system_prompt),
 		sampling,
 		reasoning: {effort: form.reasoning_effort, budget_tokens: form.reasoning_budget_tokens},
 		tool_ids: [...form.tool_ids],
 		tools_locked: form.tools_locked,
+		levels,
+		default_level: defaultLevel?.key ?? null,
 		starters: form.starters.map(starter => starter.trim()).filter(Boolean),
 		prompt_visible: form.prompt_visible,
 		is_enabled: form.is_enabled,
@@ -324,7 +363,7 @@ function applyPreset(loaded: PresetResponse) {
 	preset.value = loaded;
 	baseModel.value = loaded.base_model;
 	baseModelKey.value = loaded.base_model?.model_id ?? null;
-	populate(presetToRequest(loaded));
+	populate(presetToRequest(loaded), loaded.levels.map(level => level.model));
 }
 
 async function savePreset() {
@@ -397,7 +436,7 @@ onMounted(async () => {
 		const draft = presetStore.draft;
 		presetStore.draft = null;
 		if (draft) {
-			populate(draft);
+			populate(draft, draft.level_models);
 			slugTouched.value = false;
 			form.slug = slugify(form.name);
 			checkSlug();

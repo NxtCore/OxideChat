@@ -65,6 +65,7 @@
 					</div>
 
 					<div class="flex shrink-0 items-center gap-1.5">
+						<PresetLevelSelector />
 						<ContextLimitIndicator />
 						<ShadButton
 							data-testid="composer-send"
@@ -94,6 +95,7 @@ import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useMainStore} from '~/stores';
 import ModelSelector from './ModelSelector.vue';
+import PresetLevelSelector from './PresetLevelSelector.vue';
 import ContextLimitIndicator from './ContextLimitIndicator.vue';
 import ToolSelector from './ToolSelector.vue';
 import ChatSettingsMenu from './ChatSettingsMenu.vue';

@@ -76,9 +76,13 @@
 												<span class="px-1.5 py-0.5 text-xs rounded bg-primary/10 text-primary">
 													{{ presetScopeLabel(preset, store.getTranslation) }}
 												</span>
+												<span v-if="hasLevels(preset)" class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground" data-testid="picker-preset-levels-badge">
+													<Gauge class="h-3 w-3" />
+													{{ store.getTranslation('presets.picker.levels', {count: String(preset.levels.length)}) }}
+												</span>
 											</div>
 											<p class="text-xs text-muted-foreground mt-0.5 truncate">
-												{{ preset.base_model ? store.getTranslation('presets.picker.on_model', {model: preset.base_model.display_name}) : preset.key }}
+												{{ presetSubtitle(preset) }}
 											</p>
 											<p v-if="presetProblem(preset)" class="text-xs text-destructive mt-1">
 												{{ presetProblem(preset) }}
@@ -275,7 +279,7 @@
 </template>
 
 <script setup lang="ts">
-import {Bot, Star, Bookmark, BookmarkPlus, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2, Pencil, ScrollText, Wand2} from 'lucide-vue-next';
+import {Bot, Star, Bookmark, BookmarkPlus, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2, Pencil, ScrollText, Wand2, Gauge} from 'lucide-vue-next';
 import type {ModelList, UpdatePreferencesRequest} from '~/types/chat';
 import type {PresetResponse} from '~/types/presets';
 import {usePresetStore} from '~/stores/presetStore';
@@ -419,13 +423,19 @@ const visiblePresets = computed(() => {
 const showSectionHeaders = computed(() => pickerFilter.value !== 'presets');
 
 function isPresetBlocked(preset: PresetResponse): boolean {
-	return !!preset.unavailable || !!preset.base_model?.budget_blocked;
+	return !!presetProblem(preset);
 }
 
 function presetProblem(preset: PresetResponse): string | null {
 	if (preset.unavailable) return store.getTranslation(`presets.unavailable.${preset.unavailable}`);
-	if (preset.base_model?.budget_blocked) return store.getTranslation('settings.budgets.reached');
+	const blocked = hasLevels(preset) ? preset.levels.every(level => level.unavailable || level.model?.budget_blocked) : !!preset.base_model?.budget_blocked;
+	if (blocked) return store.getTranslation('settings.budgets.reached');
 	return null;
+}
+
+function presetSubtitle(preset: PresetResponse): string {
+	if (hasLevels(preset)) return preset.levels.map(level => presetLevelLabel(level, store.getTranslation)).join(' · ');
+	return preset.base_model ? store.getTranslation('presets.picker.on_model', {model: preset.base_model.display_name}) : preset.key;
 }
 
 function selectPreset(preset: PresetResponse) {
@@ -434,7 +444,8 @@ function selectPreset(preset: PresetResponse) {
 		store.toast(problem, {type: 'warning'});
 		return;
 	}
-	const model = presetAsModel(preset);
+	const current = modelStore.selectedModel;
+	const model = presetAsModel(preset, current?.preset?.id === preset.id ? current.level?.key : null);
 	if (!model) return;
 	modelStore.setSelectedModel(model);
 	isOpen.value = false;

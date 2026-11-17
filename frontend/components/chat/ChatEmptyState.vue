@@ -7,7 +7,7 @@
 			</div>
 			<h1 class="mb-2 text-2xl font-semibold text-foreground">{{ preset.name }}</h1>
 			<p class="mb-8 max-w-md text-center text-muted-foreground">
-				{{ preset.description || store.getTranslation('presets.empty_state.on_model', {model: preset.base_model?.display_name ?? preset.key}) }}
+				{{ preset.description || store.getTranslation('presets.empty_state.on_model', {model: level?.model?.display_name ?? preset.base_model?.display_name ?? preset.key}) }}
 			</p>
 		</template>
 		<template v-else>
@@ -52,6 +52,7 @@ const chatStore = useChatStore();
 const modelStore = useModelStore();
 
 const preset = computed(() => modelStore.selectedModel?.preset ?? null);
+const level = computed(() => modelStore.selectedModel?.level ?? null);
 
 const username = computed(() => store.auth.user?.username || store.getTranslation('chat.empty_state.username_default'));
 

@@ -62,8 +62,14 @@
 
 			<div class="space-y-1.5" data-testid="preset-base-model">
 				<ShadLabel>{{ t('model_title') }}</ShadLabel>
-				<SettingsDefaultModelPicker :model-value="baseModelKey" :placeholder="t('choose_model')" :disabled="disabled" @update:model-value="value => emit('base-key', value)" @selected="model => emit('base', model)" />
-				<p class="text-xs text-muted-foreground">{{ t('model_description') }}</p>
+				<SettingsDefaultModelPicker
+					:model-value="baseModelKey"
+					:placeholder="t('choose_model')"
+					:disabled="disabled || levelsActive"
+					@update:model-value="value => emit('base-key', value)"
+					@selected="model => emit('base', model)"
+				/>
+				<p class="text-xs text-muted-foreground" data-testid="preset-base-model-hint">{{ t(levelsActive ? 'model_from_levels' : 'model_description') }}</p>
 			</div>
 
 			<div class="space-y-1.5">
@@ -103,6 +109,7 @@ const props = defineProps<{
 	baseModelKey: string | null;
 	slugRenamed: boolean;
 	enabledLocked: boolean;
+	levelsActive?: boolean;
 	disabled?: boolean;
 }>();
 

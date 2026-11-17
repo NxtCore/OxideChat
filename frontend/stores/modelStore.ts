@@ -1,7 +1,7 @@
 import {defineStore} from 'pinia';
 import {useMainStore} from './index';
 import type {ChatMessage, ModelList, PaginatedResponse, ProviderOption, ProviderOptionsResponse} from '~/types/chat';
-import type {ComposerModel} from '~/types/presets';
+import type {ComposerModel, PresetResponse} from '~/types/presets';
 import {usePresetStore} from './presetStore';
 
 export const useModelStore = defineStore('model', {
@@ -186,7 +186,7 @@ export const useModelStore = defineStore('model', {
 					}
 					this.presetFallbackNotice = model?.display_name ?? null;
 				}
-				if (model && model.id !== this.selectedModel?.id) {
+				if (model && model.model_id !== this.selectedModel?.model_id) {
 					this.setSelectedModel(model);
 				}
 			}
@@ -250,8 +250,12 @@ export const useModelStore = defineStore('model', {
 			const hasNone = model.capabilities.some(c => c === 'REASONING_EFFORT_NONE');
 			const hasReasoningCap = model.capabilities.some(c => c === 'REASONING' || c.startsWith('REASONING_'));
 
-			const presetReasoning = model.preset?.reasoning;
-			if (hasReasoningCap && (presetReasoning?.effort || presetReasoning?.budget_tokens)) {
+			const levelReasoning = model.level?.reasoning;
+			const presetReasoning = levelReasoning?.effort || levelReasoning?.budget_tokens ? levelReasoning : model.preset?.reasoning;
+			if (model.level) {
+				this.reasoningEffort = hasReasoningCap ? (presetReasoning?.effort ?? null) : null;
+				this.reasoningBudget = hasReasoningCap ? (presetReasoning?.budget_tokens ?? null) : null;
+			} else if (hasReasoningCap && (presetReasoning?.effort || presetReasoning?.budget_tokens)) {
 				this.reasoningEffort = presetReasoning.effort ?? null;
 				this.reasoningBudget = presetReasoning.budget_tokens ?? null;
 			} else if (!hasReasoningCap) {
@@ -267,6 +271,33 @@ export const useModelStore = defineStore('model', {
 				this.reasoningEffort = null;
 				this.reasoningBudget = null;
 			}
+		},
+
+		setPresetLevel(levelKey: string) {
+			const preset = this.selectedModel?.preset;
+			if (!preset || this.selectedModel?.level?.key === levelKey) return;
+			const model = presetAsModel(preset, levelKey);
+			if (!model || model.level?.key !== levelKey) return;
+			this.selectedProviderSlug = null;
+			this.providerOptions = [];
+			this.providerOptionsModelId = null;
+			this.setSelectedModel(model);
+		},
+
+		refreshSelectedPreset(presets: PresetResponse[]) {
+			const selected = this.selectedModel;
+			if (!selected?.preset) return;
+			const fresh = presets.find(preset => preset.id === selected.preset!.id);
+			const model = fresh && !fresh.unavailable ? presetAsModel(fresh, selected.level?.key) : null;
+			if (!model) return;
+			if (model.model_id === selected.model_id) {
+				this.selectedModel = model;
+				return;
+			}
+			this.selectedProviderSlug = null;
+			this.providerOptions = [];
+			this.providerOptionsModelId = null;
+			this.setSelectedModel(model);
 		},
 
 		async toggleFavoriteModel(modelDbId: string): Promise<boolean> {

@@ -105,6 +105,8 @@ fn bind_fields<'q>(query: PresetQuery<'q>, request: &'q SavePresetRequest) -> Pr
 		.bind(&request.system_prompt)
 		.bind(Json(&request.sampling))
 		.bind(Json(&request.reasoning))
+		.bind(Json(&request.levels))
+		.bind(&request.default_level)
 		.bind(&request.tool_ids)
 		.bind(request.tools_locked)
 		.bind(&request.starters)
@@ -230,8 +232,15 @@ impl Preset {
 	}
 
 	async fn check_references(pool: &PgPool, actor: &PresetActor, shared: bool, request: &SavePresetRequest) -> Result<(), PresetError> {
-		Self::check_base_model(pool, actor, &request.base_model_id).await?;
+		for model_id in request_model_ids(request) {
+			Self::check_base_model(pool, actor, &model_id).await?;
+		}
 		Self::check_tools(pool, actor, shared, &request.tool_ids).await
+	}
+
+	/// Every model the preset runs on: its base model and the models of its levels.
+	fn model_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
+		self.base_model_id.into_iter().chain(self.levels.iter().map(|level| level.model_id))
 	}
 
 	async fn check_base_model(pool: &PgPool, actor: &PresetActor, base_model_id: &Uuid) -> Result<(), PresetError> {
@@ -283,8 +292,8 @@ impl Preset {
 		let mut tx = pool.begin().await?;
 		let query = sqlx::query_as::<_, Self>(concat!(
 			"INSERT INTO model_presets (scope, owner_id, team_id, created_by, slug, name, description, icon, base_model_id, system_prompt, \
-			 sampling, reasoning, tool_ids, tools_locked, starters, prompt_visible, is_enabled) \
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING ",
+			 sampling, reasoning, levels, default_level, tool_ids, tools_locked, starters, prompt_visible, is_enabled) \
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING ",
 			preset_columns!()
 		))
 		.bind(scope.as_str())
@@ -299,7 +308,7 @@ impl Preset {
 
 	/// Replaces a preset the actor may edit, audited in the same transaction; its scope never changes after it is created.
 	///
-	/// The base model is only checked against the actor's access when it changes, so editors without access to it can still
+	/// The base model and level models are only checked against the actor's access when they are new to the preset, so editors without access to it can still
 	/// change the rest; a preset never grants model access.
 	///
 	/// # Errors
@@ -315,15 +324,16 @@ impl Preset {
 		request.team_id = current.team_id;
 		let request = request.normalized()?;
 		let shared = current.scope() != PresetScope::Personal || Shares::exist(pool, id).await?;
-		if current.base_model_id != Some(request.base_model_id) {
-			Self::check_base_model(pool, actor, &request.base_model_id).await?;
+		let known: HashSet<Uuid> = current.model_ids().collect();
+		for model_id in request_model_ids(&request).filter(|id| !known.contains(id)) {
+			Self::check_base_model(pool, actor, &model_id).await?;
 		}
 		Self::check_tools(pool, actor, shared, &request.tool_ids).await?;
 		let mut tx = pool.begin().await?;
 		let query = sqlx::query_as::<_, Self>(concat!(
 			"UPDATE model_presets SET slug = $2, name = $3, description = $4, icon = $5, base_model_id = $6, system_prompt = $7, \
-			 sampling = $8, reasoning = $9, tool_ids = $10, tools_locked = $11, starters = $12, prompt_visible = $13, is_enabled = $14, \
-			 disabled_by_admin = disabled_by_admin AND NOT $14, updated_at = NOW() \
+			 sampling = $8, reasoning = $9, levels = $10, default_level = $11, tool_ids = $12, tools_locked = $13, starters = $14, \
+			 prompt_visible = $15, is_enabled = $16, disabled_by_admin = disabled_by_admin AND NOT $16, updated_at = NOW() \
 			 WHERE id = $1 AND deleted_at IS NULL RETURNING ",
 			preset_columns!()
 		))
@@ -512,7 +522,9 @@ impl Preset {
 	/// # Errors
 	/// Returns the database error when the base models cannot be loaded.
 	pub async fn responses_for_user(pool: &PgPool, actor: &PresetActor, presets: Vec<Self>) -> Result<Vec<PresetResponse>, sqlx::Error> {
-		let ids: Vec<Uuid> = presets.iter().filter_map(|preset| preset.base_model_id).collect();
+		let mut ids: Vec<Uuid> = presets.iter().flat_map(Self::model_ids).collect();
+		ids.sort_unstable();
+		ids.dedup();
 		let bases: HashMap<Uuid, (ModelListPublic, bool)> = Model::list_public_for_user_by_ids(pool, &actor.user_id, &ids)
 			.await?
 			.into_iter()
@@ -529,16 +541,22 @@ impl Preset {
 		Ok(presets
 			.into_iter()
 			.map(|preset| {
-				let base = preset
-					.base_model_id
-					.and_then(|id| bases.get(&id))
-					.map(|(model, allowed)| PresetBaseModel { model: model.clone(), allowed: *allowed });
+				let lookup = |id: &Uuid| bases.get(id).map(|(model, allowed)| PresetBaseModel { model: model.clone(), allowed: *allowed });
+				let base = preset.base_model_id.as_ref().and_then(lookup);
+				let levels = preset.levels.iter().map(|level| lookup(&level.model_id)).collect();
 				let has_gateway_usage = used.contains(&preset.id);
 				PresetResponse {
 					has_gateway_usage,
-					..PresetResponse::build(preset, base, actor)
+					..PresetResponse::build(preset, base, levels, actor)
 				}
 			})
 			.collect())
 	}
+}
+
+fn request_model_ids(request: &SavePresetRequest) -> impl Iterator<Item = Uuid> {
+	let mut ids: Vec<Uuid> = std::iter::once(request.base_model_id).chain(request.levels.iter().map(|level| level.model_id)).collect();
+	ids.sort_unstable();
+	ids.dedup();
+	ids.into_iter()
 }

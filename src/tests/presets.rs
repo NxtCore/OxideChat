@@ -49,6 +49,8 @@ mod validation {
 			system_prompt: None,
 			sampling: PresetSampling::default(),
 			reasoning: PresetReasoning::default(),
+			levels: Vec::new(),
+			default_level: None,
 			tool_ids: Vec::new(),
 			tools_locked: false,
 			starters: Vec::new(),
@@ -928,6 +930,157 @@ mod gateway {
 				Err(response) => assert!(!accepted && response.status().as_u16() == 404, "{}", route.path),
 			}
 		}
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod levels {
+	use super::repository::personal;
+	use super::scopes::team;
+	use super::validation::request;
+	use crate::tests::gateway::support::{create_provider_model, create_team, insert_key};
+	use crate::tests::support::{TestResult, create_user};
+	use crate::types::*;
+	use serde_json::json;
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	fn level(key: &str, model_id: Uuid) -> PresetLevel {
+		PresetLevel {
+			key: key.to_string(),
+			label: None,
+			hint: None,
+			model_id,
+			reasoning: PresetReasoning::default(),
+		}
+	}
+
+	fn with_levels(slug: &str, levels: Vec<PresetLevel>, default_level: Option<&str>) -> SavePresetRequest {
+		SavePresetRequest {
+			levels,
+			default_level: default_level.map(str::to_string),
+			..request(slug)
+		}
+	}
+
+	#[test]
+	fn a_key_may_name_a_level() {
+		assert_eq!(preset_key_parts("presets/gemini"), Some(("gemini", None)));
+		assert_eq!(preset_key_parts("presets/gemini:high"), Some(("gemini", Some("high"))));
+		assert_eq!(preset_key_parts("presets/team/gemini:max"), Some(("team/gemini", Some("max"))));
+		assert_eq!(preset_key_parts("presets/gemini:"), None);
+		assert_eq!(preset_key_parts("presets/:high"), None);
+		assert_eq!(preset_key_parts("ollama/llama3:8b"), None);
+	}
+
+	#[test]
+	fn the_base_model_follows_the_default_level() -> Result<(), PresetError> {
+		let (low, high) = (Uuid::new_v4(), Uuid::new_v4());
+		let saved = with_levels("gemini", vec![level("low", low), level("high", high)], Some("high")).normalized()?;
+		assert_eq!(saved.base_model_id, high);
+		assert_eq!(saved.default_level.as_deref(), Some("high"));
+
+		let first = with_levels("gemini", vec![level(" low ", low), level("high", high)], None).normalized()?;
+		assert_eq!(first.base_model_id, low);
+		assert_eq!(first.default_level.as_deref(), Some("low"));
+
+		let plain = SavePresetRequest { default_level: Some("low".to_string()), ..request("plain") }.normalized()?;
+		assert_eq!(plain.default_level, None);
+		Ok(())
+	}
+
+	#[test]
+	fn levels_are_checked() {
+		let model = Uuid::new_v4();
+		let invalid = [
+			with_levels("one", vec![level("low", model)], None),
+			with_levels("many", ["a", "b", "c", "d", "e", "f"].iter().map(|key| level(key, model)).collect(), None),
+			with_levels("twice", vec![level("low", model), level("low", model)], None),
+			with_levels("bad-key", vec![level("Low", model), level("high", model)], None),
+			with_levels("colon", vec![level("a:b", model), level("high", model)], None),
+			with_levels("unknown-default", vec![level("low", model), level("high", model)], Some("max")),
+		];
+		for input in invalid {
+			let slug = input.slug.clone();
+			assert!(matches!(input.normalized(), Err(PresetError::Invalid)), "{slug} should be refused");
+		}
+		let mut effort = level("high", model);
+		effort.reasoning.effort = Some("extreme".to_string());
+		assert!(matches!(with_levels("effort", vec![level("low", model), effort], None).normalized(), Err(PresetError::Invalid)));
+		let mut label = level("high", model);
+		label.label = Some("x".repeat(41));
+		assert!(matches!(with_levels("label", vec![level("low", model), label], None).normalized(), Err(PresetError::Invalid)));
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn every_level_model_must_be_usable(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		create_team(&pool, user_id, "Everything", true).await?;
+		let (_, open) = create_provider_model(&pool, "Open", "open").await?;
+		let (_, disabled) = create_provider_model(&pool, "Off", "off").await?;
+		sqlx::query("UPDATE models SET is_enabled = false WHERE id = $1").bind(disabled).execute(&pool).await?;
+		let input = with_levels("mixed", vec![level("low", open), level("high", disabled)], None);
+		assert!(matches!(Preset::create(&pool, &personal(user_id), input).await, Err(PresetError::BaseModelNotAllowed)));
+		let missing = with_levels("missing", vec![level("low", open), level("high", Uuid::new_v4())], None);
+		assert!(matches!(Preset::create(&pool, &personal(user_id), missing).await, Err(PresetError::BaseModelNotAllowed)));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_preset_runs_on_the_model_and_reasoning_of_the_chosen_level(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let (_, strong) = create_provider_model(&pool, &format!("Strong {}", Uuid::new_v4().simple()), "strong").await?;
+		let mut high = level("high", strong);
+		high.reasoning.effort = Some("high".to_string());
+		let mut input = with_levels("gemini", vec![level("low", team.model_id), high], None);
+		input.reasoning.effort = Some("low".to_string());
+		Preset::create(&pool, &personal(team.member_id), input).await?;
+
+		let preset = Preset::find_visible_by_slug(&pool, &team.member_id, "gemini").await?.ok_or("missing preset")?;
+		let default = preset.clone().at_level(None).map(|preset| (preset.base_model_id, preset.reasoning.0.effort));
+		assert_eq!(default, Some((Some(team.model_id), Some("low".to_string()))));
+		let chosen = preset.clone().at_level(Some("high")).map(|preset| (preset.base_model_id, preset.reasoning.0.effort));
+		assert_eq!(chosen, Some((Some(strong), Some("high".to_string()))));
+		assert!(preset.at_level(Some("max")).is_none());
+
+		let (_, token) = insert_key(&pool, Some(team.member_id), team.team_id, json!(["inference:read", "inference:write"])).await?;
+		let context = GatewayCredential::authenticate(&pool, &token).await?;
+		let mut ids: Vec<String> = GatewayModel::list_for_context(&pool, &context)
+			.await?
+			.into_iter()
+			.map(|model| model.id)
+			.filter(|id| id.starts_with(PRESET_KEY_PREFIX))
+			.collect();
+		ids.sort();
+		assert_eq!(ids, ["presets/gemini", "presets/gemini:high", "presets/gemini:low"]);
+
+		let inference = GatewayModel::resolve_inference(&pool, &context, "presets/gemini:high").await?;
+		assert_eq!(inference.model_id, strong);
+		assert_eq!(inference.public_model_id, "presets/gemini:high");
+		assert_eq!(inference.preset.and_then(|preset| preset.reasoning.effort).as_deref(), Some("high"));
+		assert_eq!(GatewayModel::resolve_inference(&pool, &context, "presets/gemini").await?.model_id, team.model_id);
+		let unknown = GatewayModel::resolve_inference(&pool, &context, "presets/gemini:max").await;
+		assert!(matches!(unknown, Err(GatewayModelAccessError::NotFound)));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_preset_stays_usable_while_one_level_is(pool: PgPool) -> TestResult {
+		let team = team(&pool).await?;
+		let (_, gone) = create_provider_model(&pool, &format!("Gone {}", Uuid::new_v4().simple()), "gone").await?;
+		let input = with_levels("partial", vec![level("low", team.model_id), level("high", gone)], Some("high"));
+		Preset::create(&pool, &personal(team.member_id), input).await?;
+		sqlx::query("DELETE FROM models WHERE id = $1").bind(gone).execute(&pool).await?;
+
+		let presets = Preset::list_for_user(&pool, &team.member_id).await?;
+		let responses = Preset::responses_for_user(&pool, &personal(team.member_id), presets).await?;
+		let response = responses.iter().find(|preset| preset.slug == "partial").ok_or("missing preset")?;
+		assert_eq!(response.unavailable, None);
+		assert_eq!(response.default_level.as_deref(), Some("high"));
+		let states: Vec<(&str, Option<PresetUnavailable>)> = response.levels.iter().map(|level| (level.key.as_str(), level.unavailable)).collect();
+		assert_eq!(states, [("low", None), ("high", Some(PresetUnavailable::BaseModelUnavailable))]);
+		assert!(response.levels[0].model.is_some());
 		Ok(())
 	}
 }

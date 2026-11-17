@@ -1,4 +1,5 @@
 import {defineStore} from 'pinia';
+import {useModelStore} from './modelStore';
 import type {ComposerModel, PresetDraft, PresetResponse, PresetScopesResponse, PresetSlugAvailability, SavePresetRequest} from '~/types/presets';
 
 export const usePresetStore = defineStore('preset', {
@@ -24,6 +25,7 @@ export const usePresetStore = defineStore('preset', {
 					this.presets = await $customFetch<PresetResponse[]>(presetsPath);
 					this.loaded = true;
 					this.stale = false;
+					useModelStore().refreshSelectedPreset(this.presets);
 				} catch (e) {
 					console.error('Failed to load presets:', e);
 				}
@@ -44,8 +46,9 @@ export const usePresetStore = defineStore('preset', {
 
 		async modelForKey(key: string): Promise<ComposerModel | null> {
 			await this.ensurePresets();
-			const preset = this.byKey(key);
-			return preset && !preset.unavailable ? presetAsModel(preset) : null;
+			const {key: presetKey, level} = splitPresetKey(key);
+			const preset = this.byKey(presetKey);
+			return preset && !preset.unavailable ? presetAsModel(preset, level) : null;
 		},
 
 		async fetchPreset(id: string): Promise<PresetResponse> {
