@@ -46,8 +46,8 @@ impl ProviderKind {
 	#[must_use]
 	pub fn to_omni_kind(&self) -> OmniProviderKind {
 		match self {
-			Self::Openai => OmniProviderKind::OpenAI,
-			Self::OpenaiCompat | Self::Mistral => OmniProviderKind::OpenAICompat,
+			Self::Openai | Self::Mistral => OmniProviderKind::OpenAI,
+			Self::OpenaiCompat => OmniProviderKind::OpenAICompat,
 			Self::Anthropic => OmniProviderKind::Anthropic,
 			Self::Google => OmniProviderKind::Google,
 			Self::Openrouter => OmniProviderKind::OpenRouter,

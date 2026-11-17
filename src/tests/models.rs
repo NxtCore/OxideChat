@@ -643,9 +643,9 @@ mod catalog_pricing {
 	}
 
 	#[test]
-	fn mistral_runs_on_the_openai_compatible_adapter_with_its_vendor_profile() -> TestResult {
+	fn mistral_runs_on_the_responses_adapter_with_its_vendor_profile() -> TestResult {
 		let config = omniference::catalog::providers::resolve_provider(catalog_provider("Mistral", &ProviderKind::Mistral))?;
-		assert_eq!(config.endpoint.kind, omniference::types::ProviderKind::OpenAICompat);
+		assert_eq!(config.endpoint.kind, omniference::types::ProviderKind::OpenAI);
 		assert_eq!(config.vendor_slug(), Some("mistral"));
 		assert_eq!(config.resolved_profile.and_then(|resolved| resolved.profile.dialect.clone()).as_deref(), Some("mistral"));
 		Ok(())
