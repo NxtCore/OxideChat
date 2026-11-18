@@ -5,7 +5,7 @@ use sqlx::PgPool;
 
 macro_rules! visible_to_key {
 	() => {
-		"deleted_at IS NULL AND is_enabled AND (base_model_id IS NOT NULL OR jsonb_array_length(levels) > 0) AND (
+		"deleted_at IS NULL AND is_enabled AND mode = 'standard' AND (base_model_id IS NOT NULL OR jsonb_array_length(levels) > 0) AND (
 			(scope = 'personal' AND owner_id = $1)
 			OR (scope = 'team' AND team_id = $2)
 			OR scope = 'installation'

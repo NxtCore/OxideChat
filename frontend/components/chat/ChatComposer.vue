@@ -13,6 +13,14 @@
 				</button>
 			</div>
 			<div
+				v-if="arenaPending"
+				data-testid="arena-pick-to-continue"
+				class="mb-2 flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
+			>
+				<Swords class="h-3.5 w-3.5 shrink-0" />
+				<span class="flex-1">{{ store.getTranslation('chat.arena.pick_to_continue') }}</span>
+			</div>
+			<div
 				data-testid="chat-composer"
 				class="relative flex flex-col rounded-2xl border bg-card shadow-sm transition-colors"
 				:class="isDragging ? 'border-primary ring-2 ring-primary/30' : 'border-border'"
@@ -38,7 +46,7 @@
 					:placeholder="placeholder"
 					rows="1"
 					class="min-h-15 w-full resize-none border-none px-4 py-3 text-foreground placeholder:text-muted-foreground focus-visible:ring-0"
-					:disabled="chatStore.isStreaming"
+					:disabled="chatStore.isStreaming || arenaPending"
 					@keydown.enter.exact="handleEnter"
 					@input="autoResize"
 					@paste="handlePaste"
@@ -60,8 +68,10 @@
 						</button>
 						<input ref="fileInputRef" type="file" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
 						<ModelSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
-						<ToolSelector v-if="modelStore.hasToolCapability(modelStore.selectedModel)" class="shrink-0" />
-						<ChatSettingsMenu />
+						<template v-if="!arenaSelected">
+							<ToolSelector v-if="modelStore.hasToolCapability(modelStore.selectedModel)" class="shrink-0" />
+							<ChatSettingsMenu />
+						</template>
 					</div>
 
 					<div class="flex shrink-0 items-center gap-1.5">
@@ -89,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import {ArrowUp, Loader2, X, ImageIcon, Info} from 'lucide-vue-next';
+import {ArrowUp, Loader2, X, ImageIcon, Info, Swords} from 'lucide-vue-next';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
@@ -150,8 +160,11 @@ const placeholder = computed(() => {
 	return store.getTranslation('chat.composer.placeholder_default');
 });
 
+const arenaSelected = computed(() => isArena(modelStore.selectedModel?.preset));
+const arenaPending = computed(() => !!chatStore.arenaRound && !chatStore.arenaRound.decided && !chatStore.isStreaming);
+
 const canSend = computed(() => {
-	return (message.value.trim().length > 0 || attachedImages.value.length > 0) && modelStore.selectedModel && !chatStore.isStreaming;
+	return (message.value.trim().length > 0 || attachedImages.value.length > 0) && modelStore.selectedModel && !chatStore.isStreaming && !arenaPending.value;
 });
 
 function handleEnter(e: KeyboardEvent) {

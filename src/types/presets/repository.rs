@@ -1,5 +1,5 @@
 use super::rows::preset_columns;
-use super::{Preset, PresetActor, PresetBaseModel, PresetError, PresetResponse, PresetScope, PresetScopesResponse, PresetTeam, SavePresetRequest};
+use super::{Preset, PresetActor, PresetBaseModel, PresetMode, PresetError, PresetResponse, PresetScope, PresetScopesResponse, PresetTeam, SavePresetRequest};
 use crate::logging::AuditLog;
 use crate::types::models::{Model, ModelListPublic};
 use crate::types::{AssignmentKind, AssignmentRole, AssignmentTarget, AssignmentsResponse, AuditEntry, ReplaceAssignmentsRequest, Tool, is_unique_violation};
@@ -112,6 +112,7 @@ fn bind_fields<'q>(query: PresetQuery<'q>, request: &'q SavePresetRequest) -> Pr
 		.bind(&request.starters)
 		.bind(request.prompt_visible)
 		.bind(request.is_enabled)
+		.bind(Json(request.arena.clone().unwrap_or_default()))
 }
 
 impl PresetActor {
@@ -287,15 +288,19 @@ impl Preset {
 		let mut tx = pool.begin().await?;
 		let query = sqlx::query_as::<_, Self>(concat!(
 			"INSERT INTO model_presets (scope, owner_id, team_id, created_by, slug, name, description, icon, base_model_id, system_prompt, \
-			 sampling, reasoning, levels, default_level, tool_ids, tools_locked, starters, prompt_visible, is_enabled) \
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING ",
+			 sampling, reasoning, levels, default_level, tool_ids, tools_locked, starters, prompt_visible, is_enabled, arena, mode) \
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING ",
 			preset_columns!()
 		))
 		.bind(scope.as_str())
 		.bind(owner_id)
 		.bind(request.team_id)
 		.bind(actor.user_id);
-		let preset = bind_fields(query, &request).fetch_one(&mut *tx).await.map_err(map_write_error)?;
+		let preset = bind_fields(query, &request)
+			.bind(request.mode.unwrap_or_default().as_str())
+			.fetch_one(&mut *tx)
+			.await
+			.map_err(map_write_error)?;
 		audit(&mut tx, EVENT_CREATED, &actor.user_id, &preset).await?;
 		tx.commit().await?;
 		Ok(preset)
@@ -317,6 +322,7 @@ impl Preset {
 		let mut request = request;
 		request.scope = Some(current.scope());
 		request.team_id = current.team_id;
+		request.mode = Some(if current.is_arena() { PresetMode::Arena } else { PresetMode::Standard });
 		let request = request.normalized()?;
 		let shared = current.scope() != PresetScope::Personal || Shares::exist(pool, id).await?;
 		let known: HashSet<Uuid> = current.model_ids().collect();
@@ -328,7 +334,7 @@ impl Preset {
 		let query = sqlx::query_as::<_, Self>(concat!(
 			"UPDATE model_presets SET slug = $2, name = $3, description = $4, icon = $5, base_model_id = $6, system_prompt = $7, \
 			 sampling = $8, reasoning = $9, levels = $10, default_level = $11, tool_ids = $12, tools_locked = $13, starters = $14, \
-			 prompt_visible = $15, is_enabled = $16, disabled_by_admin = disabled_by_admin AND NOT $16, updated_at = NOW() \
+			 prompt_visible = $15, is_enabled = $16, disabled_by_admin = disabled_by_admin AND NOT $16, arena = $17, updated_at = NOW() \
 			 WHERE id = $1 AND deleted_at IS NULL RETURNING ",
 			preset_columns!()
 		))

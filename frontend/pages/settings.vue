@@ -39,7 +39,7 @@
 
 <script setup lang="ts">
 import {ADMIN_ANALYTICS_VIEW, ADMIN_BUDGETS_VIEW, ADMIN_CONFIG_VIEW, ADMIN_DEVELOPER_VIEW, ADMIN_I18N_VIEW, ADMIN_PRESETS_VIEW, ADMIN_PROVIDERS_VIEW, ADMIN_ROLES_VIEW, ADMIN_TEAMS_VIEW, ADMIN_TOOLS_VIEW, ADMIN_USERS_VIEW, SETTINGS_APPEARANCE_EDIT, SETTINGS_PRESETS_EDIT, SETTINGS_SESSIONS_VIEW} from '~/types/generated/permissions';
-import {Activity, User, Cpu, Bot, Package, Palette, Users, Network, CreditCard, BarChart3, SlidersHorizontal, ShieldCheck, Languages, MonitorSmartphone, Shield, Wand2} from 'lucide-vue-next';
+import {Activity, User, Cpu, Bot, Package, Palette, Users, Network, CreditCard, BarChart3, SlidersHorizontal, ShieldCheck, Languages, MonitorSmartphone, Shield, Wand2, Swords} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 definePageMeta({
@@ -58,6 +58,7 @@ const groups = [
 			{id: 'profile', label: 'settings.tabs.profile', icon: User, permission: 'settings.profile.view'},
 			{id: 'usage', label: 'settings.analytics.my_usage', icon: Activity, permission: 'settings.profile.view'},
 			{id: 'presets', label: 'settings.tabs.presets', icon: Wand2, permission: [SETTINGS_PRESETS_EDIT, ADMIN_PRESETS_VIEW]},
+			{id: 'arenas', label: 'settings.tabs.arenas', icon: Swords, permission: [SETTINGS_PRESETS_EDIT, ADMIN_PRESETS_VIEW]},
 			{id: 'appearance', label: 'settings.tabs.appearance', icon: Palette, permission: SETTINGS_APPEARANCE_EDIT},
 			{id: 'sessions', label: 'settings.tabs.sessions', icon: MonitorSmartphone, permission: SETTINGS_SESSIONS_VIEW},
 		],

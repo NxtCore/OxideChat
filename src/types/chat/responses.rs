@@ -77,6 +77,8 @@ pub struct ChatResponse {
 pub struct ChatWithMessagesResponse {
 	pub chat: ChatResponse,
 	pub messages: Vec<ChatMessageResponse>,
+	/// An arena round still waiting for the user's pick, shown blind.
+	pub pending_arena_round: Option<crate::types::ArenaRoundResponse>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -100,6 +102,8 @@ pub struct ChatMessageResponse {
 	pub parent_id: Option<Uuid>,
 	pub fork_index: i32,
 	pub sibling_count: i32,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub arena_round_id: Option<Uuid>,
 }
 
 impl From<Message> for ChatMessageResponse {
@@ -123,6 +127,7 @@ impl From<Message> for ChatMessageResponse {
 			parent_id: m.parent_id,
 			fork_index: m.fork_index,
 			sibling_count: 1,
+			arena_round_id: m.arena_round_id,
 		}
 	}
 }
@@ -284,5 +289,21 @@ pub enum StreamData {
 	/// Sent after `done` when the chat got a generated title.
 	Title {
 		title: String,
+	},
+	/// Opens an arena round: the user message is saved and `candidates` answers follow.
+	ArenaStarted {
+		round_id: Uuid,
+		candidates: usize,
+		stream_responses: bool,
+		show_reasoning: bool,
+	},
+	/// One event of one arena answer, by its position in the round.
+	ArenaCandidate {
+		candidate: usize,
+		event: Box<StreamData>,
+	},
+	/// Every answer of the round has finished.
+	ArenaDone {
+		round_id: Uuid,
 	},
 }

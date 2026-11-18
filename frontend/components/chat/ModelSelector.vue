@@ -12,6 +12,7 @@
 					:src="modelStore.selectedModel?.icon"
 					class="h-4 w-4 mt-0.5 shrink-0 flex items-center justify-center rounded-md bg-muted overflow-hidden"
 				/>
+				<Swords v-else-if="isArena(modelStore.selectedModel?.preset)" class="h-4 w-4 shrink-0 text-primary" data-testid="model-selector-arena" />
 				<Wand2 v-else-if="modelStore.selectedModel?.preset" class="h-4 w-4 shrink-0 text-primary" />
 				<div
 					v-else-if="iconStore.getProviderIcon(modelStore.selectedModel?.provider.name, modelStore.selectedModel?.model_id)?.type === 'svg'"
@@ -52,14 +53,14 @@
 							<Loader2 class="h-5 w-5 animate-spin" />
 						</div>
 						<template v-else>
-							<template v-if="visiblePresets.length > 0">
+							<template v-for="(section, sectionIndex) in presetSections" :key="section.key">
 								<p v-if="showSectionHeaders" class="px-3 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-									{{ store.getTranslation('presets.picker.section') }}
+									{{ store.getTranslation(section.label) }}
 								</p>
 								<div
-									v-for="preset in visiblePresets"
+									v-for="preset in section.items"
 									:key="preset.id"
-									data-testid="picker-preset"
+									:data-testid="isArena(preset) ? 'picker-arena' : 'picker-preset'"
 									:data-preset-key="preset.key"
 									class="px-3 py-2 transition-colors border-b border-border/50"
 									:class="isPresetBlocked(preset) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-accent/50 cursor-pointer'"
@@ -69,6 +70,7 @@
 								>
 									<div class="flex items-start gap-3">
 										<img v-if="preset.icon" :src="preset.icon" class="h-5 w-5 mt-0.5 rounded-md bg-muted object-cover" alt="" />
+										<Swords v-else-if="isArena(preset)" class="h-5 w-5 mt-0.5 text-primary" />
 										<Wand2 v-else class="h-5 w-5 mt-0.5 text-primary" />
 										<div class="flex-1 min-w-0">
 											<div class="flex items-center gap-2 flex-wrap">
@@ -76,7 +78,7 @@
 												<span class="px-1.5 py-0.5 text-xs rounded bg-primary/10 text-primary">
 													{{ presetScopeLabel(preset, store.getTranslation) }}
 												</span>
-												<span v-if="hasLevels(preset)" class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground" data-testid="picker-preset-levels-badge">
+												<span v-if="hasLevels(preset) && !isArena(preset)" class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground" data-testid="picker-preset-levels-badge">
 													<Gauge class="h-3 w-3" />
 													{{ store.getTranslation('presets.picker.levels', {count: String(preset.levels.length)}) }}
 												</span>
@@ -112,14 +114,14 @@
 										</div>
 									</div>
 								</div>
-								<p v-if="showSectionHeaders && pickerModels.length > 0" class="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">
+								<p v-if="showSectionHeaders && pickerModels.length > 0 && sectionIndex === presetSections.length - 1" class="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">
 									{{ store.getTranslation('presets.picker.models_section') }}
 								</p>
 							</template>
 							<div v-if="pickerFilter === 'presets' && visiblePresets.length === 0" class="p-4 text-center text-sm text-muted-foreground">
 								{{ store.getTranslation('presets.picker.empty') }}
 							</div>
-							<div v-else-if="pickerFilter !== 'presets' && pickerModels.length === 0 && visiblePresets.length === 0" class="p-4 text-center text-sm text-muted-foreground">
+							<div v-else-if="!presetOnlyFilter && pickerModels.length === 0 && presetSections.length === 0" class="p-4 text-center text-sm text-muted-foreground">
 								{{ store.getTranslation('chat.model_selector.no_models') }}
 							</div>
 							<div
@@ -230,6 +232,16 @@
 						>
 							<Wand2 class="h-5 w-5" />
 						</button>
+						<button
+							v-if="arenaCount > 0"
+							data-testid="picker-arenas-tab"
+							class="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg transition-colors"
+							:class="pickerFilter === 'arenas' ? 'bg-primary/20 text-primary' : 'hover:bg-accent text-muted-foreground'"
+							:title="store.getTranslation('presets.arena.picker_section')"
+							@click="pickerSelectFilter('arenas')"
+						>
+							<Swords class="h-5 w-5" />
+						</button>
 						<div class="shrink-0 w-px h-6 bg-border" />
 						<button
 							v-for="provider in pickerProviders"
@@ -279,7 +291,7 @@
 </template>
 
 <script setup lang="ts">
-import {Bot, Star, Bookmark, BookmarkPlus, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2, Pencil, ScrollText, Wand2, Gauge} from 'lucide-vue-next';
+import {Bot, Star, Bookmark, BookmarkPlus, ChevronDown, Search, Filter, Wrench, Sparkles, Eye, Loader2, Pencil, ScrollText, Wand2, Gauge, Swords} from 'lucide-vue-next';
 import type {ModelList, UpdatePreferencesRequest} from '~/types/chat';
 import type {PresetResponse} from '~/types/presets';
 import {usePresetStore} from '~/stores/presetStore';
@@ -401,7 +413,7 @@ function savePreset() {
 
 function editPreset(preset: PresetResponse) {
 	isOpen.value = false;
-	openSettings(`/settings/presets/${preset.id}`);
+	openSettings(`/settings/${isArena(preset) ? 'arenas' : 'presets'}/${preset.id}`);
 }
 
 function showInstructions(preset: PresetResponse) {
@@ -409,18 +421,29 @@ function showInstructions(preset: PresetResponse) {
 	instructionsPreset.value = preset;
 }
 
-const visiblePresets = computed(() => {
+function matchingPresets(own: string, arenas: boolean): PresetResponse[] {
 	const filter = pickerFilter.value;
-	if (filter !== 'all' && filter !== 'presets' && filter !== 'favorites') return [];
+	if (filter !== 'all' && filter !== own && filter !== 'favorites') return [];
 	const needle = pickerSearch.value.trim().toLowerCase();
 	return presetStore.presets.filter(preset => {
+		if (isArena(preset) !== arenas) return false;
 		if (filter === 'favorites' && !isFavoriteKey(preset.key)) return false;
 		if (!needle) return true;
 		return `${preset.name} ${preset.key} ${preset.description ?? ''}`.toLowerCase().includes(needle);
 	});
-});
+}
 
-const showSectionHeaders = computed(() => pickerFilter.value !== 'presets');
+const visiblePresets = computed(() => matchingPresets('presets', false));
+const presetSections = computed(() =>
+	[
+		{key: 'presets', label: 'presets.picker.section', items: visiblePresets.value},
+		{key: 'arenas', label: 'presets.arena.picker_section', items: matchingPresets('arenas', true)},
+	].filter(section => section.items.length > 0),
+);
+const arenaCount = computed(() => presetStore.presets.filter(isArena).length);
+const presetOnlyFilter = computed(() => pickerFilter.value === 'presets' || pickerFilter.value === 'arenas');
+
+const showSectionHeaders = computed(() => !presetOnlyFilter.value);
 
 function isPresetBlocked(preset: PresetResponse): boolean {
 	return !!presetProblem(preset);
@@ -428,12 +451,15 @@ function isPresetBlocked(preset: PresetResponse): boolean {
 
 function presetProblem(preset: PresetResponse): string | null {
 	if (preset.unavailable) return store.getTranslation(`presets.unavailable.${preset.unavailable}`);
-	const blocked = hasLevels(preset) ? preset.levels.every(level => level.unavailable || level.model?.budget_blocked) : !!preset.base_model?.budget_blocked;
+	const blocked = isArena(preset)
+		? preset.levels.some(level => level.unavailable || level.model?.budget_blocked)
+		: hasLevels(preset) ? preset.levels.every(level => level.unavailable || level.model?.budget_blocked) : !!preset.base_model?.budget_blocked;
 	if (blocked) return store.getTranslation('settings.budgets.reached');
 	return null;
 }
 
 function presetSubtitle(preset: PresetResponse): string {
+	if (isArena(preset)) return store.getTranslation('presets.arena.picker_subtitle', {count: String(preset.levels.length)});
 	if (hasLevels(preset)) return preset.levels.map(level => presetLevelLabel(level, store.getTranslation)).join(' · ');
 	return preset.base_model ? store.getTranslation('presets.picker.on_model', {model: preset.base_model.display_name}) : preset.key;
 }

@@ -69,12 +69,13 @@ impl Preset {
 			 LEFT JOIN teams t ON t.id = p.team_id \
 			 LEFT JOIN users u ON u.id = p.owner_id \
 			 LEFT JOIN models m ON m.id = p.base_model_id \
-			 WHERE p.deleted_at IS NULL AND ($1::text IS NULL OR p.scope = $1) AND ($2::uuid IS NULL OR p.team_id = $2) AND ($3::uuid[] IS NULL OR p.id = ANY($3)) \
+			 WHERE p.deleted_at IS NULL AND ($1::text IS NULL OR p.scope = $1) AND ($2::uuid IS NULL OR p.team_id = $2) AND ($3::uuid[] IS NULL OR p.id = ANY($3)) AND ($4::text IS NULL OR p.mode = $4) \
 			 ORDER BY lower(p.name), p.slug",
 		)
 		.bind(query.scope.map(PresetScope::as_str))
 		.bind(query.team_id)
 		.bind(ids)
+		.bind(query.mode.map(super::PresetMode::as_str))
 		.fetch_all(pool)
 		.await?;
 		Ok(rows.into_iter().map(AdminPresetResponse::from).collect())

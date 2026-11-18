@@ -13,6 +13,7 @@
 			<TransitionGroup name="message">
 				<MessageItem v-for="message in messages" :key="message.client_id ?? message.id" :message="message" :animation="store.preferences?.streaming_animation" />
 			</TransitionGroup>
+			<ArenaRound v-if="chatStore.arenaRound" :round="chatStore.arenaRound" />
 		</div>
 
 		<Transition name="fade">
@@ -30,6 +31,7 @@
 <script setup lang="ts">
 import {ArrowDown} from 'lucide-vue-next';
 import MessageItem from './MessageItem.vue';
+import ArenaRound from './ArenaRound.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores/index';
@@ -74,7 +76,7 @@ function handleScrollButtonClick() {
 
 // Watch for message content changes (during streaming)
 watch(
-	() => props.messages.map(m => `${m.content || ''}${m.reasoning_content || ''}`).join(''),
+	() => [...props.messages, ...(chatStore.arenaRound?.candidates.map(candidate => candidate.message) ?? [])].map(m => `${m.content || ''}${m.reasoning_content || ''}`).join(''),
 	() => {
 		if (isAutoScrolling.value && chatStore.isStreaming) {
 			nextTick(() => scrollToBottom(true));

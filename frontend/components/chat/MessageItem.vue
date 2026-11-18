@@ -183,7 +183,7 @@
 				<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.15s" />
 				<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.3s" />
 			</div>
-			<div v-if="!isUser && !isStreaming" class="flex items-center gap-3 mt-1">
+			<div v-if="!isUser && !isStreaming && !blind" class="flex items-center gap-3 mt-1">
 				<span v-if="modelDisplayName" class="text-xs text-muted-foreground">
 					{{ modelDisplayName }}
 				</span>
@@ -223,6 +223,8 @@ const store = useMainStore();
 const props = defineProps<{
 	message: ChatMessage;
 	animation?: string;
+	/** An arena answer: no model, icon or actions until the round is decided. */
+	blind?: boolean;
 }>();
 
 const chatStore = useChatStore();
@@ -259,7 +261,7 @@ const attachedImages = computed(() => {
 });
 
 const model = computed(() => {
-	if (isUser.value) return null;
+	if (isUser.value || props.blind) return null;
 	return modelStore.models.find(m => m.id === props.message.model_id);
 });
 

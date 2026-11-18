@@ -86,6 +86,8 @@ mod agent {
 			reasoning_budget_tokens: None,
 			request_settings: RequestSettings::default(),
 			needs_title: false,
+			active: true,
+			arena_round_id: None,
 		};
 		AgentRun::new(Arc::clone(&fixture.state), turn, Instant::now())
 	}

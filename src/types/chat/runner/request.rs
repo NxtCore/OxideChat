@@ -23,6 +23,8 @@ pub(super) struct RequestInputs<'a> {
 	/// The upstream provider the user picked, already checked against what they may use, followed by the
 	/// providers it may fall back to when the routing provider needs them listed (Cortecs "prefer").
 	pub provider_slugs: &'a [String],
+	/// Whether the tools the admin enabled for the model are added; arenas send none so every model runs alike.
+	pub config_tools: bool,
 }
 
 /// Interpolate `{{variable}}` placeholders in a system prompt string.
@@ -281,7 +283,7 @@ pub(crate) fn turn_tool_ids(enabled_tools: &[String], config: Option<&ModelConfi
 
 async fn apply_tools_and_system_prompt(db: &PgPool, inputs: &RequestInputs<'_>, ir: &mut ChatRequestIR) {
 	let mut tool_system_prompts: Vec<String> = Vec::new();
-	let tool_ids = turn_tool_ids(inputs.enabled_tools, inputs.system_config);
+	let tool_ids = turn_tool_ids(inputs.enabled_tools, inputs.system_config.filter(|_| inputs.config_tools));
 	let (specs, choice, prompts) = resolve_tools(db, inputs.user.id, &tool_ids).await;
 	if !specs.is_empty() {
 		ir.tools = specs;

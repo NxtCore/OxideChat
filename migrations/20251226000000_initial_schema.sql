@@ -807,6 +807,8 @@ CREATE TABLE IF NOT EXISTS model_presets (
     is_enabled BOOLEAN NOT NULL DEFAULT true,
     disabled_by_admin BOOLEAN NOT NULL DEFAULT false,
     shared_with_everyone BOOLEAN NOT NULL DEFAULT false,
+    mode VARCHAR(10) NOT NULL DEFAULT 'standard' CONSTRAINT model_presets_mode_check CHECK (mode IN ('standard', 'arena')),
+    arena JSONB NOT NULL DEFAULT '{}',
     created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -815,7 +817,8 @@ CREATE TABLE IF NOT EXISTS model_presets (
         (scope = 'personal' AND owner_id IS NOT NULL AND team_id IS NULL) OR
         (scope = 'team' AND team_id IS NOT NULL AND owner_id IS NULL) OR
         (scope = 'installation' AND owner_id IS NULL AND team_id IS NULL)
-    )
+    ),
+    CONSTRAINT model_presets_arena_scope_check CHECK (mode <> 'arena' OR scope <> 'personal')
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS model_presets_slug_unique ON model_presets (slug) WHERE deleted_at IS NULL;
@@ -836,6 +839,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS model_preset_shares_user_unique ON model_prese
 CREATE UNIQUE INDEX IF NOT EXISTS model_preset_shares_team_unique ON model_preset_shares (preset_id, team_id) WHERE team_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_model_preset_shares_user ON model_preset_shares(user_id) WHERE user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_model_preset_shares_team ON model_preset_shares(team_id) WHERE team_id IS NOT NULL;
+
+-- Arena rounds: one blind comparison of an arena preset's models; candidates are inactive assistant messages until one is picked
+CREATE TABLE IF NOT EXISTS arena_rounds (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    preset_id UUID NOT NULL REFERENCES model_presets(id),
+    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    user_message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    winner_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+    winner_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    decided_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_arena_rounds_preset ON arena_rounds(preset_id);
+CREATE INDEX IF NOT EXISTS idx_arena_rounds_chat ON arena_rounds(chat_id);
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS arena_round_id UUID REFERENCES arena_rounds(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_arena_round ON messages(arena_round_id) WHERE arena_round_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS usage_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -4910,4 +4932,99 @@ ON CONFLICT (language, key_path) DO NOTHING;
 INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.errors.request_failed', 'The request to the model failed. Try again or pick another model.'),
     ('de', 'chat.errors.request_failed', 'Die Anfrage an das Modell ist fehlgeschlagen. Versuche es erneut oder wähle ein anderes Modell.')
+ON CONFLICT (language, key_path) DO NOTHING;
+
+INSERT INTO i18n_translations (language, key_path, value) VALUES
+    ('en', 'presets.errors.arena_invalid', 'An arena needs 2 to 5 different models, no tools and a team or organization owner.'),
+    ('de', 'presets.errors.arena_invalid', 'Eine Arena braucht 2 bis 5 verschiedene Modelle, keine Tools und ein Team oder die Organisation als Besitzer.'),
+    ('en', 'chat.arena.errors.decided', 'You already picked an answer in this round.'),
+    ('de', 'chat.arena.errors.decided', 'In dieser Runde hast du bereits eine Antwort gewählt.'),
+    ('en', 'chat.arena.errors.no_regenerate', 'Arena answers cannot be regenerated. Send a new message instead.'),
+    ('de', 'chat.arena.errors.no_regenerate', 'Arena-Antworten lassen sich nicht neu erzeugen. Sende stattdessen eine neue Nachricht.'),
+    ('en', 'chat.arena.pick_to_continue', 'Pick the better answer to continue the chat.'),
+    ('de', 'chat.arena.pick_to_continue', 'Wähle die bessere Antwort, um den Chat fortzusetzen.'),
+    ('en', 'chat.arena.pick_hint', 'Blind test: which answer is better? The models are revealed after your pick.'),
+    ('de', 'chat.arena.pick_hint', 'Blindtest: Welche Antwort ist besser? Die Modelle werden nach deiner Wahl gezeigt.'),
+    ('en', 'chat.arena.revealed', 'The models are revealed. The chat continues with your pick.'),
+    ('de', 'chat.arena.revealed', 'Die Modelle sind aufgedeckt. Der Chat geht mit deiner Wahl weiter.'),
+    ('en', 'chat.arena.answer', 'Answer {label}'),
+    ('de', 'chat.arena.answer', 'Antwort {label}'),
+    ('en', 'chat.arena.pick', 'Pick this answer'),
+    ('de', 'chat.arena.pick', 'Diese Antwort wählen'),
+    ('en', 'chat.arena.picked', 'Picked'),
+    ('de', 'chat.arena.picked', 'Gewählt'),
+    ('en', 'chat.arena.picked_model', 'Answer {label} came from {model}.'),
+    ('de', 'chat.arena.picked_model', 'Antwort {label} kam von {model}.'),
+    ('en', 'chat.arena.pick_error', 'The answer could not be picked.'),
+    ('de', 'chat.arena.pick_error', 'Die Antwort konnte nicht gewählt werden.'),
+    ('en', 'chat.arena.load_error', 'The arena answers could not be loaded.'),
+    ('de', 'chat.arena.load_error', 'Die Arena-Antworten konnten nicht geladen werden.'),
+    ('en', 'chat.arena.compare', 'Compare arena answers'),
+    ('de', 'chat.arena.compare', 'Arena-Antworten vergleichen'),
+    ('en', 'chat.arena.compare_title', 'Arena answers'),
+    ('de', 'chat.arena.compare_title', 'Arena-Antworten'),
+    ('en', 'chat.arena.compare_description', 'Every answer of this round with the model that wrote it.'),
+    ('de', 'chat.arena.compare_description', 'Alle Antworten dieser Runde mit dem Modell, das sie geschrieben hat.'),
+    ('en', 'settings.tabs.arenas', 'Arenas'),
+    ('de', 'settings.tabs.arenas', 'Arenen'),
+    ('en', 'presets.arena.picker_section', 'Arenas'),
+    ('de', 'presets.arena.picker_section', 'Arenen'),
+    ('en', 'presets.arena.picker_subtitle', 'Blind test · {count} models'),
+    ('de', 'presets.arena.picker_subtitle', 'Blindtest · {count} Modelle'),
+    ('en', 'presets.arena.new_title', 'New arena'),
+    ('de', 'presets.arena.new_title', 'Neue Arena'),
+    ('en', 'presets.editor.tabs.models', 'Models'),
+    ('de', 'presets.editor.tabs.models', 'Modelle'),
+    ('en', 'presets.editor.tabs.options', 'Options'),
+    ('de', 'presets.editor.tabs.options', 'Optionen'),
+    ('en', 'presets.editor.tabs.results', 'Results'),
+    ('de', 'presets.editor.tabs.results', 'Ergebnisse'),
+    ('en', 'presets.arena.stream_responses', 'Stream answers'),
+    ('de', 'presets.arena.stream_responses', 'Antworten streamen'),
+    ('en', 'presets.arena.stream_responses_description', 'Show answers while they are written. When off, all answers appear together once every model is done, so speed gives nothing away.'),
+    ('de', 'presets.arena.stream_responses_description', 'Antworten erscheinen, während sie geschrieben werden. Ausgeschaltet erscheinen alle Antworten zusammen, sobald jedes Modell fertig ist, damit die Geschwindigkeit nichts verrät.'),
+    ('en', 'presets.arena.show_reasoning', 'Show reasoning'),
+    ('de', 'presets.arena.show_reasoning', 'Reasoning anzeigen'),
+    ('en', 'presets.arena.show_reasoning_description', 'Show the models'' reasoning before the pick. Reasoning styles can give a model away.'),
+    ('de', 'presets.arena.show_reasoning_description', 'Zeigt das Reasoning der Modelle vor der Wahl. Der Stil des Reasonings kann ein Modell verraten.'),
+    ('en', 'presets.arena.models_title', 'Models'),
+    ('de', 'presets.arena.models_title', 'Modelle'),
+    ('en', 'presets.arena.models_description', '2 to 5 different models. Every model answers each message, in a random order.'),
+    ('de', 'presets.arena.models_description', '2 bis 5 verschiedene Modelle. Jedes Modell beantwortet jede Nachricht, in zufälliger Reihenfolge.'),
+    ('en', 'presets.arena.add_model', 'Add model'),
+    ('de', 'presets.arena.add_model', 'Modell hinzufügen'),
+    ('en', 'presets.arena.remove_model', 'Remove model'),
+    ('de', 'presets.arena.remove_model', 'Modell entfernen'),
+    ('en', 'presets.arena.errors.models_count', 'Choose 2 to 5 models.'),
+    ('de', 'presets.arena.errors.models_count', 'Wähle 2 bis 5 Modelle.'),
+    ('en', 'presets.arena.errors.models_distinct', 'Each model can only be in the arena once.'),
+    ('de', 'presets.arena.errors.models_distinct', 'Jedes Modell kann nur einmal in der Arena sein.'),
+    ('en', 'presets.arena.errors.scope', 'Choose a team or the organization as owner.'),
+    ('de', 'presets.arena.errors.scope', 'Wähle ein Team oder die Organisation als Besitzer.'),
+    ('en', 'presets.arena.results_title', 'Results'),
+    ('de', 'presets.arena.results_title', 'Ergebnisse'),
+    ('en', 'presets.arena.results_description', 'How often users picked each model in decided rounds.'),
+    ('de', 'presets.arena.results_description', 'Wie oft Nutzer jedes Modell in entschiedenen Runden gewählt haben.'),
+    ('en', 'presets.arena.results_empty', 'No decided rounds yet.'),
+    ('de', 'presets.arena.results_empty', 'Noch keine entschiedenen Runden.'),
+    ('en', 'presets.arena.results_model', 'Model'),
+    ('de', 'presets.arena.results_model', 'Modell'),
+    ('en', 'presets.arena.results_rounds', 'Rounds'),
+    ('de', 'presets.arena.results_rounds', 'Runden'),
+    ('en', 'presets.arena.results_wins', 'Wins'),
+    ('de', 'presets.arena.results_wins', 'Siege'),
+    ('en', 'presets.arena.results_win_rate', 'Win rate'),
+    ('de', 'presets.arena.results_win_rate', 'Siegquote'),
+    ('en', 'presets.arena.results_error', 'The results could not be loaded.'),
+    ('de', 'presets.arena.results_error', 'Die Ergebnisse konnten nicht geladen werden.'),
+    ('en', 'presets.arena.settings.title', 'Arenas'),
+    ('de', 'presets.arena.settings.title', 'Arenen'),
+    ('en', 'presets.arena.settings.description', 'Blind tests that answer every message with several models side by side. Users pick the better answer, and the chat continues with it.'),
+    ('de', 'presets.arena.settings.description', 'Blindtests, die jede Nachricht mit mehreren Modellen nebeneinander beantworten. Nutzer wählen die bessere Antwort, und der Chat geht damit weiter.'),
+    ('en', 'presets.arena.settings.create', 'Create arena'),
+    ('de', 'presets.arena.settings.create', 'Arena erstellen'),
+    ('en', 'presets.arena.settings.empty_title', 'No arenas yet'),
+    ('de', 'presets.arena.settings.empty_title', 'Noch keine Arenen'),
+    ('en', 'presets.arena.settings.empty_description', 'Create an arena to let your team compare models without knowing which is which.'),
+    ('de', 'presets.arena.settings.empty_description', 'Erstelle eine Arena, damit dein Team Modelle vergleichen kann, ohne zu wissen, welches welches ist.')
 ON CONFLICT (language, key_path) DO NOTHING;
