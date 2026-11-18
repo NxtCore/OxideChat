@@ -55,6 +55,9 @@ test.describe('arenas', () => {
 			await page.goto('/');
 			await pickArena(page, key);
 			await expect(page.getByTestId('model-selector-arena')).toBeVisible();
+			const emptyState = page.getByTestId('preset-empty-state').locator('..');
+			await expect(emptyState).toContainText(t('presets.arena.picker_subtitle', {count: 2}));
+			for (const name of Object.values(names)) await expect(emptyState).not.toContainText(name);
 			await page.getByTestId('chat-composer').locator('textarea').fill('Reply with one short word.');
 			await page.getByTestId('composer-send').click();
 

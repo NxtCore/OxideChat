@@ -4,7 +4,7 @@
 			<Swords class="h-4 w-4 text-primary" />
 			<span>{{ store.getTranslation(round.decided ? 'chat.arena.revealed' : 'chat.arena.pick_hint') }}</span>
 		</div>
-		<div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+		<div class="grid gap-3" :class="columns">
 			<div
 				v-for="(candidate, index) in round.candidates"
 				:key="index"
@@ -46,6 +46,8 @@ const store = useMainStore();
 const chatStore = useChatStore();
 const picking = ref(false);
 const winnerId = ref<string | null>(null);
+
+const columns = computed(() => (props.round.candidates.length % 2 ? 'md:grid-cols-3' : 'md:grid-cols-2'));
 
 function canPick(candidate: ArenaCandidate): boolean {
 	return !chatStore.isStreaming && !candidate.message.id.startsWith('streaming-');

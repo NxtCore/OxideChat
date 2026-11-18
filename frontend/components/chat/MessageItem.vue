@@ -1,6 +1,6 @@
 <template>
 	<div class="group flex gap-4" :class="isUser ? 'flex-row-reverse' : ''" data-testid="message" :data-role="message.role">
-		<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full overflow-hidden bg-muted">
+		<div v-if="!blind" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full overflow-hidden bg-muted">
 			<User v-if="isUser" class="h-4 w-4 text-muted-foreground" />
 			<template v-else>
 				<div v-if="providerIcon?.type === 'svg'" class="h-full w-full p-1.5 [&>svg]:h-full [&>svg]:w-full" v-html="providerIcon.icon" />
@@ -9,7 +9,7 @@
 			</template>
 		</div>
 
-		<div class="flex flex-1 flex-col gap-2" :class="isUser ? 'items-end' : 'items-start'">
+		<div class="flex min-w-0 flex-1 flex-col gap-2" :class="isUser ? 'items-end' : 'items-start'">
 			<ReasoningBlock
 				v-if="!isUser && !hasInterleavedParts && message.reasoning_content"
 				v-model:open="showReasoning"

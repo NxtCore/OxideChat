@@ -9,7 +9,7 @@
 				<div v-if="!round" class="flex justify-center py-8 text-muted-foreground">
 					<Loader2 class="h-5 w-5 animate-spin" />
 				</div>
-				<div v-else class="grid max-h-[70vh] gap-3 overflow-y-auto md:grid-cols-2 xl:grid-cols-3">
+				<div v-else class="grid max-h-[70vh] gap-3 overflow-y-auto" :class="round.candidates.length % 2 ? 'md:grid-cols-3' : 'md:grid-cols-2'">
 					<div
 						v-for="candidate in round.candidates"
 						:key="candidate.message_id"
