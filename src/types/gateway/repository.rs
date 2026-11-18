@@ -1,6 +1,6 @@
 use super::{GatewayAuthContext, GatewayAuthError, GatewayAuthFailure, GatewayCredential, GatewayInference, GatewayModel, GatewayModelAccessError, public_model_id};
 use super::{GatewayRatePolicy, GatewayRateRule};
-use crate::types::{BudgetAdmission, BudgetLedger, GatewayPreset, Preset, RequestLogOwner, TokenEstimate, RESERVED_PROVIDER_NAME, preset_slug};
+use crate::types::{BudgetAdmission, BudgetLedger, GatewayPreset, Preset, RequestLogOwner, TokenEstimate, PRESET_LEVEL_SEPARATOR, RESERVED_PROVIDER_NAME, preset_key_parts};
 use crate::utils::auth::{hash_password, verify_password};
 use chrono::Utc;
 use omniference::types::providers::OpenAIModel;
@@ -237,21 +237,24 @@ impl GatewayModel {
 		let mut listed: Vec<OpenAIModel> = models.into_iter().map(OpenAIModel::from).collect();
 		let presets = Preset::list_for_gateway(pool, context).await?;
 		if !presets.is_empty() {
-			let base_ids: Vec<Uuid> = presets.iter().filter_map(|preset| preset.base_model_id).collect();
-			let accessible: HashSet<Uuid> = Self::accessible_model_ids(pool, context, &base_ids).await?.into_iter().collect();
-			listed.extend(
-				presets
-					.into_iter()
-					.filter(|preset| preset.base_model_id.is_some_and(|id| accessible.contains(&id)))
-					.map(|preset| OpenAIModel {
-						id: preset.key(),
-						object: Some("model".to_string()),
-						created: Some(u64::try_from(preset.updated_at.timestamp()).unwrap_or_default()),
-						owned_by: Some(RESERVED_PROVIDER_NAME.to_string()),
-						model_type: Some("chat".to_string()),
-						capabilities: Vec::new(),
-					}),
-			);
+			let model_ids: Vec<Uuid> = presets.iter().flat_map(Preset::model_ids).collect();
+			let accessible: HashSet<Uuid> = Self::accessible_model_ids(pool, context, &model_ids).await?.into_iter().collect();
+			for preset in &presets {
+				let created = Some(u64::try_from(preset.updated_at.timestamp()).unwrap_or_default());
+				let entry = |id: String| OpenAIModel {
+					id,
+					object: Some("model".to_string()),
+					created,
+					owned_by: Some(RESERVED_PROVIDER_NAME.to_string()),
+					model_type: Some("chat".to_string()),
+					capabilities: Vec::new(),
+				};
+				if preset.model_ids().any(|id| accessible.contains(&id)) {
+					listed.push(entry(preset.key()));
+				}
+				let levels = preset.levels.iter().filter(|level| accessible.contains(&level.model_id));
+				listed.extend(levels.map(|level| entry(format!("{}{PRESET_LEVEL_SEPARATOR}{}", preset.key(), level.key))));
+			}
 		}
 		Ok(listed)
 	}
@@ -277,20 +280,30 @@ impl GatewayModel {
 			.await
 	}
 
-	async fn resolve_preset(pool: &PgPool, context: &GatewayAuthContext, slug: &str) -> Result<Option<GatewayInference>, sqlx::Error> {
+	async fn resolve_preset(pool: &PgPool, context: &GatewayAuthContext, slug: &str, level: Option<&str>) -> Result<Option<GatewayInference>, sqlx::Error> {
 		let Some(preset) = Preset::find_for_gateway(pool, context, slug).await? else {
 			return Ok(None);
 		};
-		let Some(base_id) = preset.base_model_id else {
-			return Ok(None);
+		let public_model_id = match level {
+			Some(level) => format!("{}{PRESET_LEVEL_SEPARATOR}{level}", preset.key()),
+			None => preset.key(),
 		};
-		let Some(model) = Self::resolve_model_by_id(pool, context, &base_id).await? else {
-			return Ok(None);
-		};
-		let mut inference = GatewayInference::from(model);
-		inference.public_model_id = preset.key();
-		inference.preset = Some(GatewayPreset::from(preset));
-		Ok(Some(inference))
+		for candidate in preset.level_candidates(level) {
+			let Some(model_id) = preset.model_at(candidate.as_deref()) else {
+				continue;
+			};
+			let Some(model) = Self::resolve_model_by_id(pool, context, &model_id).await? else {
+				continue;
+			};
+			let Some(preset) = preset.at_level(candidate.as_deref()) else {
+				return Ok(None);
+			};
+			let mut inference = GatewayInference::from(model);
+			inference.public_model_id = public_model_id;
+			inference.preset = Some(GatewayPreset::from(preset));
+			return Ok(Some(inference));
+		}
+		Ok(None)
 	}
 
 	/// Resolves one enabled provider/model identifier accessible to the context.
@@ -332,8 +345,8 @@ impl GatewayModel {
 	/// Returns [`GatewayModelAccessError::NotFound`] for inaccessible or ambiguous
 	/// models and a database error when model access cannot be queried.
 	pub async fn resolve_inference(pool: &PgPool, context: &GatewayAuthContext, requested_id: &str) -> Result<GatewayInference, GatewayModelAccessError> {
-		if let Some(slug) = preset_slug(requested_id) {
-			return Self::resolve_preset(pool, context, slug).await?.ok_or(GatewayModelAccessError::NotFound);
+		if let Some((slug, level)) = preset_key_parts(requested_id) {
+			return Self::resolve_preset(pool, context, slug, level).await?.ok_or(GatewayModelAccessError::NotFound);
 		}
 		let model = Self::resolve_model(pool, context, requested_id).await?.ok_or(GatewayModelAccessError::NotFound)?;
 		Ok(model.into())

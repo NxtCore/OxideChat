@@ -1,4 +1,4 @@
-use super::{PresetReasoning, PresetSampling, PresetScope};
+use super::{PresetLevel, PresetReasoning, PresetSampling, PresetScope};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -25,6 +25,12 @@ pub struct SavePresetRequest {
 	pub sampling: PresetSampling,
 	#[serde(default)]
 	pub reasoning: PresetReasoning,
+	/// Levels users pick between; empty for a preset that always runs on its base model, which then follows the default level.
+	#[serde(default)]
+	pub levels: Vec<PresetLevel>,
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub default_level: Option<String>,
 	#[serde(default)]
 	pub tool_ids: Vec<Uuid>,
 	#[serde(default)]

@@ -1,4 +1,4 @@
-use super::{MAX_PRESET_SLUG_LEN, MAX_PRESET_STARTERS, PresetReasoning, PresetSampling, PresetScope, SavePresetRequest};
+use super::{MAX_PRESET_LEVELS, MAX_PRESET_SLUG_LEN, MAX_PRESET_STARTERS, MIN_PRESET_LEVELS, PresetLevel, PresetReasoning, PresetSampling, PresetScope, SavePresetRequest};
 
 const MAX_NAME_LEN: usize = 100;
 const MAX_DESCRIPTION_LEN: usize = 2_000;
@@ -7,6 +7,9 @@ const MAX_SYSTEM_PROMPT_LEN: usize = 50_000;
 const MAX_STARTER_LEN: usize = 300;
 const MAX_STOP_SEQUENCES: usize = 4;
 const MAX_TOOLS: usize = 64;
+const MAX_LEVEL_KEY_LEN: usize = 32;
+const MAX_LEVEL_LABEL_LEN: usize = 40;
+const MAX_LEVEL_HINT_LEN: usize = 100;
 const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh"];
 
 /// Why a preset could not be saved or used.
@@ -78,8 +81,48 @@ impl PresetReasoning {
 	}
 }
 
+/// Whether `key` can name a level: lowercase letters, digits and inner hyphens, at most 32 characters.
+#[must_use]
+pub fn is_valid_level_key(key: &str) -> bool {
+	key.len() <= MAX_LEVEL_KEY_LEN && is_valid_slug_part(key)
+}
+
+impl PresetLevel {
+	fn normalized(mut self) -> Result<Self, PresetError> {
+		self.key = self.key.trim().to_string();
+		self.label = optional_text(self.label, MAX_LEVEL_LABEL_LEN)?;
+		self.hint = optional_text(self.hint, MAX_LEVEL_HINT_LEN)?;
+		if is_valid_level_key(&self.key) && self.reasoning.is_valid() { Ok(self) } else { Err(PresetError::Invalid) }
+	}
+}
+
+fn normalized_levels(levels: Vec<PresetLevel>, default_level: Option<String>) -> Result<(Vec<PresetLevel>, Option<String>), PresetError> {
+	if levels.is_empty() {
+		return Ok((levels, None));
+	}
+	if !(MIN_PRESET_LEVELS..=MAX_PRESET_LEVELS).contains(&levels.len()) {
+		return Err(PresetError::Invalid);
+	}
+	let levels = levels.into_iter().map(PresetLevel::normalized).collect::<Result<Vec<_>, _>>()?;
+	let mut keys: Vec<&str> = levels.iter().map(|level| level.key.as_str()).collect();
+	keys.sort_unstable();
+	keys.dedup();
+	if keys.len() != levels.len() {
+		return Err(PresetError::Invalid);
+	}
+	let default_level = match default_level.map(|key| key.trim().to_string()) {
+		Some(key) if levels.iter().any(|level| level.key == key) => key,
+		Some(_) => return Err(PresetError::Invalid),
+		None => levels[0].key.clone(),
+	};
+	Ok((levels, Some(default_level)))
+}
+
 impl SavePresetRequest {
 	/// Trims the text fields and checks every limit, returning the preset as it will be stored.
+	///
+	/// A preset with levels needs 2 to 5 of them with unique keys; its default level is the first one unless named,
+	/// and its base model becomes the default level's model.
 	///
 	/// # Errors
 	/// Returns [`PresetError::InvalidSlug`] for a malformed slug and [`PresetError::Invalid`] for any other field.
@@ -108,6 +151,10 @@ impl SavePresetRequest {
 		self.tool_ids.dedup();
 		if self.tool_ids.len() > MAX_TOOLS || !self.sampling.is_valid() || !self.reasoning.is_valid() {
 			return Err(PresetError::Invalid);
+		}
+		(self.levels, self.default_level) = normalized_levels(self.levels, self.default_level)?;
+		if let Some(level) = self.default_level.as_ref().and_then(|key| self.levels.iter().find(|level| &level.key == key)) {
+			self.base_model_id = level.model_id;
 		}
 		Ok(self)
 	}

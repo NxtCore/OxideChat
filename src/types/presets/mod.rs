@@ -31,6 +31,15 @@ pub const MAX_PRESET_SLUG_LEN: usize = 64;
 /// Most conversation starters a preset can show.
 pub const MAX_PRESET_STARTERS: usize = 4;
 
+/// Separates a preset key from the level it asks for, as in `presets/gemini:high`.
+pub const PRESET_LEVEL_SEPARATOR: char = ':';
+
+/// Fewest levels a preset with levels must have.
+pub const MIN_PRESET_LEVELS: usize = 2;
+
+/// Most levels a preset can have.
+pub const MAX_PRESET_LEVELS: usize = 5;
+
 /// Who a preset belongs to and who can see it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -122,6 +131,24 @@ pub struct PresetReasoning {
 	pub budget_tokens: Option<u32>,
 }
 
+/// One step of a preset with levels: the model it runs on and, optionally, the reasoning it uses there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct PresetLevel {
+	/// Short ID of the level, used in `presets/<slug>:<key>`; `low`, `medium`, `high` and `max` have translated labels.
+	pub key: String,
+	/// Custom label; without one the translated label of the key is shown.
+	#[serde(default)]
+	pub label: Option<String>,
+	/// Short hint shown with the level, such as "Hard problems".
+	#[serde(default)]
+	pub hint: Option<String>,
+	pub model_id: Uuid,
+	/// Reasoning this level uses; when empty the preset's reasoning applies.
+	#[serde(default)]
+	pub reasoning: PresetReasoning,
+}
+
 /// A row of `model_presets`.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Preset {
@@ -138,6 +165,8 @@ pub struct Preset {
 	pub system_prompt: Option<String>,
 	pub sampling: Json<PresetSampling>,
 	pub reasoning: Json<PresetReasoning>,
+	pub levels: Json<Vec<PresetLevel>>,
+	pub default_level: Option<String>,
 	pub tool_ids: Vec<Uuid>,
 	pub tools_locked: bool,
 	pub starters: Vec<String>,
@@ -158,6 +187,54 @@ impl Preset {
 	#[must_use]
 	pub fn scope(&self) -> PresetScope {
 		PresetScope::from_stored(&self.scope)
+	}
+
+	/// The level `key` names, or the default level when `key` is `None`; `None` for a preset without levels.
+	#[must_use]
+	pub fn level(&self, key: Option<&str>) -> Option<&PresetLevel> {
+		let key = key.or(self.default_level.as_deref())?;
+		self.levels.iter().find(|level| level.key == key)
+	}
+
+	/// Every model the preset runs on: its base model and the models of its levels.
+	pub fn model_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
+		self.base_model_id.into_iter().chain(self.levels.iter().map(|level| level.model_id))
+	}
+
+	/// The levels a key may run on, in the order to try them: the named level, or for a bare key the default level and then the others.
+	#[must_use]
+	pub fn level_candidates(&self, key: Option<&str>) -> Vec<Option<String>> {
+		if key.is_some() || self.levels.is_empty() {
+			return vec![key.map(str::to_string)];
+		}
+		let default = self.default_level.as_deref();
+		let others = self.levels.iter().map(|level| level.key.as_str()).filter(|level| Some(*level) != default);
+		default.into_iter().chain(others).map(|level| Some(level.to_string())).collect()
+	}
+
+	/// The model the preset runs on at level `key`, resolved like [`Preset::at_level`].
+	#[must_use]
+	pub fn model_at(&self, key: Option<&str>) -> Option<Uuid> {
+		if self.levels.is_empty() {
+			return self.base_model_id.filter(|_| key.is_none());
+		}
+		self.level(key).map(|level| level.model_id)
+	}
+
+	/// The preset as it runs at level `key`: its base model and reasoning become the level's.
+	///
+	/// Without levels only `None` resolves; with levels `None` picks the default level. Returns `None` for an unknown level.
+	#[must_use]
+	pub fn at_level(mut self, key: Option<&str>) -> Option<Self> {
+		if self.levels.is_empty() {
+			return key.is_none().then_some(self);
+		}
+		let level = self.level(key)?.clone();
+		self.base_model_id = Some(level.model_id);
+		if level.reasoning.effort.is_some() || level.reasoning.budget_tokens.is_some() {
+			self.reasoning = Json(level.reasoning);
+		}
+		Some(self)
 	}
 }
 
@@ -237,6 +314,17 @@ impl PresetActor {
 #[must_use]
 pub fn preset_slug(key: &str) -> Option<&str> {
 	key.strip_prefix(PRESET_KEY_PREFIX).filter(|slug| !slug.is_empty())
+}
+
+/// The slug and the level of a preset key such as `presets/gemini:high`, or `None` when the key is not in the preset namespace.
+#[must_use]
+pub fn preset_key_parts(key: &str) -> Option<(&str, Option<&str>)> {
+	let rest = preset_slug(key)?;
+	match rest.split_once(PRESET_LEVEL_SEPARATOR) {
+		Some((slug, level)) if !slug.is_empty() && !level.is_empty() => Some((slug, Some(level))),
+		Some(_) => None,
+		None => Some((rest, None)),
+	}
 }
 
 /// Whether a model ID falls into the reserved preset namespace.

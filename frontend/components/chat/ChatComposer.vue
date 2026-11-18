@@ -7,7 +7,7 @@
 				class="mb-2 flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
 			>
 				<Info class="h-3.5 w-3.5 shrink-0" />
-				<span class="flex-1">{{ store.getTranslation('presets.fallback_notice', {model: modelStore.presetFallbackNotice}) }}</span>
+				<span class="flex-1">{{ store.getTranslation(modelStore.presetFallbackNotice.key, {model: modelStore.presetFallbackNotice.model}) }}</span>
 				<button class="rounded p-0.5 hover:bg-accent" :aria-label="store.getTranslation('presets.dismiss')" @click="modelStore.presetFallbackNotice = null">
 					<X class="h-3.5 w-3.5" />
 				</button>
@@ -65,6 +65,7 @@
 					</div>
 
 					<div class="flex shrink-0 items-center gap-1.5">
+						<PresetLevelSelector />
 						<ContextLimitIndicator />
 						<ShadButton
 							data-testid="composer-send"
@@ -94,6 +95,7 @@ import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useMainStore} from '~/stores';
 import ModelSelector from './ModelSelector.vue';
+import PresetLevelSelector from './PresetLevelSelector.vue';
 import ContextLimitIndicator from './ContextLimitIndicator.vue';
 import ToolSelector from './ToolSelector.vue';
 import ChatSettingsMenu from './ChatSettingsMenu.vue';

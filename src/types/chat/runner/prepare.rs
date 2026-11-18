@@ -3,7 +3,7 @@ use crate::types::models::Model;
 use crate::types::providers::ProviderKind;
 use crate::types::models_configs::ModelConfig;
 use crate::i18n::I18n;
-use crate::types::presets::preset_slug;
+use crate::types::presets::preset_key_parts;
 use crate::types::{
 	BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, MessagePart, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
 	StreamingUserMessageCreate, TokenEstimate, UsageDetails, User,
@@ -89,10 +89,10 @@ async fn prompt_bytes(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, system_c
 		.saturating_add(preset_bytes as u64))
 }
 
-/// The model a key names: a provider model, or the base model of a preset the user can see.
+/// The model a key names: a provider model, or the model of a preset the user can see at the level the key asks for.
 async fn resolve_model(db: &PgPool, user_id: &Uuid, key: &str) -> Result<(Model, Option<Preset>), TurnError> {
 	let not_found = || TurnError::new("not_found", "Model not found");
-	let Some(slug) = preset_slug(key) else {
+	let Some((slug, level)) = preset_key_parts(key) else {
 		let model = Model::find_by_model_id(db, key).await.map_err(internal("Failed to fetch model"))?.ok_or_else(not_found)?;
 		return Ok((model, None));
 	};
@@ -100,7 +100,9 @@ async fn resolve_model(db: &PgPool, user_id: &Uuid, key: &str) -> Result<(Model,
 		.await
 		.map_err(internal("Failed to fetch preset"))?
 		.filter(|preset| preset.is_enabled)
-		.ok_or_else(|| TurnError::new("not_found", I18n::get().translate("presets.errors.not_found", &None)))?;
+		.ok_or_else(|| TurnError::new("not_found", I18n::get().translate("presets.errors.not_found", &None)))?
+		.at_level(level)
+		.ok_or_else(|| TurnError::new("not_found", I18n::get().translate("presets.errors.level_not_found", &None)))?;
 	let model = match preset.base_model_id {
 		Some(id) => Model::find_by_id(db, &id).await.map_err(internal("Failed to fetch model"))?,
 		None => None,

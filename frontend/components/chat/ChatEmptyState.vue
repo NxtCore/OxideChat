@@ -9,7 +9,7 @@
 			<ShadSeparator class="my-6 max-w-2xl" />
 			<div v-if="preset.description" :class="descriptionClass" data-testid="chat-description" v-html="renderComplete(preset.description)" />
 			<p v-else class="mb-8 max-w-2xl text-center text-muted-foreground">
-				{{ store.getTranslation('presets.empty_state.on_model', {model: preset.base_model?.display_name ?? preset.key}) }}
+				{{ store.getTranslation('presets.empty_state.on_model', {model: level?.model?.display_name ?? preset.base_model?.display_name ?? preset.key}) }}
 			</p>
 		</template>
 		<template v-else-if="model">
@@ -71,6 +71,7 @@ const modelStore = useModelStore();
 const {renderComplete} = useMarkdown();
 
 const preset = computed(() => modelStore.selectedModel?.preset ?? null);
+const level = computed(() => modelStore.selectedModel?.level ?? null);
 
 const model = computed(() => modelStore.selectedModel);
 
