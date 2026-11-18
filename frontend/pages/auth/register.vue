@@ -77,6 +77,11 @@ const form = ref({
 });
 
 const loading = ref(false);
+
+watchEffect(() => {
+	if (store.base && !store.base.registration.enabled) router.replace('/auth/login');
+});
+
 const passwordStrength = ref<{isValid: boolean} | null>(null);
 
 async function handleRegister() {

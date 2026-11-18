@@ -96,3 +96,47 @@ mod storage {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod secret_redirect {
+	use crate::types::providers::{Provider, ProviderKind};
+	use serde_json::json;
+	use sqlx::types::Json;
+	use uuid::Uuid;
+
+	fn provider(api_key: Option<&str>, headers: serde_json::Value) -> Provider {
+		Provider {
+			id: Uuid::new_v4(),
+			owner_id: None,
+			kind: ProviderKind::Openai,
+			name: "Upstream".to_string(),
+			base_url: "https://api.example.com/v1".to_string(),
+			api_key: api_key.map(str::to_string),
+			extra_headers: Json(headers),
+			is_enabled: true,
+			reported_cost: None,
+			created_at: chrono::Utc::now(),
+			updated_at: chrono::Utc::now(),
+		}
+	}
+
+	#[test]
+	fn a_new_host_must_come_with_a_new_key() {
+		let stored = provider(Some("oxide:v1:ciphertext"), json!({}));
+		assert!(stored.redirects_secrets(Some("https://evil.example/v1"), false, None));
+		assert!(stored.redirects_secrets(Some("http://api.example.com/v1"), false, None));
+		assert!(!stored.redirects_secrets(Some("https://evil.example/v1"), true, None));
+		assert!(!stored.redirects_secrets(Some("https://api.example.com/v2"), false, None));
+		assert!(!stored.redirects_secrets(None, false, None));
+		assert!(!provider(None, json!({})).redirects_secrets(Some("https://evil.example/v1"), false, None));
+	}
+
+	#[test]
+	fn a_new_host_must_not_keep_stored_headers() {
+		let stored = provider(None, json!({"X-Token": "oxide:v1:ciphertext"}));
+		assert!(stored.redirects_secrets(Some("https://evil.example/v1"), true, None));
+		assert!(stored.redirects_secrets(Some("https://evil.example/v1"), true, Some(&json!({"X-Token": "***"}))));
+		assert!(!stored.redirects_secrets(Some("https://evil.example/v1"), true, Some(&json!({"X-Token": "retyped"}))));
+		assert!(!stored.redirects_secrets(Some("https://evil.example/v1"), true, Some(&json!({}))));
+	}
+}

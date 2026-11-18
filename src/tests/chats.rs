@@ -178,3 +178,54 @@ mod storage {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod branch_workspace {
+	use crate::tests::support::{TestResult, create_user};
+	use crate::types::{Chat, User};
+	use axum::body::Body;
+	use axum::http::{Request, StatusCode};
+	use sqlx::PgPool;
+	use tower::ServiceExt;
+	use uuid::Uuid;
+
+	async fn workspace(pool: &PgPool, user_id: Uuid) -> TestResult<Uuid> {
+		Ok(sqlx::query_scalar("INSERT INTO workspaces (user_id, name) VALUES ($1, 'Private') RETURNING id")
+			.bind(user_id)
+			.fetch_one(pool)
+			.await?)
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_branch_cannot_be_put_into_another_users_workspace(pool: PgPool) -> TestResult {
+		crate::config::Config::init(&pool).await?;
+		crate::i18n::I18n::init(&pool).await;
+		let user_id = create_user(&pool).await?;
+		let other_id = create_user(&pool).await?;
+		User::find_by_id(&pool, &user_id).await?.ok_or("user")?.set_roles(&pool, &["user".to_owned()]).await?;
+		let session = Uuid::new_v4();
+		User::insert_session(&pool, session, &user_id, chrono::Utc::now() + chrono::Duration::days(1)).await?;
+		let own = workspace(&pool, user_id).await?;
+		let foreign = workspace(&pool, other_id).await?;
+		let chat = Chat::create(&pool, &user_id, None, Some("Source")).await?;
+		let message_id: Uuid = sqlx::query_scalar("INSERT INTO messages (chat_id, role, content) VALUES ($1, 'user', 'hi') RETURNING id")
+			.bind(chat.id)
+			.fetch_one(&pool)
+			.await?;
+
+		let router = crate::routes::build_router(crate::tests::gateway::support::job_state(pool.clone()));
+		let branch = |workspace_id: Uuid| {
+			Request::builder()
+				.method("POST")
+				.uri(format!("/api/v1/chats/{}/messages/{message_id}/branch", chat.id))
+				.header("content-type", "application/json")
+				.header("cookie", format!("{}={session}", crate::utils::auth::SESSION_COOKIE_NAME))
+				.body(Body::from(serde_json::json!({ "workspace_id": workspace_id }).to_string()))
+		};
+		assert_eq!(router.clone().oneshot(branch(foreign)?).await?.status(), StatusCode::NOT_FOUND);
+		let foreign_chats: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chats WHERE workspace_id = $1").bind(foreign).fetch_one(&pool).await?;
+		assert_eq!(foreign_chats, 0);
+		assert!(router.oneshot(branch(own)?).await?.status().is_success());
+		Ok(())
+	}
+}

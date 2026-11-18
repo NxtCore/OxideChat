@@ -49,6 +49,50 @@ fn embedded_v4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
 	ip.to_ipv4()
 }
 
+/// Why a response body could not be read.
+#[derive(Debug, thiserror::Error)]
+pub enum BodyError {
+	#[error("the response is larger than {0} bytes")]
+	TooLarge(usize),
+	#[error("the response could not be read: {0}")]
+	Read(reqwest::Error),
+}
+
+/// Reads a response body and stops as soon as it grows past `limit` bytes, so a remote server
+/// cannot make the process buffer an endless answer.
+///
+/// # Errors
+///
+/// Returns an error when the body is larger than `limit` or the connection fails; the error never
+/// contains the request URL.
+pub async fn read_limited(response: reqwest::Response, limit: usize) -> Result<Vec<u8>, BodyError> {
+	use futures_util::StreamExt;
+
+	let declared = usize::try_from(response.content_length().unwrap_or(0)).unwrap_or(usize::MAX);
+	if declared > limit {
+		return Err(BodyError::TooLarge(limit));
+	}
+	let mut body = Vec::with_capacity(declared);
+	let mut stream = response.bytes_stream();
+	while let Some(chunk) = stream.next().await {
+		let chunk = chunk.map_err(|error| BodyError::Read(error.without_url()))?;
+		if body.len().saturating_add(chunk.len()) > limit {
+			return Err(BodyError::TooLarge(limit));
+		}
+		body.extend_from_slice(&chunk);
+	}
+	Ok(body)
+}
+
+/// Whether two URLs share scheme, host and port. URLs that cannot be parsed never match.
+#[must_use]
+pub fn same_origin(first: &str, second: &str) -> bool {
+	match (reqwest::Url::parse(first), reqwest::Url::parse(second)) {
+		(Ok(first), Ok(second)) => first.origin().is_tuple() && first.origin() == second.origin(),
+		_ => false,
+	}
+}
+
 /// Whether the address may be contacted.
 ///
 /// IPv6 addresses that carry an IPv4 address (mapped, compatible, 6to4, NAT64) are judged by that address,

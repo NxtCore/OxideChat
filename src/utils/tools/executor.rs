@@ -1,3 +1,4 @@
+use crate::types::BudgetLedger;
 use crate::types::tools::ToolDb;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -40,6 +41,8 @@ pub struct ToolContext {
 	pub function_name: Option<String>,
 	/// Database pool for tools that need storage access (e.g., imagegen)
 	pub db: Option<Arc<ToolDb>>,
+	/// Budget reservations for tools that send paid requests of their own (e.g., imagegen)
+	pub budget_ledger: Option<BudgetLedger>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -62,6 +65,7 @@ impl Default for ToolContext {
 			timeout_ms: Some(30000),
 			function_name: None,
 			db: None,
+			budget_ledger: None,
 		}
 	}
 }

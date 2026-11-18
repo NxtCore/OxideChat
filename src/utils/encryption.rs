@@ -204,6 +204,30 @@ pub(crate) fn decrypt_object_values(value: &Value) -> Result<Value, EncryptionEr
 	Ok(revealed)
 }
 
+/// Whether a submitted secret stands for the stored one instead of a newly typed value.
+#[must_use]
+pub(crate) fn keeps_stored_secret(value: &str) -> bool {
+	value == SECRET_MASK || value.starts_with(CURRENT_PREFIX) || value.starts_with(LEGACY_PREFIX)
+}
+
+/// Whether a JSON config with a `url` would carry stored secrets to another host.
+///
+/// True when `updated` points at a different origin than `existing` while any value in one of
+/// its `secret_maps` (such as `headers`) still stands for the stored secret.
+#[must_use]
+pub(crate) fn config_redirects_secrets(existing: &Value, updated: &Value, secret_maps: &[&str]) -> bool {
+	let url = |config: &Value| config.get("url").and_then(Value::as_str).unwrap_or_default().to_owned();
+	let (old_url, new_url) = (url(existing), url(updated));
+	if old_url == new_url || crate::utils::outbound::same_origin(&old_url, &new_url) {
+		return false;
+	}
+	secret_maps
+		.iter()
+		.filter_map(|key| updated.get(key).and_then(Value::as_object))
+		.flat_map(serde_json::Map::values)
+		.any(|value| value.as_str().is_some_and(keeps_stored_secret))
+}
+
 pub(crate) fn mask_object_values(value: &Value) -> Value {
 	let mut masked = value.clone();
 	if let Some(object) = masked.as_object_mut() {

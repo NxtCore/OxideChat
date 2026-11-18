@@ -62,6 +62,10 @@ pub async fn update_oauth_provider(
 		return Err(ErrorCode::BadRequest.into());
 	}
 	let endpoints = resolve(&req).await?;
+	let existing = OAuthProvider::find(&state.db, id).await?.ok_or(ErrorCode::NotFound)?;
+	if existing.redirects_secret(&req, &endpoints) {
+		return Err(ErrorCode::SecretRequiredForNewHost.into());
+	}
 	let provider = OAuthProvider::update(&state.db, id, &req, &endpoints).await?.ok_or(ErrorCode::NotFound)?;
 	AuditLog::log(&state.db, LogEvent::OAuthProviderUpdated, Some(auth.id), None, Some(provider.id));
 	json_ok(provider.to_response())

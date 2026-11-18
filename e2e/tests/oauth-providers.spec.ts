@@ -1,6 +1,6 @@
 import type {Browser, Page} from '@playwright/test';
 import {test, expect} from './support/fixtures';
-import {MEMBER, MOCK_IDP_URL} from './support/constants';
+import {MOCK_IDP_URL} from './support/constants';
 
 const SLUG = 'e2e-idp';
 const NAME = 'E2E IdP';
@@ -76,10 +76,13 @@ test.describe('custom sign-in providers', () => {
 		});
 	});
 
-	test('a verified email links to the existing account', async ({browser, baseURL}) => {
-		await setProfile({sub: 'idp-member', email: MEMBER.email, email_verified: true, name: 'Someone Else'});
+	test('a verified email links to the existing account', async ({browser, baseURL, api}) => {
+		const username = `linked${Date.now()}`;
+		const email = `${username}@e2e.test`;
+		await api.post('/api/v1/admin/users', {email, username, password: 'Linked-Passw0rd!', roles: ['user']});
+		await setProfile({sub: `idp-${username}`, email, email_verified: true, name: 'Someone Else'});
 		await signInWithProvider(browser, baseURL!, async page => {
-			await expectSignedIn(page, baseURL!, MEMBER.username);
+			await expectSignedIn(page, baseURL!, username);
 		});
 	});
 

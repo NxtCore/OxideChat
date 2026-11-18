@@ -38,6 +38,7 @@ pub(super) struct ModelListPublicRow {
 	pub provider_name: String,
 	pub provider_kind: ProviderKind,
 	pub icon: Option<String>,
+	pub description: Option<String>,
 	pub is_favorite: bool,
 }
 
@@ -113,6 +114,7 @@ impl From<ModelListPublicRow> for ModelListPublic {
 				kind: row.provider_kind,
 			},
 			icon: row.icon,
+			description: row.description,
 			is_favorite: row.is_favorite,
 			budget_blocked: false,
 		}

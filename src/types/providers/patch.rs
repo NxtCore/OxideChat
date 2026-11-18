@@ -1,5 +1,6 @@
 use super::{Provider, ProviderKind, ProviderReportedCost};
-use crate::utils::encryption::encrypt_object_values;
+use crate::utils::encryption::{encrypt_object_values, keeps_stored_secret};
+use crate::utils::outbound::same_origin;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -30,6 +31,28 @@ impl Provider {
 		sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM providers WHERE owner_id IS NULL AND reported_cost->>'unit' = 'currency')")
 			.fetch_one(pool)
 			.await
+	}
+
+	/// Whether an update would send this provider's stored key or headers to another host.
+	///
+	/// True when `base_url` names a different origin and the key is not replaced (`new_key`), or
+	/// the headers are left as they are or still contain masked values.
+	#[must_use]
+	pub fn redirects_secrets(&self, base_url: Option<&str>, new_key: bool, extra_headers: Option<&Value>) -> bool {
+		let Some(base_url) = base_url else {
+			return false;
+		};
+		if self.base_url == base_url || same_origin(&self.base_url, base_url) {
+			return false;
+		}
+		let keeps_key = self.api_key.as_deref().is_some_and(|key| !key.is_empty()) && !new_key;
+		let headers = extra_headers.unwrap_or(&self.extra_headers.0);
+		let keeps_headers = match (extra_headers, headers.as_object()) {
+			(_, None) => false,
+			(None, Some(stored)) => !stored.is_empty(),
+			(Some(_), Some(sent)) => sent.values().any(|value| value.as_str().is_some_and(keeps_stored_secret)),
+		};
+		keeps_key || keeps_headers
 	}
 
 	#[allow(clippy::too_many_arguments)]

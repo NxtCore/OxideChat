@@ -256,6 +256,22 @@ impl OAuthProvider {
 			.await
 	}
 
+	/// A provider by ID, enabled or not.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the query fails.
+	pub async fn find(pool: &PgPool, id: Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as("SELECT * FROM oauth_providers WHERE id = $1").bind(id).fetch_optional(pool).await
+	}
+
+	/// Whether saving `req` would send the stored client secret to a token endpoint on another host.
+	#[must_use]
+	pub fn redirects_secret(&self, req: &SaveOAuthProviderRequest, endpoints: &ResolvedEndpoints) -> bool {
+		let new_secret = req.client_secret.as_deref().is_some_and(|secret| !secret.is_empty());
+		!new_secret && !self.client_secret.is_empty() && !crate::utils::outbound::same_origin(&self.token_url, &endpoints.token_url)
+	}
+
 	/// Adds a provider; the slug must be unused.
 	///
 	/// # Errors

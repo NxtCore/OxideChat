@@ -241,7 +241,7 @@ impl AgentRun {
 
 	fn chat_failed(&self, error: &impl std::fmt::Display) -> StreamData {
 		tracing::error!(%error, iteration = self.iteration, "failed to start chat iteration");
-		error_event("chat_error", error.to_string())
+		error_event("chat_error", crate::i18n::I18n::get().translate("chat.errors.request_failed", &None))
 	}
 
 	pub(crate) fn apply(&mut self, event: StreamEvent) -> Option<StreamData> {
@@ -380,7 +380,7 @@ impl AgentRun {
 	}
 
 	async fn run_server_tool(&self, call: &ToolCall) -> ToolOutput {
-		match execute_tool_by_name(&self.state.db, &self.state.mcp_pool, self.user_id, &call.name, call.args.clone()).await {
+		match execute_tool_by_name(&self.state, self.user_id, &call.name, call.args.clone()).await {
 			Ok(result) => ToolOutput {
 				output: result.output,
 				error: None,

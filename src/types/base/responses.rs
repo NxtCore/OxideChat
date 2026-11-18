@@ -29,6 +29,21 @@ pub struct BaseResponse {
 	pub instance: InstanceResponse,
 	/// Whether chats get a generated title after their first reply.
 	pub title_generation: TitleGeneration,
+	/// Whether visitors may create an account with email and password.
+	pub registration: Registration,
+}
+
+/// Admin setting for local sign-up; the admin PATCH takes the same shape. Sign-in providers have their own `allow_registration`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct Registration {
+	pub enabled: bool,
+}
+
+impl Default for Registration {
+	fn default() -> Self {
+		Self { enabled: true }
+	}
 }
 
 /// Admin setting for generated chat titles; the admin PATCH takes the same shape.

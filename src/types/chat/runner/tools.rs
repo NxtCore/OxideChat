@@ -1,4 +1,4 @@
-use crate::types::{Tool, ToolFunction};
+use crate::types::{JobState, Tool, ToolFunction};
 use crate::utils::tools::{HttpExecutor, ToolContext, ToolExecutor, get_builtin_executor};
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -20,14 +20,11 @@ pub(super) async fn get_client_tool_info(db: &PgPool, tool_name: &str, user_id: 
 	Some((config.mcp_server_id, config.tool_name, tool.id))
 }
 
-pub(super) async fn execute_tool_by_name(
-	db: &PgPool,
-	mcp_pool: &crate::utils::tools::McpConnectionPool,
-	user_id: Uuid,
-	full_tool_name: &str,
-	input: serde_json::Value,
-) -> Result<crate::types::ToolExecutionResult, String> {
+pub(super) async fn execute_tool_by_name(state: &JobState, user_id: Uuid, full_tool_name: &str, input: serde_json::Value) -> Result<crate::types::ToolExecutionResult, String> {
 	use crate::types::ToolSourceKind;
+
+	let db = &state.db;
+	let mcp_pool = &state.mcp_pool;
 
 	let mut tool: Option<Tool>;
 	let mut function_name: Option<String> = None;
@@ -78,6 +75,7 @@ pub(super) async fn execute_tool_by_name(
 		timeout_ms: Some(30000),
 		function_name: function_name.map(|s| s.to_string()),
 		db: Some(std::sync::Arc::new(db.clone())),
+		budget_ledger: Some(state.budget_ledger.clone()),
 	};
 
 	match tool.source_kind {
@@ -101,15 +99,7 @@ pub(super) async fn execute_tool_by_name(
 				.revealed_source_config()
 				.map_err(|error| format!("Failed to decrypt HTTP tool credentials: {error}"))?;
 			let base_url = source_config.get("url").and_then(|v| v.as_str()).unwrap_or("");
-			let url = if let Some(entrypoint) = &function_entrypoint {
-				if entrypoint.starts_with("http") {
-					entrypoint.clone()
-				} else {
-					format!("{}{}", base_url.trim_end_matches('/'), entrypoint)
-				}
-			} else {
-				base_url.to_string()
-			};
+			let url = crate::utils::tools::http::function_url(base_url, function_entrypoint.as_deref()).map_err(|e| format!("{:?}", e))?;
 
 			let headers: HashMap<String, String> = source_config.get("headers").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
 

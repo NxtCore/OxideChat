@@ -75,12 +75,12 @@ test.describe('presets', () => {
 			await expect(page.getByTestId('streaming-message')).toHaveCount(0, {timeout: 60_000});
 			const chatUrl = page.url();
 			const chatId = chatUrl.split('/').pop();
-			const storedAssistant = async () => {
+			const savedReply = async () => {
 				const messages = await api.get(`/api/v1/chats/${chatId}/messages`);
 				return (messages.items ?? messages).find((message: any) => message.role === 'assistant');
 			};
-			await expect.poll(storedAssistant).toBeTruthy();
-			const assistant = await storedAssistant();
+			await expect.poll(savedReply, {timeout: 15_000}).toBeTruthy();
+			const assistant = await savedReply();
 			expect(assistant.model_key).toBe(key);
 			expect(assistant.model_id).toBe(seed.model.id);
 

@@ -5,10 +5,25 @@
 				<img v-if="preset.icon" :src="preset.icon" alt="" class="h-full w-full object-cover" />
 				<Wand2 v-else class="h-8 w-8 text-primary" />
 			</div>
-			<h1 class="mb-2 text-2xl font-semibold text-foreground">{{ preset.name }}</h1>
-			<p class="mb-8 max-w-md text-center text-muted-foreground">
-				{{ preset.description || store.getTranslation('presets.empty_state.on_model', {model: level?.model?.display_name ?? preset.base_model?.display_name ?? preset.key}) }}
+			<h1 class="text-2xl font-semibold text-foreground">{{ preset.name }}</h1>
+			<ShadSeparator class="my-6 max-w-2xl" />
+			<div v-if="preset.description" :class="descriptionClass" data-testid="chat-description" v-html="renderComplete(preset.description)" />
+			<p v-else class="mb-8 max-w-2xl text-center text-muted-foreground">
+				{{ store.getTranslation('presets.empty_state.on_model', {model: level?.model?.display_name ?? preset.base_model?.display_name ?? preset.key}) }}
 			</p>
+		</template>
+		<template v-else-if="model">
+			<div class="mb-6 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-muted" data-testid="model-empty-state">
+				<img v-if="model.icon" :src="model.icon" alt="" class="h-full w-full object-cover" />
+				<div v-else-if="providerIcon?.type === 'svg'" class="h-full w-full p-3 [&>svg]:h-full [&>svg]:w-full" v-html="sanitizeSvg(providerIcon.icon)" />
+				<img v-else-if="providerIcon?.type === 'png'" :src="providerIcon.icon" alt="" class="h-full w-full object-contain p-3" />
+				<Bot v-else class="h-8 w-8 text-muted-foreground" />
+			</div>
+			<h1 class="text-2xl font-semibold text-foreground" :class="{'mb-8': !modelDescription}" data-testid="model-empty-state-name">{{ modelName }}</h1>
+			<template v-if="modelDescription">
+				<ShadSeparator class="my-6 max-w-2xl" />
+				<div :class="descriptionClass" data-testid="chat-description" v-html="renderComplete(modelDescription)" />
+			</template>
 		</template>
 		<template v-else>
 			<img :src="store.appIcon" alt="" class="h-20 w-20 mb-8 object-contain" />
@@ -36,12 +51,14 @@
 </template>
 
 <script setup lang="ts">
-import {Wand2} from 'lucide-vue-next';
+import {Bot, Wand2} from 'lucide-vue-next';
 import ChatComposer from './ChatComposer.vue';
 
 import {useMainStore} from '~/stores';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
+import {useIconsStore} from '~/stores/icons';
+import {sanitizeSvg} from '~/composables/useMarkdown';
 
 const emit = defineEmits<{
 	send: [content: string, parts?: any[]];
@@ -51,8 +68,22 @@ const store = useMainStore();
 const chatStore = useChatStore();
 const modelStore = useModelStore();
 
+const {renderComplete} = useMarkdown();
+
 const preset = computed(() => modelStore.selectedModel?.preset ?? null);
 const level = computed(() => modelStore.selectedModel?.level ?? null);
+
+const model = computed(() => modelStore.selectedModel);
+
+const modelName = computed(() => model.value?.display_name.replace(/^[^:]+:\s+/, '') || model.value?.display_name);
+
+const modelDescription = computed(() => model.value?.description?.trim() || null);
+
+const iconStore = useIconsStore();
+
+const providerIcon = computed(() => (model.value ? iconStore.getProviderIcon(model.value.provider.name, model.value.model_id) : null));
+
+const descriptionClass = 'prose prose-sm dark:prose-invert mb-8 w-full max-w-2xl text-center text-muted-foreground [&_ol]:list-inside [&_ol]:pl-0 [&_ul]:list-inside [&_ul]:pl-0';
 
 const username = computed(() => store.auth.user?.username || store.getTranslation('chat.empty_state.username_default'));
 

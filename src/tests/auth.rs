@@ -153,6 +153,19 @@ mod tests {
 		}
 	}
 
+	mod login_password {
+		use crate::utils::auth::{hash_password, verify_login_password};
+
+		#[test]
+		fn only_the_right_password_of_an_account_with_a_password_verifies() {
+			let hash = hash_password("Sup3r$ecret-pass").unwrap();
+			assert!(verify_login_password("Sup3r$ecret-pass", Some(&hash)));
+			assert!(!verify_login_password("wrong", Some(&hash)));
+			assert!(!verify_login_password("Sup3r$ecret-pass", None));
+			assert!(!verify_login_password("oxide-login-no-such-account", None));
+		}
+	}
+
 	mod rate_limit {
 		use crate::utils::rate_limit::RateLimiter;
 		use std::time::Duration;
@@ -174,6 +187,18 @@ mod tests {
 			assert!(!limiter.allow("key", 1, Duration::from_secs(60)).await);
 			tokio::time::advance(Duration::from_secs(61)).await;
 			assert!(limiter.allow("key", 1, Duration::from_secs(60)).await);
+		}
+
+		#[tokio::test]
+		async fn has_room_does_not_count_and_sees_what_allow_counted() {
+			let limiter = RateLimiter::spawn();
+			for _ in 0..10 {
+				assert!(limiter.has_room("key", 2, Duration::from_secs(60)).await);
+			}
+			assert!(limiter.allow("key", 2, Duration::from_secs(60)).await);
+			assert!(limiter.has_room("key", 2, Duration::from_secs(60)).await);
+			assert!(limiter.allow("key", 2, Duration::from_secs(60)).await);
+			assert!(!limiter.has_room("key", 2, Duration::from_secs(60)).await);
 		}
 
 		#[tokio::test]

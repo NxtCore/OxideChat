@@ -164,6 +164,96 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn url_input_cannot_leave_its_path_segment_or_add_a_query() {
+		let server = spawn_server(ok_response()).await;
+		let url = format!("{}/items/{{{{input.id}}}}", server.base_url);
+		let executor = HttpExecutor::new("t".to_string(), http_config(&url, None, &[])).unwrap();
+
+		executor.execute(json!({ "id": "../../admin/users?all=1#" }), &ctx()).await.unwrap();
+		let raw = server.request.await.unwrap();
+		assert!(raw.contains("POST /items/..%2F..%2Fadmin%2Fusers%3Fall%3D1%23 "), "unexpected request line in: {raw}");
+
+		for dots in ["..", ".", "%2e%2e"] {
+			let server = spawn_server(ok_response()).await;
+			let url = format!("{}/items/{{{{input.id}}}}/details", server.base_url);
+			let executor = HttpExecutor::new("t".to_string(), http_config(&url, None, &[])).unwrap();
+			let result = executor.execute(json!({ "id": dots }), &ctx()).await;
+			if dots.starts_with('%') {
+				result.unwrap();
+				let raw = server.request.await.unwrap();
+				assert!(raw.contains("POST /items/%252e%252e/details "), "unexpected request line in: {raw}");
+			} else {
+				assert!(matches!(result, Err(ToolError::InvalidInput(_))), "input {dots:?} must be rejected");
+				assert_eq!(server.hits.load(Ordering::SeqCst), 0, "request must not be sent");
+			}
+		}
+	}
+
+	#[test]
+	fn function_entrypoints_stay_on_the_tool_host() {
+		use crate::utils::tools::http::function_url;
+
+		assert_eq!(function_url("https://api.example.com/v1/", None).unwrap(), "https://api.example.com/v1/");
+		assert_eq!(function_url("https://api.example.com/v1/", Some("/search")).unwrap(), "https://api.example.com/v1/search");
+		assert_eq!(function_url("https://api.example.com/v1", Some("https://api.example.com/v2/search")).unwrap(), "https://api.example.com/v2/search");
+		for foreign in ["https://evil.example/collect", "http://api.example.com/v1", "https://api.example.com:8443/v1", "https://api.example.com.evil.example/"] {
+			assert!(matches!(function_url("https://api.example.com/v1", Some(foreign)), Err(ToolError::InvalidInput(_))), "{foreign} must be refused");
+		}
+	}
+
+	#[test]
+	fn a_config_that_moves_host_must_not_keep_stored_secrets() {
+		use crate::utils::encryption::config_redirects_secrets;
+
+		let existing = json!({"url": "https://api.example.com/mcp", "headers": {"Authorization": "Bearer stored"}});
+		let moved_masked = json!({"url": "https://evil.example/mcp", "headers": {"Authorization": "***"}});
+		let moved_retyped = json!({"url": "https://evil.example/mcp", "headers": {"Authorization": "Bearer new"}});
+		let moved_without_headers = json!({"url": "https://evil.example/mcp"});
+		let same_host_masked = json!({"url": "https://api.example.com/other", "headers": {"Authorization": "***"}});
+
+		assert!(config_redirects_secrets(&existing, &moved_masked, &["headers", "env"]));
+		assert!(!config_redirects_secrets(&existing, &moved_retyped, &["headers", "env"]));
+		assert!(!config_redirects_secrets(&existing, &moved_without_headers, &["headers", "env"]));
+		assert!(!config_redirects_secrets(&existing, &same_host_masked, &["headers", "env"]));
+	}
+
+	#[tokio::test]
+	async fn oversized_response_bodies_are_refused() {
+		use crate::utils::tools::http::MAX_TOOL_RESPONSE_BYTES;
+
+		let body = "x".repeat(MAX_TOOL_RESPONSE_BYTES + 1);
+		let server = spawn_server(http_response("200 OK", &body, "Content-Type: text/plain\r\n")).await;
+		let executor = HttpExecutor::new("t".to_string(), http_config(&format!("{}/hook", server.base_url), None, &[])).unwrap();
+		let result = executor.execute(json!({}), &ctx()).await;
+		assert!(matches!(result, Err(ToolError::HttpError(_))), "unexpected result: {:?}", result.map(|_| ()));
+	}
+
+	#[tokio::test]
+	async fn connection_errors_do_not_reveal_the_tool_url() {
+		let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+		let address = listener.local_addr().unwrap();
+		drop(listener);
+		let config = http_config(&format!("http://{address}/hook?api_key={{{{settings.key}}}}"), None, &[]);
+		let executor = HttpExecutor::new("t".to_string(), config).unwrap();
+		let ctx = ToolContext {
+			settings: json!({ "key": "s3cret-value" }),
+			..ToolContext::default()
+		};
+		let error = executor.execute(json!({}), &ctx).await.unwrap_err().to_string();
+		assert!(!error.contains("s3cret-value") && !error.contains("/hook"), "error reveals the URL: {error}");
+	}
+
+	#[test]
+	fn image_fetches_use_the_shared_address_filter() {
+		use crate::utils::outbound::is_allowed_ip;
+
+		for blocked in ["100.64.0.1", "169.254.169.254", "10.0.0.1", "127.0.0.1", "64:ff9b::a00:1", "2002:a00:1::1"] {
+			assert!(!is_allowed_ip(blocked.parse().unwrap(), false), "{blocked} must be refused");
+		}
+		assert!(is_allowed_ip("93.184.216.34".parse().unwrap(), false));
+	}
+
+	#[tokio::test]
 	async fn redirect_responses_are_not_followed() {
 		let target = spawn_server(ok_response()).await;
 		let redirect_response = http_response("302 Found", "", &format!("Location: {}/hook\r\n", target.base_url));

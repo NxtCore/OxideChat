@@ -141,6 +141,12 @@ impl GatewayInference {
 	}
 }
 
+/// Bounds one image the web chat image tool generates from a prompt and its input images.
+#[must_use]
+pub fn image_tool_estimate(prompt_bytes: u64, input_images: u64) -> TokenEstimate {
+	media_tokens(MediaKind::Image { images: input_images }, &Map::new(), TokenEstimate::input_for_bytes(prompt_bytes))
+}
+
 fn media_tokens(kind: MediaKind, fields: &Map<String, Value>, input: u64) -> TokenEstimate {
 	let mut units = UnitEstimate { requests: 1, ..UnitEstimate::default() };
 	let mut estimate = TokenEstimate::text(input, 0);

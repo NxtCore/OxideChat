@@ -76,6 +76,19 @@ impl ImageContent {
 		sqlx::query_as("SELECT data, file_path, mime_type FROM images WHERE id = $1").bind(id).fetch_optional(pool).await
 	}
 
+	/// Loads an image only when the user may read it: their own images and icons, which every signed-in user sees.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the query fails.
+	pub async fn find_for_user(pool: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<Self>, sqlx::Error> {
+		sqlx::query_as("SELECT data, file_path, mime_type FROM images WHERE id = $1 AND (user_id = $2 OR source IN ('icon', 'model_icon'))")
+			.bind(id)
+			.bind(user_id)
+			.fetch_optional(pool)
+			.await
+	}
+
 	/// Stores a caption for an image.
 	///
 	/// # Errors
@@ -86,13 +99,17 @@ impl ImageContent {
 		Ok(())
 	}
 
-	/// Returns the stored caption of an image, if any.
+	/// Returns the stored caption of one of the user's images, if any.
 	///
 	/// # Errors
 	///
 	/// Returns a database error when the query fails.
-	pub async fn caption(pool: &PgPool, id: Uuid) -> Result<Option<String>, sqlx::Error> {
-		let row: Option<(Option<String>,)> = sqlx::query_as("SELECT caption FROM images WHERE id = $1").bind(id).fetch_optional(pool).await?;
+	pub async fn caption(pool: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+		let row: Option<(Option<String>,)> = sqlx::query_as("SELECT caption FROM images WHERE id = $1 AND user_id = $2")
+			.bind(id)
+			.bind(user_id)
+			.fetch_optional(pool)
+			.await?;
 		Ok(row.and_then(|r| r.0))
 	}
 }

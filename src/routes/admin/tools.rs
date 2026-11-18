@@ -46,6 +46,9 @@ pub async fn create_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Jso
 pub async fn update_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(tool_id): Path<Uuid>, Json(req): Json<UpdateToolRequest>) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_TOOLS_EDIT).await?;
 
+	if Tool::update_redirects_secrets(&state.db, &tool_id, &req).await? {
+		return Err(ErrorCode::SecretRequiredForNewHost.into());
+	}
 	let (tool, functions) = Tool::update_system(&state.db, &tool_id, &req).await?.ok_or(ErrorCode::NotFound)?;
 	json_ok(ToolResponse::from_tool_with_functions(tool, functions))
 }
@@ -135,10 +138,9 @@ async fn run_http(state: &JobState, tool: &Tool, req: &TestToolRequest, ctx: &To
 		None => None,
 	};
 
-	let url = match &function_entrypoint {
-		Some(entrypoint) if entrypoint.starts_with("http") => entrypoint.clone(),
-		Some(entrypoint) => format!("{}{}", config.url.trim_end_matches('/'), entrypoint),
-		None => config.url.clone(),
+	let url = match crate::utils::tools::http::function_url(&config.url, function_entrypoint.as_deref()) {
+		Ok(url) => url,
+		Err(error) => return Ok(Err(error)),
 	};
 
 	let http_config = crate::utils::tools::http::HttpConfig {
@@ -171,7 +173,7 @@ async fn run_mcp(state: &JobState, tool: &Tool, req: &TestToolRequest) -> Result
 }
 
 pub async fn test_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(tool_id): Path<Uuid>, Json(req): Json<TestToolRequest>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_TOOLS_VIEW).await?;
+	auth.require(&state.db, ADMIN_TOOLS_EDIT).await?;
 
 	let tool = Tool::find_by_id_system(&state.db, &tool_id).await?.ok_or(ErrorCode::NotFound)?;
 	let tool_settings = Tool::effective_settings_for_user(&state.db, &tool_id, None)
@@ -184,6 +186,7 @@ pub async fn test_tool(State(state): State<Arc<JobState>>, auth: AuthUser, Path(
 		timeout_ms: Some(30000),
 		function_name: req.function_name.clone(),
 		db: Some(Arc::new(state.db.clone())),
+		budget_ledger: None,
 	};
 
 	let start = std::time::Instant::now();

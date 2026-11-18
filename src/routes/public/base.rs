@@ -61,5 +61,6 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 			icon_id: config.instance_icon_id(),
 		},
 		title_generation: config.title_generation(),
+		registration: config.registration(),
 	})
 }

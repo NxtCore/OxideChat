@@ -79,21 +79,31 @@ pub async fn create_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 	Ok(ResponseBuilder::new(ResponseBody::Json(response)).status(StatusCode::CREATED).build())
 }
 
-/// Update an existing provider
-pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<UpdateProviderRequest>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
+/// Checks an update and returns the new API key, encrypted, when the request carries one.
+async fn checked_api_key(state: &JobState, id: &Uuid, base_url: Option<&str>, req: &UpdateProviderRequest) -> Result<Option<String>, AppError> {
 	if req.name.as_deref().is_some_and(is_reserved_provider_name) {
 		return Err(ErrorCode::ProviderNameReserved.into());
 	}
-
-	let base_url = req.base_url.as_deref().map(|url| url.trim_end_matches('/').to_string());
 	if req.reported_cost.as_ref().and_then(Option::as_ref).is_some_and(|cost| !cost.is_valid()) {
 		return Err(ErrorCode::ValidationFailed.into());
+	}
+	let existing = Provider::find_for_admin(&state.db, id).await?.ok_or(ErrorCode::NotFound)?;
+	if existing.redirects_secrets(base_url, req.api_key.is_some(), req.extra_headers.as_ref()) {
+		return Err(ErrorCode::SecretRequiredForNewHost.into());
 	}
 	let api_key = req.api_key.as_deref().map(encrypt_api_key).transpose().map_err(|error| {
 		tracing::error!("Failed to encrypt provider credential: {error}");
 		ErrorCode::InternalError
 	})?;
+	Ok(api_key)
+}
+
+/// Update an existing provider
+pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<UpdateProviderRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_PROVIDERS_EDIT).await?;
+
+	let base_url = req.base_url.as_deref().map(|url| url.trim_end_matches('/').to_string());
+	let api_key = checked_api_key(&state, &id, base_url.as_deref(), &req).await?;
 	let mut provider = Provider::patch_system(
 		&state.db,
 		&id,
@@ -110,15 +120,19 @@ pub async fn update_provider(State(state): State<Arc<JobState>>, auth: AuthUser,
 		provider = Provider::set_reported_cost(&state.db, &id, reported_cost.as_ref()).await?.ok_or(ErrorCode::NotFound)?;
 	}
 
-	reload_providers(&state.db).await;
-	if provider.is_enabled
-		&& let Err(e) = sync_provider_models(&state.db, &provider).await
-	{
-		tracing::warn!("Failed to sync models after provider update: {e}");
-	}
+	reload_and_sync(&state, &provider).await;
 	let response: ProviderResponse = provider.into();
 
 	Ok(ResponseBuilder::new(ResponseBody::Json(response)).build())
+}
+
+async fn reload_and_sync(state: &JobState, provider: &Provider) {
+	reload_providers(&state.db).await;
+	if provider.is_enabled
+		&& let Err(e) = sync_provider_models(&state.db, provider).await
+	{
+		tracing::warn!("Failed to sync models after provider update: {e}");
+	}
 }
 
 /// GET /api/v1/admin/exchange-rates

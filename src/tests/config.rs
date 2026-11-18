@@ -41,6 +41,14 @@ mod tests {
 		assert!(!ConfigValues::default().title_generation.enabled);
 	}
 
+	#[test]
+	fn registration_update_is_optional_and_on_by_default() {
+		let request: UpdateGlobalConfigRequest = serde_json::from_str(r#"{"registration":{"enabled":false}}"#).unwrap();
+		assert!(!request.registration.unwrap().enabled);
+		assert!(serde_json::from_str::<UpdateGlobalConfigRequest>("{}").unwrap().registration.is_none());
+		assert!(ConfigValues::default().registration.enabled);
+	}
+
 	mod branding_icon {
 		use crate::utils::images::{is_safe_stored_image, store_image};
 		use sqlx::PgPool;

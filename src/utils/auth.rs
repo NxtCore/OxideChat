@@ -38,6 +38,17 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, argon2::passw
 	Ok(argon2().verify_password(password.as_bytes(), &parsed_hash).is_ok())
 }
 
+static DUMMY_PASSWORD_HASH: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| hash_password("oxide-login-no-such-account").unwrap_or_default());
+
+/// Verify a login password. Without a stored hash (unknown email, or an account that signs in
+/// through a provider) the same work is spent on a dummy hash and the result is `false`, so the
+/// response time does not tell which emails have an account.
+#[must_use]
+pub fn verify_login_password(password: &str, hash: Option<&str>) -> bool {
+	let verified = verify_password(password, hash.unwrap_or(DUMMY_PASSWORD_HASH.as_str())).unwrap_or(false);
+	verified && hash.is_some()
+}
+
 /// Determine whether cookies should be marked `Secure` based on `BASE_URL`.
 ///
 /// Returns `true` when `BASE_URL` uses the `https` scheme, `false` when it uses

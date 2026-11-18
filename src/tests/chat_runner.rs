@@ -412,6 +412,20 @@ mod prepare {
 		}))?)
 	}
 
+	#[test]
+	fn the_first_estimate_counts_the_text_of_parts() -> TestResult {
+		use crate::types::chat::runner::prepare::request_bytes;
+
+		assert_eq!(request_bytes(&request("m", None)?), 5);
+		let with_parts: StreamRequest = serde_json::from_value(serde_json::json!({
+			"content": "hello",
+			"model_key": "m",
+			"parts": [{"type": "text", "text": "0123456789"}, {"type": "image", "image_id": "ignored"}],
+		}))?;
+		assert_eq!(request_bytes(&with_parts), 15);
+		Ok(())
+	}
+
 	struct Setup {
 		state: std::sync::Arc<JobState>,
 		user: User,
