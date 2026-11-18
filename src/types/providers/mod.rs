@@ -35,7 +35,7 @@ impl ProviderKind {
 	/// Kinds that route each request to one of several upstream providers. Their requests honour the provider
 	/// selector and the admins' upstream provider allowlists through `ChatRequestIR::provider_routing`, which
 	/// Omniference's adapter for the kind maps onto the provider's own routing fields.
-	pub const UPSTREAM_ROUTING: &[Self] = &[Self::Openrouter];
+	pub const UPSTREAM_ROUTING: &[Self] = &[Self::Openrouter, Self::Cortecs];
 
 	/// Whether requests to this kind can be routed to a chosen upstream provider.
 	#[must_use]

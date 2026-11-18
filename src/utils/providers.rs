@@ -2,7 +2,8 @@
 
 use crate::ai::OF_ENGINE;
 use crate::ai::parse_extra_headers;
-use crate::types::catalog::{AvailabilityState, GatewayCatalogModel, GatewayCatalogSyncInput, GatewayProviderOptionSyncInput};
+use crate::types::catalog::{AvailabilityState, CORTECS_GATEWAY, GatewayCatalogModel, GatewayCatalogSyncInput, GatewayProviderOptionSyncInput, cortecs_options};
+use crate::types::exchange_rates::ExchangeRate;
 use crate::types::models::{Model, ModelSyncInput};
 use crate::types::providers::{Provider, ProviderKind, SyncProviderResponse};
 use crate::utils::encryption::decrypt_api_key;
@@ -77,12 +78,7 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 		.await
 		.map_err(|e| format!("Failed to sync provider models: {e}"))?;
 
-	// Piggyback the gateway catalog sync on the existing provider sync (OpenRouter only).
-	// Failures here are non-fatal: runnable model sync already succeeded.
-	if provider.kind == ProviderKind::Openrouter
-		&& let Err(e) = sync_gateway_catalog(pool, provider).await {
-			eprintln!("[AI] Warning: gateway catalog sync failed for {}: {e}", provider.name);
-		}
+	sync_catalog(pool, provider).await;
 	sync_upstream(pool, provider).await;
 
 	Ok(SyncProviderResponse {
@@ -92,6 +88,18 @@ pub async fn sync_provider_models(pool: &PgPool, provider: &Provider) -> Result<
 		models_removed: summary.removed,
 		message: format!("Synced {} models", sync_models.len()),
 	})
+}
+
+/// Syncs the gateway catalog of a routing provider; failures are logged, the runnable model sync already succeeded.
+async fn sync_catalog(pool: &PgPool, provider: &Provider) {
+	let catalog = match provider.kind {
+		ProviderKind::Openrouter => sync_gateway_catalog(pool, provider).await,
+		ProviderKind::Cortecs => sync_cortecs_catalog(pool, provider).await,
+		_ => Ok(()),
+	};
+	if let Err(e) = catalog {
+		tracing::warn!(provider_id = %provider.id, error = %e, "gateway catalog sync failed");
+	}
 }
 
 /// Refreshes the upstream providers a routing provider can send requests to; failures keep the previous snapshot.
@@ -175,6 +183,10 @@ pub async fn sync_endpoint_options(pool: &PgPool, model_id: &Uuid) -> Result<(),
 		.map_err(|e| format!("Failed to load provider: {e}"))?
 		.ok_or_else(|| "Provider not found".to_string())?;
 
+	if provider.kind == ProviderKind::Cortecs {
+		return sync_cortecs_catalog(pool, &provider).await;
+	}
+
 	let api_key = provider
 		.api_key
 		.as_deref()
@@ -228,4 +240,54 @@ pub async fn sync_endpoint_options(pool: &PgPool, model_id: &Uuid) -> Result<(),
 		.map_err(|e| format!("Failed to store provider options: {e}"))?;
 
 	Ok(())
+}
+
+/// Sync the Cortecs catalog: one `/v1/models?extended=true` call lists every model the key can run with its
+/// upstream providers, so the catalog rows and every model's provider options are written together.
+pub async fn sync_cortecs_catalog(pool: &PgPool, provider: &Provider) -> Result<(), String> {
+	let api_key = provider
+		.api_key
+		.as_deref()
+		.map(decrypt_api_key)
+		.transpose()
+		.map_err(|error| format!("Failed to decrypt provider credential: {error}"))?;
+	let extra_headers = parse_extra_headers(&provider.extra_headers.0).map_err(|error| format!("Failed to decrypt provider headers: {error}"))?;
+
+	let models = omniference::catalog::fetch_cortecs_models(&provider.base_url, api_key.as_deref(), &extra_headers, None)
+		.await
+		.map_err(|e| format!("Cortecs catalog fetch failed: {e}"))?;
+	if models.is_empty() {
+		return Ok(());
+	}
+
+	let inputs: Vec<GatewayCatalogSyncInput> = models
+		.iter()
+		.map(|model| GatewayCatalogSyncInput {
+			gateway_model_id: model.id.clone(),
+			display_name: model.id.clone(),
+			raw: serde_json::to_value(model).unwrap_or(Value::Null),
+		})
+		.collect();
+	let ids: Vec<String> = models.iter().map(|model| model.id.clone()).collect();
+	let usd_per_unit = ExchangeRate::usd_per_unit_map(pool).await.map_err(|e| format!("Exchange rate lookup failed: {e}"))?;
+	let options: Vec<(&str, GatewayProviderOptionSyncInput)> = models
+		.iter()
+		.flat_map(|model| cortecs_options(model, &usd_per_unit).into_iter().map(|option| (model.id.as_str(), option)))
+		.collect();
+
+	GatewayCatalogModel::upsert_public_catalog(pool, &provider.id, CORTECS_GATEWAY, &inputs)
+		.await
+		.map_err(|e| format!("Catalog upsert failed: {e}"))?;
+	GatewayCatalogModel::mark_availability(pool, &provider.id, CORTECS_GATEWAY, &ids)
+		.await
+		.map_err(|e| format!("Catalog availability update failed: {e}"))?;
+	GatewayCatalogModel::delete_absent(pool, &provider.id, CORTECS_GATEWAY, &ids)
+		.await
+		.map_err(|e| format!("Catalog prune failed: {e}"))?;
+	GatewayCatalogModel::refresh_local_model_ids(pool, &provider.id, CORTECS_GATEWAY, &provider.name)
+		.await
+		.map_err(|e| format!("Catalog relink failed: {e}"))?;
+	GatewayCatalogModel::replace_gateway_provider_options(pool, &provider.id, CORTECS_GATEWAY, &options)
+		.await
+		.map_err(|e| format!("Failed to store provider options: {e}"))
 }

@@ -200,3 +200,113 @@ mod tests {
 		assert!(result.options.is_empty());
 	}
 }
+
+#[cfg(test)]
+mod cortecs {
+	use crate::types::catalog::{CORTECS_GATEWAY, GatewayCatalogModel, GatewayCatalogSyncInput, cortecs_options};
+	use crate::types::provider_routing::sources::cortecs::upstream_providers;
+	use omniference::catalog::CortecsModel;
+	use rust_decimal::Decimal;
+	use serde_json::json;
+	use sqlx::PgPool;
+	use std::collections::HashMap;
+	use uuid::Uuid;
+
+	fn fixture() -> Vec<CortecsModel> {
+		serde_json::from_value(json!([
+			{
+				"id": "kimi-k3.1-pro",
+				"pricing": {"currency": "EUR", "input_token": 2.0, "output_token": 10.0},
+				"providers": ["tensorix", "Berget"],
+				"context_size": 1048576,
+				"max_output_tokens": 500000,
+				"providers_details": {
+					"tensorix": {
+						"pricing": {"currency": "EUR", "input_token": 2.0, "output_token": 10.0, "cache_read_cost": 0.5},
+						"quantization": "mxfp4",
+						"max_output_tokens": 64000,
+						"metrics": {"throughput": 97.74, "latency": 17.78, "ttft": 4.46, "cache_hit_rate": 0.88, "uptime": 0.99}
+					},
+					"berget": {}
+				}
+			},
+			{"id": "mistral-small", "providers": ["berget", "ovh"], "providers_details": {}}
+		]))
+		.unwrap()
+	}
+
+	fn eur_rate() -> HashMap<String, Decimal> {
+		HashMap::from([("EUR".to_string(), Decimal::new(11, 1))])
+	}
+
+	#[test]
+	fn upstream_providers_are_the_union_of_model_providers() {
+		let slugs: Vec<String> = upstream_providers(&fixture()).into_iter().map(|provider| provider.slug).collect();
+		assert_eq!(slugs, ["berget", "ovh", "tensorix"]);
+	}
+
+	#[test]
+	fn options_convert_units_and_fall_back_to_model_values() {
+		let models = fixture();
+		let options = cortecs_options(&models[0], &eur_rate());
+		let tensorix = options.iter().find(|option| option.provider_slug.as_deref() == Some("tensorix")).unwrap();
+		assert_eq!(tensorix.quantization.as_deref(), Some("mxfp4"));
+		assert_eq!(tensorix.context_length, Some(1_048_576));
+		assert_eq!(tensorix.max_completion_tokens, Some(64_000));
+		assert!((tensorix.latency.unwrap() - 17_780.0).abs() < 1e-6);
+		assert!((tensorix.uptime.unwrap() - 99.0).abs() < 1e-6);
+		assert!((tensorix.price_input.unwrap() - 2.2).abs() < 1e-9);
+		assert!((tensorix.price_output.unwrap() - 11.0).abs() < 1e-9);
+		assert_eq!(tensorix.status, Some(1.0));
+		assert_eq!(tensorix.raw["metrics"]["ttft"], json!(4.46));
+
+		let berget = options.iter().find(|option| option.provider_slug.as_deref() == Some("berget")).unwrap();
+		assert_eq!(berget.max_completion_tokens, Some(500_000));
+		assert!((berget.price_input.unwrap() - 2.2).abs() < 1e-9);
+		assert!(berget.latency.is_none());
+	}
+
+	#[test]
+	fn prices_stay_empty_without_an_exchange_rate() {
+		let options = cortecs_options(&fixture()[0], &HashMap::new());
+		assert!(options.iter().all(|option| option.price_input.is_none() && option.price_output.is_none()));
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn catalog_rows_link_and_options_are_replaced(pool: PgPool) {
+		let provider_id: Uuid = sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, is_enabled) VALUES ('CORTECS', 'Cortecs', 'https://api.cortecs.ai', true) RETURNING id")
+			.fetch_one(&pool)
+			.await
+			.unwrap();
+		let model_id: Uuid = sqlx::query_scalar(
+			"INSERT INTO models (provider_id, model_id, display_name, capabilities, input_modalities, output_modalities, is_enabled)
+			 VALUES ($1, 'cortecs/kimi-k3.1-pro', 'Kimi', '[]'::jsonb, '[\"text\"]'::jsonb, '[\"text\"]'::jsonb, true) RETURNING id",
+		)
+		.bind(provider_id)
+		.fetch_one(&pool)
+		.await
+		.unwrap();
+		let models = fixture();
+		let inputs: Vec<GatewayCatalogSyncInput> = models
+			.iter()
+			.map(|model| GatewayCatalogSyncInput {
+				gateway_model_id: model.id.clone(),
+				display_name: model.id.clone(),
+				raw: json!({}),
+			})
+			.collect();
+		GatewayCatalogModel::upsert_public_catalog(&pool, &provider_id, CORTECS_GATEWAY, &inputs).await.unwrap();
+		GatewayCatalogModel::refresh_local_model_ids(&pool, &provider_id, CORTECS_GATEWAY, "Cortecs").await.unwrap();
+
+		let rates = eur_rate();
+		let options: Vec<_> = models.iter().flat_map(|model| cortecs_options(model, &rates).into_iter().map(|option| (model.id.as_str(), option))).collect();
+		GatewayCatalogModel::replace_gateway_provider_options(&pool, &provider_id, CORTECS_GATEWAY, &options).await.unwrap();
+		GatewayCatalogModel::replace_gateway_provider_options(&pool, &provider_id, CORTECS_GATEWAY, &options).await.unwrap();
+
+		let stored = GatewayCatalogModel::provider_options_for_model(&pool, &model_id).await.unwrap();
+		assert_eq!(stored.gateway_model_id.as_deref(), Some("kimi-k3.1-pro"));
+		let mut slugs: Vec<String> = stored.options.into_iter().filter_map(|option| option.provider_slug).collect();
+		slugs.sort();
+		assert_eq!(slugs, ["berget", "tensorix"]);
+	}
+}

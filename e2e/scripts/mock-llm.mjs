@@ -10,6 +10,17 @@ const MODELS = ['mock-chat', 'mock-error', 'mock-slow'];
 const MEDIA_MODELS = ['mock-embed', 'mock-rerank', 'mock-decide', 'mock-image', 'mock-whisper', 'mock-tts'];
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+// What Cortecs adds to every model with `?extended=true`: its upstream providers, EUR prices and latency in seconds.
+const CORTECS_DETAILS = {
+	pricing: {currency: 'EUR', input_token: 1, output_token: 2},
+	providers: ['berget', 'tensorix'],
+	context_size: 128000,
+	max_output_tokens: 32000,
+	providers_details: {
+		berget: {pricing: {currency: 'EUR', input_token: 1, output_token: 2}, quantization: 'fp8', metrics: {throughput: 80, latency: 0.4, ttft: 0.3, uptime: 1}},
+		tensorix: {pricing: {currency: 'EUR', input_token: 1.5, output_token: 3}, max_output_tokens: 8000, metrics: {throughput: 120, latency: 0.25, ttft: 0.2, uptime: 0.98}},
+	},
+};
 const BULK_MODELS = Array.from({length: 120}, (_, i) => `bulk-model-${String(i + 1).padStart(3, '0')}`);
 
 function lastUserText(body) {
@@ -194,7 +205,8 @@ const server = http.createServer(async (req, res) => {
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/models') {
-		return sendJson(res, 200, {object: 'list', data: MODELS.map(id => ({id, object: 'model', created: 0, owned_by: 'mock'}))});
+		const extended = url.searchParams.get('extended') === 'true' ? CORTECS_DETAILS : {};
+		return sendJson(res, 200, {object: 'list', data: MODELS.map(id => ({id, object: 'model', created: 0, owned_by: 'mock', ...extended}))});
 	}
 
 	if (req.method === 'GET' && url.pathname === '/v1/providers') {

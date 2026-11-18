@@ -2,9 +2,10 @@
 //!
 //! Every kind in [`ProviderKind::UPSTREAM_ROUTING`] may have a source. A source asks the routing provider which
 //! upstream providers exist. Kinds without a source fall back to
-//! the provider names seen in the synced model endpoint options. To add one (e.g. Vercel or Cortecs), add a file
+//! the provider names seen in the synced model endpoint options. To add one (e.g. Vercel), add a file
 //! with its `sync` function and call it from [`sync`].
 
+pub mod cortecs;
 mod openrouter;
 
 use crate::types::providers::ProviderKind;
@@ -39,6 +40,7 @@ pub enum UpstreamSyncError {
 pub async fn sync(kind: &ProviderKind, provider: &SourceProvider) -> Option<Result<Vec<SyncedUpstreamProvider>, UpstreamSyncError>> {
 	match kind {
 		ProviderKind::Openrouter => Some(openrouter::sync(provider).await),
+		ProviderKind::Cortecs => Some(cortecs::sync(provider).await),
 		_ => None,
 	}
 }
