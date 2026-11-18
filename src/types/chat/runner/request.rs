@@ -20,8 +20,9 @@ pub(super) struct RequestInputs<'a> {
 	pub system_config: Option<&'a ModelConfig>,
 	/// The tools this turn may call: the request's, or the preset's when it locks them; the admin's model tools are added on top.
 	pub enabled_tools: &'a [String],
-	/// The upstream provider the user picked, already checked against what they may use.
-	pub provider_slug: Option<&'a str>,
+	/// The upstream provider the user picked, already checked against what they may use, followed by the
+	/// providers it may fall back to when the routing provider needs them listed (Cortecs "prefer").
+	pub provider_slugs: &'a [String],
 }
 
 /// Interpolate `{{variable}}` placeholders in a system prompt string.
@@ -249,17 +250,17 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 }
 
 fn apply_provider_routing(ir: &mut ChatRequestIR, inputs: &RequestInputs<'_>) {
-	let Some(slug) = inputs.provider_slug else {
+	let Some(slug) = inputs.provider_slugs.first() else {
 		return;
 	};
 	ir.provider_routing = Some(match inputs.req.provider_routing_mode.as_deref() {
 		Some("lock") => omniference::types::ProviderRouting {
-			only: Some(vec![slug.to_string()]),
+			only: Some(vec![slug.clone()]),
 			allow_fallbacks: Some(false),
 			..Default::default()
 		},
 		_ => omniference::types::ProviderRouting {
-			order: Some(vec![slug.to_string()]),
+			order: Some(inputs.provider_slugs.to_vec()),
 			..Default::default()
 		},
 	});

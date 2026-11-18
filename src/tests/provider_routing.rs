@@ -43,7 +43,7 @@ mod tests {
 			assert!(ProviderKind::Openrouter.routes_upstream());
 			assert!(!ProviderKind::Openai.routes_upstream());
 			assert!(!ProviderKind::Anthropic.routes_upstream());
-			assert!(!ProviderKind::Cortecs.routes_upstream());
+			assert!(ProviderKind::Cortecs.routes_upstream());
 		}
 	}
 

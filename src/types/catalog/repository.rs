@@ -229,6 +229,74 @@ impl GatewayCatalogModel {
 		}))
 	}
 
+	/// Replaces the provider options of every catalog model a provider has under `source_gateway`, in one
+	/// transaction. Each item names its catalog model by `gateway_model_id`; items without a catalog row are skipped.
+	///
+	/// # Errors
+	/// Returns a database error when the options cannot be stored.
+	pub async fn replace_gateway_provider_options(
+		pool: &sqlx::PgPool,
+		provider_id: &Uuid,
+		source_gateway: &str,
+		items: &[(&str, GatewayProviderOptionSyncInput)],
+	) -> Result<(), sqlx::Error> {
+		let rows: Vec<Value> = items
+			.iter()
+			.map(|(gateway_model_id, item)| {
+				serde_json::json!({
+					"gateway_model_id": gateway_model_id,
+					"provider_slug": item.provider_slug,
+					"provider_name": item.provider_name,
+					"endpoint_name": item.endpoint_name,
+					"status": item.status,
+					"quantization": item.quantization,
+					"context_length": item.context_length,
+					"max_completion_tokens": item.max_completion_tokens,
+					"latency": item.latency,
+					"throughput": item.throughput,
+					"uptime": item.uptime,
+					"price_input": item.price_input,
+					"price_output": item.price_output,
+					"raw": item.raw,
+				})
+			})
+			.collect();
+		let mut tx = pool.begin().await?;
+		sqlx::query(
+			r#"
+			DELETE FROM gateway_model_provider_options o
+			USING gateway_catalog_models c
+			WHERE o.catalog_model_id = c.id AND c.provider_id = $1 AND c.source_gateway = $2
+			"#,
+		)
+		.bind(provider_id)
+		.bind(source_gateway)
+		.execute(&mut *tx)
+		.await?;
+		sqlx::query(
+			r#"
+			INSERT INTO gateway_model_provider_options (
+				catalog_model_id, provider_slug, provider_name, endpoint_name, status, quantization,
+				context_length, max_completion_tokens, latency, throughput, uptime, price_input, price_output, raw, fetched_at
+			)
+			SELECT c.id, u.provider_slug, u.provider_name, u.endpoint_name, u.status, u.quantization,
+			       u.context_length, u.max_completion_tokens, u.latency, u.throughput, u.uptime, u.price_input, u.price_output, u.raw, NOW()
+			FROM jsonb_to_recordset($3) AS u(
+				gateway_model_id text, provider_slug text, provider_name text, endpoint_name text, status double precision,
+				quantization text, context_length integer, max_completion_tokens integer, latency double precision,
+				throughput double precision, uptime double precision, price_input double precision, price_output double precision, raw jsonb
+			)
+			JOIN gateway_catalog_models c ON c.provider_id = $1 AND c.source_gateway = $2 AND c.gateway_model_id = u.gateway_model_id
+			"#,
+		)
+		.bind(provider_id)
+		.bind(source_gateway)
+		.bind(Value::Array(rows))
+		.execute(&mut *tx)
+		.await?;
+		tx.commit().await
+	}
+
 	/// Replace the stored provider options for a catalog model with a fresh set.
 	pub async fn upsert_provider_options(pool: &sqlx::PgPool, catalog_model_id: &Uuid, items: &[GatewayProviderOptionSyncInput]) -> Result<(), sqlx::Error> {
 		let mut tx = pool.begin().await?;

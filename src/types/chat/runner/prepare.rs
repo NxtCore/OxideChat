@@ -1,4 +1,5 @@
 use super::request::{RequestInputs, build_request};
+use crate::types::catalog::GatewayCatalogModel;
 use crate::types::models::Model;
 use crate::types::providers::ProviderKind;
 use crate::types::models_configs::ModelConfig;
@@ -196,29 +197,44 @@ async fn select_fork(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, user_mess
 	}
 }
 
-/// The upstream provider the user picked for a routing provider kind, if they get the selector.
+/// The upstream provider the user picked for a routing provider kind, if they get the selector, first in the
+/// returned list. Cortecs cannot prefer one provider and fall back to any other, so in "prefer" mode the
+/// model's other stored providers the user may use follow it.
 ///
 /// A pick the user's teams do not allow refuses the turn; for other provider kinds, or without the
 /// selector, the pick is ignored.
-async fn picked_provider(db: &PgPool, user_id: &Uuid, model: &Model, req: &StreamRequest) -> Result<Option<String>, TurnError> {
+async fn picked_provider(db: &PgPool, user_id: &Uuid, model: &Model, req: &StreamRequest) -> Result<Vec<String>, TurnError> {
 	let Some(slug) = req.provider_slug.as_deref().map(str::trim).filter(|slug| !slug.is_empty()) else {
-		return Ok(None);
+		return Ok(Vec::new());
 	};
 	let Some(kind) = Model::provider_kind(db, &model.id)
 		.await
 		.map_err(internal("Failed to fetch model"))?
 		.filter(ProviderKind::routes_upstream)
 	else {
-		return Ok(None);
+		return Ok(Vec::new());
 	};
 	let routing = EffectiveProviderRouting::for_user(db, user_id).await.map_err(internal("Failed to check provider access"))?;
 	if !routing.selector_enabled {
-		return Ok(None);
+		return Ok(Vec::new());
 	}
 	if !routing.allows(&kind, slug) {
 		return Err(TurnError::new("provider_not_allowed", I18n::get().translate("chat.errors.provider_not_allowed", &None)));
 	}
-	Ok(Some(slug.to_string()))
+	let mut slugs = vec![slug.to_string()];
+	if kind == ProviderKind::Cortecs && req.provider_routing_mode.as_deref() != Some("lock") {
+		let stored = GatewayCatalogModel::provider_options_for_model(db, &model.id)
+			.await
+			.map_err(internal("Failed to fetch provider options"))?;
+		slugs.extend(
+			stored
+				.options
+				.into_iter()
+				.filter_map(|option| option.provider_slug)
+				.filter(|other| other != slug && routing.allows(&kind, other)),
+		);
+	}
+	Ok(slugs)
 }
 
 /// Checks access and budget, stores the user message, picks the fork and builds the model request.
@@ -239,7 +255,7 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		return Err(TurnError::new("model_not_allowed", "Model not available for this user"));
 	}
 
-	let provider_slug = picked_provider(db, &user.id, &model, req).await?;
+	let provider_slugs = picked_provider(db, &user.id, &model, req).await?;
 
 	let system_config = ModelConfig::find_system_by_stable_key(db, &model.model_id).await.ok().flatten();
 
@@ -268,7 +284,7 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		preset: preset.as_ref(),
 		system_config: system_config.as_ref(),
 		enabled_tools: &request_settings.enabled_tools,
-		provider_slug: provider_slug.as_deref(),
+		provider_slugs: &provider_slugs,
 	};
 	let ir = build_request(db, &inputs, messages).await?;
 

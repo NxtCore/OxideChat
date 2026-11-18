@@ -33,6 +33,37 @@ test.describe('provider routing', () => {
 		}
 	});
 
+	test('a Cortecs provider lists its upstream providers and each model\'s options', async ({page, api}) => {
+		const before = (await api.get('/api/v1/config')).provider_routing;
+		const provider = await api.post('/api/v1/admin/providers', {kind: 'CORTECS', name: uniqueName('Cortecs'), base_url: MOCK_LLM_URL, api_key: MOCK_LLM_KEY});
+		const syncedSlugs = async () =>
+			((await api.get('/api/v1/admin/upstream-providers')).find((gateway: {kind: string}) => gateway.kind === 'CORTECS')?.providers ?? []).map((upstream: {slug: string}) => upstream.slug).sort();
+		try {
+			const sync = await api.post(`/api/v1/admin/providers/${provider.id}/sync`);
+			expect(sync.success, JSON.stringify(sync)).toBe(true);
+			await expect.poll(syncedSlugs).toEqual(['berget', 'tensorix']);
+
+			const models: {id: string; model_id: string}[] = await api.get(`/api/v1/admin/providers/${provider.id}/models`);
+			const model = models.find(candidate => candidate.model_id.endsWith('/mock-chat'))!;
+			const options = (await api.get(`/api/v1/admin/models/${model.id}/provider-options`)).options;
+			const tensorix = options.find((option: {provider_slug: string}) => option.provider_slug === 'tensorix');
+			expect(options.map((option: {provider_slug: string}) => option.provider_slug).sort()).toEqual(['berget', 'tensorix']);
+			expect(tensorix).toMatchObject({latency: 250, max_completion_tokens: 8000, context_length: 128000, uptime: 98});
+
+			await api.patch('/api/v1/admin/config', {provider_routing: {selector_enabled: true, allowed_providers: {CORTECS: ['tensorix']}}});
+			const visible = (await api.get(`/api/v1/models/${model.id}/provider-options`)).options;
+			expect(visible.map((option: {provider_slug: string}) => option.provider_slug)).toEqual(['tensorix']);
+
+			await page.goto('/settings/admin-config');
+			await page.getByTestId('config-allowed-providers-gateway-cortecs').click();
+			await expect(page.getByTestId('config-allowed-providers-cortecs-option-berget')).toBeVisible();
+			await expect(page.getByTestId('config-allowed-providers-cortecs-option-tensorix').getByRole('checkbox')).toBeChecked();
+		} finally {
+			await api.patch('/api/v1/admin/config', {provider_routing: before});
+			await api.delete(`/api/v1/admin/providers/${provider.id}`);
+		}
+	});
+
 	test('a team picks its providers within the installation list', async ({page, api, t}) => {
 		const before = (await api.get('/api/v1/config')).provider_routing;
 		const name = uniqueName('RoutingTeam');

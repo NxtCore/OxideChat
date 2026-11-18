@@ -5,10 +5,12 @@ use serde_json::Value;
 use sqlx::types::Json;
 use uuid::Uuid;
 
+mod cortecs;
 mod repository;
 mod responses;
 mod rows;
 
+pub use cortecs::{CORTECS_GATEWAY, cortecs_options};
 pub use responses::*;
 
 /// Model-level availability of a gateway catalog model for the configured provider key.
