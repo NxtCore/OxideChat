@@ -68,7 +68,7 @@
 
 			<div class="space-y-1.5">
 				<ShadLabel for="preset-description">{{ t('description') }}</ShadLabel>
-				<ShadTextarea id="preset-description" v-model="form.description" :placeholder="t('description_placeholder')" rows="3" maxlength="2000" />
+				<SettingsMarkdownField id="preset-description" v-model="form.description" :placeholder="t('description_placeholder')" :maxlength="2000" />
 				<p class="text-xs text-muted-foreground">{{ t('description_hint') }}</p>
 			</div>
 
