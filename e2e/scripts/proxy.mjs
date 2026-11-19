@@ -5,7 +5,7 @@ const backend = {host: '127.0.0.1', port: Number(process.env.E2E_BACKEND_PORT ??
 const frontend = {host: '127.0.0.1', port: Number(process.env.E2E_FRONTEND_PORT ?? 3102)};
 
 function targetFor(path) {
-	if (path.startsWith('/api/') || path.startsWith('/openai/') || path === '/health') return backend;
+	if (path.startsWith('/api/') || path.startsWith('/openai/') || path.startsWith('/anthropic/') || path === '/health') return backend;
 	return frontend;
 }
 

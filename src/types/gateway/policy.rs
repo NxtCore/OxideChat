@@ -97,8 +97,9 @@ impl GatewayRoute {
 	pub const TRANSCRIPTIONS: Self = Self::inference("/audio/transcriptions", "gateway.transcriptions");
 	pub const TRANSLATIONS: Self = Self::inference("/audio/translations", "gateway.translations");
 	pub const SPEECH: Self = Self::inference("/audio/speech", "gateway.speech");
+	pub const MESSAGES: Self = Self::inference("/messages", "gateway.messages");
 	/// Every inference route, used to name the route of a request rejected before its handler ran.
-	pub const INFERENCE: [Self; 10] = [
+	pub const INFERENCE: [Self; 11] = [
 		Self::CHAT,
 		Self::RESPONSES,
 		Self::EMBEDDINGS,
@@ -109,6 +110,7 @@ impl GatewayRoute {
 		Self::TRANSCRIPTIONS,
 		Self::TRANSLATIONS,
 		Self::SPEECH,
+		Self::MESSAGES,
 	];
 
 	const fn inference(path: &'static str, usage_type: &'static str) -> Self {

@@ -1,3 +1,4 @@
+pub mod anthropic;
 pub mod auth;
 pub mod base;
 pub mod chats;

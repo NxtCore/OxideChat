@@ -185,3 +185,40 @@ test.describe('OpenAI gateway: usage, cost and logs', () => {
 		expect(response.status()).toBe(401);
 	});
 });
+
+test.describe('Anthropic gateway: Claude Code clients', () => {
+	test('messages authenticate with x-api-key and are billed and logged like chat', async ({page, api, seed}) => {
+		const key = await createKeyViaApi(api, seed.teamId, uniqueName('anthropic-key'));
+		const headers = {'x-api-key': key.token, 'anthropic-version': '2023-06-01'};
+
+		const models = await page.request.get('/anthropic/v1/models', {headers});
+		expect(models.status(), await models.text()).toBe(200);
+		expect((await models.json()).data.map((model: {id: string}) => model.id)).toContain(seed.model.publicId);
+
+		const message = {model: seed.model.publicId, max_tokens: 20, messages: [{role: 'user', content: PROMPT}]};
+		const response = await page.request.post('/anthropic/v1/messages', {headers, data: message, failOnStatusCode: false});
+		expect(response.status(), await response.text()).toBe(200);
+		const body = await response.json();
+		expect(body.type).toBe('message');
+		expect(body.content[0].text.trim().length).toBeGreaterThan(0);
+		const log = await waitForLog(api, key.id, response.headers()['x-request-id']);
+		expect(log.status).toBe('success');
+		expect(log.request_type).toBe('gateway.messages');
+		expect(log.input_tokens).toBe(body.usage.input_tokens);
+		expect(log.output_tokens).toBe(body.usage.output_tokens);
+		expect(Number(log.cost_total)).toBeGreaterThan(0);
+
+		const stream = await page.request.post('/anthropic/v1/messages', {headers, data: {...message, stream: true}, failOnStatusCode: false});
+		expect(stream.status()).toBe(200);
+		const sse = await stream.text();
+		expect(sse).toContain('event: message_start');
+		expect(sse).toContain('event: message_stop');
+		const streamed = await waitForLog(api, key.id, stream.headers()['x-request-id']);
+		expect(streamed.streaming).toBe(true);
+		expect(streamed.status).toBe('success');
+
+		const missing = await page.request.post('/anthropic/v1/messages', {headers: {'anthropic-version': '2023-06-01'}, data: message, failOnStatusCode: false});
+		expect(missing.status()).toBe(401);
+		expect((await missing.json()).error.type).toBe('authentication_error');
+	});
+});

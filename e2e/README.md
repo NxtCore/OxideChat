@@ -7,7 +7,7 @@ real LLM provider with a cheap model.
 
 | Port | Process | Source |
 | ---- | ------- | ------ |
-| 3100 | Proxy that routes `/api`, `/openai` and `/health` like nginx does in production | `scripts/proxy.mjs` |
+| 3100 | Proxy that routes `/api`, `/openai`, `/anthropic` and `/health` like nginx does in production | `scripts/proxy.mjs` |
 | 3101 | Backend binary (`target/debug/OxideChat`) | `scripts/start-backend.mjs` |
 | 3102 | Nuxt production build | `scripts/start-frontend.mjs` |
 | 3103 | Local stand-in provider, used only when no API key is configured | `scripts/mock-llm.mjs` |

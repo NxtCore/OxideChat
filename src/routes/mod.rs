@@ -17,6 +17,9 @@ use tower_cookies::CookieManagerLayer;
 /// Largest image edit or audio upload the gateway accepts, the limit `OpenAI` documents for both.
 const GATEWAY_UPLOAD_LIMIT_BYTES: usize = 25 * 1024 * 1024;
 
+/// Largest Anthropic Messages body the gateway accepts, Anthropic's own limit; Claude Code histories outgrow the default.
+const GATEWAY_MESSAGES_LIMIT_BYTES: usize = 32 * 1024 * 1024;
+
 /// Builds the complete API router backed by shared [`Arc<JobState>`] state.
 ///
 /// The returned router includes public, administrative, and OpenAI-compatible
@@ -45,6 +48,19 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.method_not_allowed_fallback(public::openai::method_not_allowed)
 		.fallback(public::openai::not_found)
 		.layer(from_fn(crate::routes::gateway::add_request_id));
+	let anthropic_router = Router::new()
+		.route("/models", get(public::anthropic::list_models))
+		.route_layer(from_fn_with_state(state.clone(), crate::routes::gateway::authenticate_read))
+		.merge(
+			Router::new()
+				.route("/messages", post(public::anthropic::messages))
+				.layer(DefaultBodyLimit::max(GATEWAY_MESSAGES_LIMIT_BYTES))
+				.route_layer(from_fn_with_state(state.clone(), crate::routes::gateway::authenticate_write)),
+		)
+		.method_not_allowed_fallback(public::anthropic::method_not_allowed)
+		.fallback(public::anthropic::not_found)
+		.layer(from_fn(crate::routes::gateway::add_request_id))
+		.layer(from_fn(crate::routes::gateway::anthropic::anthropic_compat));
 	let auth_router = Router::new()
 		.route("/setup", post(public::auth::setup))
 		.route("/register", post(public::auth::register))
@@ -56,6 +72,7 @@ pub fn build_router(state: Arc<JobState>) -> Router {
 		.layer(DefaultBodyLimit::max(64 * 1024));
 	Router::new()
 		.nest("/openai/v1", openai_router)
+		.nest("/anthropic/v1", anthropic_router)
 		.nest("/api/v1/auth", auth_router)
 		.merge(admin::router())
 		.merge(public::router())

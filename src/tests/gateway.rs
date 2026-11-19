@@ -1223,6 +1223,50 @@ mod http {
 		Ok(())
 	}
 
+	async fn anthropic(router: &Router, method: &str, path: &str, api_key: Option<&str>, body: Option<&Value>) -> TestResult<(u16, Value)> {
+		let mut request = Request::builder().method(method).uri(path).header("content-type", "application/json").header("anthropic-version", "2023-06-01");
+		if let Some(api_key) = api_key {
+			request = request.header("x-api-key", api_key);
+		}
+		let response = router.clone().oneshot(request.body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))?).await?;
+		let status = response.status().as_u16();
+		assert!(response.headers().contains_key("x-request-id"));
+		Ok((status, json_body(response).await?))
+	}
+
+	fn anthropic_error(body: &Value) -> &str {
+		assert_eq!(body["type"], "error", "{body}");
+		assert!(body["error"]["message"].is_string(), "{body}");
+		body["error"]["type"].as_str().unwrap_or_default()
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn anthropic_messages_take_x_api_key_and_answer_anthropic_errors(pool: PgPool) -> TestResult {
+		let user_id = create_user(&pool).await?;
+		let (_, reader) = create_key_in_new_team(&pool, user_id, json!(["inference:read"])).await?;
+		let (_, writer) = create_key_in_new_team(&pool, user_id, json!(["inference:write"])).await?;
+		let (router, _) = router(pool.clone()).await?;
+		let message = json!({"model": "absent/model", "max_tokens": 16, "messages": [{"role": "user", "content": "hi"}]});
+
+		let (status, body) = anthropic(&router, "POST", "/anthropic/v1/messages", None, Some(&message)).await?;
+		assert_eq!((status, anthropic_error(&body)), (401, "authentication_error"));
+		let (status, body) = anthropic(&router, "POST", "/anthropic/v1/messages", Some(&reader), Some(&message)).await?;
+		assert_eq!((status, anthropic_error(&body)), (403, "permission_error"));
+		let (status, body) = anthropic(&router, "POST", "/anthropic/v1/messages", Some(&writer), Some(&json!({"max_tokens": 16, "messages": []}))).await?;
+		assert_eq!((status, anthropic_error(&body)), (400, "invalid_request_error"));
+		let (status, body) = anthropic(&router, "POST", "/anthropic/v1/messages", Some(&writer), Some(&message)).await?;
+		assert_eq!((status, anthropic_error(&body)), (404, "not_found_error"));
+		let (status, body) = anthropic(&router, "GET", "/anthropic/v1/absent", Some(&reader), None).await?;
+		assert_eq!((status, anthropic_error(&body)), (404, "not_found_error"));
+
+		let (status, body) = anthropic(&router, "GET", "/anthropic/v1/models", Some(&reader), None).await?;
+		assert_eq!(status, 200);
+		assert_eq!((body["data"].as_array().map(Vec::len), &body["has_more"]), (Some(0), &json!(false)));
+		let logged: Vec<_> = logged(&pool).await?.into_iter().map(|(request_type, status, _)| (request_type, status)).collect();
+		assert_eq!(logged, [("gateway.messages".to_owned(), Some(403)), ("gateway.messages".to_owned(), Some(404))]);
+		Ok(())
+	}
+
 	#[sqlx::test(migrations = "./migrations")]
 	async fn a_rejected_key_is_logged_under_the_route_it_called(pool: PgPool) -> TestResult {
 		let user_id = create_user(&pool).await?;

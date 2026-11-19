@@ -139,6 +139,19 @@ impl GatewayInference {
 			.and_then(|body| self.estimate_split(&body, output_max, 1));
 		GatewayEstimate { result, limited }
 	}
+
+	/// Bounds an Anthropic Messages request; the output maximum is applied only when token rules reserve it.
+	pub fn messages_estimate(&self, policy: &GatewayRatePolicy, request: &mut Map<String, Value>) -> GatewayEstimate {
+		let limited = policy.has_token_rules();
+		if limited && !request.contains_key("max_tokens") && let Some(max) = self.max_output_tokens {
+			request.insert("max_tokens".to_owned(), Value::from(max));
+		}
+		let output_max = request.get("max_tokens").and_then(Value::as_u64);
+		let result = serde_json::to_vec(&*request)
+			.map_err(|_| GatewayLimitError::Unavailable)
+			.and_then(|body| self.estimate_split(&body, output_max, 1));
+		GatewayEstimate { result, limited }
+	}
 }
 
 /// Bounds one image the web chat image tool generates from a prompt and its input images.

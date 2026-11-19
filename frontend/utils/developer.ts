@@ -11,25 +11,41 @@ export function maskedKey(key: DeveloperKey): string {
 	return `${key.key_prefix}…${key.last_four}`;
 }
 
-export const GATEWAY_ENDPOINTS = [{id: 'openai', label: 'developer.endpoints.openai', path: '/openai/v1'}];
-
-/** Every route under a gateway base URL and the model type it serves; `/models` lists them all. */
-export const GATEWAY_ROUTES = [
-	{method: 'POST', path: '/chat/completions', type: 'chat'},
-	{method: 'POST', path: '/responses', type: 'chat'},
-	{method: 'POST', path: '/embeddings', type: 'embedding'},
-	{method: 'POST', path: '/rerank', type: 'reranking'},
-	{method: 'POST', path: '/decisions', type: 'decision'},
-	{method: 'POST', path: '/images/generations', type: 'image'},
-	{method: 'POST', path: '/images/edits', type: 'image'},
-	{method: 'POST', path: '/audio/transcriptions', type: 'transcription'},
-	{method: 'POST', path: '/audio/translations', type: 'transcription'},
-	{method: 'POST', path: '/audio/speech', type: 'speech'},
-	{method: 'GET', path: '/models', type: null},
+/** Every gateway base URL and the routes under it, with the model type each serves; a `/models` route lists them all. */
+export const GATEWAY_ENDPOINTS = [
+	{
+		id: 'openai',
+		label: 'developer.endpoints.openai',
+		path: '/openai/v1',
+		hint: null,
+		routes: [
+			{method: 'POST', path: '/chat/completions', type: 'chat'},
+			{method: 'POST', path: '/responses', type: 'chat'},
+			{method: 'POST', path: '/embeddings', type: 'embedding'},
+			{method: 'POST', path: '/rerank', type: 'reranking'},
+			{method: 'POST', path: '/decisions', type: 'decision'},
+			{method: 'POST', path: '/images/generations', type: 'image'},
+			{method: 'POST', path: '/images/edits', type: 'image'},
+			{method: 'POST', path: '/audio/transcriptions', type: 'transcription'},
+			{method: 'POST', path: '/audio/translations', type: 'transcription'},
+			{method: 'POST', path: '/audio/speech', type: 'speech'},
+			{method: 'GET', path: '/models', type: null},
+		],
+	},
+	{
+		id: 'anthropic',
+		label: 'developer.endpoints.anthropic',
+		path: '/anthropic',
+		hint: 'developer.endpoints.anthropic_hint',
+		routes: [
+			{method: 'POST', path: '/v1/messages', type: 'chat'},
+			{method: 'GET', path: '/v1/models', type: null},
+		],
+	},
 ] as const;
 
 export function routesForType(type: string): string[] {
-	return GATEWAY_ROUTES.filter(route => route.type === type).map(route => `${route.method} ${route.path}`);
+	return GATEWAY_ENDPOINTS.flatMap(endpoint => endpoint.routes.filter(route => route.type === type).map(route => `${route.method} ${endpoint.path}${route.path}`));
 }
 
 export function gatewayBaseUrl(): string {

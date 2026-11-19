@@ -46,7 +46,7 @@ Back up the database first. Images older than 0.4.2 kept the generated key insid
 - Session cookies are `Secure` unless `BASE_URL` starts with `http://`, so only use `http://` for local setups.
 - `docker-compose.yml` publishes the container on `127.0.0.1:8080` only, so it is reachable through your proxy on the same host and not directly from the network. Change the port mapping only if the proxy runs on another machine.
 - Set `TRUSTED_PROXIES` to the address or range your proxy connects from (comma-separated, for example `172.18.0.1` for a proxy on the Docker host, or the proxy container's network such as `172.18.0.0/16`). Only requests from these addresses may name the client IP in `X-Forwarded-For`. It is empty by default: every request then counts as coming from the proxy's address, so all users share the per-IP rate limits until you set it. `docker compose logs oxidechat` shows the address requests arrive from.
-- The bundled `nginx.conf` adds baseline security headers (nosniff, frame-deny, referrer policy, CSP), a 25 MB request-body cap, and per-IP rate limits on `/api/v1/auth/` and `/openai/`. The OpenAI-compatible gateway is served under `/openai/`.
+- The bundled `nginx.conf` adds baseline security headers (nosniff, frame-deny, referrer policy, CSP), a 25 MB request-body cap, and per-IP rate limits on `/api/v1/auth/` and the gateway. The OpenAI-compatible gateway is served under `/openai/`, the Anthropic Messages gateway (for Claude Code) under `/anthropic/`.
 - Base images in the `Dockerfile` are pinned by digest, and CI signs pushed images keylessly with cosign (GitHub OIDC). Verify with `cosign verify <image>@<digest>`.
 
 # Inspiration
