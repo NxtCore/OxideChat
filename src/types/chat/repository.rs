@@ -372,9 +372,9 @@ impl Message {
 			r#"
 			INSERT INTO messages (
 				chat_id, role, content, content_parts, reasoning_content,
-				model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork
+				model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork, arena_round_id
 			)
-			VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, TRUE)
+			VALUES ($1, 'assistant', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			RETURNING *
 			"#,
 		)
@@ -389,6 +389,8 @@ impl Message {
 		.bind(sqlx::types::Json(params.request_settings))
 		.bind(params.parent_id)
 		.bind(params.fork_index)
+		.bind(params.is_active_fork)
+		.bind(params.arena_round_id)
 		.fetch_one(pool)
 		.await?;
 

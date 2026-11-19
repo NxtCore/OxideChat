@@ -79,6 +79,8 @@ pub(crate) struct AgentRun {
 	reasoning_budget_tokens: Option<u32>,
 	request_settings: RequestSettings,
 	needs_title: bool,
+	active: bool,
+	arena_round_id: Option<Uuid>,
 	start_time: Instant,
 	base_ir: ChatRequestIR,
 	current_messages: Vec<OmniMessage>,
@@ -96,7 +98,7 @@ pub(crate) struct AgentRun {
 	step: IterationState,
 }
 
-fn sse(data: StreamData) -> Result<Event, Infallible> {
+pub(crate) fn sse(data: StreamData) -> Result<Event, Infallible> {
 	Ok(Event::default().data(serde_json::to_string(&data).unwrap_or_default()))
 }
 
@@ -166,6 +168,8 @@ impl AgentRun {
 			reasoning_budget_tokens: turn.reasoning_budget_tokens,
 			request_settings: turn.request_settings,
 			needs_title: turn.needs_title,
+			active: turn.active,
+			arena_round_id: turn.arena_round_id,
 			start_time,
 			base_ir,
 			current_messages,
@@ -533,6 +537,8 @@ impl AgentRun {
 				request_settings: &self.request_settings,
 				parent_id: self.assistant_parent_id,
 				fork_index: self.assistant_fork_index,
+				is_active_fork: self.active,
+				arena_round_id: self.arena_round_id.as_ref(),
 			},
 		)
 		.await
@@ -561,10 +567,15 @@ impl AgentRun {
 /// Omniference records each request's usage and cost through `OxideCostSink`, also when the
 /// client disconnects and the stream is dropped mid-request.
 pub fn stream_turn(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant) -> impl Stream<Item = Result<Event, Infallible>> {
+	turn_events(state, turn, start_time).map(sse)
+}
+
+/// The events of one chat turn, from the saved user message to `done` and the title.
+pub(crate) fn turn_events(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant) -> impl Stream<Item = StreamData> {
 	async_stream::stream! {
 		if let Some(msg) = &turn.user_message {
 			let message: ChatMessageResponse = msg.clone().into();
-			yield sse(StreamData::UserMessageSaved { message });
+			yield StreamData::UserMessageSaved { message };
 		}
 
 		let engine = ai::get();
@@ -574,9 +585,9 @@ pub fn stream_turn(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant
 			let request = match run.next_request().await {
 				Ok(request) => request,
 				Err(error) => {
-					yield sse(error.event());
+					yield error.event();
 					if let Some(done) = run.save_partial().await {
-						yield sse(done);
+						yield done;
 					}
 					break 'agentic_loop;
 				}
@@ -584,9 +595,9 @@ pub fn stream_turn(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant
 			let mut upstream = match engine.chat(request).await {
 				Ok(upstream) => upstream,
 				Err(error) => {
-					yield sse(run.chat_failed(&error));
+					yield run.chat_failed(&error);
 					if let Some(done) = run.save_partial().await {
-						yield sse(done);
+						yield done;
 					}
 					break 'agentic_loop;
 				}
@@ -595,36 +606,36 @@ pub fn stream_turn(state: Arc<JobState>, turn: PreparedTurn, start_time: Instant
 			while let Some(event) = upstream.next().await {
 				match event {
 					StreamEvent::ToolCallEnd { id, args_json } => {
-						yield sse(StreamData::ToolCallEnd { id: id.clone() });
+						yield StreamData::ToolCallEnd { id: id.clone() };
 						if let Some(call) = run.take_pending_call(id, args_json) {
 							let started = Instant::now();
 							let result = match run.client_tool(&call).await {
 								Some((event, tool_id, pending)) => {
-									yield sse(event);
+									yield event;
 									run.await_client_result(&call.id, tool_id, pending).await
 								}
 								None => run.run_server_tool(&call).await,
 							};
-							yield sse(run.record_tool_result(call, started, result));
+							yield run.record_tool_result(call, started, result);
 						}
 					}
 					StreamEvent::Done => match run.finish_iteration().await {
 						Finish::Continue => continue 'agentic_loop,
 						Finish::Stop(event) => {
 							let finished = matches!(event, StreamData::Done { .. });
-							yield sse(event);
+							yield event;
 							if finished
 								&& let Some(job) = run.title_job()
 								&& let Ok(Some(title)) = tokio::spawn(generate_title(job)).await
 							{
-								yield sse(StreamData::Title { title });
+								yield StreamData::Title { title };
 							}
 							break 'agentic_loop;
 						}
 					},
 					other => {
 						if let Some(data) = run.apply(other) {
-							yield sse(data);
+							yield data;
 						}
 					}
 				}

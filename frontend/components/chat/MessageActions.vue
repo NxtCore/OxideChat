@@ -47,6 +47,17 @@
 			</ShadTooltipContent>
 		</ShadTooltip>
 
+		<ShadTooltip v-if="message.arena_round_id">
+			<ShadTooltipTrigger as-child>
+				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" data-testid="message-action-arena" @click="compareOpen = true">
+					<Swords class="h-3.5 w-3.5" />
+				</ShadButton>
+			</ShadTooltipTrigger>
+			<ShadTooltipContent side="top" :side-offset="8">
+				<p class="text-xs">{{ store.getTranslation('chat.arena.compare') }}</p>
+			</ShadTooltipContent>
+		</ShadTooltip>
+
 		<ShadTooltip>
 			<ShadTooltipTrigger as-child>
 				<ShadButton variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent/50" data-testid="message-action-branch" @click="handleBranch">
@@ -167,11 +178,13 @@
 				</div>
 			</ShadTooltipContent>
 		</ShadTooltip>
+		<ArenaCompareDialog v-if="message.arena_round_id" v-model:open="compareOpen" :round-id="message.arena_round_id" />
 	</div>
 </template>
 
 <script setup lang="ts">
-import {Copy, Check, RefreshCw, Info, ChevronLeft, ChevronRight, GitBranch} from 'lucide-vue-next';
+import {Copy, Check, RefreshCw, Info, ChevronLeft, ChevronRight, GitBranch, Swords} from 'lucide-vue-next';
+import ArenaCompareDialog from './ArenaCompareDialog.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useMainStore} from '~/stores';
@@ -193,6 +206,7 @@ defineEmits<{
 const chatStore = useChatStore();
 const {sendAndStream} = useChatStream();
 const copied = ref(false);
+const compareOpen = ref(false);
 
 async function copyContent() {
 	if (!props.message.content) return;

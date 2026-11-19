@@ -94,9 +94,8 @@ export function useChatStream() {
 	const modelStore = useModelStore();
 	const preferencesStore = usePreferencesStore();
 
-	function applyEvent(data: any, chatId: string, userMessageId: string | null, streamingMessageId: string): Promise<void> | void {
+	function applyEvent(data: any, chatId: string, userMessageId: string | null, msg: ChatMessage | undefined): Promise<void> | void {
 		const userMsg = userMessageId ? chatStore.messages.find(m => m.id === userMessageId) : undefined;
-		const msg = chatStore.messages.find(m => m.id === streamingMessageId);
 
 		switch (data.type) {
 			case 'user_message_saved':
@@ -187,6 +186,45 @@ export function useChatStream() {
 			case 'title': {
 				const chat = chatStore.chats.find(c => c.id === chatId);
 				if (chat) chat.title = data.title;
+				break;
+			}
+			case 'arena_started':
+				chatStore.messages = chatStore.messages.filter(m => m.id !== msg?.id);
+				chatStore.arenaRound = {
+					id: data.round_id,
+					user_message_id: userMsg?.id ?? null,
+					decided: false,
+					stream_responses: data.stream_responses,
+					show_reasoning: data.show_reasoning,
+					candidates: Array.from({length: data.candidates}, (_, index) => ({
+						message: arenaMessage(`streaming-arena-${index}`, data.round_id),
+						label: arenaLabel(index),
+						model_name: null,
+						failed: false,
+					})),
+				};
+				break;
+			case 'arena_candidate': {
+				const candidate = chatStore.arenaRound?.candidates[data.candidate];
+				if (!candidate) break;
+				if (data.event.type === 'done') {
+					Object.assign(candidate.message, data.event.message);
+				} else if (data.event.type === 'error') {
+					candidate.failed = true;
+					if (!candidate.message.content) candidate.message.content = data.event.message;
+				} else {
+					return applyEvent(data.event, chatId, null, candidate.message);
+				}
+				break;
+			}
+			case 'arena_done': {
+				chatStore.isStreaming = false;
+				if (chatStore.arenaRound) chatStore.arenaRound.user_message_id = userMsg?.id ?? chatStore.arenaRound.user_message_id;
+				const chat = chatStore.chats.find(c => c.id === chatId);
+				if (chat) chat.updated_at = new Date().toISOString();
+				useBudgetStore()
+					.fetchMyBudget()
+					.catch(() => {});
 				break;
 			}
 			case 'error':
@@ -286,7 +324,7 @@ export function useChatStream() {
 					if (!jsonStr) continue;
 
 					try {
-						await applyEvent(JSON.parse(jsonStr), chatId, userMessageId, streamingMessageId);
+						await applyEvent(JSON.parse(jsonStr), chatId, userMessageId, chatStore.messages.find(m => m.id === streamingMessageId));
 					} catch (e) {
 						console.error('Failed to parse SSE event:', e);
 					}

@@ -1,3 +1,4 @@
+use super::arena::{ArenaTurn, prepare_arena_turn};
 use super::request::{RequestInputs, build_request};
 use crate::types::catalog::GatewayCatalogModel;
 use crate::types::models::Model;
@@ -6,7 +7,7 @@ use crate::types::models_configs::ModelConfig;
 use crate::i18n::I18n;
 use crate::types::presets::preset_key_parts;
 use crate::types::{
-	BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, MessagePart, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
+	ArenaRound, BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, MessagePart, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
 	StreamingUserMessageCreate, TokenEstimate, UsageDetails, User,
 };
 use axum::response::{
@@ -61,9 +62,18 @@ pub struct PreparedTurn {
 	pub(crate) reasoning_budget_tokens: Option<u32>,
 	pub(crate) request_settings: RequestSettings,
 	pub(crate) needs_title: bool,
+	/// Whether the reply becomes the chat's active one; arena answers stay inactive until one is picked.
+	pub(crate) active: bool,
+	pub(crate) arena_round_id: Option<Uuid>,
 }
 
-fn internal(message: &'static str) -> impl FnOnce(sqlx::Error) -> TurnError {
+/// A prepared turn: one reply, or an arena round where every model of the arena answers.
+pub enum Turn {
+	Single(Box<PreparedTurn>),
+	Arena(Box<ArenaTurn>),
+}
+
+pub(super) fn internal(message: &'static str) -> impl FnOnce(sqlx::Error) -> TurnError {
 	move |error| {
 		tracing::error!(%error, "{message}");
 		TurnError::new("internal_error", message)
@@ -80,7 +90,7 @@ pub(crate) fn request_bytes(req: &StreamRequest) -> u64 {
 	(req.content.len() + parts.sum::<usize>()) as u64
 }
 
-async fn prompt_bytes(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, system_config: Option<&ModelConfig>, preset: Option<&Preset>) -> Result<u64, TurnError> {
+pub(super) async fn prompt_bytes(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, system_config: Option<&ModelConfig>, preset: Option<&Preset>) -> Result<u64, TurnError> {
 	let history_bytes = Message::active_prompt_bytes(db, chat_id).await.map_err(internal("Failed to check budget status"))?;
 	let system_bytes = system_config.and_then(|config| config.system_prompt.as_deref()).map_or(0, str::len);
 	let preset_bytes = preset.and_then(|preset| preset.system_prompt.as_deref()).map_or(0, str::len);
@@ -113,11 +123,11 @@ async fn resolve_model(db: &PgPool, user_id: &Uuid, key: &str) -> Result<(Model,
 	Ok((model, Some(preset)))
 }
 
-fn output_estimate(model: &Model) -> u64 {
+pub(super) fn output_estimate(model: &Model) -> u64 {
 	model.max_tokens.and_then(|tokens| u64::try_from(tokens).ok()).filter(|tokens| *tokens > 0).unwrap_or(DEFAULT_OUTPUT_ESTIMATE)
 }
 
-async fn admit(state: &JobState, user_id: Uuid, model: &Model, prompt_bytes: u64) -> Result<BudgetAdmission, TurnError> {
+pub(super) async fn admit(state: &JobState, user_id: Uuid, model: &Model, prompt_bytes: u64) -> Result<BudgetAdmission, TurnError> {
 	let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes(prompt_bytes), output_estimate(model));
 	match state.budget_ledger.reserve_for_model(&state.db, BudgetSubject::user(user_id), &model.id, estimate).await {
 		Ok(admission) => Ok(admission),
@@ -129,7 +139,7 @@ async fn admit(state: &JobState, user_id: Uuid, model: &Model, prompt_bytes: u64
 	}
 }
 
-async fn store_user_message(db: &PgPool, chat_id: &Uuid, model_id: &Uuid, req: &StreamRequest, request_settings: &RequestSettings) -> Result<Option<Message>, TurnError> {
+pub(super) async fn store_user_message(db: &PgPool, chat_id: &Uuid, model_id: Option<&Uuid>, req: &StreamRequest, request_settings: &RequestSettings) -> Result<Option<Message>, TurnError> {
 	let content_parts_json = req.parts.as_ref().and_then(|parts| serde_json::to_value(parts).ok());
 	let last_active_message_id = Message::last_active_id(db, chat_id).await.ok().flatten();
 
@@ -237,11 +247,29 @@ async fn picked_provider(db: &PgPool, user_id: &Uuid, model: &Model, req: &Strea
 	Ok(slugs)
 }
 
-/// Checks access and budget, stores the user message, picks the fork and builds the model request.
+pub(super) async fn require_model_access(db: &PgPool, user_id: &Uuid, model: &Model) -> Result<(), TurnError> {
+	if Model::can_user_use_model(db, user_id, &model.id).await.map_err(internal("Failed to check model access"))? {
+		Ok(())
+	} else {
+		Err(TurnError::new("model_not_allowed", "Model not available for this user"))
+	}
+}
+
+async fn refuse_pending_round(db: &PgPool, chat_id: &Uuid) -> Result<(), TurnError> {
+	match ArenaRound::pending_for_chat(db, chat_id).await.map_err(internal("Failed to fetch chat"))? {
+		Some(_) => Err(TurnError::new("arena_pending", I18n::get().translate("chat.arena.pick_to_continue", &None))),
+		None => Ok(()),
+	}
+}
+
+/// Checks access and budget, stores the user message, picks the fork and builds the model request; an arena preset
+/// prepares one request per model instead.
+///
+/// A chat whose last arena round still waits for a pick takes no new turn.
 ///
 /// # Errors
 /// Returns a [`TurnError`] whose code and message are sent to the client as an SSE error event.
-pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req: &StreamRequest) -> Result<PreparedTurn, TurnError> {
+pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req: &StreamRequest) -> Result<Turn, TurnError> {
 	let db = &state.db;
 
 	let chat = Chat::find_by_id_and_user(db, &chat_id, &user.id)
@@ -249,11 +277,20 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		.map_err(internal("Failed to fetch chat"))?
 		.ok_or_else(|| TurnError::new("not_found", "Chat not found"))?;
 
-	let (model, preset) = resolve_model(db, &user.id, &req.model_key).await?;
+	refuse_pending_round(db, &chat_id).await?;
 
-	if !Model::can_user_use_model(db, &user.id, &model.id).await.map_err(internal("Failed to check model access"))? {
-		return Err(TurnError::new("model_not_allowed", "Model not available for this user"));
+	let (model, preset) = resolve_model(db, &user.id, &req.model_key).await?;
+	match preset {
+		Some(preset) if preset.is_arena() => prepare_arena_turn(state, user, &chat, req, preset).await.map(|turn| Turn::Arena(Box::new(turn))),
+		preset => prepare_single(state, user, &chat, req, (model, preset)).await.map(|turn| Turn::Single(Box::new(turn))),
 	}
+}
+
+async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &StreamRequest, (model, preset): (Model, Option<Preset>)) -> Result<PreparedTurn, TurnError> {
+	let db = &state.db;
+	let chat_id = chat.id;
+
+	require_model_access(db, &user.id, &model).await?;
 
 	let provider_slugs = picked_provider(db, &user.id, &model, req).await?;
 
@@ -272,7 +309,7 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		},
 	};
 
-	let user_message = store_user_message(db, &chat_id, &model.id, req, &request_settings).await?;
+	let user_message = store_user_message(db, &chat_id, Some(&model.id), req, &request_settings).await?;
 	let (assistant_parent_id, assistant_fork_index, messages) = select_fork(db, &chat_id, req, user_message.as_ref()).await?;
 
 	let inputs = RequestInputs {
@@ -285,6 +322,7 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		system_config: system_config.as_ref(),
 		enabled_tools: &request_settings.enabled_tools,
 		provider_slugs: &provider_slugs,
+		config_tools: true,
 	};
 	let ir = build_request(db, &inputs, messages).await?;
 
@@ -302,5 +340,7 @@ pub async fn prepare_turn(state: &Arc<JobState>, user: &User, chat_id: Uuid, req
 		reasoning_budget_tokens: req.reasoning_budget_tokens,
 		request_settings,
 		needs_title: chat.title.is_none(),
+		active: true,
+		arena_round_id: None,
 	})
 }

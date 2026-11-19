@@ -1,7 +1,7 @@
 import type {Ref} from 'vue';
 import type {ModelList, PaginatedResponse, ProviderTab} from '~/types/chat';
 
-export type ModelFilter = 'all' | 'favorites' | 'presets' | string;
+export type ModelFilter = 'all' | 'favorites' | 'presets' | 'arenas' | string;
 
 export function useModelPicker<T = ModelList>(options: {endpoint?: string; providerEndpoint?: string; params?: Record<string, string>} = {}) {
 	const {$customFetch} = useNuxtApp();
@@ -50,7 +50,7 @@ export function useModelPicker<T = ModelList>(options: {endpoint?: string; provi
 
 	async function loadInitial() {
 		page.value = 1;
-		if (selectedFilter.value === 'presets') {
+		if (selectedFilter.value === 'presets' || selectedFilter.value === 'arenas') {
 			models.value = [];
 			hasMore.value = false;
 			return;

@@ -1,4 +1,4 @@
-use crate::types::{AppError, AuthUser, BaseType, Chat, ChatListParams, ChatMessageResponse, ChatSampling, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, JobState, Message, Page, PageQuery, UpdateChatRequest, json_ok};
+use crate::types::{AppError, ArenaRound, AuthUser, BaseType, Chat, ChatListParams, ChatMessageResponse, ChatSampling, ChatResponse, ChatWithMessagesResponse, CreateChatRequest, JobState, Message, Page, PageQuery, UpdateChatRequest, json_ok};
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
 use axum::{
 	Json,
@@ -69,7 +69,15 @@ pub async fn get_chat(State(state): State<Arc<JobState>>, user: AuthUser, Path(i
 	let messages = Message::list_active_by_chat(&state.db, &id).await?;
 	let chat_response = build_chat_response(&state.db, &chat).await?;
 	let messages = ChatMessageResponse::list_for(&state.db, &id, messages).await?;
-	json_ok(ChatWithMessagesResponse { chat: chat_response, messages })
+	let pending_arena_round = match ArenaRound::pending_for_chat(&state.db, &id).await? {
+		Some(round) => Some(round.to_response(&state.db).await?),
+		None => None,
+	};
+	json_ok(ChatWithMessagesResponse {
+		chat: chat_response,
+		messages,
+		pending_arena_round,
+	})
 }
 
 /// PATCH /api/v1/chats/:id

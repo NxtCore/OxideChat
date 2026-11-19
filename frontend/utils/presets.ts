@@ -111,7 +111,16 @@ export function isValidPresetSlug(slug: string): boolean {
 	return slug.length > 0 && slug.length <= 64 && PRESET_SLUG_PATTERN.test(slug);
 }
 
+export function isArena(preset: PresetResponse | null | undefined): boolean {
+	return preset?.mode === 'arena';
+}
+
 export function presetAsModel(preset: PresetResponse, levelKey?: string | null): ComposerModel | null {
+	if (isArena(preset)) {
+		const first = preset.levels.find(level => level.model)?.model;
+		if (!first) return null;
+		return {...first, id: preset.id, model_id: preset.key, display_name: preset.name, icon: preset.icon ?? null, is_favorite: false, preset};
+	}
 	if (hasLevels(preset)) {
 		const level = usableLevel(preset, levelKey);
 		if (!level?.model) return null;
@@ -161,6 +170,7 @@ export function presetToRequest(preset: PresetResponse): SavePresetRequest {
 		starters: [...preset.starters],
 		prompt_visible: preset.prompt_visible,
 		is_enabled: preset.is_enabled,
+		arena: {...preset.arena},
 	};
 }
 

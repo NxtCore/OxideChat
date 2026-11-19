@@ -3,13 +3,14 @@
 		<template v-if="preset">
 			<div class="mb-6 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-primary/10" data-testid="preset-empty-state">
 				<img v-if="preset.icon" :src="preset.icon" alt="" class="h-full w-full object-cover" />
+				<Swords v-else-if="isArena(preset)" class="h-8 w-8 text-primary" />
 				<Wand2 v-else class="h-8 w-8 text-primary" />
 			</div>
 			<h1 class="text-2xl font-semibold text-foreground">{{ preset.name }}</h1>
 			<ShadSeparator class="my-6 max-w-2xl" />
 			<div v-if="preset.description" :class="descriptionClass" data-testid="chat-description" v-html="renderComplete(preset.description)" />
 			<p v-else class="mb-8 max-w-2xl text-center text-muted-foreground">
-				{{ store.getTranslation('presets.empty_state.on_model', {model: level?.model?.display_name ?? preset.base_model?.display_name ?? preset.key}) }}
+				{{ presetSubtitle }}
 			</p>
 		</template>
 		<template v-else-if="model">
@@ -51,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import {Bot, Wand2} from 'lucide-vue-next';
+import {Bot, Swords, Wand2} from 'lucide-vue-next';
 import ChatComposer from './ChatComposer.vue';
 
 import {useMainStore} from '~/stores';
@@ -74,6 +75,13 @@ const preset = computed(() => modelStore.selectedModel?.preset ?? null);
 const level = computed(() => modelStore.selectedModel?.level ?? null);
 
 const model = computed(() => modelStore.selectedModel);
+
+const presetSubtitle = computed(() => {
+	const value = preset.value;
+	if (!value) return '';
+	if (isArena(value)) return store.getTranslation('presets.arena.picker_subtitle', {count: String(value.levels.length)});
+	return store.getTranslation('presets.empty_state.on_model', {model: level.value?.model?.display_name ?? value.base_model?.display_name ?? value.key});
+});
 
 const modelName = computed(() => model.value?.display_name.replace(/^[^:]+:\s+/, '') || model.value?.display_name);
 

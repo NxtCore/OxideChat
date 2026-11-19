@@ -152,13 +152,14 @@ pub struct Message {
 	pub created_at: DateTime<Utc>,
 	pub parent_id: Option<Uuid>,
 	pub fork_index: i32,
+	pub arena_round_id: Option<Uuid>,
 }
 
 pub struct StreamingUserMessageCreate<'a> {
 	pub chat_id: &'a Uuid,
 	pub content: &'a str,
 	pub content_parts: Option<&'a serde_json::Value>,
-	pub model_id: &'a Uuid,
+	pub model_id: Option<&'a Uuid>,
 	pub reasoning_details: &'a ReasoningDetails,
 	pub usage_details: &'a UsageDetails,
 	pub cost_details: &'a CostDetails,
@@ -178,6 +179,9 @@ pub struct StreamingAssistantMessageCreate<'a> {
 	pub request_settings: &'a RequestSettings,
 	pub parent_id: Option<Uuid>,
 	pub fork_index: i32,
+	/// Whether the reply becomes the chat's active one; arena answers stay inactive until one is picked.
+	pub is_active_fork: bool,
+	pub arena_round_id: Option<&'a Uuid>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

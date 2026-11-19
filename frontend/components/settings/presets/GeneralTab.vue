@@ -48,11 +48,11 @@
 					<AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0" />
 					{{ t('slug_renamed') }}
 				</p>
-				<p class="text-xs text-muted-foreground">
+				<p v-if="!arena" class="text-xs text-muted-foreground">
 					{{ t('api_hint') }}
 					<NuxtLink to="/developer/models" class="text-primary hover:underline">{{ t('api_link') }}</NuxtLink>
 				</p>
-				<div class="relative rounded-md bg-muted">
+				<div v-if="!arena" class="relative rounded-md bg-muted">
 					<ShadButton variant="ghost" size="icon" type="button" class="absolute right-1 top-1 h-7 w-7" :aria-label="store.getTranslation('developer.reveal.copy')" @click="store.copyToClipboard(curl)">
 						<Copy class="h-3.5 w-3.5" />
 					</ShadButton>
@@ -60,7 +60,7 @@
 				</div>
 			</div>
 
-			<div class="space-y-1.5" data-testid="preset-base-model">
+			<div v-if="!arena" class="space-y-1.5" data-testid="preset-base-model">
 				<ShadLabel>{{ t('model_title') }}</ShadLabel>
 				<SettingsDefaultModelPicker
 					:model-value="baseModelKey"
@@ -89,7 +89,10 @@
 			<div class="space-y-1.5">
 				<ShadLabel>{{ t('icon') }}</ShadLabel>
 				<ImagePicker v-model="form.icon" :disabled="disabled" test-id="preset-icon">
-					<template #fallback><Wand2 class="h-1/2 w-1/2 text-primary" /></template>
+					<template #fallback>
+						<Swords v-if="arena" class="h-1/2 w-1/2 text-primary" />
+						<Wand2 v-else class="h-1/2 w-1/2 text-primary" />
+					</template>
 				</ImagePicker>
 			</div>
 		</div>
@@ -97,7 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import {AlertTriangle, Check, Copy, Loader2, Wand2, X} from 'lucide-vue-next';
+import {AlertTriangle, Check, Copy, Loader2, Swords, Wand2, X} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import type {ModelList} from '~/types/chat';
 
@@ -111,6 +114,8 @@ const props = defineProps<{
 	enabledLocked: boolean;
 	levelsActive?: boolean;
 	disabled?: boolean;
+	/** An arena: no base model and no API snippet, since arenas run in web chat only. */
+	arena?: boolean;
 }>();
 
 const emit = defineEmits<{

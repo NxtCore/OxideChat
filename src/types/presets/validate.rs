@@ -1,4 +1,4 @@
-use super::{MAX_PRESET_LEVELS, MAX_PRESET_SLUG_LEN, MAX_PRESET_STARTERS, MIN_PRESET_LEVELS, PresetLevel, PresetReasoning, PresetSampling, PresetScope, SavePresetRequest};
+use super::{PresetMode, MAX_PRESET_LEVELS, MAX_PRESET_SLUG_LEN, MAX_PRESET_STARTERS, MIN_PRESET_LEVELS, PresetLevel, PresetReasoning, PresetSampling, PresetScope, SavePresetRequest};
 
 const MAX_NAME_LEN: usize = 100;
 const MAX_DESCRIPTION_LEN: usize = 2_000;
@@ -23,6 +23,8 @@ pub enum PresetError {
 	Invalid,
 	#[error("the base model does not exist or may not be used")]
 	BaseModelNotAllowed,
+	#[error("an arena needs 2 to 5 different models, no tools and a team or installation scope")]
+	ArenaInvalid,
 	#[error("a tool does not exist or may not be used")]
 	ToolsNotAllowed,
 	#[error("the preset does not exist")]
@@ -119,6 +121,17 @@ fn normalized_levels(levels: Vec<PresetLevel>, default_level: Option<String>) ->
 }
 
 impl SavePresetRequest {
+	fn check_arena(&self) -> Result<(), PresetError> {
+		let mut models: Vec<_> = self.levels.iter().map(|level| level.model_id).collect();
+		models.sort_unstable();
+		models.dedup();
+		let personal = self.scope.is_none_or(|scope| scope == PresetScope::Personal);
+		if self.levels.is_empty() || models.len() != self.levels.len() || !self.tool_ids.is_empty() || personal {
+			return Err(PresetError::ArenaInvalid);
+		}
+		Ok(())
+	}
+
 	/// Trims the text fields and checks every limit, returning the preset as it will be stored.
 	///
 	/// A preset with levels needs 2 to 5 of them with unique keys; its default level is the first one unless named,
@@ -153,6 +166,9 @@ impl SavePresetRequest {
 			return Err(PresetError::Invalid);
 		}
 		(self.levels, self.default_level) = normalized_levels(self.levels, self.default_level)?;
+		if self.mode == Some(PresetMode::Arena) {
+			self.check_arena()?;
+		}
 		if let Some(level) = self.default_level.as_ref().and_then(|key| self.levels.iter().find(|level| &level.key == key)) {
 			self.base_model_id = level.model_id;
 		}

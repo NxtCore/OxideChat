@@ -5,6 +5,7 @@ use sqlx::types::Json;
 use uuid::Uuid;
 
 mod admin;
+mod arena;
 mod gateway;
 mod repository;
 mod requests;
@@ -12,6 +13,7 @@ mod responses;
 mod rows;
 mod validate;
 
+pub use arena::*;
 pub use requests::*;
 pub use responses::*;
 pub use validate::*;
@@ -70,6 +72,51 @@ impl PresetScope {
 			_ => Self::Personal,
 		}
 	}
+}
+
+/// Whether a preset is a normal preset or a blind arena that runs every level side by side.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum PresetMode {
+	#[default]
+	Standard,
+	Arena,
+}
+
+impl PresetMode {
+	/// The value stored in `model_presets.mode`.
+	#[must_use]
+	pub const fn as_str(self) -> &'static str {
+		match self {
+			Self::Standard => "standard",
+			Self::Arena => "arena",
+		}
+	}
+}
+
+/// How an arena shows its answers before the user picks one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct PresetArena {
+	/// Whether answers stream in; when off they appear together once every model has finished.
+	#[serde(default = "default_true")]
+	pub stream_responses: bool,
+	#[serde(default)]
+	pub show_reasoning: bool,
+}
+
+impl Default for PresetArena {
+	fn default() -> Self {
+		Self {
+			stream_responses: true,
+			show_reasoning: false,
+		}
+	}
+}
+
+const fn default_true() -> bool {
+	true
 }
 
 /// Sampling defaults a preset applies; any field left empty falls through to the model.
@@ -173,6 +220,8 @@ pub struct Preset {
 	pub prompt_visible: bool,
 	pub is_enabled: bool,
 	pub disabled_by_admin: bool,
+	pub mode: String,
+	pub arena: Json<PresetArena>,
 	pub updated_at: DateTime<Utc>,
 }
 
@@ -181,6 +230,12 @@ impl Preset {
 	#[must_use]
 	pub fn key(&self) -> String {
 		format!("{PRESET_KEY_PREFIX}{}", self.slug)
+	}
+
+	/// Whether the preset is a blind arena.
+	#[must_use]
+	pub fn is_arena(&self) -> bool {
+		self.mode == PresetMode::Arena.as_str()
 	}
 
 	/// The scope stored on the row.

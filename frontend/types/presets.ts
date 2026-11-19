@@ -16,6 +16,11 @@ export type {PresetTeam} from './generated/PresetTeam';
 export type {PresetScopesResponse} from './generated/PresetScopesResponse';
 export type {AdminPresetResponse} from './generated/AdminPresetResponse';
 export type {AdminUpdatePresetRequest} from './generated/AdminUpdatePresetRequest';
+export type {PresetMode} from './generated/PresetMode';
+export type {PresetArena} from './generated/PresetArena';
+export type {ArenaRoundResponse} from './generated/ArenaRoundResponse';
+export type {ArenaCandidateResponse} from './generated/ArenaCandidateResponse';
+export type {ArenaResultRow} from './generated/ArenaResultRow';
 
 export type ComposerModel = ModelList & {preset?: PresetResponse; level?: PresetLevelResponse};
 

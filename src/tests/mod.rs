@@ -20,6 +20,7 @@ pub mod middleware;
 pub mod models;
 pub mod oauth;
 pub mod presets;
+pub mod arena;
 pub mod provider_routing;
 pub mod providers;
 pub mod request_logs;
