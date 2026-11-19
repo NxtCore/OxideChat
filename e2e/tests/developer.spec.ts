@@ -6,8 +6,8 @@ test.describe('developer area', () => {
 		await page.goto('/developer');
 		await expect(page).toHaveURL(/\/developer\/keys$/);
 		await expect(page.getByTestId('endpoint-openai')).toContainText('/openai/v1');
-		await expect(page.getByTestId('endpoint-url-anthropic')).toHaveText(/\/anthropic$/);
-		await expect(page.getByTestId('gateway-route-anthropic-v1-messages')).toContainText(t('developer.model_type.chat'));
+		await expect(page.getByTestId('endpoint-url-anthropic')).toHaveText(/\/anthropic\/v1$/);
+		await expect(page.getByTestId('gateway-route-anthropic-messages')).toContainText(t('developer.model_type.chat'));
 		await expect(page.getByTestId('endpoint-anthropic')).toContainText(t('developer.endpoints.anthropic_hint'));
 		await expect(page.getByRole('link', {name: t('developer.nav.gateway_admin')})).toHaveAttribute('href', '/settings/gateway-admin');
 		await expect(page.locator('a[href="/settings/admin-config"]')).toHaveCount(0);

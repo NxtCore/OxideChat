@@ -35,11 +35,11 @@ export const GATEWAY_ENDPOINTS = [
 	{
 		id: 'anthropic',
 		label: 'developer.endpoints.anthropic',
-		path: '/anthropic',
+		path: '/anthropic/v1',
 		hint: 'developer.endpoints.anthropic_hint',
 		routes: [
-			{method: 'POST', path: '/v1/messages', type: 'chat'},
-			{method: 'GET', path: '/v1/models', type: null},
+			{method: 'POST', path: '/messages', type: 'chat'},
+			{method: 'GET', path: '/models', type: null},
 		],
 	},
 ] as const;
