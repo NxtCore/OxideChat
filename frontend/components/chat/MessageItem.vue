@@ -1,6 +1,6 @@
 <template>
 	<div class="group flex gap-4" :class="isUser ? 'flex-row-reverse' : ''" data-testid="message" :data-role="message.role">
-		<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full overflow-hidden bg-muted">
+		<div v-if="!blind" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full overflow-hidden bg-muted">
 			<User v-if="isUser" class="h-4 w-4 text-muted-foreground" />
 			<template v-else>
 				<div v-if="providerIcon?.type === 'svg'" class="h-full w-full p-1.5 [&>svg]:h-full [&>svg]:w-full" v-html="providerIcon.icon" />
@@ -9,7 +9,7 @@
 			</template>
 		</div>
 
-		<div class="flex flex-1 flex-col gap-2" :class="isUser ? 'items-end' : 'items-start'">
+		<div class="flex min-w-0 flex-1 flex-col gap-2" :class="isUser ? 'items-end' : 'items-start'">
 			<ReasoningBlock
 				v-if="!isUser && !hasInterleavedParts && message.reasoning_content"
 				v-model:open="showReasoning"
@@ -183,7 +183,7 @@
 				<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.15s" />
 				<span class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0.3s" />
 			</div>
-			<div v-if="!isUser && !isStreaming" class="flex items-center gap-3 mt-1">
+			<div v-if="!isUser && !isStreaming && !blind" class="flex items-center gap-3 mt-1">
 				<span v-if="modelDisplayName" class="text-xs text-muted-foreground">
 					{{ modelDisplayName }}
 				</span>
@@ -223,6 +223,8 @@ const store = useMainStore();
 const props = defineProps<{
 	message: ChatMessage;
 	animation?: string;
+	/** An arena answer: no model, icon or actions until the round is decided. */
+	blind?: boolean;
 }>();
 
 const chatStore = useChatStore();
@@ -259,7 +261,7 @@ const attachedImages = computed(() => {
 });
 
 const model = computed(() => {
-	if (isUser.value) return null;
+	if (isUser.value || props.blind) return null;
 	return modelStore.models.find(m => m.id === props.message.model_id);
 });
 

@@ -2,7 +2,8 @@ import {defineStore} from 'pinia';
 import {useWorkspaceStore} from './workspaceStore';
 import {useModelStore} from './modelStore';
 import {usePreferencesStore} from './preferencesStore';
-import type {Chat, ChatSampling, ChatMessage, ChatWithMessages, CreateChatRequest, UpdateChatRequest, ChatListParams, PaginatedResponse} from '~/types/chat';
+import type {ArenaRoundResponse} from '~/types/presets';
+import type {ArenaRoundState, Chat, ChatSampling, ChatMessage, ChatWithMessages, CreateChatRequest, UpdateChatRequest, ChatListParams, PaginatedResponse} from '~/types/chat';
 
 interface ChatState {
 	chats: Chat[];
@@ -13,6 +14,9 @@ interface ChatState {
 	messagesLoading: boolean;
 
 	isStreaming: boolean;
+
+	/** The arena round shown under the last user message; blind until one answer is picked. */
+	arenaRound: ArenaRoundState | null;
 
 	pendingBranchContent: string | null;
 	pendingBranchParts: any[] | null;
@@ -33,6 +37,8 @@ export const useChatStore = defineStore('chat', {
 		messagesLoading: false,
 
 		isStreaming: false,
+
+		arenaRound: null,
 
 		pendingBranchContent: null,
 		pendingBranchParts: null,
@@ -100,6 +106,7 @@ export const useChatStore = defineStore('chat', {
 				this.chats.unshift(newChat);
 				this.activeChat = newChat;
 				this.messages = [];
+				this.arenaRound = null;
 				router.push(`/chats/${newChat.id}`);
 				return newChat;
 			} catch (e) {
@@ -148,6 +155,7 @@ export const useChatStore = defineStore('chat', {
 
 				this.messages = reconciled;
 				this.activeChat = chatWithMessages.chat;
+				this.arenaRound = chatWithMessages.pending_arena_round ? arenaRoundState(chatWithMessages.pending_arena_round) : null;
 				const modelStore = useModelStore();
 				await modelStore.hydrateComposerFromMessages(this.messages);
 				const lastAssistantMessage = this.messages.findLast(m => m.role === 'assistant');
@@ -160,6 +168,22 @@ export const useChatStore = defineStore('chat', {
 			} finally {
 				this.messagesLoading = false;
 			}
+		},
+
+		/** Picks the winning answer of the pending arena round, then reloads the chat, which continues with the winner. */
+		async pickArenaAnswer(chatId: string, messageId: string): Promise<ArenaRoundResponse | null> {
+			const round = this.arenaRound;
+			if (!round) return null;
+			const {$customFetch} = useNuxtApp();
+			const revealed = await $customFetch<ArenaRoundResponse>(`/api/v1/chats/${chatId}/arena-rounds/${round.id}/pick`, {method: 'POST', body: {message_id: messageId}});
+			this.arenaRound = arenaRoundState(revealed);
+			await this.fetchChat(chatId, {silent: true});
+			return revealed;
+		},
+
+		async fetchArenaRound(chatId: string, roundId: string): Promise<ArenaRoundResponse> {
+			const {$customFetch} = useNuxtApp();
+			return await $customFetch<ArenaRoundResponse>(`/api/v1/chats/${chatId}/arena-rounds/${roundId}`);
 		},
 
 		async saveSampling(sampling: ChatSampling): Promise<void> {
@@ -214,6 +238,7 @@ export const useChatStore = defineStore('chat', {
 			} else {
 				const modelStore = useModelStore();
 				this.messages = [];
+				this.arenaRound = null;
 				modelStore.setContextTokens(0);
 				this.activeChat = null;
 				if (this.initialized) await modelStore.resetComposerToDefaults();

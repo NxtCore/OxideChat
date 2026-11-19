@@ -1,5 +1,5 @@
 use crate::types::{
-	AppError, AuthUser, BranchFromMessageRequest, BranchResponse, Chat, ChatMessageResponse, ChatResponse, EditMessageRequest, JobState, Message, MessageListParams, ReasoningDetails,
+	AppError, ArenaRound, AuthUser, BranchFromMessageRequest, BranchResponse, Chat, ChatMessageResponse, ChatResponse, EditMessageRequest, JobState, Message, MessageListParams, ReasoningDetails,
 	SendMessageRequest, SwitchForkRequest, json_ok,
 };
 use crate::utils::response::{ErrorCode, ResponseBody, ResponseBuilder};
@@ -22,6 +22,14 @@ async fn require_chat(state: &JobState, chat_id: &Uuid, user: &AuthUser) -> Resu
 
 async fn find_message(state: &JobState, chat_id: &Uuid, message_id: &Uuid) -> Result<Message, AppError> {
 	Ok(Message::find_by_id_and_chat(&state.db, message_id, chat_id).await?.ok_or(ErrorCode::NotFound)?)
+}
+
+async fn require_decided(state: &JobState, message: &Message) -> Result<(), AppError> {
+	if ArenaRound::is_undecided(&state.db, message.arena_round_id.as_ref()).await? {
+		Err(ErrorCode::ArenaRoundPending.into())
+	} else {
+		Ok(())
+	}
 }
 
 /// GET /`api/v1/chats/:chat_id/messages`
@@ -64,6 +72,7 @@ pub async fn edit_message(State(state): State<Arc<JobState>>, user: AuthUser, Pa
 pub async fn switch_fork(State(state): State<Arc<JobState>>, user: AuthUser, Path((chat_id, message_id)): Path<(Uuid, Uuid)>, Json(req): Json<SwitchForkRequest>) -> Result<Response, AppError> {
 	require_chat(&state, &chat_id, &user).await?;
 	let msg = find_message(&state, &chat_id, &message_id).await?;
+	require_decided(&state, &msg).await?;
 	let target = Message::switch_to_fork(&state.db, &chat_id, msg.parent_id.as_ref(), req.fork_index).await?.ok_or(ErrorCode::NotFound)?;
 	json_ok(ChatMessageResponse::from(target))
 }
@@ -72,6 +81,7 @@ pub async fn switch_fork(State(state): State<Arc<JobState>>, user: AuthUser, Pat
 pub async fn get_siblings(State(state): State<Arc<JobState>>, user: AuthUser, Path((chat_id, message_id)): Path<(Uuid, Uuid)>) -> Result<Response, AppError> {
 	require_chat(&state, &chat_id, &user).await?;
 	let msg = find_message(&state, &chat_id, &message_id).await?;
+	require_decided(&state, &msg).await?;
 	let siblings = Message::siblings(&state.db, &chat_id, msg.parent_id.as_ref()).await?;
 	let count = siblings.len() as i32;
 	let responses: Vec<ChatMessageResponse> = siblings

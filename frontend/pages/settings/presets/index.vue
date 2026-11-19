@@ -138,14 +138,15 @@ const t = (key: string) => store.getTranslation(`presets.settings.${key}`);
 const pendingDelete = ref<PresetResponse | null>(null);
 
 const scopes = computed(() => presetStore.scopes);
+const standardPresets = computed(() => presetStore.presets.filter(preset => !isArena(preset)));
 const hasAnyScope = computed(() => !!scopes.value && (scopes.value.personal || scopes.value.teams.length > 0 || scopes.value.installation));
 
 const visibleTabs = computed<PresetTab[]>(() => {
-	const has = (scope: PresetScope) => presetStore.presets.some(preset => preset.scope === scope && !preset.shared);
+	const has = (scope: PresetScope) => standardPresets.value.some(preset => preset.scope === scope && !preset.shared);
 	const tabs: PresetTab[] = ['mine'];
 	if ((scopes.value?.teams.length ?? 0) > 0 || has('team')) tabs.push('team');
 	if (scopes.value?.installation || has('installation')) tabs.push('organization');
-	if (presetStore.presets.some(preset => preset.shared)) tabs.push('shared');
+	if (standardPresets.value.some(preset => preset.shared)) tabs.push('shared');
 	if (store.hasPermission(ADMIN_PRESETS_VIEW)) tabs.push('all');
 	return tabs;
 });
@@ -155,7 +156,7 @@ const currentTab = ref<PresetTab>(queryTab && (queryTab in TAB_SCOPES || queryTa
 
 watch(currentTab, tab => router.replace({query: tab === 'mine' ? {} : {tab}}));
 
-const rows = computed(() => presetStore.presets.filter(preset => (currentTab.value === 'shared' ? preset.shared : !preset.shared && preset.scope === TAB_SCOPES[currentTab.value])));
+const rows = computed(() => standardPresets.value.filter(preset => (currentTab.value === 'shared' ? preset.shared : !preset.shared && preset.scope === TAB_SCOPES[currentTab.value])));
 
 const canCreate = computed(() => {
 	if (!scopes.value) return false;

@@ -166,7 +166,7 @@ pub enum MessagePart {
 	ToolResult { tool_call_id: String },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StreamRequest {
 	pub content: String,
 	#[serde(default)]

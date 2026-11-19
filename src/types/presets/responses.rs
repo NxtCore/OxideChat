@@ -1,4 +1,4 @@
-use super::{Preset, PresetActor, PresetLevel, PresetReasoning, PresetSampling, PresetScope};
+use super::{Preset, PresetActor, PresetArena, PresetLevel, PresetMode, PresetReasoning, PresetSampling, PresetScope};
 use crate::types::models::ModelListPublic;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -40,6 +40,8 @@ pub struct PresetResponse {
 	pub prompt_visible: bool,
 	pub is_enabled: bool,
 	pub disabled_by_admin: bool,
+	pub mode: PresetMode,
+	pub arena: PresetArena,
 	pub has_gateway_usage: bool,
 	pub can_edit: bool,
 	/// Whether the viewer may delete the preset and change who it is shared with.
@@ -145,7 +147,7 @@ impl PresetResponse {
 	/// Builds the response for `viewer`, with `level_models` holding the model of each level in order; the instructions
 	/// are hidden from viewers who may not see them.
 	///
-	/// A preset with levels is usable while at least one of its levels is.
+	/// A preset with levels is usable while at least one of its levels is; an arena only while every level is.
 	#[must_use]
 	pub fn build(mut preset: Preset, base: Option<PresetBaseModel>, level_models: Vec<Option<PresetBaseModel>>, viewer: &PresetActor) -> Self {
 		let can_manage = viewer.can_manage(&preset);
@@ -154,8 +156,11 @@ impl PresetResponse {
 		let scope = preset.scope();
 		let team = preset.team_id.zip(preset.team_name.clone()).map(|(id, name)| PresetTeam { id, name });
 		let levels: Vec<PresetLevelResponse> = std::mem::take(&mut preset.levels.0).into_iter().zip(level_models).map(|(level, model)| PresetLevelResponse::build(level, model)).collect();
+		let is_arena = preset.is_arena();
 		let unavailable = if !preset.is_enabled {
 			Some(PresetUnavailable::Disabled)
+		} else if is_arena {
+			levels.iter().find_map(|level| level.unavailable)
 		} else if !levels.is_empty() && levels.iter().any(|level| level.unavailable.is_none()) {
 			None
 		} else {
@@ -185,6 +190,8 @@ impl PresetResponse {
 			prompt_visible: preset.prompt_visible,
 			is_enabled: preset.is_enabled,
 			disabled_by_admin: preset.disabled_by_admin,
+			mode: if is_arena { PresetMode::Arena } else { PresetMode::Standard },
+			arena: preset.arena.0,
 			has_gateway_usage: false,
 			can_edit,
 			can_manage,

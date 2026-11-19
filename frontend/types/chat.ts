@@ -1,3 +1,4 @@
+import type {ArenaRoundResponse} from './generated/ArenaRoundResponse';
 import type {Chat} from './generated/Chat';
 import type {CreateMcpServerRequest as GeneratedCreateMcpServerRequest} from './generated/CreateMcpServerRequest';
 import type {CreateWorkspaceRequest as GeneratedCreateWorkspaceRequest} from './generated/CreateWorkspaceRequest';
@@ -112,11 +113,29 @@ export interface ChatMessage {
 	parent_id: string | null;
 	fork_index: number;
 	sibling_count: number;
+	arena_round_id?: string | null;
 }
 
 export interface ChatWithMessages {
 	chat: Chat;
 	messages: ChatMessage[];
+	pending_arena_round: ArenaRoundResponse | null;
+}
+
+export interface ArenaCandidate {
+	message: ChatMessage;
+	label: string;
+	model_name: string | null;
+	failed: boolean;
+}
+
+export interface ArenaRoundState {
+	id: string;
+	user_message_id: string | null;
+	decided: boolean;
+	stream_responses: boolean;
+	show_reasoning: boolean;
+	candidates: ArenaCandidate[];
 }
 
 export type StreamingAnimation = 'fade' | 'typewriter' | 'slide' | 'none';

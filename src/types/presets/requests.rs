@@ -1,4 +1,4 @@
-use super::{PresetLevel, PresetReasoning, PresetSampling, PresetScope};
+use super::{PresetArena, PresetLevel, PresetMode, PresetReasoning, PresetSampling, PresetScope};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -41,6 +41,19 @@ pub struct SavePresetRequest {
 	pub prompt_visible: bool,
 	#[serde(default = "default_true")]
 	pub is_enabled: bool,
+	/// Set when the preset is created and never changed afterwards.
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub mode: Option<PresetMode>,
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub arena: Option<PresetArena>,
+}
+
+/// Filter for preset lists by mode; all modes when empty.
+#[derive(Debug, Default, Deserialize)]
+pub struct PresetListQuery {
+	pub mode: Option<PresetMode>,
 }
 
 /// Filters for the admin preset list.
@@ -48,6 +61,7 @@ pub struct SavePresetRequest {
 pub struct AdminPresetQuery {
 	pub scope: Option<PresetScope>,
 	pub team_id: Option<Uuid>,
+	pub mode: Option<PresetMode>,
 }
 
 /// Admin change to any preset: a new slug to settle a taken ID, or turning it on or off.

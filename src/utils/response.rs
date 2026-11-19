@@ -111,6 +111,7 @@ pub enum ErrorCode {
 	PresetInvalid,
 	PresetBaseModelInvalid,
 	PresetToolsInvalid,
+	PresetArenaInvalid,
 	ProviderNameReserved,
 	RoleNameInvalid,
 	RolePermissionUnknown,
@@ -149,6 +150,8 @@ pub enum ErrorCode {
 	ApiKeyRuleDuplicate,
 	ApiKeyAdminDisabled,
 	PresetSlugTaken,
+	ArenaRoundDecided,
+	ArenaRoundPending,
 	RoleNameTaken,
 	RoleLockOut,
 
@@ -198,6 +201,7 @@ impl ErrorCode {
 			| Self::PresetInvalid
 			| Self::PresetBaseModelInvalid
 			| Self::PresetToolsInvalid
+			| Self::PresetArenaInvalid
 			| Self::ProviderNameReserved
 			| Self::RoleNameInvalid
 			| Self::RolePermissionUnknown
@@ -212,7 +216,7 @@ impl ErrorCode {
 			| Self::OAuthUserInfoError => StatusCode::UNAUTHORIZED,
 			Self::Forbidden | Self::InsufficientPermissions | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden | Self::RoleProtected | Self::RolePermissionNotHeld | Self::RegistrationDisabled => StatusCode::FORBIDDEN,
 			Self::NotFound | Self::UserNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
-			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled | Self::PresetSlugTaken | Self::RoleNameTaken | Self::RoleLockOut => StatusCode::CONFLICT,
+			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled | Self::PresetSlugTaken | Self::ArenaRoundDecided | Self::ArenaRoundPending | Self::RoleNameTaken | Self::RoleLockOut => StatusCode::CONFLICT,
 			Self::RateLimited | Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -253,6 +257,7 @@ impl ErrorCode {
 			Self::PresetInvalid => "presets.errors.invalid",
 			Self::PresetBaseModelInvalid => "presets.errors.base_model_invalid",
 			Self::PresetToolsInvalid => "presets.errors.tools_invalid",
+			Self::PresetArenaInvalid => "presets.errors.arena_invalid",
 			Self::ProviderNameReserved => "settings.providers.errors.name_reserved",
 
 			Self::NotAuthenticated => "auth.errors.not_authenticated",
@@ -281,6 +286,8 @@ impl ErrorCode {
 			Self::ApiKeyRuleDuplicate => "developer.errors.rule_duplicate",
 			Self::ApiKeyAdminDisabled => "developer.errors.key_admin_disabled",
 			Self::PresetSlugTaken => "presets.errors.slug_taken",
+			Self::ArenaRoundDecided => "chat.arena.errors.decided",
+			Self::ArenaRoundPending => "chat.arena.pick_to_continue",
 			Self::RoleNameTaken => "roles.errors.name_taken",
 			Self::RoleLockOut => "roles.errors.lock_out",
 			Self::RoleNameInvalid => "roles.errors.name_invalid",
@@ -332,6 +339,7 @@ impl ErrorCode {
 			Self::PresetInvalid => "preset_invalid",
 			Self::PresetBaseModelInvalid => "preset_base_model_invalid",
 			Self::PresetToolsInvalid => "preset_tools_invalid",
+			Self::PresetArenaInvalid => "preset_arena_invalid",
 			Self::ProviderNameReserved => "provider_name_reserved",
 
 			Self::NotAuthenticated => "not_authenticated",
@@ -360,6 +368,8 @@ impl ErrorCode {
 			Self::ApiKeyRuleDuplicate => "api_key_rule_duplicate",
 			Self::ApiKeyAdminDisabled => "api_key_admin_disabled",
 			Self::PresetSlugTaken => "preset_slug_taken",
+			Self::ArenaRoundDecided => "arena_round_decided",
+			Self::ArenaRoundPending => "arena_round_pending",
 			Self::RoleNameTaken => "role_name_taken",
 			Self::RoleLockOut => "role_lock_out",
 			Self::RoleNameInvalid => "role_name_invalid",

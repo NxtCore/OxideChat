@@ -2,7 +2,7 @@
 
 use crate::types::consts::{ADMIN_PRESETS_EDIT, ADMIN_USERS_VIEW, SETTINGS_PRESETS_EDIT};
 use crate::types::{
-	AppError, AuthUser, Budget, ReplaceAssignmentsRequest, BudgetSubject, JobState, Preset, PresetActor, PresetError, PresetResponse, PresetSlugAvailability, PresetSlugQuery, SavePresetRequest,
+	AppError, AuthUser, Budget, ReplaceAssignmentsRequest, BudgetSubject, JobState, Preset, PresetActor, PresetError, PresetListQuery, PresetMode, PresetResponse, PresetSlugAvailability, PresetSlugQuery, SavePresetRequest,
 	is_valid_preset_slug, json_ok,
 };
 use crate::utils::response::{ResponseBody, ResponseBuilder};
@@ -46,9 +46,12 @@ async fn single(state: &JobState, actor: &PresetActor, preset: Preset) -> Result
 /// GET /api/v1/presets
 ///
 /// Every preset the user can see, with its base model and whether it can be used.
-pub async fn list_presets(State(state): State<Arc<JobState>>, user: AuthUser) -> Result<Response, AppError> {
+pub async fn list_presets(State(state): State<Arc<JobState>>, user: AuthUser, Query(query): Query<PresetListQuery>) -> Result<Response, AppError> {
 	let actor = actor(&state, &user).await?;
-	let presets = Preset::list_for_user(&state.db, &user.id).await?;
+	let mut presets = Preset::list_for_user(&state.db, &user.id).await?;
+	if let Some(mode) = query.mode {
+		presets.retain(|preset| preset.is_arena() == (mode == PresetMode::Arena));
+	}
 	json_ok(responses(&state, &actor, presets).await?)
 }
 
@@ -115,4 +118,13 @@ pub async fn replace_preset_assignments(State(state): State<Arc<JobState>>, user
 	let actor = actor(&state, &user).await?;
 	let preset = Preset::replace_assignments(&state.db, &actor, &id, &request).await?;
 	json_ok(preset.assignments(&state.db, &actor).await?)
+}
+
+/// GET /api/v1/presets/{id}/arena-results
+///
+/// How often each model of an arena was picked, for whoever manages the arena.
+pub async fn get_arena_results(State(state): State<Arc<JobState>>, user: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	let actor = actor(&state, &user).await?;
+	let preset = Preset::find_for_actor(&state.db, &actor, &id).await?.filter(|preset| actor.can_manage(preset)).ok_or(PresetError::NotFound)?;
+	json_ok(Preset::arena_results(&state.db, &preset.id).await?)
 }

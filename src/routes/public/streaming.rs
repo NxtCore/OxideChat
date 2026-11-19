@@ -2,7 +2,7 @@
 //!
 //! Server-Sent Events (SSE) endpoint for streaming AI chat completions.
 
-use crate::types::chat::runner::{prepare_turn, stream_turn};
+use crate::types::chat::runner::{Turn, prepare_turn, stream_arena, stream_turn};
 use crate::types::{AppError, AuthUser, ClientToolResultRequest, JobState, StreamRequest, json_ok};
 use crate::utils::response::ErrorCode;
 use axum::{
@@ -18,7 +18,8 @@ use uuid::Uuid;
 
 pub async fn stream_completion(State(state): State<Arc<JobState>>, user: AuthUser, Path(chat_id): Path<Uuid>, Json(req): Json<StreamRequest>) -> Response {
 	match prepare_turn(&state, &user, chat_id, &req).await {
-		Ok(turn) => Sse::new(stream_turn(state, turn, Instant::now())).keep_alive(KeepAlive::default()).into_response(),
+		Ok(Turn::Single(turn)) => Sse::new(stream_turn(state, *turn, Instant::now())).keep_alive(KeepAlive::default()).into_response(),
+		Ok(Turn::Arena(turn)) => Sse::new(stream_arena(state, *turn, Instant::now())).keep_alive(KeepAlive::default()).into_response(),
 		Err(error) => error.into_response(),
 	}
 }

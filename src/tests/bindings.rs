@@ -86,6 +86,7 @@ mod tests {
 			PresetScopesResponse,
 			AdminPresetResponse,
 			AdminUpdatePresetRequest,
+			ArenaRoundResponse, ArenaPickRequest, ArenaResultRow,
 			ProviderBillingOverviewResponse,
 			ProviderTab,
 			RequestLogResponse,

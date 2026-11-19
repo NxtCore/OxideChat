@@ -33,7 +33,7 @@ mod ids {
 }
 
 #[cfg(test)]
-mod validation {
+pub(crate) mod validation {
 	use crate::types::*;
 	use uuid::Uuid;
 
@@ -56,6 +56,8 @@ mod validation {
 			starters: Vec::new(),
 			prompt_visible: true,
 			is_enabled: true,
+			mode: None,
+			arena: None,
 		}
 	}
 
@@ -366,7 +368,7 @@ mod repository {
 }
 
 #[cfg(test)]
-mod scopes {
+pub(crate) mod scopes {
 	use super::repository::{for_model, personal};
 	use crate::tests::gateway::support::{create_provider_model, create_team};
 	use crate::tests::support::{TestResult, create_user};
@@ -716,7 +718,7 @@ mod scopes {
 		assert!(!updated.is_enabled);
 		assert_eq!(updated.owner.map(|owner| owner.id), Some(team.member_id));
 		assert!(Preset::slug_available(&pool, "squatted", None).await?);
-		let filtered = Preset::admin_list(&pool, &AdminPresetQuery { scope: Some(PresetScope::Team), team_id: None }).await?;
+		let filtered = Preset::admin_list(&pool, &AdminPresetQuery { scope: Some(PresetScope::Team), team_id: None, mode: None }).await?;
 		assert!(filtered.is_empty());
 		Ok(())
 	}

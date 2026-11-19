@@ -140,7 +140,7 @@ function ownerLabel(preset: AdminPresetResponse): string {
 async function load() {
 	loading.value = true;
 	try {
-		presets.value = await $customFetch<AdminPresetResponse[]>('/api/v1/admin/presets');
+		presets.value = await $customFetch<AdminPresetResponse[]>('/api/v1/admin/presets', {params: {mode: 'standard'}});
 	} catch (e: any) {
 		store.toast(t('load_error'), {type: 'error', description: errorMessage(e, '')});
 	} finally {

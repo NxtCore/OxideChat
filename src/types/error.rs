@@ -1,7 +1,7 @@
 //! Handler error type shared by all routes.
 
 use crate::types::models::PriceSheetError;
-use crate::types::{GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError, RoleError};
+use crate::types::{ArenaError, GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError, RoleError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::response::{IntoResponse, Response};
@@ -33,6 +33,9 @@ pub enum AppError {
 	/// A role could not be saved, deleted or found.
 	#[error(transparent)]
 	Role(#[from] RoleError),
+	/// An arena round could not be found or picked.
+	#[error(transparent)]
+	Arena(#[from] ArenaError),
 	/// A model price could not be saved.
 	#[error(transparent)]
 	Pricing(#[from] PriceSheetError),
@@ -84,6 +87,9 @@ impl AppError {
 			Self::GatewayAdmin(error) => admin_error_code(error),
 			Self::Preset(error) => preset_error_code(error),
 			Self::Role(error) => role_error_code(error),
+			Self::Arena(ArenaError::NotFound) => ErrorCode::NotFound,
+			Self::Arena(ArenaError::Decided) => ErrorCode::ArenaRoundDecided,
+			Self::Arena(ArenaError::Database(_)) => ErrorCode::InternalError,
 			Self::Pricing(PriceSheetError::NotFound) => ErrorCode::NotFound,
 			Self::Pricing(PriceSheetError::Database(_)) => ErrorCode::InternalError,
 			Self::Pricing(_) => ErrorCode::ValidationFailed,
@@ -160,6 +166,7 @@ fn preset_error_code(error: &PresetError) -> ErrorCode {
 		PresetError::Invalid => ErrorCode::PresetInvalid,
 		PresetError::BaseModelNotAllowed => ErrorCode::PresetBaseModelInvalid,
 		PresetError::ToolsNotAllowed => ErrorCode::PresetToolsInvalid,
+		PresetError::ArenaInvalid => ErrorCode::PresetArenaInvalid,
 		PresetError::NotFound => ErrorCode::NotFound,
 		PresetError::Forbidden => ErrorCode::InsufficientPermissions,
 		PresetError::Database(_) => ErrorCode::InternalError,

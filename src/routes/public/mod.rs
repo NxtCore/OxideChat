@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod base;
+pub mod arena;
 pub mod chats;
 pub mod developer;
 pub mod images;
@@ -43,6 +44,8 @@ pub fn router() -> Router<Arc<JobState>> {
 		// Messages
 		.route("/api/v1/chats/{chat_id}/messages", get(messages::list_messages).post(messages::send_message))
 		.route("/api/v1/chats/{chat_id}/stream", post(streaming::stream_completion))
+		.route("/api/v1/chats/{chat_id}/arena-rounds/{round_id}", get(arena::get_round))
+		.route("/api/v1/chats/{chat_id}/arena-rounds/{round_id}/pick", post(arena::pick))
 		.route("/api/v1/chats/{chat_id}/stream/tool-result", post(streaming::submit_client_tool_result))
 		// Message Forks
 		.route("/api/v1/chats/{chat_id}/messages/{message_id}/edit", post(messages::edit_message))
@@ -59,6 +62,7 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/presets/check-slug", get(presets::check_slug))
 		.route("/api/v1/presets/scopes", get(presets::list_scopes))
 		.route("/api/v1/presets/{id}", get(presets::get_preset).put(presets::update_preset).delete(presets::delete_preset))
+		.route("/api/v1/presets/{id}/arena-results", get(presets::get_arena_results))
 		.route("/api/v1/presets/{id}/assignments", get(presets::get_preset_assignments).put(presets::replace_preset_assignments))
 		// Providers
 		.route("/api/v1/providers", get(providers::list_providers))
