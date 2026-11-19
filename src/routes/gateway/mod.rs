@@ -69,6 +69,7 @@ async fn authenticate_owned(state: &JobState, headers: &HeaderMap, scope: &str) 
 	Ok(context)
 }
 
+pub mod anthropic;
 pub mod media;
 
 /// Lists the models visible to an authorized gateway API key, only those of `model_type` when set.
