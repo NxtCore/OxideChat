@@ -53,7 +53,11 @@ pub async fn check_reranker(pool: &PgPool, model_id: &Uuid) -> Result<(), RagErr
 pub async fn probe_embedding(state: &JobState, user_id: &Uuid, settings: &EmbeddingSettings) -> Result<u32, RagError> {
 	let (model, provider) = load(&state.db, &settings.model_id, "embedding", RagError::NotEmbeddingModel).await?;
 	let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes(TEST_INPUT.len() as u64), 0);
-	let admission = match state.budget_ledger.reserve_for_model(&state.db, BudgetSubject::user(*user_id), &model.id, estimate).await {
+	let admission = match state
+		.budget_ledger
+		.reserve_for_model(&state.db, BudgetSubject::user(*user_id), &model.id, estimate)
+		.await
+	{
 		Ok(admission) => admission,
 		Err(BudgetError::Exceeded) => return Err(RagError::BudgetExceeded),
 		Err(error) => return Err(RagError::EmbeddingFailed(error.to_string())),
@@ -80,9 +84,16 @@ pub async fn probe_embedding(state: &JobState, user_id: &Uuid, settings: &Embedd
 		raw_request: None,
 		metadata,
 	};
-	let response = crate::ai::get().embeddings(request).await.map_err(|error| RagError::EmbeddingFailed(error.to_string()))?;
+	let response = crate::ai::get()
+		.embeddings(request)
+		.await
+		.map_err(|error| RagError::EmbeddingFailed(error.to_string()))?;
 	drop(admission);
-	let size = response.data.first().map(|item| vector_size(&item.embedding)).ok_or_else(|| RagError::EmbeddingFailed("no embedding returned".to_string()))?;
+	let size = response
+		.data
+		.first()
+		.map(|item| vector_size(&item.embedding))
+		.ok_or_else(|| RagError::EmbeddingFailed("no embedding returned".to_string()))?;
 	match (u32::try_from(size), settings.dimensions) {
 		(Ok(size), Some(requested)) if size != requested => Err(RagError::DimensionsMismatch),
 		(Ok(size), _) if (1..=super::MAX_DIMENSIONS).contains(&size) => Ok(size),

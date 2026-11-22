@@ -1,11 +1,11 @@
 use super::{
-	ConnectionEmbedding, ConnectionKind, ConnectionMode, ConnectionResponse, ENV_PGVECTOR_URL, EmbeddingSettings, RagConfig, RagConnection, RagDefaults, RagError, RagSetupResponse,
-	RerankerSettings, SaveConnectionRequest, UpdateRagSetupRequest,
+	ConnectionEmbedding, ConnectionKind, ConnectionMode, ConnectionResponse, ENV_PGVECTOR_URL, EmbeddingSettings, RagConfig, RagConnection, RagDefaults, RagError,
+	RagSetupResponse, RerankerSettings, SaveConnectionRequest, UpdateRagSetupRequest,
 };
 use crate::logging::AuditLog;
 use crate::types::AuditEntry;
 use crate::utils::encryption::encrypt_secret_value;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 const AUDIT_CONNECTION: &str = "rag_connection";
@@ -22,10 +22,6 @@ fn to_i32(value: Option<u32>) -> Option<i32> {
 	value.and_then(|value| i32::try_from(value).ok())
 }
 
-async fn audit(tx: &mut Transaction<'_, Postgres>, event: &str, actor_id: &Uuid, target_type: &str, target_id: &Uuid, metadata: serde_json::Value) -> Result<(), sqlx::Error> {
-	AuditLog::write(tx, AuditEntry { event, actor_id, target_type, target_id, metadata }).await
-}
-
 /// `RAG_PGVECTOR_URL`, when set and not empty.
 #[must_use]
 fn env_pgvector_url() -> Option<String> {
@@ -39,7 +35,9 @@ impl RagConfig {
 	///
 	/// Returns a database error when the query fails.
 	pub async fn get(pool: &PgPool) -> Result<Self, sqlx::Error> {
-		sqlx::query_as!(Self, "SELECT enabled, reranker_model_id, reranker_top_n, default_connection_id FROM rag_config").fetch_one(pool).await
+		sqlx::query_as!(Self, "SELECT enabled, reranker_model_id, reranker_top_n, default_connection_id FROM rag_config")
+			.fetch_one(pool)
+			.await
 	}
 
 	/// Saves the settings after checking the default connection is managed; the reranker must be checked by the caller.
@@ -66,7 +64,17 @@ impl RagConfig {
 		.execute(&mut *tx)
 		.await?;
 		let metadata = serde_json::json!({ "enabled": request.enabled, "reranker": request.reranker, "defaults": request.defaults });
-		audit(&mut tx, "rag_config_updated", actor_id, AUDIT_CONFIG, &Uuid::nil(), metadata).await?;
+		AuditLog::write(
+			&mut tx,
+			AuditEntry {
+				event: "rag_config_updated",
+				actor_id,
+				target_type: AUDIT_CONFIG,
+				target_id: &Uuid::nil(),
+				metadata,
+			},
+		)
+		.await?;
 		tx.commit().await?;
 		Ok(())
 	}
@@ -82,19 +90,26 @@ impl RagConfig {
 		let connections = RagConnection::list(pool).await?;
 		Ok(RagSetupResponse {
 			enabled: config.enabled,
-			connections: connections.iter().map(|connection| connection.to_response(env && config.default_connection_id == Some(connection.id))).collect(),
+			connections: connections
+				.iter()
+				.map(|connection| connection.to_response(env && config.default_connection_id == Some(connection.id)))
+				.collect(),
 			reranker: RerankerSettings {
 				model_id: config.reranker_model_id,
 				top_n: u32::try_from(config.reranker_top_n).unwrap_or(1),
 			},
-			defaults: RagDefaults { connection_id: config.default_connection_id },
+			defaults: RagDefaults {
+				connection_id: config.default_connection_id,
+			},
 		})
 	}
 
 	/// The address and password `RAG_PGVECTOR_URL` gives `connection`, if it is the default managed connection.
 	#[must_use]
 	pub fn env_url_for(&self, connection: &RagConnection) -> Option<String> {
-		(self.default_connection_id == Some(connection.id) && connection.mode == ConnectionMode::Managed).then(env_pgvector_url).flatten()
+		(self.default_connection_id == Some(connection.id) && connection.mode == ConnectionMode::Managed)
+			.then(env_pgvector_url)
+			.flatten()
 	}
 }
 
@@ -155,7 +170,17 @@ impl RagConnection {
 		)
 		.fetch_one(&mut *tx)
 		.await?;
-		audit(&mut tx, "rag_connection_created", actor_id, AUDIT_CONNECTION, &connection.id, connection.audit_metadata()).await?;
+		AuditLog::write(
+			&mut tx,
+			AuditEntry {
+				event: "rag_connection_created",
+				actor_id,
+				target_type: AUDIT_CONNECTION,
+				target_id: &connection.id,
+				metadata: connection.audit_metadata(),
+			},
+		)
+		.await?;
 		tx.commit().await?;
 		Ok(connection)
 	}
@@ -197,7 +222,17 @@ impl RagConnection {
 		.fetch_optional(&mut *tx)
 		.await?
 		.ok_or(RagError::NotFound)?;
-		audit(&mut tx, "rag_connection_updated", actor_id, AUDIT_CONNECTION, &connection.id, connection.audit_metadata()).await?;
+		AuditLog::write(
+			&mut tx,
+			AuditEntry {
+				event: "rag_connection_updated",
+				actor_id,
+				target_type: AUDIT_CONNECTION,
+				target_id: &connection.id,
+				metadata: connection.audit_metadata(),
+			},
+		)
+		.await?;
 		tx.commit().await?;
 		Ok(connection)
 	}
@@ -209,10 +244,23 @@ impl RagConnection {
 	/// Returns a database error when the delete fails.
 	pub async fn delete(pool: &PgPool, actor_id: &Uuid, id: &Uuid) -> Result<bool, sqlx::Error> {
 		let mut tx = pool.begin().await?;
-		let Some(name) = sqlx::query_scalar!("DELETE FROM rag_connections WHERE id = $1 RETURNING name", id).fetch_optional(&mut *tx).await? else {
+		let Some(name) = sqlx::query_scalar!("DELETE FROM rag_connections WHERE id = $1 RETURNING name", id)
+			.fetch_optional(&mut *tx)
+			.await?
+		else {
 			return Ok(false);
 		};
-		audit(&mut tx, "rag_connection_deleted", actor_id, AUDIT_CONNECTION, id, serde_json::json!({ "name": name })).await?;
+		AuditLog::write(
+			&mut tx,
+			AuditEntry {
+				event: "rag_connection_deleted",
+				actor_id,
+				target_type: AUDIT_CONNECTION,
+				target_id: id,
+				metadata: serde_json::json!({ "name": name }),
+			},
+		)
+		.await?;
 		tx.commit().await?;
 		Ok(true)
 	}
@@ -269,7 +317,13 @@ impl RagConnection {
 /// Whether two connection addresses share scheme, host and port; `None` is the main database.
 #[must_use]
 fn same_host(first: Option<&str>, second: Option<&str>) -> bool {
-	let parts = |url: Option<&str>| url.map(|url| reqwest::Url::parse(url).ok().map(|url| (url.scheme().to_owned(), url.host_str().map(str::to_owned), url.port_or_known_default())));
+	let parts = |url: Option<&str>| {
+		url.map(|url| {
+			reqwest::Url::parse(url)
+				.ok()
+				.map(|url| (url.scheme().to_owned(), url.host_str().map(str::to_owned), url.port_or_known_default()))
+		})
+	};
 	match (parts(first), parts(second)) {
 		(None, None) => true,
 		(Some(Some(first)), Some(Some(second))) => first == second,

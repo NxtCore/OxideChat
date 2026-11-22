@@ -1,7 +1,10 @@
 //! Admin routes for the knowledge setup: connections, embedding and rerank models.
 
 use crate::types::consts::{ADMIN_RAG_EDIT, ADMIN_RAG_VIEW};
-use crate::types::rag::{ConnectionMode, ConnectionTestResponse, RagConfig, RagConnection, SaveConnectionRequest, StoreError, UpdateRagSetupRequest, VectorStore, check_reranker, probe_embedding};
+use crate::types::rag::{
+	ConnectionMode, ConnectionTestResponse, RagConfig, RagConnection, SaveConnectionRequest, StoreError, UpdateRagSetupRequest, VectorStore, check_reranker,
+	probe_embedding,
+};
 use crate::types::{AppError, AuthUser, JobState, json_ok};
 use crate::utils::response::ErrorCode;
 use axum::{
@@ -45,7 +48,12 @@ pub async fn create_connection(State(state): State<Arc<JobState>>, auth: AuthUse
 /// PUT /api/v1/admin/rag/connections/{id}
 ///
 /// `kind` and `mode` are ignored. A missing secret keeps the stored one unless the host changes.
-pub async fn update_connection(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<SaveConnectionRequest>) -> Result<Response, AppError> {
+pub async fn update_connection(
+	State(state): State<Arc<JobState>>,
+	auth: AuthUser,
+	Path(id): Path<Uuid>,
+	Json(req): Json<SaveConnectionRequest>,
+) -> Result<Response, AppError> {
 	auth.require(&state.db, ADMIN_RAG_EDIT).await?;
 	let existing = RagConnection::find(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
 	req.validate(existing.kind, existing.mode, existing.secret.is_some() && req.secret.is_none())?;
@@ -78,8 +86,18 @@ pub async fn test_connection(State(state): State<Arc<JobState>>, auth: AuthUser,
 	let env_url = RagConfig::get(&state.db).await?.env_url_for(&connection);
 	let result = test(&connection, &state, env_url.as_deref()).await;
 	json_ok(match result {
-		Ok((version, collections)) => ConnectionTestResponse { ok: true, error: None, version: Some(version), collections },
-		Err(error) => ConnectionTestResponse { ok: false, error: Some(error), version: None, collections: Vec::new() },
+		Ok((version, collections)) => ConnectionTestResponse {
+			ok: true,
+			error: None,
+			version: Some(version),
+			collections,
+		},
+		Err(error) => ConnectionTestResponse {
+			ok: false,
+			error: Some(error),
+			version: None,
+			collections: Vec::new(),
+		},
 	})
 }
 

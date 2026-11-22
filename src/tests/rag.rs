@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod validation {
-	use crate::types::rag::{ConnectionKind, ConnectionMode, EmbeddingSettings, RagDefaults, RagError, RerankerSettings, SaveConnectionRequest, UpdateRagSetupRequest, parse_version};
+	use crate::types::rag::{
+		ConnectionKind, ConnectionMode, EmbeddingSettings, RagDefaults, RagError, RerankerSettings, SaveConnectionRequest, UpdateRagSetupRequest, parse_version,
+	};
 	use uuid::Uuid;
 
 	pub fn request(kind: ConnectionKind, mode: ConnectionMode, url: Option<&str>, secret: Option<&str>) -> SaveConnectionRequest {
@@ -24,7 +26,10 @@ mod validation {
 		use ConnectionMode::{Managed, ReadOnly};
 		assert_eq!(check(&request(Pgvector, Managed, None, None)), Ok(()));
 		assert_eq!(check(&request(Pgvector, ReadOnly, Some("postgres://reader@db.example.com/kb"), Some("pw"))), Ok(()));
-		assert_eq!(check(&request(Pgvector, ReadOnly, Some("postgres://reader:pw@db.example.com/kb"), None)), Err("url_has_password"));
+		assert_eq!(
+			check(&request(Pgvector, ReadOnly, Some("postgres://reader:pw@db.example.com/kb"), None)),
+			Err("url_has_password")
+		);
 		assert_eq!(check(&request(Pgvector, ReadOnly, None, None)), Err("url_required"));
 		assert_eq!(check(&request(Pgvector, ReadOnly, Some("  "), None)), Err("url_required"));
 		assert_eq!(check(&request(Pgvector, ReadOnly, Some("https://db.example.com"), None)), Err("invalid_url"));
@@ -32,7 +37,10 @@ mod validation {
 		assert_eq!(check(&request(Qdrant, ReadOnly, Some("http://qdrant:6333"), None)), Ok(()));
 		assert_eq!(check(&request(Qdrant, ReadOnly, Some("http://qdrant:6333"), Some("key"))), Err("insecure_secret"));
 		assert_eq!(check(&request(Qdrant, ReadOnly, Some("postgres://qdrant"), None)), Err("invalid_url"));
-		assert_eq!(check(&request(Qdrant, Managed, Some("https://qdrant.example.com"), None)), Err("managed_needs_pgvector"));
+		assert_eq!(
+			check(&request(Qdrant, Managed, Some("https://qdrant.example.com"), None)),
+			Err("managed_needs_pgvector")
+		);
 	}
 
 	#[test]
@@ -47,18 +55,33 @@ mod validation {
 		managed.name = " ".to_string();
 		assert_eq!(check(&managed), Err("invalid_name"));
 		managed.name = "Main".to_string();
-		for (dimensions, expected) in [(None, Ok(())), (Some(1024), Ok(())), (Some(0), Err("invalid_dimensions")), (Some(4001), Err("invalid_dimensions"))] {
-			managed.embedding = Some(EmbeddingSettings { model_id: Uuid::new_v4(), dimensions });
+		for (dimensions, expected) in [
+			(None, Ok(())),
+			(Some(1024), Ok(())),
+			(Some(0), Err("invalid_dimensions")),
+			(Some(4001), Err("invalid_dimensions")),
+		] {
+			managed.embedding = Some(EmbeddingSettings {
+				model_id: Uuid::new_v4(),
+				dimensions,
+			});
 			assert_eq!(check(&managed), expected, "{dimensions:?}");
 		}
 		let mut read_only = request(ConnectionKind::Qdrant, ConnectionMode::ReadOnly, Some("https://qdrant.example.com"), None);
-		read_only.embedding = Some(EmbeddingSettings { model_id: Uuid::new_v4(), dimensions: None });
+		read_only.embedding = Some(EmbeddingSettings {
+			model_id: Uuid::new_v4(),
+			dimensions: None,
+		});
 		assert_eq!(check(&read_only), Err("read_only_has_model"));
 	}
 
 	#[test]
 	fn top_n_is_bounded() {
-		let setup = |top_n| UpdateRagSetupRequest { enabled: true, reranker: RerankerSettings { model_id: None, top_n }, defaults: RagDefaults { connection_id: None } };
+		let setup = |top_n| UpdateRagSetupRequest {
+			enabled: true,
+			reranker: RerankerSettings { model_id: None, top_n },
+			defaults: RagDefaults { connection_id: None },
+		};
 		assert!(setup(1).validate().is_ok());
 		assert!(setup(50).validate().is_ok());
 		assert!(setup(0).validate().is_err());
@@ -86,12 +109,19 @@ mod connections {
 
 	async fn read_only(pool: &PgPool, actor: &Uuid) -> TestResult<RagConnection> {
 		crate::utils::encryption::init_for_test([0x42; 32])?;
-		let request = request(ConnectionKind::Pgvector, ConnectionMode::ReadOnly, Some("postgres://reader@db.example.com/kb"), Some("pw"));
+		let request = request(
+			ConnectionKind::Pgvector,
+			ConnectionMode::ReadOnly,
+			Some("postgres://reader@db.example.com/kb"),
+			Some("pw"),
+		);
 		Ok(RagConnection::create(pool, actor, &request, None).await?)
 	}
 
 	async fn audit_events(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
-		sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_type IN ('rag_connection', 'rag_config') ORDER BY created_at, event").fetch_all(pool).await
+		sqlx::query_scalar("SELECT event FROM audit_logs WHERE target_type IN ('rag_connection', 'rag_config') ORDER BY created_at, event")
+			.fetch_all(pool)
+			.await
 	}
 
 	#[sqlx::test]
@@ -115,7 +145,10 @@ mod connections {
 		let mut change = request(ConnectionKind::Qdrant, ConnectionMode::Managed, Some("postgres://reader@db.example.com/other"), None);
 		change.name = "Renamed".to_string();
 		let kept = created.update(&pool, &actor, &change, None).await?;
-		assert_eq!((kept.name.as_str(), kept.kind, kept.mode), ("Renamed", ConnectionKind::Pgvector, ConnectionMode::ReadOnly));
+		assert_eq!(
+			(kept.name.as_str(), kept.kind, kept.mode),
+			("Renamed", ConnectionKind::Pgvector, ConnectionMode::ReadOnly)
+		);
 		assert_eq!(kept.secret, created.secret);
 		change.secret = Some(String::new());
 		assert_eq!(kept.update(&pool, &actor, &change, None).await?.secret, None);
@@ -138,9 +171,13 @@ mod connections {
 	async fn a_new_vector_size_starts_a_new_index_generation(pool: PgPool) -> TestResult {
 		let actor = create_user(&pool).await?;
 		let managed = RagConnection::create(&pool, &actor, &request(ConnectionKind::Pgvector, ConnectionMode::Managed, None, None), None).await?;
-		let same = managed.update(&pool, &actor, &request(ConnectionKind::Pgvector, ConnectionMode::Managed, None, None), None).await?;
+		let same = managed
+			.update(&pool, &actor, &request(ConnectionKind::Pgvector, ConnectionMode::Managed, None, None), None)
+			.await?;
 		assert_eq!(same.index_generation, 0);
-		let resized = same.update(&pool, &actor, &request(ConnectionKind::Pgvector, ConnectionMode::Managed, None, None), Some(768)).await?;
+		let resized = same
+			.update(&pool, &actor, &request(ConnectionKind::Pgvector, ConnectionMode::Managed, None, None), Some(768))
+			.await?;
 		assert_eq!((resized.index_generation, resized.vector_size), (1, Some(768)));
 		Ok(())
 	}
@@ -150,9 +187,16 @@ mod connections {
 		let actor = create_user(&pool).await?;
 		let external = read_only(&pool, &actor).await?;
 		let managed = RagConnection::create(&pool, &actor, &request(ConnectionKind::Pgvector, ConnectionMode::Managed, None, None), None).await?;
-		let setup = |connection_id| UpdateRagSetupRequest { enabled: true, reranker: RerankerSettings { model_id: None, top_n: 6 }, defaults: RagDefaults { connection_id } };
+		let setup = |connection_id| UpdateRagSetupRequest {
+			enabled: true,
+			reranker: RerankerSettings { model_id: None, top_n: 6 },
+			defaults: RagDefaults { connection_id },
+		};
 
-		assert!(matches!(RagConfig::save(&pool, &actor, &setup(Some(external.id))).await, Err(RagError::DefaultNotManaged)));
+		assert!(matches!(
+			RagConfig::save(&pool, &actor, &setup(Some(external.id))).await,
+			Err(RagError::DefaultNotManaged)
+		));
 		assert!(matches!(RagConfig::save(&pool, &actor, &setup(Some(Uuid::new_v4()))).await, Err(RagError::NotFound)));
 		RagConfig::save(&pool, &actor, &setup(Some(managed.id))).await?;
 		let config = RagConfig::get(&pool).await?;
