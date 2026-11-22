@@ -102,8 +102,11 @@ fn validate_url(url: &str, kind: ConnectionKind, has_secret: bool) -> Result<(),
 	if parsed.host_str().is_none_or(str::is_empty) {
 		return Err(RagError::InvalidUrl);
 	}
-	if parsed.password().is_some() {
+	if parsed.password().is_some() || parsed.query_pairs().any(|(key, _)| key == "password") {
 		return Err(RagError::UrlHasPassword);
+	}
+	if kind == ConnectionKind::Pgvector && (parsed.host_str().is_some_and(|host| host.contains('%')) || parsed.query_pairs().any(|(key, _)| key != "sslmode")) {
+		return Err(RagError::InvalidUrl);
 	}
 	match (kind, parsed.scheme()) {
 		(ConnectionKind::Pgvector, "postgres" | "postgresql") | (ConnectionKind::Qdrant, "https") => Ok(()),
