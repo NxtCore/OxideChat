@@ -10,6 +10,7 @@ const ADMIN_PAGES = [
 	'/settings/translations',
 	'/settings/providers',
 	'/settings/tools',
+	'/settings/knowledge-setup',
 	'/settings/presets',
 	'/settings/presets?tab=all',
 	'/settings/models',

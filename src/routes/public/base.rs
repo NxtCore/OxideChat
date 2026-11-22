@@ -5,7 +5,8 @@
 use crate::i18n::I18n;
 use crate::types::oauth::OAuthProvider;
 use crate::types::providers::ProviderKind;
-use crate::types::{AppError, BaseResponse, ChatProviderSelectorResponse, EffectiveProviderRouting, InstanceResponse, JobState, RequestContext, Role, User, json_ok};
+use crate::types::rag::RagConfig;
+use crate::types::{AppError, BaseResponse, ChatProviderSelectorResponse, EffectiveProviderRouting, InstanceResponse, JobState, RagStatus, RequestContext, Role, User, json_ok};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
 use axum::extract::{Extension, State};
 use axum::response::{IntoResponse, Response};
@@ -62,5 +63,8 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 		},
 		title_generation: config.title_generation(),
 		registration: config.registration(),
+		rag: RagStatus {
+			enabled: RagConfig::get(&state.db).await.map_err(AppError::database)?.enabled,
+		},
 	})
 }

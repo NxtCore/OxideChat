@@ -303,7 +303,7 @@ impl Model {
 		PolicyResolver::can_use_model(pool, user_id, model_id).await
 	}
 
-	/// Lists models for admins, filtered by search text, provider and output modality.
+	/// Lists models for admins, filtered by search text, provider, output modality and model type.
 	///
 	/// # Errors
 	/// Returns the database error when the query fails.
@@ -357,6 +357,15 @@ impl Model {
 					)
 				)
 			)
+			AND (
+				$6::TEXT IS NULL
+				OR ($6 = 'embedding' AND (COALESCE(sys_mc.capabilities, m.capabilities, '[]'::jsonb) ? 'EMBEDDINGS' OR COALESCE(sys_mc.output_modalities, m.output_modalities, '[]'::jsonb) ? 'EMBEDDINGS'))
+				OR (
+					$6 = 'reranking'
+					AND COALESCE(sys_mc.capabilities, m.capabilities, '[]'::jsonb) ? 'RERANK'
+					AND NOT (COALESCE(sys_mc.capabilities, m.capabilities, '[]'::jsonb) ? 'EMBEDDINGS' OR COALESCE(sys_mc.output_modalities, m.output_modalities, '[]'::jsonb) ? 'EMBEDDINGS')
+				)
+			)
 			ORDER BY m.display_name, p.name
 			LIMIT $1 OFFSET $2
 			"#,
@@ -365,6 +374,7 @@ impl Model {
 			search.as_deref(),
 			params.provider_id,
 			params.output_only.as_deref(),
+			params.model_type.as_deref(),
 		)
 		.fetch_all(pool)
 		.await?;

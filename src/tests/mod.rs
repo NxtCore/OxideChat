@@ -23,6 +23,7 @@ pub mod presets;
 pub mod arena;
 pub mod provider_routing;
 pub mod providers;
+pub mod rag;
 pub mod request_logs;
 pub mod response;
 pub mod roles;
