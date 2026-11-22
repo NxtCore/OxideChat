@@ -30,6 +30,24 @@ mod validation {
 			check(&request(Pgvector, ReadOnly, Some("postgres://reader:pw@db.example.com/kb"), None)),
 			Err("url_has_password")
 		);
+		assert_eq!(
+			check(&request(Pgvector, ReadOnly, Some("postgres://reader@db.example.com/kb?sslmode=require"), Some("pw"))),
+			Ok(())
+		);
+		assert_eq!(
+			check(&request(Pgvector, ReadOnly, Some("postgres://reader@db.example.com/kb?password=pw"), None)),
+			Err("url_has_password")
+		);
+		for url in [
+			"postgres://reader@db.example.com/kb?host=attacker.example.com",
+			"postgres://reader@db.example.com/kb?hostaddr=203.0.113.9",
+			"postgres://reader@db.example.com/kb?port=6543",
+			"postgres://reader@db.example.com/kb?host=/var/run/postgresql",
+			"postgres://reader@db.example.com/kb?sslrootcert=/etc/shadow",
+			"postgres://reader@%2Fvar%2Frun%2Fpostgresql/kb",
+		] {
+			assert_eq!(check(&request(Pgvector, ReadOnly, Some(url), Some("pw"))), Err("invalid_url"), "{url}");
+		}
 		assert_eq!(check(&request(Pgvector, ReadOnly, None, None)), Err("url_required"));
 		assert_eq!(check(&request(Pgvector, ReadOnly, Some("  "), None)), Err("url_required"));
 		assert_eq!(check(&request(Pgvector, ReadOnly, Some("https://db.example.com"), None)), Err("invalid_url"));
