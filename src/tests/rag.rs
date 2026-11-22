@@ -652,3 +652,202 @@ mod pgvector {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod retrieval {
+	use super::validation::request;
+	use super::views::view;
+	use crate::tests::gateway::support::job_state;
+	use crate::tests::support::{TestResult, create_user, insert_user};
+	use crate::types::rag::{
+		Candidate, ConnectionKind, ConnectionMode, KNOWLEDGE_TOOL, KnowledgeActor, KnowledgeBase, KnowledgeHit, RagConfig, RagConnection, RagDefaults, RerankerSettings,
+		SaveKnowledgeBaseRequest, UpdateRagSetupRequest, add_knowledge_tool, number, per_document, rrf, run_knowledge_tool, turn_knowledge_bases,
+	};
+	use crate::types::{AssignmentKind, AssignmentRef, ReplaceAssignmentsRequest};
+	use omniference::types::{ChatRequestIR, ToolSpec};
+	use serde_json::json;
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	fn candidate(base: Uuid, text: &str, url: Option<&str>) -> Candidate {
+		Candidate {
+			knowledge_base: base,
+			knowledge_base_name: "Handbook".to_string(),
+			hit: KnowledgeHit {
+				text: text.to_string(),
+				title: None,
+				url: url.map(str::to_string),
+				section: None,
+				score: 0.0,
+			},
+		}
+	}
+
+	fn texts(candidates: &[Candidate]) -> Vec<&str> {
+		candidates.iter().map(|candidate| candidate.hit.text.as_str()).collect()
+	}
+
+	#[test]
+	fn rrf_rewards_hits_found_by_several_bases_and_drops_duplicates() {
+		let (first, second) = (Uuid::new_v4(), Uuid::new_v4());
+		let merged = rrf(vec![
+			vec![candidate(first, "a", None), candidate(first, "shared", None), candidate(first, "b", None)],
+			vec![candidate(second, "c", None), candidate(second, "shared ", None)],
+		]);
+		assert_eq!(merged.first().map(|candidate| candidate.hit.text.trim()), Some("shared"));
+		assert_eq!(merged.len(), 4);
+	}
+
+	#[test]
+	fn at_most_three_excerpts_come_from_one_document() {
+		let base = Uuid::new_v4();
+		let doc = Some("https://intranet.example/a");
+		let list = vec![
+			candidate(base, "1", doc),
+			candidate(base, "2", doc),
+			candidate(base, "3", doc),
+			candidate(base, "4", doc),
+			candidate(base, "5", Some("https://intranet.example/b")),
+		];
+		assert_eq!(texts(&per_document(list)), ["1", "2", "3", "5"]);
+	}
+
+	#[test]
+	fn sources_are_numbered_and_capped() {
+		let base = Uuid::new_v4();
+		let long = "x".repeat(9_000);
+		let sources = number(vec![candidate(base, &long, None), candidate(base, &long, None), candidate(base, "short", None)]);
+		assert_eq!(sources.len(), 1);
+		assert_eq!(sources[0].n, 1);
+	}
+
+	async fn shared_base(pool: &PgPool, name: &str) -> TestResult<(KnowledgeBase, KnowledgeActor)> {
+		crate::utils::encryption::init_for_test([0x42; 32])?;
+		let admin = KnowledgeActor {
+			user_id: create_user(pool).await?,
+			manage: true,
+			view_all: true,
+		};
+		let connection = match RagConnection::list(pool).await?.into_iter().next() {
+			Some(connection) => connection,
+			None => {
+				let request = request(ConnectionKind::Qdrant, ConnectionMode::ReadOnly, Some("https://qdrant.example.com"), None);
+				RagConnection::create(pool, &admin.user_id, &request, None).await?
+			}
+		};
+		let mut external = view("docs", None);
+		external.connection_id = connection.id;
+		let save = SaveKnowledgeBaseRequest {
+			name: name.to_string(),
+			description: Some("HR policies".to_string()),
+			view: Some(external.clone()),
+		};
+		let id = KnowledgeBase::create(pool, &admin, &save, &external).await?;
+		Ok((KnowledgeBase::find(pool, &admin, &id).await?.ok_or("missing")?, admin))
+	}
+
+	async fn enable(pool: &PgPool, actor: &Uuid, enabled: bool) -> TestResult {
+		let setup = UpdateRagSetupRequest {
+			enabled,
+			reranker: RerankerSettings { model_id: None, top_n: 6 },
+			defaults: RagDefaults { connection_id: None },
+		};
+		Ok(RagConfig::save(pool, actor, &setup).await?)
+	}
+
+	#[sqlx::test]
+	async fn only_shared_bases_of_the_turn_are_searched_while_knowledge_is_on(pool: PgPool) -> TestResult {
+		let (base, admin) = shared_base(&pool, "Handbook").await?;
+		let member = insert_user(&pool, "member").await?;
+		let state = job_state(pool.clone());
+
+		enable(&pool, &admin.user_id, true).await?;
+		assert!(turn_knowledge_bases(&state, &member, &[base.id]).await?.is_empty());
+		assert!(turn_knowledge_bases(&state, &member, &[]).await?.is_empty());
+		let unshared = run_knowledge_tool(&state, &member, &[base.id], &json!({"query": "holidays"})).await?;
+		assert!(unshared.sources.is_empty() && unshared.unavailable.is_empty());
+
+		let everyone = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef {
+				kind: AssignmentKind::Everyone,
+				id: None,
+				role: None,
+			}],
+		};
+		base.replace_assignments(&pool, &admin, &everyone).await?;
+		assert_eq!(turn_knowledge_bases(&state, &member, &[base.id, Uuid::new_v4()]).await?.len(), 1);
+		let other = run_knowledge_tool(&state, &member, &[base.id], &json!({"query": "holidays", "knowledge_base": "Elsewhere"})).await?;
+		assert!(other.sources.is_empty());
+		assert!(run_knowledge_tool(&state, &member, &[base.id], &json!({"query": " "})).await.is_err());
+
+		enable(&pool, &admin.user_id, false).await?;
+		assert!(turn_knowledge_bases(&state, &member, &[base.id]).await?.is_empty());
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn chats_keep_only_bases_their_user_may_search(pool: PgPool) -> TestResult {
+		let (shared, admin) = shared_base(&pool, "Shared").await?;
+		let (hidden, _) = shared_base(&pool, "Hidden").await?;
+		let member = insert_user(&pool, "member").await?;
+		let everyone = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef {
+				kind: AssignmentKind::Everyone,
+				id: None,
+				role: None,
+			}],
+		};
+		shared.replace_assignments(&pool, &admin, &everyone).await?;
+		let chat_id: Uuid = sqlx::query_scalar("INSERT INTO chats (user_id) VALUES ($1) RETURNING id")
+			.bind(member)
+			.fetch_one(&pool)
+			.await?;
+		let kept = KnowledgeBase::attach_to_chat(&pool, &member, &chat_id, &[shared.id, hidden.id]).await?;
+		assert_eq!(kept, [shared.id]);
+		assert_eq!(KnowledgeBase::chat_ids(&pool, &chat_id).await?, [shared.id]);
+		assert!(KnowledgeBase::attach_to_chat(&pool, &member, &chat_id, &[]).await?.is_empty());
+		assert!(KnowledgeBase::chat_ids(&pool, &chat_id).await?.is_empty());
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn the_tool_names_the_attached_bases(pool: PgPool) -> TestResult {
+		let (base, _) = shared_base(&pool, "Handbook").await?;
+		let mut ir = ChatRequestIR::default();
+		add_knowledge_tool(&mut ir, &[]);
+		assert!(ir.tools.is_empty());
+		add_knowledge_tool(&mut ir, std::slice::from_ref(&base));
+		let ToolSpec::JsonSchema { name, description, schema, .. } = &ir.tools[0];
+		assert_eq!(name, KNOWLEDGE_TOOL);
+		assert!(description.as_deref().is_some_and(|text| text.contains("- Handbook: HR policies")));
+		assert_eq!(schema["properties"]["knowledge_base"]["enum"], json!(["Handbook"]));
+		Ok(())
+	}
+	#[sqlx::test]
+	async fn presets_keep_only_bases_their_editor_may_search(pool: PgPool) -> TestResult {
+		use crate::tests::gateway::support::{create_provider_model, create_team};
+		use crate::types::{Preset, PresetActor, PresetResponse};
+		let (shared, admin) = shared_base(&pool, "Shared").await?;
+		let (hidden, _) = shared_base(&pool, "Hidden").await?;
+		let everyone = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef {
+				kind: AssignmentKind::Everyone,
+				id: None,
+				role: None,
+			}],
+		};
+		shared.replace_assignments(&pool, &admin, &everyone).await?;
+		let user_id = create_user(&pool).await?;
+		create_team(&pool, user_id, "Knowledge team", true).await?;
+		let (_, model_id) = create_provider_model(&pool, "knowledge-provider", "base").await?;
+		let actor = PresetActor::load(&pool, &user_id, true, false).await?;
+		let mut request = super::super::presets::validation::request("with-knowledge");
+		request.base_model_id = model_id;
+		request.knowledge_base_ids = Some(vec![shared.id, hidden.id]);
+		let preset = Preset::create(&pool, &actor, request).await?;
+		assert_eq!(KnowledgeBase::preset_ids(&pool, &preset.id).await?, [shared.id]);
+		let responses: Vec<PresetResponse> = Preset::responses_for_user(&pool, &actor, vec![preset]).await?;
+		assert_eq!(responses[0].knowledge_base_ids, [shared.id]);
+		Ok(())
+	}
+}

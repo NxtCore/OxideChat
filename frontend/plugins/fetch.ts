@@ -4,6 +4,7 @@ import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useBudgetStore} from '~/stores/budgetStore';
 import {useDeveloperStore} from '~/stores/developerStore';
 import {usePresetStore} from '~/stores/presetStore';
+import {useKnowledgeStore} from '~/stores/knowledgeStore';
 
 const STALE_AFTER_WRITE: {path: RegExp; markStale: () => void}[] = [
     {path: /^\/api\/v1\/admin\/(models|image-models|providers|teams|users|config)(\/|$)/, markStale: () => (useModelStore().stale = true)},
@@ -13,6 +14,7 @@ const STALE_AFTER_WRITE: {path: RegExp; markStale: () => void}[] = [
     {path: /^\/api\/v1\/admin\/providers(\/|$)/, markStale: () => clearNuxtState('upstream-gateways')},
     {path: /^\/api\/v1\/(presets|admin\/(models|providers|teams|users|tools|presets))(\/|$)/, markStale: () => (usePresetStore().stale = true)},
     {path: /^\/api\/v1\/admin\/(teams|users)(\/|$)/, markStale: () => (usePresetStore().scopes = null)},
+    {path: /^\/api\/v1\/(knowledge-bases|admin\/(rag|teams|users|roles))(\/|$)/, markStale: () => (useKnowledgeStore().stale = true)},
 ];
 
 function markStaleAfterWrite(request: RequestInfo, method: string | undefined) {

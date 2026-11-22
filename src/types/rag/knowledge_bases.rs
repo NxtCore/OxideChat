@@ -23,7 +23,12 @@ macro_rules! columns {
 			s.user_id = $1
 			OR s.team_id IN (SELECT team_id FROM team_members WHERE user_id = $1)
 			OR s.role_id IN (SELECT role_id FROM user_roles WHERE user_id = $1)
-		 )) AS editor
+		 )) AS editor,
+		 (kb.shared_with_everyone OR EXISTS (SELECT 1 FROM knowledge_base_shares s WHERE s.knowledge_base_id = kb.id AND (
+			s.user_id = $1
+			OR s.team_id IN (SELECT team_id FROM team_members WHERE user_id = $1)
+			OR s.role_id IN (SELECT role_id FROM user_roles WHERE user_id = $1)
+		 ))) AS usable
 		 FROM knowledge_bases kb JOIN rag_connections c ON c.id = kb.connection_id"
 	};
 }
@@ -50,6 +55,8 @@ pub struct KnowledgeBase {
 	pub connection_name: String,
 	pub connection_kind: ConnectionKind,
 	pub editor: bool,
+	/// Shared with the viewer, so they may search it; knowledge admins see others too.
+	pub usable: bool,
 }
 
 /// Who is acting on knowledge bases: `manage` is `admin.rag.edit`, `view_all` is `admin.rag.view`.
@@ -140,6 +147,91 @@ impl KnowledgeBase {
 			.bind(id)
 			.fetch_optional(pool)
 			.await
+	}
+
+	/// The knowledge bases among `ids` that `user_id` may search right now; the IDs come from chats and presets, never trusted as given.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the query fails.
+	pub async fn accessible(pool: &PgPool, user_id: &Uuid, ids: &[Uuid]) -> Result<Vec<Self>, sqlx::Error> {
+		if ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		sqlx::query_as::<_, Self>(concat!(
+			"SELECT ",
+			columns!(),
+			" WHERE kb.id = ANY($2) AND ",
+			visible!(),
+			" ORDER BY lower(kb.name), kb.id"
+		))
+		.bind(user_id)
+		.bind(ids)
+		.fetch_all(pool)
+		.await
+	}
+
+	/// The knowledge bases attached to a chat, whoever may still search them.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the query fails.
+	pub async fn chat_ids(pool: &PgPool, chat_id: &Uuid) -> Result<Vec<Uuid>, sqlx::Error> {
+		sqlx::query_scalar("SELECT knowledge_base_id FROM chat_knowledge_bases WHERE chat_id = $1 ORDER BY knowledge_base_id")
+			.bind(chat_id)
+			.fetch_all(pool)
+			.await
+	}
+
+	/// The knowledge bases attached to a preset.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the query fails.
+	pub async fn preset_ids(pool: &PgPool, preset_id: &Uuid) -> Result<Vec<Uuid>, sqlx::Error> {
+		sqlx::query_scalar("SELECT knowledge_base_id FROM preset_knowledge_bases WHERE preset_id = $1 ORDER BY knowledge_base_id")
+			.bind(preset_id)
+			.fetch_all(pool)
+			.await
+	}
+
+	/// Makes the knowledge bases among `ids` that `user_id` may search the only ones attached to the chat; returns them.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when a query fails.
+	pub async fn attach_to_chat(pool: &PgPool, user_id: &Uuid, chat_id: &Uuid, ids: &[Uuid]) -> Result<Vec<Uuid>, sqlx::Error> {
+		let allowed: Vec<Uuid> = Self::accessible(pool, user_id, ids).await?.into_iter().map(|base| base.id).collect();
+		let mut tx = pool.begin().await?;
+		sqlx::query("DELETE FROM chat_knowledge_bases WHERE chat_id = $1")
+			.bind(chat_id)
+			.execute(&mut *tx)
+			.await?;
+		sqlx::query("INSERT INTO chat_knowledge_bases (chat_id, knowledge_base_id) SELECT $1, unnest($2::uuid[])")
+			.bind(chat_id)
+			.bind(&allowed)
+			.execute(&mut *tx)
+			.await?;
+		tx.commit().await?;
+		Ok(allowed)
+	}
+
+	/// Makes `ids` the knowledge bases attached to a preset in the caller's transaction; the caller must be allowed to see each of them.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when a statement fails.
+	pub async fn attach_to_preset(tx: &mut Transaction<'_, Postgres>, preset_id: &Uuid, ids: &[Uuid]) -> Result<(), sqlx::Error> {
+		sqlx::query("DELETE FROM preset_knowledge_bases WHERE preset_id = $1")
+			.bind(preset_id)
+			.execute(&mut **tx)
+			.await?;
+		sqlx::query("INSERT INTO preset_knowledge_bases (preset_id, knowledge_base_id) SELECT $1, unnest($2::uuid[])")
+			.bind(preset_id)
+			.bind(ids)
+			.execute(&mut **tx)
+			.await?;
+		Ok(())
 	}
 
 	/// Stores a new knowledge base shared with nobody; the view must have been checked with [`check_view`].
@@ -349,6 +441,7 @@ impl KnowledgeBase {
 			description: self.description.clone(),
 			can_edit: actor.can_edit(self),
 			can_manage: actor.manage,
+			usable: self.usable,
 			connection: actor.view_all.then(|| KnowledgeBaseConnection {
 				id: self.connection_id,
 				name: self.connection_name.clone(),

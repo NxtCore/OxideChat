@@ -1,7 +1,7 @@
 import type {Page} from '@playwright/test';
 import {test, expect, Api} from './support/fixtures';
 import {uniqueName} from './support/gateway';
-import {AUTH_FILES, MOCK_LLM_KEY, MOCK_LLM_URL} from './support/constants';
+import {AUTH_FILES, LLM, MOCK_LLM_KEY, MOCK_LLM_URL} from './support/constants';
 
 const CONNECTION = 'E2E handbook store';
 const BASE = 'E2E handbook';
@@ -129,6 +129,37 @@ test.describe('knowledge bases', () => {
 			await expect(memberPage.getByTestId('knowledge-delete')).toHaveCount(0);
 			const response = await (await memberPage.request.get(`/api/v1/knowledge-bases/${baseId}`)).json();
 			expect(response).toMatchObject({name: BASE, can_edit: false, can_manage: false, view: null, connection: null});
+		} finally {
+			await member.close();
+		}
+	});
+	test('a member attaches the knowledge base in the composer and the answer cites its record', async ({browser, baseURL, t, seed}) => {
+		test.skip(!LLM.isMock, 'only the local stand-in calls the knowledge tool on cue');
+		const member = await browser.newContext({baseURL, storageState: AUTH_FILES.member});
+		try {
+			const page = await member.newPage();
+			await page.goto('/');
+			await page.getByTestId('model-selector').click();
+			const search = page.getByPlaceholder(t('chat.model_selector.search_models'));
+			await search.fill(seed.model.displayName);
+			await page.getByText(seed.model.displayName, {exact: true}).last().click();
+			await expect(search).toBeHidden();
+
+			await page.getByTestId('composer-settings').click();
+			await page.getByTestId(`composer-knowledge-${BASE}`).click();
+			await expect(page.getByTestId('composer-chip-knowledge')).toHaveText(t('chat.composer.knowledge_chip', {count: 1}));
+			await page.keyboard.press('Escape');
+
+			const composer = page.locator('textarea').first();
+			await composer.fill('How do I book holidays?');
+			await composer.press('Enter');
+			await expect(page).toHaveURL(/\/chats\/[0-9a-f-]{36}/);
+			const reply = page.locator('[data-testid="message"][data-role="assistant"]').first();
+			await expect(reply).toContainText('Mock answer: Holidays are booked in the HR portal. [1]', {timeout: 60_000});
+			await expect(page.getByTestId('knowledge-source-chip').first()).toContainText('[1] Holidays');
+
+			const chatId = page.url().match(/chats\/([0-9a-f-]{36})/)![1];
+			expect((await (await page.request.get(`/api/v1/chats/${chatId}`)).json()).knowledge_base_ids).toEqual([baseId]);
 		} finally {
 			await member.close();
 		}

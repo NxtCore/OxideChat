@@ -5,9 +5,9 @@ use crate::ai::provider_to_config;
 use crate::types::gateway::model_type;
 use crate::types::models::Model;
 use crate::types::providers::Provider;
-use crate::types::{BUDGET_RESERVATION_METADATA_KEY, BudgetError, BudgetSubject, JobState, TokenEstimate};
+use crate::types::{BUDGET_RESERVATION_METADATA_KEY, BudgetAdmission, BudgetError, BudgetSubject, JobState, TokenEstimate};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use omniference::types::{EmbeddingInput, EmbeddingRequestIR, EmbeddingVector, ModelRef};
+use omniference::types::{EmbeddingInput, EmbeddingRequestIR, EmbeddingVector, ModelRef, RerankRequestIR};
 use sqlx::PgPool;
 use sqlx::types::Json;
 use std::collections::BTreeMap;
@@ -66,32 +66,9 @@ pub async fn probe_embedding(state: &JobState, user_id: &Uuid, settings: &Embedd
 /// Returns why the model cannot be used, the budget refused it or the provider failed.
 pub async fn embed(state: &JobState, user_id: &Uuid, settings: &EmbeddingSettings, text: &str, request_type: &str) -> Result<Vec<f32>, RagError> {
 	let (model, provider) = load(&state.db, &settings.model_id, "embedding", RagError::NotEmbeddingModel).await?;
-	let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes(text.len() as u64), 0);
-	let admission = match state
-		.budget_ledger
-		.reserve_for_model(&state.db, BudgetSubject::user(*user_id), &model.id, estimate)
-		.await
-	{
-		Ok(admission) => admission,
-		Err(BudgetError::Exceeded) => return Err(RagError::BudgetExceeded),
-		Err(error) => return Err(RagError::EmbeddingFailed(error.to_string())),
-	};
-	let mut metadata = BTreeMap::from([
-		("oxide_user_id".to_string(), user_id.to_string()),
-		("oxide_model_id".to_string(), model.id.to_string()),
-		("oxide_request_type".to_string(), request_type.to_string()),
-	]);
-	if let Some(reservation) = &admission.reservation {
-		metadata.insert(BUDGET_RESERVATION_METADATA_KEY.to_string(), reservation.id.to_string());
-	}
+	let (admission, metadata) = reserve(state, user_id, &model, text.len(), request_type).await?;
 	let request = EmbeddingRequestIR {
-		model: ModelRef {
-			alias: model.display_name.clone(),
-			provider: provider_to_config(&provider).map_err(|error| RagError::EmbeddingFailed(error.to_string()))?,
-			model_id: model.model_id.clone(),
-			input_modalities: Vec::new(),
-			output_modalities: Vec::new(),
-		},
+		model: model_ref(&model, &provider)?,
 		input: EmbeddingInput::Text(text.to_string()),
 		dimensions: settings.dimensions,
 		encoding_format: None,
@@ -110,6 +87,63 @@ pub async fn embed(state: &JobState, user_id: &Uuid, settings: &EmbeddingSetting
 		.map(|item| floats(item.embedding))
 		.filter(|vector| !vector.is_empty())
 		.ok_or_else(|| RagError::EmbeddingFailed("no embedding returned".to_string()))
+}
+
+/// Sorts `documents` by relevance to `query` with the reranker `model_id`, billed to `user_id` as `rag_query`; returns document indexes, most relevant first.
+///
+/// # Errors
+///
+/// Returns why the model cannot be used, the budget refused it or the provider failed.
+pub async fn rerank(state: &JobState, user_id: &Uuid, model_id: &Uuid, query: &str, documents: &[&str]) -> Result<Vec<usize>, RagError> {
+	let (model, provider) = load(&state.db, model_id, "reranking", RagError::NotRerankingModel).await?;
+	let bytes = query.len() + documents.iter().map(|document| document.len()).sum::<usize>();
+	let (admission, metadata) = reserve(state, user_id, &model, bytes, "rag_query").await?;
+	let request = RerankRequestIR {
+		model: model_ref(&model, &provider)?,
+		query: query.to_string(),
+		documents: documents.iter().map(|document| serde_json::Value::String((*document).to_string())).collect(),
+		top_n: None,
+		return_documents: Some(false),
+		raw_request: None,
+		metadata,
+	};
+	let response = crate::ai::get().rerank(request).await.map_err(|error| RagError::EmbeddingFailed(error.to_string()))?;
+	drop(admission);
+	let mut results = response.results;
+	results.sort_by(|a, b| b.relevance_score.total_cmp(&a.relevance_score));
+	Ok(results.into_iter().filter_map(|result| usize::try_from(result.index).ok()).collect())
+}
+
+async fn reserve(state: &JobState, user_id: &Uuid, model: &Model, bytes: usize, request_type: &str) -> Result<(BudgetAdmission, BTreeMap<String, String>), RagError> {
+	let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes(bytes as u64), 0);
+	let admission = match state
+		.budget_ledger
+		.reserve_for_model(&state.db, BudgetSubject::user(*user_id), &model.id, estimate)
+		.await
+	{
+		Ok(admission) => admission,
+		Err(BudgetError::Exceeded) => return Err(RagError::BudgetExceeded),
+		Err(error) => return Err(RagError::EmbeddingFailed(error.to_string())),
+	};
+	let mut metadata = BTreeMap::from([
+		("oxide_user_id".to_string(), user_id.to_string()),
+		("oxide_model_id".to_string(), model.id.to_string()),
+		("oxide_request_type".to_string(), request_type.to_string()),
+	]);
+	if let Some(reservation) = &admission.reservation {
+		metadata.insert(BUDGET_RESERVATION_METADATA_KEY.to_string(), reservation.id.to_string());
+	}
+	Ok((admission, metadata))
+}
+
+fn model_ref(model: &Model, provider: &Provider) -> Result<ModelRef, RagError> {
+	Ok(ModelRef {
+		alias: model.display_name.clone(),
+		provider: provider_to_config(provider).map_err(|error| RagError::EmbeddingFailed(error.to_string()))?,
+		model_id: model.model_id.clone(),
+		input_modalities: Vec::new(),
+		output_modalities: Vec::new(),
+	})
 }
 
 /// The floats of a vector, also when the provider sent it as base64 little-endian `f32`s.

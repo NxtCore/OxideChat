@@ -2,6 +2,7 @@ use super::history::tool_message_name;
 use super::prepare::PreparedTurn;
 use super::title::{TitleJob, first_user_text, generate_title};
 use super::tools::{execute_tool_by_name, get_client_tool_info};
+use crate::types::rag::{KNOWLEDGE_TOOL, run_knowledge_tool};
 use crate::ai;
 use crate::types::{
 	BUDGET_RESERVATION_METADATA_KEY, BudgetError, BudgetReservation, BudgetSubject, ChatMessageResponse, CostDetails, JobState, Message, MessagePart, PendingCall,
@@ -81,6 +82,7 @@ pub(crate) struct AgentRun {
 	needs_title: bool,
 	active: bool,
 	arena_round_id: Option<Uuid>,
+	knowledge_base_ids: Vec<Uuid>,
 	start_time: Instant,
 	base_ir: ChatRequestIR,
 	current_messages: Vec<OmniMessage>,
@@ -170,6 +172,7 @@ impl AgentRun {
 			needs_title: turn.needs_title,
 			active: turn.active,
 			arena_round_id: turn.arena_round_id,
+			knowledge_base_ids: turn.knowledge_base_ids,
 			start_time,
 			base_ir,
 			current_messages,
@@ -384,6 +387,22 @@ impl AgentRun {
 	}
 
 	async fn run_server_tool(&self, call: &ToolCall) -> ToolOutput {
+		if call.name == KNOWLEDGE_TOOL {
+			return match run_knowledge_tool(&self.state, &self.user_id, &self.knowledge_base_ids, &call.args).await {
+				Ok(output) => ToolOutput {
+					output: serde_json::to_value(output).unwrap_or_default(),
+					error: None,
+					tool_id: None,
+					function_id: None,
+				},
+				Err(error) => ToolOutput {
+					output: serde_json::json!({"error": error.to_string()}),
+					error: Some(error.to_string()),
+					tool_id: None,
+					function_id: None,
+				},
+			};
+		}
 		match execute_tool_by_name(&self.state, self.user_id, &call.name, call.args.clone()).await {
 			Ok(result) => ToolOutput {
 				output: result.output,

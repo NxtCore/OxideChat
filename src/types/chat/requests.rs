@@ -185,6 +185,9 @@ pub struct StreamRequest {
 	/// How the picked provider is applied: `"prefer"` (order, fallbacks on) or `"lock"`
 	/// (only, no fallback). Defaults to `"prefer"`.
 	pub provider_routing_mode: Option<String>,
+	/// Knowledge bases to attach to the chat from this turn on; `None` keeps the chat's current ones.
+	#[serde(default)]
+	pub knowledge_base_ids: Option<Vec<Uuid>>,
 }
 
 const MAX_CUSTOM_SAMPLING_FIELDS: usize = 32;

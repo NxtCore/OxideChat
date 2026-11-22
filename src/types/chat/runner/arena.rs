@@ -112,6 +112,7 @@ pub(super) async fn prepare_arena_turn(state: &Arc<JobState>, user: &User, chat:
 			needs_title: false,
 			active: false,
 			arena_round_id: Some(round_id),
+			knowledge_base_ids: Vec::new(),
 		});
 	}
 

@@ -5,6 +5,7 @@ mod models;
 mod repository;
 mod requests;
 mod responses;
+mod retrieval;
 mod store;
 mod view;
 
@@ -12,6 +13,7 @@ pub use knowledge_bases::*;
 pub use models::*;
 pub use requests::*;
 pub use responses::*;
+pub use retrieval::*;
 pub use store::*;
 pub use view::*;
 

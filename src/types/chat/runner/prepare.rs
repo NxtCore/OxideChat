@@ -14,6 +14,7 @@ use axum::response::{
 	IntoResponse, Response,
 	sse::{Event, KeepAlive, Sse},
 };
+use crate::types::rag::{KnowledgeBase, add_knowledge_tool, turn_knowledge_bases};
 use omniference::types::ChatRequestIR;
 use sqlx::PgPool;
 use std::{convert::Infallible, sync::Arc};
@@ -65,6 +66,8 @@ pub struct PreparedTurn {
 	/// Whether the reply becomes the chat's active one; arena answers stay inactive until one is picked.
 	pub(crate) active: bool,
 	pub(crate) arena_round_id: Option<Uuid>,
+	/// Knowledge bases the knowledge tool may search in this turn; checked again when it runs.
+	pub(crate) knowledge_base_ids: Vec<Uuid>,
 }
 
 /// A prepared turn: one reply, or an arena round where every model of the arena answers.
@@ -324,7 +327,9 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 		provider_slugs: &provider_slugs,
 		config_tools: true,
 	};
-	let ir = build_request(db, &inputs, messages).await?;
+	let mut ir = build_request(db, &inputs, messages).await?;
+	let knowledge = knowledge_bases(state, &user.id, &chat_id, req, preset.as_ref()).await?;
+	add_knowledge_tool(&mut ir, &knowledge);
 
 	Ok(PreparedTurn {
 		chat_id,
@@ -342,5 +347,19 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 		needs_title: chat.title.is_none(),
 		active: true,
 		arena_round_id: None,
+		knowledge_base_ids: knowledge.iter().map(|base| base.id).collect(),
 	})
+}
+
+async fn knowledge_bases(state: &JobState, user_id: &Uuid, chat_id: &Uuid, req: &StreamRequest, preset: Option<&Preset>) -> Result<Vec<KnowledgeBase>, TurnError> {
+	let db = &state.db;
+	let mut ids = match &req.knowledge_base_ids {
+		Some(ids) => KnowledgeBase::attach_to_chat(db, user_id, chat_id, ids).await,
+		None => KnowledgeBase::chat_ids(db, chat_id).await,
+	}
+	.map_err(internal("Failed to load knowledge bases"))?;
+	if let Some(preset) = preset {
+		ids.extend(KnowledgeBase::preset_ids(db, &preset.id).await.map_err(internal("Failed to load knowledge bases"))?);
+	}
+	turn_knowledge_bases(state, user_id, &ids).await.map_err(internal("Failed to load knowledge bases"))
 }

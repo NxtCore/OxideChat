@@ -120,6 +120,7 @@ export interface ChatWithMessages {
 	chat: Chat;
 	messages: ChatMessage[];
 	pending_arena_round: ArenaRoundResponse | null;
+	knowledge_base_ids?: string[];
 }
 
 export interface ArenaCandidate {

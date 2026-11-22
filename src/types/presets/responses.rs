@@ -49,6 +49,8 @@ pub struct PresetResponse {
 	/// Whether the viewer only sees the preset because it was shared with them.
 	pub shared: bool,
 	pub unavailable: Option<PresetUnavailable>,
+	/// Knowledge bases the preset searches; viewers search only those shared with them.
+	pub knowledge_base_ids: Vec<Uuid>,
 	pub updated_at: DateTime<Utc>,
 }
 
@@ -197,6 +199,7 @@ impl PresetResponse {
 			can_manage,
 			shared,
 			unavailable,
+			knowledge_base_ids: Vec::new(),
 			updated_at: preset.updated_at,
 		}
 	}

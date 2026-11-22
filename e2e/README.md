@@ -35,7 +35,8 @@ work, but it cannot catch provider-specific problems.
 The stand-in always runs, also with a key: under `/media` it serves non-chat models (embeddings, rerank,
 decisions, images, speech to text and text to speech), which `gateway-media.spec.ts` adds as its own
 provider to check that every non-chat gateway route is billed and logged like chat. Under `/qdrant` it
-serves a small read-only Qdrant collection for `knowledge.spec.ts`.
+serves a small read-only Qdrant collection for `knowledge.spec.ts`, and its chat model calls the
+`knowledge_search` tool once whenever a request offers it.
 
 ## How dynamic costs are checked
 

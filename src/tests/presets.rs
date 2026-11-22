@@ -58,6 +58,7 @@ pub(crate) mod validation {
 			is_enabled: true,
 			mode: None,
 			arena: None,
+			knowledge_base_ids: None,
 		}
 	}
 

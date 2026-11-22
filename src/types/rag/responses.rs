@@ -93,6 +93,8 @@ pub struct KnowledgeBaseResponse {
 	pub can_edit: bool,
 	/// The viewer may change the source, share and delete it.
 	pub can_manage: bool,
+	/// Shared with the viewer, so chats may search it; knowledge admins also see bases that are not.
+	pub usable: bool,
 	pub connection: Option<KnowledgeBaseConnection>,
 	pub view: Option<ExternalView>,
 }

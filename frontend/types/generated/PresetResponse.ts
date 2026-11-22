@@ -24,4 +24,8 @@ can_manage: boolean,
 /**
  * Whether the viewer only sees the preset because it was shared with them.
  */
-shared: boolean, unavailable: PresetUnavailable | null, updated_at: string, };
+shared: boolean, unavailable: PresetUnavailable | null, 
+/**
+ * Knowledge bases the preset searches; viewers search only those shared with them.
+ */
+knowledge_base_ids: Array<string>, updated_at: string, };

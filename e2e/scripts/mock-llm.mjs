@@ -40,7 +40,18 @@ function lastUserText(body) {
 }
 
 function replyFor(body) {
+	const last = (body.messages ?? []).at(-1);
+	if (last?.role === 'tool') {
+		const source = JSON.parse(typeof last.content === 'string' ? last.content : last.content?.[0]?.text ?? '{}').sources?.[0];
+		return source ? `Mock answer: ${source.text} [${source.n}]` : 'Mock answer: nothing found';
+	}
 	return `Mock reply: ${lastUserText(body)}`;
+}
+
+// Calls the knowledge tool once when it is offered, then answers from its first source.
+function wantsKnowledge(body) {
+	const offered = (body.tools ?? []).some(tool => tool.function?.name === 'knowledge_search');
+	return offered && (body.messages ?? []).at(-1)?.role === 'user';
 }
 
 function usage() {
@@ -204,6 +215,14 @@ async function streamCompletion(req, res, body, model) {
 	req.on('close', () => (closed = true));
 
 	send(chunk({role: 'assistant', content: ''}));
+	if (wantsKnowledge(body)) {
+		const call = {index: 0, id: 'call_knowledge', type: 'function', function: {name: 'knowledge_search', arguments: JSON.stringify({query: lastUserText(body)})}};
+		send(chunk({tool_calls: [call]}));
+		send(chunk({}, 'tool_calls'));
+		send({id, object: 'chat.completion.chunk', created, model, choices: [], usage: usage()});
+		res.write('data: [DONE]\n\n');
+		return res.end();
+	}
 	const words = replyFor(body).split(' ');
 	const delay = model === 'mock-slow' ? 400 : 5;
 	for (const [index, word] of words.entries()) {

@@ -115,6 +115,7 @@
 				</div>
 				<SettingsModelsParametersTab v-show="currentTab === 'parameters'" :form="form" :capabilities="baseModel?.capabilities ?? []" />
 				<SettingsPresetsToolsTab v-if="!arena" v-show="currentTab === 'tools'" :form="form" :capabilities="baseModel?.capabilities ?? null" />
+				<SettingsPresetsKnowledgeTab v-if="!arena && currentTab === 'knowledge'" :form="form" />
 				<SettingsPresetsStartersTab v-if="!arena" v-show="currentTab === 'starters'" :form="form" />
 			</fieldset>
 		</template>
@@ -146,7 +147,7 @@ const router = useRouter();
 
 const t = (key: string, args?: Record<string, string>) => store.getTranslation(`presets.editor.${key}`, args);
 
-const PRESET_TABS = ['general', 'levels', 'sharing', 'instructions', 'parameters', 'tools', 'starters'] as const;
+const PRESET_TABS = ['general', 'levels', 'sharing', 'instructions', 'parameters', 'tools', 'knowledge', 'starters'] as const;
 const ARENA_TABS = ['general', 'models', 'options', 'sharing', 'instructions', 'parameters', 'results'] as const;
 const ARENA_OPTIONS = ['stream_responses', 'show_reasoning'] as const;
 const arena = props.arena;
@@ -156,7 +157,7 @@ const samplingKeys = ['temperature', 'max_tokens', 'top_p', 'top_k', 'frequency_
 
 const presetId = route.params.id as string;
 const isNew = presetId === 'new';
-const tabs = computed(() => (arena && !isNew ? ARENA_TABS : arena ? ARENA_TABS.filter(tab => tab !== 'results') : PRESET_TABS));
+const tabs = computed(() => (arena && !isNew ? ARENA_TABS : arena ? ARENA_TABS.filter(tab => tab !== 'results') : PRESET_TABS.filter(tab => tab !== 'knowledge' || store.base?.rag?.enabled)));
 const preset = ref<PresetResponse | null>(null);
 const loading = ref(!isNew);
 const notFound = ref(false);
@@ -180,6 +181,7 @@ const form = reactive({
 	reasoning_effort: null as string | null,
 	reasoning_budget_tokens: null as number | null,
 	tool_ids: [] as string[],
+	knowledge_base_ids: [] as string[],
 	tools_locked: false,
 	starters: ['', '', '', ''] as string[],
 	levels: [] as LevelRow[],
@@ -297,6 +299,7 @@ function populate(source: SavePresetRequest, levelModels: (ModelList | null)[] =
 	form.reasoning_effort = source.reasoning.effort ?? null;
 	form.reasoning_budget_tokens = source.reasoning.budget_tokens ?? null;
 	form.tool_ids = [...source.tool_ids];
+	form.knowledge_base_ids = [...(source.knowledge_base_ids ?? [])];
 	form.tools_locked = source.tools_locked;
 	form.starters = [...source.starters, '', '', '', ''].slice(0, MAX_PRESET_STARTERS);
 	form.levels = levelRows(source.levels, levelModels);
@@ -326,6 +329,7 @@ function buildRequest(): SavePresetRequest {
 		reasoning: {effort: form.reasoning_effort, budget_tokens: form.reasoning_budget_tokens},
 		tool_ids: [...form.tool_ids],
 		tools_locked: form.tools_locked,
+		...(arena ? {} : {knowledge_base_ids: [...form.knowledge_base_ids]}),
 		levels,
 		default_level: defaultLevel?.key ?? null,
 		starters: form.starters.map(starter => starter.trim()).filter(Boolean),

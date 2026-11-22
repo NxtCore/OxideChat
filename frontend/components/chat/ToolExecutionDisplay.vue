@@ -26,6 +26,23 @@
 			<ChevronDown class="ml-auto h-3 w-3 transition-transform" :class="isExpanded ? 'rotate-180' : ''" />
 		</div>
 
+		<div v-if="knowledgeSources.length" class="flex flex-wrap gap-1.5" data-testid="knowledge-sources">
+			<component
+				:is="source.url ? 'a' : 'span'"
+				v-for="source in knowledgeSources"
+				:key="source.n"
+				:href="source.url || undefined"
+				:target="source.url ? '_blank' : undefined"
+				:rel="source.url ? 'noopener noreferrer' : undefined"
+				:title="source.text"
+				class="max-w-56 truncate rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-foreground"
+				:class="source.url ? 'hover:bg-accent' : ''"
+				data-testid="knowledge-source-chip"
+			>
+				[{{ source.n }}] {{ source.title || source.knowledge_base }}{{ source.section ? ` › ${source.section}` : '' }}
+			</component>
+		</div>
+
 		<Transition name="expand">
 			<div v-if="isExpanded" class="w-full rounded-xl bg-muted/50 border px-4 py-3">
 				<div class="mb-3">
@@ -127,6 +144,14 @@ function isValidImageProtocol(url: string): boolean {
 	if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) return true;
 	return false;
 }
+
+type KnowledgeSource = {n: number; knowledge_base: string; title: string | null; section: string | null; url: string | null; text: string};
+
+const knowledgeSources = computed<KnowledgeSource[]>(() => {
+	if (props.name !== 'knowledge_search' || !props.output) return [];
+	const out = typeof props.output === 'string' ? tryParseJson(props.output) : props.output;
+	return Array.isArray(out?.sources) ? out.sources : [];
+});
 
 const generatedImageUrl = computed(() => {
 	if (!props.output) return null;

@@ -17,4 +17,8 @@ levels: Array<PresetLevel>, default_level?: string, tool_ids: Array<string>, too
 /**
  * Set when the preset is created and never changed afterwards.
  */
-mode?: PresetMode, arena?: PresetArena, };
+mode?: PresetMode, arena?: PresetArena, 
+/**
+ * Knowledge bases the preset searches; `None` keeps the stored ones. Only bases the saving user may search can be added.
+ */
+knowledge_base_ids?: Array<string>, };

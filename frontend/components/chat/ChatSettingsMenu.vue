@@ -33,6 +33,19 @@
 				<span class="text-xs text-muted-foreground">{{ store.getTranslation('chat.provider_selector.title') }}</span>
 				<ProviderSelector class="h-8" />
 			</div>
+			<div v-if="knowledgeVisible" role="group" :aria-label="store.getTranslation('chat.composer.knowledge')" class="space-y-0.5 px-1 pt-1" data-testid="composer-knowledge">
+				<span class="text-xs text-muted-foreground">{{ store.getTranslation('chat.composer.knowledge') }}</span>
+				<label
+					v-for="base in knowledgeStore.usable"
+					:key="base.id"
+					class="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm text-foreground hover:bg-muted/50"
+					:title="base.description ?? ''"
+					:data-testid="`composer-knowledge-${base.name}`"
+				>
+					<ShadCheckbox :model-value="knowledgeStore.selected.includes(base.id)" @update:model-value="knowledgeStore.toggle(base.id)" />
+					<span class="truncate">{{ base.name }}</span>
+				</label>
+			</div>
 		</ShadPopoverContent>
 	</ShadPopover>
 </template>
@@ -43,6 +56,7 @@ import {cn} from '~/lib/utils';
 import {useMainStore} from '~/stores';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
+import {useKnowledgeStore} from '~/stores/knowledgeStore';
 import ReasoningSelector from './ReasoningSelector.vue';
 import SamplingSelector from './SamplingSelector.vue';
 import ProviderSelector from './ProviderSelector.vue';
@@ -50,7 +64,10 @@ import ProviderSelector from './ProviderSelector.vue';
 const store = useMainStore();
 const chatStore = useChatStore();
 const modelStore = useModelStore();
+const knowledgeStore = useKnowledgeStore();
 const open = ref(false);
+const knowledgeEnabled = computed(() => Boolean(store.base?.rag?.enabled));
+const knowledgeVisible = computed(() => knowledgeEnabled.value && knowledgeStore.usable.length > 0);
 
 const effortKeys: Record<string, string> = {minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'extra_high'};
 
@@ -72,6 +89,8 @@ const chips = computed(() => {
 		list.push({key: 'sampling', label: store.getTranslation('chat.composer.sampling_chip', {count: chatStore.samplingActiveCount})});
 	}
 	if (modelStore.providerSelectorVisible && modelStore.selectedProviderName) list.push({key: 'provider', label: modelStore.selectedProviderName});
+	const attached = knowledgeStore.usable.filter(base => knowledgeStore.selected.includes(base.id)).length;
+	if (knowledgeEnabled.value && attached > 0) list.push({key: 'knowledge', label: store.getTranslation('chat.composer.knowledge_chip', {count: attached})});
 	return list;
 });
 
@@ -79,6 +98,14 @@ const triggerLabel = computed(() => {
 	const title = store.getTranslation('chat.composer.settings');
 	return chips.value.length > 0 ? `${title}: ${chips.value.map(chip => chip.label).join(', ')}` : title;
 });
+
+watch(
+	knowledgeEnabled,
+	enabled => {
+		if (enabled) knowledgeStore.ensure();
+	},
+	{immediate: true},
+);
 
 watch(
 	() => modelStore.providerSelectorVisible,
