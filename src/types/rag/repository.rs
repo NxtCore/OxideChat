@@ -241,13 +241,14 @@ impl RagConnection {
 	///
 	/// # Errors
 	///
-	/// Returns a database error when the delete fails.
-	pub async fn delete(pool: &PgPool, actor_id: &Uuid, id: &Uuid) -> Result<bool, sqlx::Error> {
+	/// Returns `ConnectionInUse` while knowledge bases point at it, or a database error.
+	pub async fn delete(pool: &PgPool, actor_id: &Uuid, id: &Uuid) -> Result<bool, RagError> {
 		let mut tx = pool.begin().await?;
-		let Some(name) = sqlx::query_scalar!("DELETE FROM rag_connections WHERE id = $1 RETURNING name", id)
+		let deleted = sqlx::query_scalar!("DELETE FROM rag_connections WHERE id = $1 RETURNING name", id)
 			.fetch_optional(&mut *tx)
-			.await?
-		else {
+			.await
+			.map_err(|error| RagError::foreign_key_or(error, RagError::ConnectionInUse))?;
+		let Some(name) = deleted else {
 			return Ok(false);
 		};
 		AuditLog::write(

@@ -35,6 +35,13 @@
 				</SettingsRow>
 			</div>
 
+			<div v-if="setup.connections.length === 0" class="mt-6 rounded-lg border border-border bg-card p-6" data-testid="knowledge-setup-steps">
+				<h3 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.knowledge_setup.steps.title') }}</h3>
+				<ol class="mt-3 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+					<li v-for="step in ['connection', 'test', 'collection']" :key="step">{{ store.getTranslation(`settings.knowledge_setup.steps.${step}`) }}</li>
+				</ol>
+			</div>
+
 			<SettingsKnowledgeConnectionsCard :setup="setup" :can-edit="canEdit" @changed="apply" />
 		</template>
 	</SettingsPage>

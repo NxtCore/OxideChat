@@ -2,8 +2,8 @@
 
 use crate::types::consts::{ADMIN_RAG_EDIT, ADMIN_RAG_VIEW};
 use crate::types::rag::{
-	ConnectionMode, ConnectionTestResponse, RagConfig, RagConnection, SaveConnectionRequest, StoreError, UpdateRagSetupRequest, VectorStore, check_reranker,
-	probe_embedding,
+	ConnectionMode, ConnectionTestResponse, InspectRequest, InspectResponse, RagConfig, RagConnection, RagError, SaveConnectionRequest, StoreError,
+	UpdateRagSetupRequest, VectorStore, check_reranker, probe_embedding,
 };
 use crate::types::{AppError, AuthUser, JobState, json_ok};
 use crate::utils::response::ErrorCode;
@@ -109,4 +109,29 @@ async fn test(connection: &RagConnection, state: &JobState, env_url: Option<&str
 		ConnectionMode::Managed => Vec::new(),
 	};
 	Ok((version, collections))
+}
+
+/// POST /api/v1/admin/rag/connections/{id}/inspect
+///
+/// Vectors, fields and a few records of a read-only connection's collection, for mapping a knowledge base onto it.
+pub async fn inspect_collection(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<InspectRequest>) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_RAG_EDIT).await?;
+	let connection = RagConnection::find(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
+	if connection.mode != ConnectionMode::ReadOnly {
+		return Err(RagError::NotReadOnly.into());
+	}
+	let result = match VectorStore::connect(&connection, &state.db, None).await {
+		Ok(store) => store.describe(req.collection.trim(), &req.filter).await,
+		Err(error) => Err(error),
+	};
+	json_ok(match result {
+		Ok(collection) => InspectResponse {
+			error: None,
+			collection: Some(collection),
+		},
+		Err(error) => InspectResponse {
+			error: Some(error),
+			collection: None,
+		},
+	})
 }

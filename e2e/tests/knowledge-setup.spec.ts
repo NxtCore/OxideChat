@@ -22,6 +22,7 @@ async function fillConnection(page: Page, fields: {name?: string; kind?: string;
 }
 
 async function reset(api: Api) {
+	for (const base of await api.get('/api/v1/knowledge-bases')) await api.delete(`/api/v1/knowledge-bases/${base.id}`);
 	const setup = await api.get('/api/v1/admin/rag');
 	await api.put('/api/v1/admin/rag', {enabled: false, reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
 	for (const connection of setup.connections) await api.delete(`/api/v1/admin/rag/connections/${connection.id}`);
@@ -80,7 +81,8 @@ test.describe('knowledge setup', () => {
 		await page.getByTestId('knowledge-connection-save').click();
 		await expect(page.getByTestId(`knowledge-connection-${QDRANT}`)).toContainText(t('settings.knowledge_setup.connections.mode_read_only'));
 
-		const setup = await api.get('/api/v1/admin/rag');
+		for (const base of await api.get('/api/v1/knowledge-bases')) await api.delete(`/api/v1/knowledge-bases/${base.id}`);
+	const setup = await api.get('/api/v1/admin/rag');
 		expect(setup.connections.find((connection: {name: string}) => connection.name === QDRANT)).toMatchObject({kind: 'qdrant', mode: 'read_only', has_secret: true});
 		expect(JSON.stringify(setup)).not.toContain(KEY);
 	});
@@ -103,7 +105,8 @@ test.describe('knowledge setup', () => {
 		await page.getByTestId('settings-save-bar-save').click();
 		await expect(page.getByTestId('settings-save-bar')).toBeHidden();
 
-		const setup = await api.get('/api/v1/admin/rag');
+		for (const base of await api.get('/api/v1/knowledge-bases')) await api.delete(`/api/v1/knowledge-bases/${base.id}`);
+	const setup = await api.get('/api/v1/admin/rag');
 		const managed = setup.connections.find((connection: {name: string}) => connection.name === MANAGED);
 		expect(setup).toMatchObject({enabled: true, defaults: {connection_id: managed.id}});
 		expect((await api.get('/api/v1/base')).rag).toEqual({enabled: true});

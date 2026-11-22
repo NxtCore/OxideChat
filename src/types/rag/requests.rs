@@ -1,4 +1,4 @@
-use super::{ConnectionKind, ConnectionMode, RagError};
+use super::{ConnectionKind, ConnectionMode, ExternalView, RagError};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -52,6 +52,74 @@ pub struct RerankerSettings {
 pub struct RagDefaults {
 	/// Managed connection new knowledge bases are stored in.
 	pub connection_id: Option<Uuid>,
+}
+
+/// Creates or changes a knowledge base on a read-only connection.
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct SaveKnowledgeBaseRequest {
+	pub name: String,
+	#[serde(default)]
+	pub description: Option<String>,
+	/// Required on create; on an update `None` keeps the stored source, and only knowledge admins may send one.
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub view: Option<ExternalView>,
+}
+
+/// Inspects a collection of a read-only connection, reading the sample with `filter`.
+#[derive(Debug, Default, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct InspectRequest {
+	pub collection: String,
+	#[serde(default)]
+	pub filter: Vec<super::FieldFilter>,
+}
+
+/// A test search of one knowledge base.
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct KnowledgeSearchRequest {
+	pub query: String,
+}
+
+impl KnowledgeSearchRequest {
+	/// The trimmed query.
+	///
+	/// # Errors
+	///
+	/// Returns `InvalidQuery` when it is empty or longer than 2000 characters.
+	pub fn query(&self) -> Result<&str, RagError> {
+		let query = self.query.trim();
+		if query.is_empty() || query.chars().count() > 2000 {
+			Err(RagError::InvalidQuery)
+		} else {
+			Ok(query)
+		}
+	}
+}
+
+impl SaveKnowledgeBaseRequest {
+	/// The trimmed description, or `None` when it is empty.
+	#[must_use]
+	pub fn description(&self) -> Option<&str> {
+		self.description.as_deref().map(str::trim).filter(|text| !text.is_empty())
+	}
+
+	/// Checks the fields that need no database or store.
+	///
+	/// # Errors
+	///
+	/// Returns the first problem found.
+	pub fn validate(&self) -> Result<(), RagError> {
+		if !(1..=100).contains(&self.name.trim().chars().count()) {
+			return Err(RagError::InvalidName);
+		}
+		if self.description().is_some_and(|text| text.chars().count() > 2000) {
+			return Err(RagError::InvalidName);
+		}
+		self.view.as_ref().map_or(Ok(()), ExternalView::validate)
+	}
 }
 
 impl SaveConnectionRequest {

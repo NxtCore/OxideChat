@@ -1,11 +1,13 @@
 //! Read access to the vector stores behind connections.
 
-use super::{ConnectionKind, ConnectionMode, RagConnection};
+use super::view::{field_paths, pg_filter, qdrant_filter, quote_ident, shorten};
+use super::{CollectionInfo, ConnectionKind, ConnectionMode, Distance, ExternalView, FieldFilter, RagConnection, VectorInfo};
 use crate::utils::encryption::decrypt_api_key;
 use crate::utils::outbound::{guarded_client, is_allowed_ip, private_hosts_allowed, read_limited};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use serde_json::Value;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::{AssertSqlSafe, PgPool};
 use std::borrow::Cow;
 use std::str::FromStr;
 use std::time::Duration;
@@ -14,6 +16,8 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_COLLECTIONS: i64 = 500;
 const MIN_PGVECTOR: (u32, u32) = (0, 8);
+const SAMPLE_SIZE: i64 = 3;
+const MAX_SEARCH_HITS: u32 = 50;
 
 /// Why a vector store could not be used; translated as `rag.store_error.<value>` and never carries the server's own text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, thiserror::Error)]
@@ -36,6 +40,10 @@ pub enum StoreError {
 	BadResponse,
 	#[error("the stored secret could not be decrypted")]
 	Secret,
+	#[error("the collection does not exist")]
+	CollectionNotFound,
+	#[error("the collection has no such field or vector")]
+	UnknownField,
 }
 
 /// An open vector store; the main database is borrowed, every other store is its own pool or client.
@@ -69,6 +77,55 @@ struct QdrantCollectionList {
 #[derive(Deserialize)]
 struct QdrantCollection {
 	name: String,
+}
+
+#[derive(Deserialize)]
+struct QdrantResult<T> {
+	result: T,
+}
+
+#[derive(Deserialize)]
+struct QdrantPoints {
+	points: Vec<QdrantPoint>,
+}
+
+#[derive(Deserialize)]
+struct QdrantPoint {
+	#[serde(default)]
+	score: f64,
+	#[serde(default)]
+	payload: Value,
+}
+
+/// A pgvector table: what to put after `FROM` and its columns as (name, type, type modifier).
+struct PgTable {
+	from: String,
+	columns: Vec<(String, String, i32)>,
+}
+
+impl PgTable {
+	fn vector_columns(&self) -> Vec<String> {
+		self.columns
+			.iter()
+			.filter(|(_, kind, _)| is_pg_vector(kind))
+			.map(|(name, _, _)| name.clone())
+			.collect()
+	}
+
+	fn columns(&self) -> Vec<String> {
+		self.columns.iter().map(|(name, _, _)| name.clone()).collect()
+	}
+
+	fn vector_type(&self, name: &str) -> Option<&str> {
+		self.columns
+			.iter()
+			.find(|(column, kind, _)| column == name && is_pg_vector(kind))
+			.map(|(_, kind, _)| kind.as_str())
+	}
+}
+
+fn is_pg_vector(kind: &str) -> bool {
+	matches!(kind, "vector" | "halfvec")
 }
 
 impl<'a> VectorStore<'a> {
@@ -152,6 +209,161 @@ impl<'a> VectorStore<'a> {
 			}
 		}
 	}
+
+	/// The collection's vectors, its payload fields and a few records, filtered like `filter`.
+	///
+	/// # Errors
+	///
+	/// Returns a `StoreError` when the store cannot be read, the collection is missing or a filter names an unknown column.
+	pub async fn describe(&self, collection: &str, filter: &[FieldFilter]) -> Result<CollectionInfo, StoreError> {
+		match self {
+			Self::Pgvector(pool) => {
+				let table = pg_table(pool, collection).await?;
+				let (clause, params) = pg_filter(filter, &table.columns(), 2).ok_or(StoreError::UnknownField)?;
+				let sql = format!("SELECT to_jsonb(t) - $1::text[] FROM {} t{clause} LIMIT {SAMPLE_SIZE}", table.from);
+				let query = params.iter().fold(
+					sqlx::query_scalar::<_, Value>(AssertSqlSafe(sql)).bind(table.vector_columns()),
+					sqlx::query::QueryScalar::bind,
+				);
+				let sample = timed(query.fetch_all(pool.as_ref())).await?;
+				let mut vectors = Vec::new();
+				for (name, kind, modifier) in table.columns.iter().filter(|(_, kind, _)| is_pg_vector(kind)) {
+					let size = match u32::try_from(*modifier) {
+						Ok(size) if size > 0 => Some(size),
+						_ => pg_vector_size(pool, &table, name, kind).await?,
+					};
+					vectors.push(VectorInfo {
+						name: Some(name.clone()),
+						size,
+						distance: None,
+					});
+				}
+				let mut fields: Vec<String> = table
+					.columns
+					.iter()
+					.filter(|(_, kind, _)| !is_pg_vector(kind))
+					.map(|(name, _, _)| name.clone())
+					.collect();
+				fields.extend(field_paths(&sample));
+				fields.sort();
+				fields.dedup();
+				Ok(CollectionInfo {
+					vectors,
+					fields,
+					sample: sample.into_iter().map(shorten).collect(),
+				})
+			}
+			Self::Qdrant(qdrant) => {
+				let info: QdrantResult<Value> = qdrant.send(reqwest::Method::GET, &["collections", collection], None).await?;
+				let vectors = qdrant_vectors(info.result.pointer("/config/params/vectors").unwrap_or(&Value::Null));
+				let mut body = serde_json::json!({ "limit": SAMPLE_SIZE, "with_payload": true, "with_vector": false });
+				if let Some(filter) = qdrant_filter(filter) {
+					body["filter"] = filter;
+				}
+				let points: QdrantResult<QdrantPoints> = qdrant
+					.send(reqwest::Method::POST, &["collections", collection, "points", "scroll"], Some(&body))
+					.await?;
+				let sample: Vec<Value> = points.result.points.into_iter().map(|point| point.payload).collect();
+				Ok(CollectionInfo {
+					vectors,
+					fields: field_paths(&sample),
+					sample: sample.into_iter().map(shorten).collect(),
+				})
+			}
+		}
+	}
+
+	/// The `limit` records of `view` nearest to `vector` as (payload, score), nearest first.
+	///
+	/// # Errors
+	///
+	/// Returns a `StoreError` when the store cannot be read, the collection is missing or the view names an unknown field.
+	pub async fn search(&self, view: &ExternalView, vector: &[f32], limit: u32) -> Result<Vec<(Value, f64)>, StoreError> {
+		let limit = limit.clamp(1, MAX_SEARCH_HITS);
+		match self {
+			Self::Pgvector(pool) => {
+				let table = pg_table(pool, &view.collection).await?;
+				let column = view.vector_name.as_deref().ok_or(StoreError::UnknownField)?;
+				let kind = table.vector_type(column).ok_or(StoreError::UnknownField)?;
+				let (clause, params) = pg_filter(&view.filter, &table.columns(), 4).ok_or(StoreError::UnknownField)?;
+				let cast = if kind == "halfvec" { "::vector::halfvec" } else { "::vector" };
+				let distance = format!("(t.{} {} $2::real[]{cast})", quote_ident(column), view.distance.pg_operator());
+				let sql = format!(
+					"SELECT to_jsonb(t) - $1::text[], {distance}::float8 FROM {} t{clause} ORDER BY {distance} LIMIT $3",
+					table.from
+				);
+				let query = sqlx::query_as::<_, (Value, f64)>(AssertSqlSafe(sql))
+					.bind(table.vector_columns())
+					.bind(vector)
+					.bind(i64::from(limit));
+				let query = params.iter().fold(query, sqlx::query::QueryAs::bind);
+				let mut tx = timed(pool.begin()).await?;
+				timed(sqlx::query("SET LOCAL hnsw.iterative_scan = relaxed_order").execute(&mut *tx)).await?;
+				let rows = timed(query.fetch_all(&mut *tx)).await?;
+				Ok(rows.into_iter().map(|(payload, distance)| (payload, view.distance.pg_score(distance))).collect())
+			}
+			Self::Qdrant(qdrant) => {
+				let mut body = serde_json::json!({ "query": vector, "limit": limit, "with_payload": true, "with_vector": false });
+				if let Some(name) = &view.vector_name {
+					body["using"] = Value::String(name.clone());
+				}
+				if let Some(filter) = qdrant_filter(&view.filter) {
+					body["filter"] = filter;
+				}
+				let points: QdrantResult<QdrantPoints> = qdrant
+					.send(reqwest::Method::POST, &["collections", &view.collection, "points", "query"], Some(&body))
+					.await?;
+				Ok(points.result.points.into_iter().map(|point| (point.payload, point.score)).collect())
+			}
+		}
+	}
+}
+
+async fn pg_table(pool: &PgPool, collection: &str) -> Result<PgTable, StoreError> {
+	let name = timed(
+		sqlx::query_as::<_, (String, String)>(
+			"SELECT n.nspname::text, c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+			 WHERE c.oid = to_regclass($1) AND c.relkind IN ('r', 'v', 'm', 'p', 'f')",
+		)
+		.bind(collection)
+		.fetch_optional(pool),
+	)
+	.await?
+	.ok_or(StoreError::CollectionNotFound)?;
+	let columns = timed(
+		sqlx::query_as::<_, (String, String, i32)>(
+			"SELECT a.attname::text, t.typname::text, a.atttypmod FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid
+			 WHERE a.attrelid = to_regclass($1) AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
+		)
+		.bind(collection)
+		.fetch_all(pool),
+	)
+	.await?;
+	Ok(PgTable {
+		from: format!("{}.{}", quote_ident(&name.0), quote_ident(&name.1)),
+		columns,
+	})
+}
+
+async fn pg_vector_size(pool: &PgPool, table: &PgTable, column: &str, kind: &str) -> Result<Option<u32>, StoreError> {
+	let column = quote_ident(column);
+	let cast = if kind == "halfvec" { "::vector" } else { "" };
+	let sql = format!("SELECT vector_dims(t.{column}{cast}) FROM {} t WHERE t.{column} IS NOT NULL LIMIT 1", table.from);
+	let size: Option<i32> = timed(sqlx::query_scalar(AssertSqlSafe(sql)).fetch_optional(pool)).await?;
+	Ok(size.and_then(|size| u32::try_from(size).ok()))
+}
+
+fn qdrant_vectors(config: &Value) -> Vec<VectorInfo> {
+	let info = |name: Option<String>, params: &Value| VectorInfo {
+		name,
+		size: params.get("size").and_then(Value::as_u64).and_then(|size| u32::try_from(size).ok()),
+		distance: params.get("distance").and_then(Value::as_str).and_then(Distance::from_qdrant),
+	};
+	match config.as_object() {
+		Some(map) if map.contains_key("size") => vec![info(None, config)],
+		Some(map) => map.iter().map(|(name, params)| info(Some(name.clone()), params)).collect(),
+		None => Vec::new(),
+	}
 }
 
 async fn connect_postgres(url: &str, password: Option<&str>, mode: ConnectionMode, trusted: bool) -> Result<VectorStore<'static>, StoreError> {
@@ -192,14 +404,29 @@ async fn check_host(host: &str, port: u16) -> Result<(), StoreError> {
 
 impl Qdrant {
 	async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, StoreError> {
-		let url = self.base.join(path).map_err(|_| StoreError::InvalidUrl)?;
-		let mut request = self.client.get(url);
+		let segments: Vec<&str> = path.split('/').filter(|segment| !segment.is_empty()).collect();
+		self.send(reqwest::Method::GET, &segments, None).await
+	}
+
+	async fn send<T: serde::de::DeserializeOwned>(&self, method: reqwest::Method, segments: &[&str], body: Option<&Value>) -> Result<T, StoreError> {
+		if segments.iter().any(|segment| matches!(*segment, "." | "..")) {
+			return Err(StoreError::InvalidUrl);
+		}
+		let mut url = self.base.clone();
+		if !segments.is_empty() {
+			url.path_segments_mut().map_err(|()| StoreError::InvalidUrl)?.pop_if_empty().extend(segments);
+		}
+		let mut request = self.client.request(method, url);
 		if let Some(key) = &self.api_key {
 			request = request.header("api-key", key);
+		}
+		if let Some(body) = body {
+			request = request.json(body);
 		}
 		let response = request.send().await.map_err(|_| StoreError::Unreachable)?;
 		match response.status() {
 			reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => return Err(StoreError::Unauthorized),
+			reqwest::StatusCode::NOT_FOUND if !segments.is_empty() => return Err(StoreError::CollectionNotFound),
 			status if !status.is_success() => return Err(StoreError::BadResponse),
 			_ => {}
 		}
@@ -219,6 +446,7 @@ fn store_error(error: &sqlx::Error) -> StoreError {
 	let code = error.as_database_error().and_then(|error| error.code().map(Cow::into_owned));
 	match code.as_deref() {
 		Some("28P01" | "28000" | "42501") => StoreError::Unauthorized,
+		Some("42602") => StoreError::ExtensionTooOld,
 		_ if matches!(error, sqlx::Error::Configuration(_)) => StoreError::InvalidUrl,
 		_ => StoreError::Unreachable,
 	}

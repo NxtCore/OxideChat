@@ -51,8 +51,22 @@ pub async fn check_reranker(pool: &PgPool, model_id: &Uuid) -> Result<(), RagErr
 ///
 /// Returns why the model cannot be used, the budget refused it, the provider failed or the size is not the requested one.
 pub async fn probe_embedding(state: &JobState, user_id: &Uuid, settings: &EmbeddingSettings) -> Result<u32, RagError> {
+	let vector = embed(state, user_id, settings, TEST_INPUT, "rag_setup").await?;
+	match (u32::try_from(vector.len()), settings.dimensions) {
+		(Ok(size), Some(requested)) if size != requested => Err(RagError::DimensionsMismatch),
+		(Ok(size), _) if (1..=super::MAX_DIMENSIONS).contains(&size) => Ok(size),
+		_ => Err(RagError::InvalidDimensions),
+	}
+}
+
+/// Embeds `text` with `settings`, reserved against and billed to `user_id` as `request_type`.
+///
+/// # Errors
+///
+/// Returns why the model cannot be used, the budget refused it or the provider failed.
+pub async fn embed(state: &JobState, user_id: &Uuid, settings: &EmbeddingSettings, text: &str, request_type: &str) -> Result<Vec<f32>, RagError> {
 	let (model, provider) = load(&state.db, &settings.model_id, "embedding", RagError::NotEmbeddingModel).await?;
-	let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes(TEST_INPUT.len() as u64), 0);
+	let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes(text.len() as u64), 0);
 	let admission = match state
 		.budget_ledger
 		.reserve_for_model(&state.db, BudgetSubject::user(*user_id), &model.id, estimate)
@@ -65,7 +79,7 @@ pub async fn probe_embedding(state: &JobState, user_id: &Uuid, settings: &Embedd
 	let mut metadata = BTreeMap::from([
 		("oxide_user_id".to_string(), user_id.to_string()),
 		("oxide_model_id".to_string(), model.id.to_string()),
-		("oxide_request_type".to_string(), "rag_setup".to_string()),
+		("oxide_request_type".to_string(), request_type.to_string()),
 	]);
 	if let Some(reservation) = &admission.reservation {
 		metadata.insert(BUDGET_RESERVATION_METADATA_KEY.to_string(), reservation.id.to_string());
@@ -78,7 +92,7 @@ pub async fn probe_embedding(state: &JobState, user_id: &Uuid, settings: &Embedd
 			input_modalities: Vec::new(),
 			output_modalities: Vec::new(),
 		},
-		input: EmbeddingInput::Text(TEST_INPUT.to_string()),
+		input: EmbeddingInput::Text(text.to_string()),
 		dimensions: settings.dimensions,
 		encoding_format: None,
 		raw_request: None,
@@ -89,23 +103,28 @@ pub async fn probe_embedding(state: &JobState, user_id: &Uuid, settings: &Embedd
 		.await
 		.map_err(|error| RagError::EmbeddingFailed(error.to_string()))?;
 	drop(admission);
-	let size = response
+	response
 		.data
-		.first()
-		.map(|item| vector_size(&item.embedding))
-		.ok_or_else(|| RagError::EmbeddingFailed("no embedding returned".to_string()))?;
-	match (u32::try_from(size), settings.dimensions) {
-		(Ok(size), Some(requested)) if size != requested => Err(RagError::DimensionsMismatch),
-		(Ok(size), _) if (1..=super::MAX_DIMENSIONS).contains(&size) => Ok(size),
-		_ => Err(RagError::InvalidDimensions),
-	}
+		.into_iter()
+		.next()
+		.map(|item| floats(item.embedding))
+		.filter(|vector| !vector.is_empty())
+		.ok_or_else(|| RagError::EmbeddingFailed("no embedding returned".to_string()))
 }
 
-/// Number of floats in a vector, also when the provider sent it as base64 little-endian `f32`s.
+/// The floats of a vector, also when the provider sent it as base64 little-endian `f32`s.
 #[must_use]
-pub fn vector_size(vector: &EmbeddingVector) -> usize {
+pub fn floats(vector: EmbeddingVector) -> Vec<f32> {
 	match vector {
-		EmbeddingVector::Float(values) => values.len(),
-		EmbeddingVector::Base64(encoded) => BASE64.decode(encoded).map_or(0, |bytes| bytes.len() / 4),
+		EmbeddingVector::Float(values) => values,
+		EmbeddingVector::Base64(encoded) => BASE64
+			.decode(encoded)
+			.map(|bytes| {
+				bytes
+					.chunks_exact(4)
+					.map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+					.collect()
+			})
+			.unwrap_or_default(),
 	}
 }

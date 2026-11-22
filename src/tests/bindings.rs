@@ -36,10 +36,6 @@ mod tests {
 			OAuthProviderResponse,
 			OAuthPresetResponse,
 			SaveOAuthProviderRequest,
-			crate::types::rag::RagSetupResponse,
-			crate::types::rag::SaveConnectionRequest,
-			crate::types::rag::UpdateRagSetupRequest,
-			crate::types::rag::ConnectionTestResponse,
 			PublicOAuthProvider,
 			GlobalConfigResponse,
 			ModelProviderOptions,
@@ -122,6 +118,24 @@ mod tests {
 			WorkspaceResponse,
 		);
 
+		export_rag(&cfg)
+	}
+
+	fn export_rag(cfg: &Config) -> Result<(), Box<dyn Error>> {
+		use crate::types::rag::{
+			ConnectionTestResponse, InspectRequest, InspectResponse, KnowledgeBaseResponse, KnowledgeSearchRequest, KnowledgeSearchResponse, RagSetupResponse,
+			SaveConnectionRequest, SaveKnowledgeBaseRequest, UpdateRagSetupRequest,
+		};
+		RagSetupResponse::export_all(cfg)?;
+		SaveConnectionRequest::export_all(cfg)?;
+		UpdateRagSetupRequest::export_all(cfg)?;
+		ConnectionTestResponse::export_all(cfg)?;
+		KnowledgeBaseResponse::export_all(cfg)?;
+		SaveKnowledgeBaseRequest::export_all(cfg)?;
+		InspectRequest::export_all(cfg)?;
+		InspectResponse::export_all(cfg)?;
+		KnowledgeSearchRequest::export_all(cfg)?;
+		KnowledgeSearchResponse::export_all(cfg)?;
 		write_permissions()
 	}
 

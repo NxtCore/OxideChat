@@ -11,6 +11,8 @@ const ADMIN_PAGES = [
 	'/settings/providers',
 	'/settings/tools',
 	'/settings/knowledge-setup',
+	'/settings/knowledge',
+	'/settings/knowledge/new',
 	'/settings/presets',
 	'/settings/presets?tab=all',
 	'/settings/models',

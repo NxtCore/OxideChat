@@ -101,6 +101,45 @@ function imageReply(count) {
 	};
 }
 
+// A read-only Qdrant collection someone else's pipeline filled; vectors match mock-embed's size.
+const QDRANT_COLLECTIONS = {
+	handbook: {
+		size: 3,
+		points: [
+			{id: 1, vector: [0.1, 0.2, 0.3], payload: {page_content: 'Holidays are booked in the HR portal.', metadata: {title: 'Holidays', url: 'https://intranet.example/holidays', site: 'HR'}}},
+			{id: 2, vector: [0.3, 0.2, 0.1], payload: {page_content: 'Expenses are paid monthly.', metadata: {title: 'Expenses', site: 'HR'}}},
+			{id: 3, vector: [0.2, 0.2, 0.2], payload: {page_content: 'Servers are patched on Tuesdays.', metadata: {title: 'Servers', site: 'IT'}}},
+		],
+	},
+	wide: {size: 4, points: []},
+};
+
+function qdrantMatches(point, filter) {
+	return (filter?.must ?? []).every(condition => condition.key.split('.').reduce((value, key) => value?.[key], point.payload) === condition.match.value);
+}
+
+async function qdrant(req, res, path) {
+	const [, collection, action] = path.match(/^\/collections\/([^/]+)(?:\/points\/(\w+))?$/) ?? [];
+	const found = QDRANT_COLLECTIONS[collection];
+	if (req.method === 'GET' && path === '/') return sendJson(res, 200, {title: 'qdrant - vector search engine', version: '1.12.0'});
+	if (req.method === 'GET' && path === '/collections') {
+		return sendJson(res, 200, {result: {collections: Object.keys(QDRANT_COLLECTIONS).map(name => ({name}))}, status: 'ok'});
+	}
+	if (!found) return sendJson(res, 404, {status: {error: 'Not found: Collection'}});
+	if (req.method === 'GET' && !action) {
+		return sendJson(res, 200, {result: {status: 'green', points_count: found.points.length, config: {params: {vectors: {size: found.size, distance: 'Cosine'}}}}});
+	}
+	const body = await readBody(req);
+	const points = found.points.filter(point => qdrantMatches(point, body.filter));
+	if (action === 'scroll') return sendJson(res, 200, {result: {points: points.slice(0, body.limit).map(({id, payload}) => ({id, payload})), next_page_offset: null}});
+	if (action === 'query') {
+		const score = point => point.vector.reduce((sum, value, index) => sum + value * body.query[index], 0);
+		const ranked = points.map(point => ({id: point.id, score: score(point), payload: point.payload})).sort((a, b) => b.score - a.score);
+		return sendJson(res, 200, {result: {points: ranked.slice(0, body.limit)}});
+	}
+	return sendJson(res, 404, {status: {error: `mock: no qdrant route for ${req.method} ${path}`}});
+}
+
 async function media(req, res, path) {
 	if (req.method === 'GET' && path === '/v1/models') {
 		return sendJson(res, 200, {object: 'list', data: MEDIA_MODELS.map(id => ({id, object: 'model', created: 0, owned_by: 'mock'}))});
@@ -187,6 +226,7 @@ async function streamCompletion(req, res, body, model) {
 const server = http.createServer(async (req, res) => {
 	const url = new URL(req.url, `http://localhost:${port}`);
 	if (req.method === 'GET' && url.pathname === '/health') return sendJson(res, 200, {ok: true});
+	if (url.pathname.startsWith('/qdrant/')) return qdrant(req, res, url.pathname.slice('/qdrant'.length));
 
 	if (req.headers.authorization !== 'Bearer mock-key') {
 		return sendJson(res, 401, {error: {message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key'}});

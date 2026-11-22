@@ -1,0 +1,136 @@
+import type {Page} from '@playwright/test';
+import {test, expect, Api} from './support/fixtures';
+import {uniqueName} from './support/gateway';
+import {AUTH_FILES, MOCK_LLM_KEY, MOCK_LLM_URL} from './support/constants';
+
+const CONNECTION = 'E2E handbook store';
+const BASE = 'E2E handbook';
+
+type Embed = {providerId: string; modelId: string; name: string};
+
+async function embeddingModel(api: Api): Promise<Embed> {
+	const provider = await api.post('/api/v1/admin/providers', {kind: 'OPENAI_COMPAT', name: uniqueName('KnowledgeEmbed'), base_url: `${MOCK_LLM_URL}/media`, api_key: MOCK_LLM_KEY});
+	const sync = await api.post(`/api/v1/admin/providers/${provider.id}/sync`);
+	expect(sync.success, JSON.stringify(sync)).toBe(true);
+	const synced: {id: string; model_id: string; display_name: string}[] = await api.get(`/api/v1/admin/providers/${provider.id}/models`);
+	const embed = synced.find(model => model.model_id.endsWith('/mock-embed'))!;
+	await api.patch(`/api/v1/admin/models/${embed.id}`, {output_modalities: ['EMBEDDINGS']});
+	await api.put(`/api/v1/admin/models/${embed.id}/pricing`, {pricing: {input: 10, output: 0, tiers: []}});
+	return {providerId: provider.id, modelId: embed.id, name: embed.display_name};
+}
+
+async function connection(api: Api): Promise<string> {
+	const setup = await api.post('/api/v1/admin/rag/connections', {name: CONNECTION, kind: 'qdrant', mode: 'read_only', url: `${MOCK_LLM_URL}/qdrant`, secret: null, embedding: null});
+	return setup.connections.find((item: {name: string}) => item.name === CONNECTION).id;
+}
+
+async function choose(page: Page, testId: string, option: string) {
+	await page.getByTestId(testId).click();
+	await page.getByRole('option', {name: option, exact: true}).click();
+}
+
+function view(connectionId: string, collection: string, modelId: string) {
+	return {connection_id: connectionId, collection, vector_name: null, distance: 'cosine', embedding: {model_id: modelId, dimensions: null}, fields: {text: 'page_content', title: null, url: null, section: null}, filter: []};
+}
+
+test.describe.configure({mode: 'serial'});
+
+test.describe('knowledge bases', () => {
+	let embed: Embed;
+	let connectionId: string;
+	let baseId: string;
+
+	test.beforeAll(async ({browser, baseURL}) => {
+		const context = await browser.newContext({baseURL, storageState: AUTH_FILES.admin});
+		const api = new Api(context.request);
+		embed = await embeddingModel(api);
+		connectionId = await connection(api);
+		await api.put('/api/v1/admin/rag', {enabled: true, reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
+		await context.close();
+	});
+
+	test.afterAll(async ({browser, baseURL}) => {
+		const context = await browser.newContext({baseURL, storageState: AUTH_FILES.admin});
+		const api = new Api(context.request);
+		for (const base of await api.get('/api/v1/knowledge-bases')) await api.delete(`/api/v1/knowledge-bases/${base.id}`);
+		await api.delete(`/api/v1/admin/rag/connections/${connectionId}`);
+		await api.put('/api/v1/admin/rag', {enabled: false, reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
+		await api.delete(`/api/v1/admin/providers/${embed.providerId}`);
+		await context.close();
+	});
+
+	test('an admin maps a Qdrant collection and the test search finds its records', async ({page, t}) => {
+		await page.goto('/settings/knowledge');
+		await page.getByTestId('knowledge-create').click();
+		await page.getByTestId('knowledge-name').fill(BASE);
+		await page.getByTestId('knowledge-tab-source').click();
+
+		await choose(page, 'knowledge-source-connection', CONNECTION);
+		await choose(page, 'knowledge-source-collection', 'handbook');
+		await expect(page.getByTestId('knowledge-source-sample')).toHaveCount(3);
+		await expect(page.getByTestId('knowledge-source-access-note')).toBeVisible();
+
+		await choose(page, 'knowledge-source-field-text', 'page_content');
+		await choose(page, 'knowledge-source-field-title', 'metadata.title');
+		await choose(page, 'knowledge-source-field-url', 'metadata.url');
+		await page.getByTestId('knowledge-source-filter-add').click();
+		await choose(page, 'knowledge-source-filter-field-0', 'metadata.site');
+		await page.getByTestId('knowledge-source-filter-value-0').fill('HR');
+		await page.getByTestId('knowledge-source-filter-apply').click();
+		await expect(page.getByTestId('knowledge-source-sample')).toHaveCount(2);
+
+		await page.getByRole('button', {name: t('knowledge.source.model_none')}).click();
+		await page.getByPlaceholder(t('chat.model_selector.search_models')).fill(embed.name);
+		await page.getByText(embed.name, {exact: true}).last().click();
+		await page.getByTestId('settings-save-bar-save').click();
+		await expect(page).toHaveURL(/\/settings\/knowledge\/[0-9a-f-]{36}\?tab=sharing/);
+		baseId = page.url().match(/knowledge\/([0-9a-f-]{36})/)![1]!;
+
+		await page.getByTestId('knowledge-tab-search').click();
+		await page.getByTestId('knowledge-search-query').fill('How do I book holidays?');
+		await page.getByTestId('knowledge-search-run').click();
+		const hits = page.getByTestId('knowledge-search-hit');
+		await expect(hits).toHaveCount(2);
+		await expect(hits.first()).toContainText('Holidays are booked in the HR portal.');
+		await expect(hits.first().getByRole('link', {name: 'Holidays'})).toHaveAttribute('href', 'https://intranet.example/holidays');
+		await expect(page.getByText('Servers are patched on Tuesdays.')).toHaveCount(0);
+	});
+
+	test('a model whose vectors do not fit the collection is refused, and a used connection stays', async ({api}) => {
+		const wide = await api.request.post('/api/v1/knowledge-bases', {data: {name: 'Too wide', view: view(connectionId, 'wide', embed.modelId)}});
+		expect(wide.status()).toBe(400);
+		expect(JSON.stringify(await wide.json())).toContain('collection_dimensions_mismatch');
+
+		const removed = await api.request.delete(`/api/v1/admin/rag/connections/${connectionId}`);
+		expect(removed.status()).toBe(400);
+		expect(JSON.stringify(await removed.json())).toContain('connection_in_use');
+	});
+
+	test('a member finds the knowledge base only after an admin confirms sharing it with everyone', async ({page, browser, baseURL, t}) => {
+		const member = await browser.newContext({baseURL, storageState: AUTH_FILES.member});
+		try {
+			const memberPage = await member.newPage();
+			expect(await (await memberPage.request.get('/api/v1/knowledge-bases')).json()).toEqual([]);
+			expect((await memberPage.request.get(`/api/v1/knowledge-bases/${baseId}`)).status()).toBe(404);
+
+			await page.goto(`/settings/knowledge/${baseId}?tab=sharing`);
+			await page.getByTestId('knowledge-sharing-add').click();
+			await page.getByTestId('knowledge-sharing-option-everyone').click();
+			await expect(page.getByText(t('knowledge.sharing.confirm_description'))).toBeVisible();
+			await page.getByTestId('knowledge-sharing-confirm').click();
+			await expect(page.getByText(t('assignments.save_success')).first()).toBeVisible();
+
+			await memberPage.goto('/settings/knowledge');
+			await memberPage.getByTestId(`knowledge-row-${BASE}`).click();
+			await expect(memberPage.getByTestId('knowledge-tab-search')).toBeVisible();
+			await expect(memberPage.getByTestId('knowledge-tab-source')).toHaveCount(0);
+			await expect(memberPage.getByTestId('knowledge-tab-sharing')).toHaveCount(0);
+			await expect(memberPage.getByTestId('knowledge-name')).toBeDisabled();
+			await expect(memberPage.getByTestId('knowledge-delete')).toHaveCount(0);
+			const response = await (await memberPage.request.get(`/api/v1/knowledge-bases/${baseId}`)).json();
+			expect(response).toMatchObject({name: BASE, can_edit: false, can_manage: false, view: null, connection: null});
+		} finally {
+			await member.close();
+		}
+	});
+});
