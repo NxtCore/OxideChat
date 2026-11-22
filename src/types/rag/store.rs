@@ -109,7 +109,8 @@ impl<'a> VectorStore<'a> {
 	pub async fn health(&self) -> Result<String, StoreError> {
 		match self {
 			Self::Pgvector(pool) => {
-				let version: Option<String> = timed(sqlx::query_scalar("SELECT extversion FROM pg_extension WHERE extname = 'vector'").fetch_optional(pool.as_ref())).await?;
+				let version: Option<String> =
+					timed(sqlx::query_scalar("SELECT extversion FROM pg_extension WHERE extname = 'vector'").fetch_optional(pool.as_ref())).await?;
 				let version = version.ok_or(StoreError::ExtensionMissing)?;
 				if parse_version(&version) < MIN_PGVECTOR {
 					return Err(StoreError::ExtensionTooOld);
@@ -138,7 +139,14 @@ impl<'a> VectorStore<'a> {
 				timed(query).await
 			}
 			Self::Qdrant(qdrant) => {
-				let mut names: Vec<String> = qdrant.get::<QdrantCollections>("collections").await?.result.collections.into_iter().map(|collection| collection.name).collect();
+				let mut names: Vec<String> = qdrant
+					.get::<QdrantCollections>("collections")
+					.await?
+					.result
+					.collections
+					.into_iter()
+					.map(|collection| collection.name)
+					.collect();
 				names.sort();
 				Ok(names)
 			}
@@ -171,7 +179,10 @@ async fn check_host(host: &str, port: u16) -> Result<(), StoreError> {
 	if host.is_empty() || host.starts_with('/') {
 		return Err(StoreError::InvalidUrl);
 	}
-	let addresses: Vec<_> = tokio::net::lookup_host((host.trim_matches(['[', ']']), port)).await.map_err(|_| StoreError::Unreachable)?.collect();
+	let addresses: Vec<_> = tokio::net::lookup_host((host.trim_matches(['[', ']']), port))
+		.await
+		.map_err(|_| StoreError::Unreachable)?
+		.collect();
 	let allow_private = private_hosts_allowed();
 	if addresses.is_empty() || addresses.iter().any(|address| !is_allowed_ip(address.ip(), allow_private)) {
 		return Err(StoreError::Blocked);
@@ -198,11 +209,14 @@ impl Qdrant {
 }
 
 async fn timed<T>(query: impl Future<Output = Result<T, sqlx::Error>>) -> Result<T, StoreError> {
-	tokio::time::timeout(TIMEOUT, query).await.map_err(|_| StoreError::Unreachable)?.map_err(|error| store_error(&error))
+	tokio::time::timeout(TIMEOUT, query)
+		.await
+		.map_err(|_| StoreError::Unreachable)?
+		.map_err(|error| store_error(&error))
 }
 
 fn store_error(error: &sqlx::Error) -> StoreError {
-	let code = error.as_database_error().and_then(|error| error.code().map(|code| code.into_owned()));
+	let code = error.as_database_error().and_then(|error| error.code().map(Cow::into_owned));
 	match code.as_deref() {
 		Some("28P01" | "28000" | "42501") => StoreError::Unauthorized,
 		_ if matches!(error, sqlx::Error::Configuration(_)) => StoreError::InvalidUrl,

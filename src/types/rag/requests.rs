@@ -86,7 +86,12 @@ impl SaveConnectionRequest {
 		}
 		match (&self.embedding, mode) {
 			(Some(_), ConnectionMode::ReadOnly) => Err(RagError::ReadOnlyHasModel),
-			(Some(EmbeddingSettings { dimensions: Some(dimensions), .. }), _) if !(1..=MAX_DIMENSIONS).contains(dimensions) => Err(RagError::InvalidDimensions),
+			(
+				Some(EmbeddingSettings {
+					dimensions: Some(dimensions), ..
+				}),
+				_,
+			) if !(1..=MAX_DIMENSIONS).contains(dimensions) => Err(RagError::InvalidDimensions),
 			_ => Ok(()),
 		}
 	}
