@@ -9,6 +9,9 @@ pub struct ModelListParams {
 	pub provider_id: Option<Uuid>,
 	/// Only models whose every output modality is this one, e.g. `text`.
 	pub output_only: Option<String>,
+	/// Only `embedding` or `reranking` models; other types match nothing.
+	#[serde(rename = "type")]
+	pub model_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

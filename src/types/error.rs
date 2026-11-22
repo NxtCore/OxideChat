@@ -1,6 +1,7 @@
 //! Handler error type shared by all routes.
 
 use crate::types::models::PriceSheetError;
+use crate::types::rag::RagError;
 use crate::types::{ArenaError, GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError, RoleError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
 use crate::utils::response::{ResponseBody, ResponseBuilder};
@@ -39,6 +40,9 @@ pub enum AppError {
 	/// A model price could not be saved.
 	#[error(transparent)]
 	Pricing(#[from] PriceSheetError),
+	/// Knowledge settings or a connection could not be saved.
+	#[error(transparent)]
+	Rag(#[from] RagError),
 }
 
 /// Returns true when the database rejected a statement because of a unique constraint.
@@ -93,6 +97,10 @@ impl AppError {
 			Self::Pricing(PriceSheetError::NotFound) => ErrorCode::NotFound,
 			Self::Pricing(PriceSheetError::Database(_)) => ErrorCode::InternalError,
 			Self::Pricing(_) => ErrorCode::ValidationFailed,
+			Self::Rag(RagError::NotFound) => ErrorCode::NotFound,
+			Self::Rag(RagError::Database(error)) if is_unique_violation(error) => ErrorCode::AlreadyExists,
+			Self::Rag(RagError::Database(_)) => ErrorCode::InternalError,
+			Self::Rag(_) => ErrorCode::ValidationFailed,
 		}
 	}
 }
@@ -121,6 +129,7 @@ impl IntoResponse for AppError {
 		}
 		match &self {
 			Self::Pricing(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
+			Self::Rag(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
 			_ => ErrorBuilder::new(code).build(),
 		}
 	}

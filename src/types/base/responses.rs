@@ -31,6 +31,15 @@ pub struct BaseResponse {
 	pub title_generation: TitleGeneration,
 	/// Whether visitors may create an account with email and password.
 	pub registration: Registration,
+	/// Whether knowledge bases are switched on.
+	pub rag: RagStatus,
+}
+
+/// Knowledge as everyone may see it; admins change it at `/api/v1/admin/rag`.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct RagStatus {
+	pub enabled: bool,
 }
 
 /// Admin setting for local sign-up; the admin PATCH takes the same shape. Sign-in providers have their own `allow_registration`.

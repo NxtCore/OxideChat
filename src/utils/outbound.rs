@@ -23,7 +23,9 @@ pub enum OutboundError {
 	Client(#[from] reqwest::Error),
 }
 
-fn private_hosts_allowed() -> bool {
+/// Whether admin-entered addresses may point at private networks and use plain `http` (`OIDC_ALLOW_PRIVATE_HOSTS=true`).
+#[must_use]
+pub fn private_hosts_allowed() -> bool {
 	std::env::var("OIDC_ALLOW_PRIVATE_HOSTS").is_ok_and(|value| value == "true")
 }
 

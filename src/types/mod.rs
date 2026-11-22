@@ -46,6 +46,7 @@ pub mod policy;
 pub mod presets;
 pub mod provider_routing;
 pub mod providers;
+pub mod rag;
 pub mod request_logs;
 pub mod roles;
 pub mod state;
