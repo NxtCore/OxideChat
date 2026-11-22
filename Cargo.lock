@@ -2195,7 +2195,9 @@ dependencies = [
 
 [[package]]
 name = "omniference"
-version = "0.8.0"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b4c0032364706e9049ef44b9a2e71b8603c6b056e68f048e7fff1a9b970a6fa"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3533,7 +3535,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

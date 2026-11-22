@@ -354,6 +354,7 @@ impl Tool {
 			description: self.description.clone(),
 			schema: self.input_schema.clone(),
 			strict: Some(false),
+			defer_loading: false,
 		}
 	}
 
@@ -376,6 +377,7 @@ impl Tool {
 					description: f.description.clone().or_else(|| self.description.clone()),
 					schema: f.input_schema.clone(),
 					strict: Some(false),
+					defer_loading: false,
 				}
 			})
 			.collect()
