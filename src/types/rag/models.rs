@@ -154,10 +154,8 @@ pub fn floats(vector: EmbeddingVector) -> Vec<f32> {
 		EmbeddingVector::Base64(encoded) => BASE64
 			.decode(encoded)
 			.map(|bytes| {
-				bytes
-					.chunks_exact(4)
-					.map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-					.collect()
+				let (chunks, _) = bytes.as_chunks::<4>();
+				chunks.iter().map(|chunk| f32::from_le_bytes(*chunk)).collect()
 			})
 			.unwrap_or_default(),
 	}

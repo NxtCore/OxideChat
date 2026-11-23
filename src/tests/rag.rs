@@ -22,7 +22,7 @@ mod validation {
 
 	#[test]
 	fn addresses_match_the_store_and_never_carry_a_password() {
-		use ConnectionKind::{Pgvector, Qdrant};
+		use ConnectionKind::Pgvector;
 		use ConnectionMode::{Managed, ReadOnly};
 		assert_eq!(check(&request(Pgvector, Managed, None, None)), Ok(()));
 		assert_eq!(check(&request(Pgvector, ReadOnly, Some("postgres://reader@db.example.com/kb"), Some("pw"))), Ok(()));
@@ -51,6 +51,12 @@ mod validation {
 		assert_eq!(check(&request(Pgvector, ReadOnly, None, None)), Err("url_required"));
 		assert_eq!(check(&request(Pgvector, ReadOnly, Some("  "), None)), Err("url_required"));
 		assert_eq!(check(&request(Pgvector, ReadOnly, Some("https://db.example.com"), None)), Err("invalid_url"));
+	}
+
+	#[test]
+	fn qdrant_keys_need_https_and_managed_storage_needs_pgvector() {
+		use ConnectionKind::Qdrant;
+		use ConnectionMode::{Managed, ReadOnly};
 		assert_eq!(check(&request(Qdrant, ReadOnly, Some("https://qdrant.example.com:6333"), Some("key"))), Ok(()));
 		assert_eq!(check(&request(Qdrant, ReadOnly, Some("http://qdrant:6333"), None)), Ok(()));
 		assert_eq!(check(&request(Qdrant, ReadOnly, Some("http://qdrant:6333"), Some("key"))), Err("insecure_secret"));
