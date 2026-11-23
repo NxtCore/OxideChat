@@ -360,7 +360,15 @@ impl AgentRun {
 		Some(ToolCall { id, name, args })
 	}
 
+	/// Whether `call` is the knowledge tool this turn offered; it wins over a user tool of the same name.
+	fn is_knowledge_call(&self, call: &ToolCall) -> bool {
+		call.name == KNOWLEDGE_TOOL && !self.knowledge_base_ids.is_empty()
+	}
+
 	async fn client_tool(&self, call: &ToolCall) -> Option<(StreamData, Uuid, PendingCall)> {
+		if self.is_knowledge_call(call) {
+			return None;
+		}
 		let (mcp_server_id, mcp_tool_name, tool_id) = get_client_tool_info(&self.state.db, &call.name, self.user_id).await?;
 		let event = StreamData::ClientToolCall {
 			id: call.id.clone(),
@@ -387,7 +395,7 @@ impl AgentRun {
 	}
 
 	async fn run_server_tool(&self, call: &ToolCall) -> ToolOutput {
-		if call.name == KNOWLEDGE_TOOL {
+		if self.is_knowledge_call(call) {
 			return match run_knowledge_tool(&self.state, &self.user_id, &self.knowledge_base_ids, &call.args).await {
 				Ok(output) => ToolOutput {
 					output: serde_json::to_value(output).unwrap_or_default(),
@@ -395,12 +403,16 @@ impl AgentRun {
 					tool_id: None,
 					function_id: None,
 				},
-				Err(error) => ToolOutput {
-					output: serde_json::json!({"error": error.to_string()}),
-					error: Some(error.to_string()),
-					tool_id: None,
-					function_id: None,
-				},
+				Err(error) => {
+					tracing::warn!(%error, "knowledge search failed");
+					let message = format!("knowledge search failed: {}", error.reason());
+					ToolOutput {
+						output: serde_json::json!({"error": message}),
+						error: Some(message),
+						tool_id: None,
+						function_id: None,
+					}
+				}
 			};
 		}
 		match execute_tool_by_name(&self.state, self.user_id, &call.name, call.args.clone()).await {

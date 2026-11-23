@@ -41,7 +41,7 @@
 
 			<SettingsKnowledgeSharing v-if="!isNew && canManage && currentTab === 'sharing'" :id="id" />
 
-			<SettingsKnowledgeTestSearch v-if="!isNew && currentTab === 'search'" :id="id" />
+			<SettingsKnowledgeTestSearch v-if="!isNew && canSearch && currentTab === 'search'" :id="id" />
 		</template>
 
 		<ShadDialog v-model:open="deleteOpen">
@@ -80,7 +80,8 @@ const deleteOpen = ref(false);
 const base = ref<KnowledgeBaseResponse | null>(null);
 const canManage = computed(() => (isNew ? store.hasPermission(ADMIN_RAG_EDIT) : !!base.value?.can_manage));
 const canEdit = computed(() => (isNew ? canManage.value : !!base.value?.can_edit));
-const tabs = computed(() => (isNew ? ['general', 'source'] : [...['general'], ...(canManage.value ? ['source', 'sharing'] : []), 'search']));
+const canSearch = computed(() => canManage.value || !!base.value?.usable);
+const tabs = computed(() => (isNew ? ['general', 'source'] : ['general', ...(canManage.value ? ['source', 'sharing'] : []), ...(canSearch.value ? ['search'] : [])]));
 const currentTab = ref(String(route.query.tab ?? 'general'));
 const sourceOpened = ref(false);
 watch(currentTab, tab => (sourceOpened.value ||= tab === 'source'), {immediate: true});

@@ -334,13 +334,18 @@ mod views {
 		assert_eq!(pg_filter(&[], &columns, 2), Some((String::new(), Vec::new())));
 		assert_eq!(
 			pg_filter(&filter("site", json!("HR")), &columns, 2),
-			Some((" WHERE t.\"site\"::text = $2".to_string(), vec!["HR".to_string()]))
+			Some((" WHERE to_jsonb(t.\"site\") = $2::jsonb".to_string(), vec!["\"HR\"".to_string()]))
 		);
 		assert_eq!(
 			pg_filter(&filter("weird\"name", json!(true)), &columns, 4),
-			Some((" WHERE t.\"weird\"\"name\"::text = $4".to_string(), vec!["true".to_string()]))
+			Some((" WHERE to_jsonb(t.\"weird\"\"name\") = $4::jsonb".to_string(), vec!["true".to_string()]))
+		);
+		assert_eq!(
+			pg_filter(&filter("site.meta.level", json!(5)), &columns, 2),
+			Some((" WHERE to_jsonb(t.\"site\") @> $2::jsonb".to_string(), vec![r#"{"meta":{"level":5}}"#.to_string()]))
 		);
 		assert_eq!(pg_filter(&filter("site; DROP TABLE x", json!("HR")), &columns, 2), None);
+		assert_eq!(pg_filter(&filter("other.site", json!("HR")), &columns, 2), None);
 	}
 
 	#[test]
@@ -446,6 +451,13 @@ mod knowledge_bases {
 		assert_eq!((base.name.as_str(), base.description.as_deref()), ("HR handbook", None));
 		let response = base.to_response(&stranger);
 		assert!(response.view.is_none() && response.connection.is_none() && !response.can_edit);
+		let auditor = KnowledgeActor {
+			view_all: true,
+			..user(insert_user(&pool, "auditor").await?)
+		};
+		let seen = KnowledgeBase::find(&pool, &auditor, &fixture.base).await?.ok_or("missing")?;
+		assert!(!auditor.can_search(&seen));
+		assert!(fixture.admin.can_search(&seen));
 		Ok(())
 	}
 
@@ -549,6 +561,7 @@ mod knowledge_bases {
 		assert!(matches!(base.delete(&pool, &editor).await, Err(RagError::Forbidden)));
 		let renamed = KnowledgeBase::find(&pool, &editor, &fixture.base).await?.ok_or("missing")?;
 		assert_eq!((renamed.name.as_str(), renamed.description.as_deref()), ("Handbook", Some("For everyone in HR")));
+		assert!(editor.can_search(&renamed));
 		Ok(())
 	}
 
@@ -617,6 +630,16 @@ mod pgvector {
 			value: json!("HR"),
 		}];
 		assert_eq!(store.describe("docs.\"Chunks\"", &unknown).await.err(), Some(StoreError::UnknownField));
+		let nested = [FieldFilter {
+			field: "metadata.title".to_string(),
+			value: json!("Holidays"),
+		}];
+		assert_eq!(store.describe("docs.\"Chunks\"", &nested).await?.sample.len(), 1);
+		let numeric = [FieldFilter {
+			field: "id".to_string(),
+			value: json!(2.0),
+		}];
+		assert_eq!(store.describe("docs.\"Chunks\"", &numeric).await?.sample.len(), 1);
 		Ok(())
 	}
 
@@ -717,8 +740,11 @@ mod retrieval {
 		let base = Uuid::new_v4();
 		let long = "x".repeat(9_000);
 		let sources = number(vec![candidate(base, &long, None), candidate(base, &long, None), candidate(base, "short", None)]);
-		assert_eq!(sources.len(), 1);
-		assert_eq!(sources[0].n, 1);
+		assert_eq!(sources.len(), 3);
+		assert_eq!(sources.iter().map(|source| source.n).collect::<Vec<_>>(), [1, 2, 3]);
+		assert_eq!(sources[0].text.chars().count(), 4_001);
+		let many: Vec<Candidate> = (0..10).map(|_| candidate(base, &long, None)).collect();
+		assert_eq!(number(many).len(), 3);
 	}
 
 	async fn shared_base(pool: &PgPool, name: &str) -> TestResult<(KnowledgeBase, KnowledgeActor)> {
@@ -776,6 +802,9 @@ mod retrieval {
 		};
 		base.replace_assignments(&pool, &admin, &everyone).await?;
 		assert_eq!(turn_knowledge_bases(&state, &member, &[base.id, Uuid::new_v4()]).await?.len(), 1);
+		let broken = run_knowledge_tool(&state, &member, &[base.id], &json!({"query": "holidays"})).await?;
+		assert!(broken.sources.is_empty());
+		assert_eq!(broken.unavailable, ["Handbook"]);
 		let other = run_knowledge_tool(&state, &member, &[base.id], &json!({"query": "holidays", "knowledge_base": "Elsewhere"})).await?;
 		assert!(other.sources.is_empty());
 		assert!(run_knowledge_tool(&state, &member, &[base.id], &json!({"query": " "})).await.is_err());
@@ -816,7 +845,15 @@ mod retrieval {
 		let mut ir = ChatRequestIR::default();
 		add_knowledge_tool(&mut ir, &[]);
 		assert!(ir.tools.is_empty());
+		ir.tools.push(ToolSpec::JsonSchema {
+			name: KNOWLEDGE_TOOL.to_string(),
+			description: Some("someone else's tool".to_string()),
+			schema: json!({"type": "object"}),
+			strict: None,
+			defer_loading: false,
+		});
 		add_knowledge_tool(&mut ir, std::slice::from_ref(&base));
+		assert_eq!(ir.tools.len(), 1);
 		let ToolSpec::JsonSchema { name, description, schema, .. } = &ir.tools[0];
 		assert_eq!(name, KNOWLEDGE_TOOL);
 		assert!(description.as_deref().is_some_and(|text| text.contains("- Handbook: HR policies")));

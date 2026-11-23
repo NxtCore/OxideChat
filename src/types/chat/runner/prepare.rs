@@ -328,7 +328,12 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 		config_tools: true,
 	};
 	let mut ir = build_request(db, &inputs, messages).await?;
-	let knowledge = knowledge_bases(state, &user.id, &chat_id, req, preset.as_ref()).await?;
+	let mut knowledge = knowledge_bases(state, &user.id, &chat_id, req, preset.as_ref()).await?;
+	// A model the catalog describes without `TOOLS` would refuse the request; one without any capabilities (self-hosted) may still call tools.
+	let capabilities = &model.capabilities.0;
+	if !capabilities.is_empty() && !capabilities.iter().any(|capability| capability == "TOOLS") {
+		knowledge.clear();
+	}
 	add_knowledge_tool(&mut ir, &knowledge);
 
 	Ok(PreparedTurn {

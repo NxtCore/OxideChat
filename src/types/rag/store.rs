@@ -313,7 +313,12 @@ impl<'a> VectorStore<'a> {
 				let points: QdrantResult<QdrantPoints> = qdrant
 					.send(reqwest::Method::POST, &["collections", &view.collection, "points", "query"], Some(&body))
 					.await?;
-				Ok(points.result.points.into_iter().map(|point| (point.payload, point.score)).collect())
+				Ok(points
+					.result
+					.points
+					.into_iter()
+					.map(|point| (point.payload, view.distance.qdrant_score(point.score)))
+					.collect())
 			}
 		}
 	}

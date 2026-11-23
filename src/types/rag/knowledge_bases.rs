@@ -73,6 +73,12 @@ impl KnowledgeActor {
 	pub const fn can_edit(&self, knowledge_base: &KnowledgeBase) -> bool {
 		self.manage || knowledge_base.editor
 	}
+
+	/// Whether the actor may run a test search: it is shared with them, or they manage knowledge. Seeing every base (`admin.rag.view`) is not enough.
+	#[must_use]
+	pub const fn can_search(&self, knowledge_base: &KnowledgeBase) -> bool {
+		self.manage || knowledge_base.usable
+	}
 }
 
 async fn audit(tx: &mut Transaction<'_, Postgres>, event: &str, actor_id: &Uuid, id: &Uuid, metadata: serde_json::Value) -> Result<(), sqlx::Error> {

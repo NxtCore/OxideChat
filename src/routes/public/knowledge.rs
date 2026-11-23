@@ -108,10 +108,13 @@ pub async fn replace_assignments(
 
 /// POST /api/v1/knowledge-bases/{id}/search
 ///
-/// A test search as the user; the query embedding is billed to them.
+/// A test search as the user, for bases shared with them or by knowledge admins (`admin.rag.edit`); the query embedding is billed to them.
 pub async fn search(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<KnowledgeSearchRequest>) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
 	let query = req.query()?;
 	let base = find(&state, &actor, &id).await?;
+	if !actor.can_search(&base) {
+		return Err(RagError::Forbidden.into());
+	}
 	json_ok(base.search(&state, &auth.id, query, TEST_SEARCH_HITS).await?)
 }

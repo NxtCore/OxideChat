@@ -44,6 +44,15 @@ impl Distance {
 		}
 	}
 
+	/// Turns a Qdrant score into one where higher is closer; Qdrant reports Euclid and Manhattan as distances.
+	#[must_use]
+	pub fn qdrant_score(self, score: f64) -> f64 {
+		match self {
+			Self::Cosine | Self::Dot => score,
+			Self::Euclid | Self::Manhattan => -score,
+		}
+	}
+
 	/// Parses Qdrant's name (`Cosine`, `Dot`, `Euclid`, `Manhattan`).
 	#[must_use]
 	pub fn from_qdrant(name: &str) -> Option<Self> {
@@ -199,20 +208,33 @@ pub fn quote_ident(name: &str) -> String {
 	format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-/// The `WHERE` clause of a pgvector view and its text parameters, numbered from `first`; `None` when a field is not one of `columns`.
+/// The `WHERE` clause of a pgvector view and its JSON parameters, numbered from `first`; `None` when a field does not start with one of `columns`.
+///
+/// Values compare as JSON, so `5` matches `5.0`; a dotted path reaches into a JSON column like the field mapping does.
 #[must_use]
 pub fn pg_filter(filter: &[FieldFilter], columns: &[String], first: usize) -> Option<(String, Vec<String>)> {
 	let mut conditions = Vec::with_capacity(filter.len());
 	let mut params = Vec::with_capacity(filter.len());
 	for (offset, condition) in filter.iter().enumerate() {
-		if !columns.contains(&condition.field) {
-			return None;
+		let (column, path) = match columns.iter().find(|column| **column == condition.field) {
+			Some(column) => (column, None),
+			None => {
+				let (column, path) = condition.field.split_once('.')?;
+				(columns.iter().find(|known| *known == column)?, Some(path))
+			}
+		};
+		let parameter = first + offset;
+		match path {
+			None => {
+				conditions.push(format!("to_jsonb(t.{}) = ${parameter}::jsonb", quote_ident(column)));
+				params.push(condition.value.to_string());
+			}
+			Some(path) => {
+				conditions.push(format!("to_jsonb(t.{}) @> ${parameter}::jsonb", quote_ident(column)));
+				let nested = path.rsplit('.').fold(condition.value.clone(), |value, key| serde_json::json!({ key: value }));
+				params.push(nested.to_string());
+			}
 		}
-		conditions.push(format!("t.{}::text = ${}", quote_ident(&condition.field), first + offset));
-		params.push(match &condition.value {
-			Value::String(text) => text.clone(),
-			value => value.to_string(),
-		});
 	}
 	let clause = if conditions.is_empty() {
 		String::new()
