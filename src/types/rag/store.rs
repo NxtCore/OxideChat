@@ -469,8 +469,8 @@ async fn connect_postgres(url: &str, password: Option<&str>, mode: ConnectionMod
 	if let Some(pool) = PG_POOLS.load().get(&key) {
 		return Ok(VectorStore::Pgvector(Cow::Owned(pool.clone())));
 	}
-	if let Some(password) = password {
-		options = options.password(password);
+	if !trusted || password.is_some() {
+		options = options.password(password.unwrap_or_default());
 	}
 	if mode == ConnectionMode::ReadOnly {
 		options = options.options([("default_transaction_read_only", "on")]);

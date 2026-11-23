@@ -75,6 +75,7 @@ impl ModelAccess {
 type TargetRow = (Uuid, Option<Uuid>, Option<Uuid>, Option<String>);
 
 impl ModelTargets {
+	/// Whether the lists are empty and none of their targets was deleted.
 	#[must_use]
 	pub fn is_unrestricted(&self) -> bool {
 		!self.removed && self.providers.is_empty() && self.upstream_providers.is_empty() && self.models.is_empty()

@@ -236,7 +236,7 @@ pub fn pg_access(field: &str, columns: &[(String, String, i32)], labels: usize, 
 		return Some((format!("t.{}{cast} && ${labels}::text[]", quote_ident(field)), Vec::new()));
 	}
 	let (value, segments) = pg_access_value(field, &names, path)?;
-	Some((format!("{value} ?| ${labels}::text[]"), segments))
+	Some((format!("(jsonb_typeof({value}) IN ('array', 'string') AND {value} ?| ${labels}::text[])"), segments))
 }
 
 /// The Qdrant condition that keeps records whose `field` holds one of `labels`.

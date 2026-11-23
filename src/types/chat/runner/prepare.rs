@@ -1,5 +1,5 @@
 use super::arena::{ArenaTurn, prepare_arena_turn};
-use super::request::{RequestInputs, build_request};
+use super::request::{RequestInputs, build_request, turn_routing};
 use crate::types::catalog::GatewayCatalogModel;
 use crate::types::models::Model;
 use crate::types::providers::ProviderKind;
@@ -295,9 +295,8 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 	let chat_id = chat.id;
 
 	require_model_access(db, &user.id, &model).await?;
-	require_knowledge_access(db, &chat_id, &model.id).await?;
-
 	let provider_slugs = picked_provider(db, &user.id, &model, req).await?;
+	let knowledge_check = require_knowledge_access(db, &user.id, &chat_id, &model.id, turn_routing(req, &provider_slugs)).await?;
 
 	let system_config = ModelConfig::find_system_by_stable_key(db, &model.model_id).await.ok().flatten();
 
@@ -331,7 +330,7 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 	};
 	let mut ir = build_request(db, &inputs, messages).await?;
 	let mut knowledge = knowledge_bases(state, &user.id, &chat_id, req, preset.as_ref()).await?;
-	allowed_for_model(db, &user.id, &model.id, ir.provider_routing.as_ref(), &mut knowledge).await?;
+	allowed_for_model(db, &knowledge_check, &mut knowledge).await?;
 	let capabilities = system_config.as_ref().and_then(|config| config.capabilities.as_ref()).unwrap_or(&model.capabilities).0.as_slice();
 	if !capabilities.is_empty() && !capabilities.iter().any(|capability| capability == "TOOLS") {
 		knowledge.clear();
@@ -371,43 +370,68 @@ async fn knowledge_bases(state: &JobState, user_id: &Uuid, chat_id: &Uuid, req: 
 	turn_knowledge_bases(state, user_id, &ids).await.map_err(internal("Failed to load knowledge bases"))
 }
 
-/// Refuses the turn before anything is stored when the chat holds excerpts its model may not see; the routing middleware checks every request again.
-pub(super) async fn require_knowledge_access(db: &PgPool, chat_id: &Uuid, model_id: &Uuid) -> Result<(), TurnError> {
-	let targets = ModelTargets::for_chat(db, chat_id).await.map_err(internal("Failed to check knowledge access"))?;
-	if targets.iter().all(ModelTargets::is_unrestricted) {
-		return Ok(());
-	}
-	let model = RoutedModel::find(db, model_id).await.map_err(internal("Failed to check knowledge access"))?;
-	if model.is_some_and(|model| ModelTargets::decide_all(&targets, &model) != ModelAccess::Denied) {
-		return Ok(());
-	}
-	Err(TurnError::new("knowledge_model_not_allowed", I18n::get().translate("chat.errors.knowledge_model_not_allowed", &None)))
+/// What the knowledge in a chat allows the turn's model, and the routing the middleware will send the turn with.
+pub(crate) struct KnowledgeCheck {
+	model: Option<RoutedModel>,
+	routing: Option<ProviderRouting>,
+	access: ModelAccess,
 }
 
-/// Keeps the knowledge bases whose model access lets them reach the turn's model through its provider routing, after the
-/// user's routing policy narrowed it the way the routing middleware will.
-async fn allowed_for_model(db: &PgPool, user_id: &Uuid, model_id: &Uuid, routing: Option<&ProviderRouting>, bases: &mut Vec<KnowledgeBase>) -> Result<(), TurnError> {
+impl KnowledgeCheck {
+	fn reaches(&self, access: &ModelAccess) -> bool {
+		match access {
+			ModelAccess::Allowed => true,
+			ModelAccess::Upstream(allowed) => narrow(self.routing.clone(), allowed).is_some(),
+			ModelAccess::Denied => false,
+		}
+	}
+}
+
+/// Refuses the turn before anything is stored when the chat holds excerpts its model may not see through `routing`, after
+/// the user's routing policy narrowed it the way the routing middleware will; the middleware checks every request again.
+pub(crate) async fn require_knowledge_access(db: &PgPool, user_id: &Uuid, chat_id: &Uuid, model_id: &Uuid, routing: Option<ProviderRouting>) -> Result<KnowledgeCheck, TurnError> {
+	let targets = ModelTargets::for_chat(db, chat_id).await.map_err(internal("Failed to check knowledge access"))?;
+	let model = RoutedModel::find(db, model_id).await.map_err(internal("Failed to check knowledge access"))?;
+	let routing = match &model {
+		Some(model) if model.kind.routes_upstream() => EffectiveProviderRouting::for_user(db, user_id)
+			.await
+			.map_err(internal("Failed to check knowledge access"))?
+			.restrict(&model.kind, routing.clone())
+			.unwrap_or(routing),
+		_ => routing,
+	};
+	let access = match &model {
+		Some(model) => ModelTargets::decide_all(&targets, model),
+		None if targets.iter().all(ModelTargets::is_unrestricted) => ModelAccess::Allowed,
+		None => ModelAccess::Denied,
+	};
+	let check = KnowledgeCheck { model, routing, access };
+	if check.reaches(&check.access) {
+		Ok(check)
+	} else {
+		Err(TurnError::new("knowledge_model_not_allowed", I18n::get().translate("chat.errors.knowledge_model_not_allowed", &None)))
+	}
+}
+
+/// Keeps the knowledge bases that, together with the excerpts the chat holds and the bases kept before them, still reach
+/// the turn's model through its routing, so a search is never followed by a refusal.
+pub(crate) async fn allowed_for_model(db: &PgPool, check: &KnowledgeCheck, bases: &mut Vec<KnowledgeBase>) -> Result<(), TurnError> {
 	let base_ids: Vec<Uuid> = bases.iter().map(|base| base.id).collect();
 	let targets = ModelTargets::load(db, &base_ids).await.map_err(internal("Failed to load knowledge bases"))?;
-	if !targets.is_empty() {
-		let model = RoutedModel::find(db, model_id).await.map_err(internal("Failed to load knowledge bases"))?;
-		let routing = match &model {
-			Some(model) if model.kind.routes_upstream() => EffectiveProviderRouting::for_user(db, user_id)
-				.await
-				.map_err(internal("Failed to load knowledge bases"))?
-				.restrict(&model.kind, routing.cloned())
-				.unwrap_or_else(|_| routing.cloned()),
-			_ => routing.cloned(),
+	let mut access = check.access.clone();
+	bases.retain(|base| {
+		let Some(targets) = targets.get(&base.id) else {
+			return true;
 		};
-		bases.retain(|base| match (targets.get(&base.id), &model) {
-			(None, _) => true,
-			(Some(targets), Some(model)) => match targets.decide(model) {
-				ModelAccess::Allowed => true,
-				ModelAccess::Upstream(allowed) => narrow(routing.clone(), &allowed).is_some(),
-				ModelAccess::Denied => false,
-			},
-			(Some(_), None) => false,
-		});
-	}
+		let Some(model) = &check.model else {
+			return false;
+		};
+		let combined = access.clone().and(targets.decide(model));
+		let keep = check.reaches(&combined);
+		if keep {
+			access = combined;
+		}
+		keep
+	});
 	Ok(())
 }

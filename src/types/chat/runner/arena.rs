@@ -48,7 +48,7 @@ pub(super) async fn prepare_arena_turn(state: &Arc<JobState>, user: &User, chat:
 			.filter(|model| model.is_enabled)
 			.ok_or_else(|| unavailable("presets.errors.base_model_unavailable"))?;
 		require_model_access(db, &user.id, &model).await?;
-		require_knowledge_access(db, &chat.id, &model.id).await?;
+		require_knowledge_access(db, &user.id, &chat.id, &model.id, None).await?;
 		let level_preset = preset.clone().at_level(Some(&level.key)).ok_or_else(|| unavailable("presets.errors.level_not_found"))?;
 		let config = ModelConfig::find_system_by_stable_key(db, &model.model_id).await.ok().flatten();
 		let bytes = prompt_bytes(db, &chat.id, req, config.as_ref(), Some(&level_preset)).await?;

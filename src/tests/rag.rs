@@ -387,11 +387,11 @@ mod views {
 		assert_eq!(pg_access("groups", &columns, 4, 5), Some(("t.\"groups\"::text[] && $4::text[]".to_string(), Vec::new())));
 		assert_eq!(
 			pg_access("metadata.acl.groups", &columns, 4, 5),
-			Some(("(to_jsonb(t.\"metadata\") #> $5::text[]) ?| $4::text[]".to_string(), vec!["acl".to_string(), "groups".to_string()]))
+			Some(("(jsonb_typeof((to_jsonb(t.\"metadata\") #> $5::text[])) IN ('array', 'string') AND (to_jsonb(t.\"metadata\") #> $5::text[]) ?| $4::text[])".to_string(), vec!["acl".to_string(), "groups".to_string()]))
 		);
 		assert_eq!(
 			pg_access("metadata", &columns, 4, 5),
-			Some(("(to_jsonb(t.\"metadata\") #> $5::text[]) ?| $4::text[]".to_string(), Vec::new()))
+			Some(("(jsonb_typeof((to_jsonb(t.\"metadata\") #> $5::text[])) IN ('array', 'string') AND (to_jsonb(t.\"metadata\") #> $5::text[]) ?| $4::text[])".to_string(), Vec::new()))
 		);
 		assert_eq!(pg_access("unknown", &columns, 4, 5), None);
 		assert_eq!(pg_access("x; DROP TABLE y", &columns, 4, 5), None);
@@ -1077,6 +1077,7 @@ mod model_access {
 	use super::views::view;
 	use crate::tests::gateway::support::job_state;
 	use crate::tests::support::{TestResult, create_user};
+	use crate::types::chat::runner::prepare::{allowed_for_model, require_knowledge_access};
 	use crate::types::providers::ProviderKind;
 	use crate::types::rag::{
 		ConnectionKind, ConnectionMode, FieldFilter, KNOWLEDGE_CHAT_METADATA_KEY, KnowledgeActor, KnowledgeBase, ModelAccess, ModelTargets, RagConnection, RagError,
@@ -1282,6 +1283,48 @@ mod model_access {
 		};
 		let _stream = middleware.handle(request, tokio_util::sync::CancellationToken::new(), &Capture(sender)).await?;
 		Ok(receiver.recv()?)
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn turns_only_offer_bases_whose_upstream_lists_still_overlap(pool: PgPool) -> TestResult {
+		crate::config::Config::init(&pool).await?;
+		crate::i18n::I18n::init(&pool).await;
+		let (first, admin, embedding_provider) = base(&pool).await?;
+		let save = SaveKnowledgeBaseRequest {
+			name: "Policies".to_string(),
+			description: None,
+			view: Some(first.view.0.clone()),
+		};
+		let id = KnowledgeBase::create(&pool, &admin, &save, &first.view.0).await?;
+		let second = KnowledgeBase::find(&pool, &admin, &id).await?.ok_or("missing")?;
+		let (router, routed_model) = provider_with_model(&pool, "OPENROUTER", "anthropic/claude").await?;
+		for (base, upstream) in [(&first, "azure"), (&second, "anthropic")] {
+			let targets = ModelTargets {
+				providers: vec![embedding_provider, router],
+				upstream_providers: slugs(&[upstream]),
+				..Default::default()
+			};
+			base.replace_model_access(&pool, &admin, &targets).await?;
+		}
+		let chat_id: Uuid = sqlx::query_scalar("INSERT INTO chats (user_id) VALUES ($1) RETURNING id")
+			.bind(admin.user_id)
+			.fetch_one(&pool)
+			.await?;
+
+		let check = require_knowledge_access(&pool, &admin.user_id, &chat_id, &routed_model, None).await.map_err(|error| format!("{error:?}"))?;
+		let mut bases = vec![first.clone(), second.clone()];
+		allowed_for_model(&pool, &check, &mut bases).await.map_err(|error| format!("{error:?}"))?;
+		assert_eq!(bases.iter().map(|base| base.id).collect::<Vec<_>>(), [first.id], "two bases with disjoint upstream lists are never searched together");
+
+		KnowledgeBase::record_chat_sources(&pool, &chat_id, &[first.id]).await?;
+		let locked = |slug: &str| Some(ProviderRouting { only: Some(slugs(&[slug])), ..Default::default() });
+		assert!(require_knowledge_access(&pool, &admin.user_id, &chat_id, &routed_model, locked("azure")).await.is_ok());
+		assert!(require_knowledge_access(&pool, &admin.user_id, &chat_id, &routed_model, locked("anthropic")).await.is_err(), "refused before the user message is stored");
+		let check = require_knowledge_access(&pool, &admin.user_id, &chat_id, &routed_model, None).await.map_err(|error| format!("{error:?}"))?;
+		let mut bases = vec![second.clone()];
+		allowed_for_model(&pool, &check, &mut bases).await.map_err(|error| format!("{error:?}"))?;
+		assert!(bases.is_empty(), "the chat's excerpts count as well");
+		Ok(())
 	}
 
 	#[sqlx::test(migrations = "./migrations")]

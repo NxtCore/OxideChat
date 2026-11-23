@@ -145,7 +145,9 @@ pub fn add_knowledge_tool(ir: &mut ChatRequestIR, bases: &[KnowledgeBase]) {
 			None => format!("- {}", base.name),
 		})
 		.collect();
-	let names: Vec<&str> = bases.iter().map(|base| base.name.as_str()).collect();
+	let mut names: Vec<&str> = bases.iter().map(|base| base.name.as_str()).collect();
+	names.sort_unstable();
+	names.dedup();
 	ir.tools.push(ToolSpec::JsonSchema {
 		name: KNOWLEDGE_TOOL.to_string(),
 		description: Some(format!(
@@ -216,7 +218,7 @@ async fn search(state: &JobState, user_id: &Uuid, bases: &[KnowledgeBase], query
 	}
 	let vectors = query_vectors(state, user_id, &models, &permitted, query).await?;
 	let searches = bases.iter().map(|base| {
-		let vector = models.iter().position(|model| *model == base.view.embedding).and_then(|index| vectors[index].as_ref());
+		let vector = models.iter().position(|model| *model == base.view.embedding).and_then(|index| vectors[index].as_deref());
 		search_one(state, user_id, base, vector)
 	});
 	let results = futures_util::future::join_all(searches).await;
@@ -266,7 +268,7 @@ async fn search_store(state: &JobState, user_id: &Uuid, base: &KnowledgeBase, ve
 	Ok(store.search(&base.view, vector, CANDIDATES, &labels).await?)
 }
 
-async fn search_one(state: &JobState, user_id: &Uuid, base: &KnowledgeBase, vector: Option<&Vec<f32>>) -> Option<Vec<Candidate>> {
+async fn search_one(state: &JobState, user_id: &Uuid, base: &KnowledgeBase, vector: Option<&[f32]>) -> Option<Vec<Candidate>> {
 	match search_store(state, user_id, base, vector?).await {
 		Ok(records) => Some(
 			records
