@@ -894,3 +894,207 @@ mod retrieval {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod model_access {
+	use super::validation::request;
+	use super::views::view;
+	use crate::tests::gateway::support::job_state;
+	use crate::tests::support::{TestResult, create_user};
+	use crate::types::providers::ProviderKind;
+	use crate::types::rag::{
+		ConnectionKind, ConnectionMode, KNOWLEDGE_CHAT_METADATA_KEY, KnowledgeActor, KnowledgeBase, ModelAccess, ModelTargets, RagConnection, RagError, RoutedModel,
+		SaveKnowledgeBaseRequest, chat_allows_model,
+	};
+	use omniference::types::ProviderRouting;
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	fn routed(kind: ProviderKind) -> RoutedModel {
+		RoutedModel {
+			id: Uuid::new_v4(),
+			provider_id: Uuid::new_v4(),
+			kind,
+		}
+	}
+
+	fn slugs(list: &[&str]) -> Vec<String> {
+		list.iter().map(|slug| (*slug).to_string()).collect()
+	}
+
+	#[test]
+	fn listed_models_and_providers_are_allowed_and_routing_providers_narrowed() {
+		let direct = routed(ProviderKind::Openai);
+		let router = routed(ProviderKind::Openrouter);
+		assert_eq!(ModelTargets::default().decide(&direct), ModelAccess::Allowed);
+
+		let by_model = ModelTargets { models: vec![direct.id], ..Default::default() };
+		assert_eq!(by_model.decide(&direct), ModelAccess::Allowed);
+		assert_eq!(by_model.decide(&router), ModelAccess::Denied);
+
+		let by_provider = ModelTargets { providers: vec![direct.provider_id, router.provider_id], ..Default::default() };
+		assert_eq!(by_provider.decide(&direct), ModelAccess::Allowed);
+		assert_eq!(by_provider.decide(&router), ModelAccess::Allowed);
+
+		let upstream = ModelTargets {
+			providers: vec![router.provider_id],
+			upstream_providers: slugs(&["anthropic"]),
+			..Default::default()
+		};
+		assert_eq!(upstream.decide(&router), ModelAccess::Upstream(slugs(&["anthropic"])));
+		assert_eq!(upstream.decide(&direct), ModelAccess::Denied);
+	}
+
+	#[test]
+	fn every_knowledge_base_must_allow_the_model() {
+		let router = routed(ProviderKind::Openrouter);
+		let anthropic = ModelTargets { upstream_providers: slugs(&["anthropic", "azure"]), ..Default::default() };
+		let azure = ModelTargets { upstream_providers: slugs(&["azure/eu"]), ..Default::default() };
+		assert_eq!(ModelTargets::decide_all([&anthropic, &azure], &router), ModelAccess::Upstream(slugs(&["azure/eu"])));
+		let other = ModelTargets { upstream_providers: slugs(&["mistral"]), ..Default::default() };
+		assert_eq!(ModelTargets::decide_all([&anthropic, &other], &router), ModelAccess::Denied);
+		assert_eq!(ModelTargets::decide_all([&ModelTargets::default()], &router), ModelAccess::Allowed);
+		assert!(!ModelAccess::Upstream(slugs(&["azure"])).is_allowed());
+	}
+
+	#[test]
+	fn targets_are_normalized_and_bounded() -> Result<(), RagError> {
+		let id = Uuid::new_v4();
+		let targets = ModelTargets {
+			providers: vec![id, id],
+			upstream_providers: slugs(&[" Azure ", "azure"]),
+			models: Vec::new(),
+		};
+		assert_eq!(targets.normalized()?, ModelTargets { providers: vec![id], upstream_providers: slugs(&["azure"]), models: Vec::new() });
+		let bad = ModelTargets { upstream_providers: slugs(&["no spaces"]), ..Default::default() };
+		assert!(matches!(bad.normalized(), Err(RagError::InvalidModelAccess)));
+		Ok(())
+	}
+
+	async fn provider_with_model(pool: &PgPool, kind: &str, model: &str) -> TestResult<(Uuid, Uuid)> {
+		let provider: Uuid = sqlx::query_scalar("INSERT INTO providers (kind, name, base_url, is_enabled) VALUES ($1::provider_kind, $2, 'https://example.com', true) RETURNING id")
+			.bind(kind)
+			.bind(format!("{kind} {}", Uuid::new_v4()))
+			.fetch_one(pool)
+			.await?;
+		let model: Uuid = sqlx::query_scalar("INSERT INTO models (provider_id, model_id, display_name, is_enabled) VALUES ($1, $2, $2, true) RETURNING id")
+			.bind(provider)
+			.bind(model)
+			.fetch_one(pool)
+			.await?;
+		Ok((provider, model))
+	}
+
+	/// A knowledge base whose embedding model belongs to its own provider.
+	async fn base(pool: &PgPool) -> TestResult<(KnowledgeBase, KnowledgeActor, Uuid)> {
+		let admin = KnowledgeActor {
+			user_id: create_user(pool).await?,
+			manage: true,
+			view_all: true,
+		};
+		let connection = RagConnection::create(
+			pool,
+			&admin.user_id,
+			&request(ConnectionKind::Qdrant, ConnectionMode::ReadOnly, Some("https://qdrant.example.com"), None),
+			None,
+		)
+		.await?;
+		let (embedding_provider, embedding_model) = provider_with_model(pool, "OPENAI", "text-embedding-3-small").await?;
+		let mut external = view("docs", None);
+		external.connection_id = connection.id;
+		external.embedding.model_id = embedding_model;
+		let save = SaveKnowledgeBaseRequest {
+			name: "Contracts".to_string(),
+			description: None,
+			view: Some(external.clone()),
+		};
+		let id = KnowledgeBase::create(pool, &admin, &save, &external).await?;
+		Ok((KnowledgeBase::find(pool, &admin, &id).await?.ok_or("missing")?, admin, embedding_provider))
+	}
+
+	#[sqlx::test]
+	async fn saving_needs_the_embedding_model_and_known_targets(pool: PgPool) -> TestResult {
+		let (base, admin, embedding_provider) = base(&pool).await?;
+		let (_, chat_model) = provider_with_model(&pool, "ANTHROPIC", "claude").await?;
+
+		let without_embedding = ModelTargets { models: vec![chat_model], ..Default::default() };
+		assert!(matches!(base.replace_model_access(&pool, &admin, &without_embedding).await, Err(RagError::EmbeddingModelNotAllowed)));
+		let unknown = ModelTargets { providers: vec![embedding_provider, Uuid::new_v4()], ..Default::default() };
+		assert!(matches!(base.replace_model_access(&pool, &admin, &unknown).await, Err(RagError::InvalidModelAccess)));
+
+		let viewer = KnowledgeActor { user_id: create_user(&pool).await?, manage: false, view_all: false };
+		let targets = ModelTargets { providers: vec![embedding_provider], models: vec![chat_model], ..Default::default() };
+		assert!(matches!(base.replace_model_access(&pool, &viewer, &targets).await, Err(RagError::Forbidden)));
+
+		base.replace_model_access(&pool, &admin, &targets).await?;
+		let stored = base.model_access(&pool, &admin).await?.targets;
+		assert_eq!(stored.providers, [embedding_provider]);
+		assert_eq!(stored.models, [chat_model]);
+		let audited: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_logs WHERE event = 'knowledge_base_model_access_updated' AND target_id = $1")
+			.bind(base.id)
+			.fetch_one(&pool)
+			.await?;
+		assert_eq!(audited, 1);
+		Ok(())
+	}
+
+	struct Capture(std::sync::mpsc::Sender<Option<ProviderRouting>>);
+
+	#[async_trait::async_trait]
+	impl omniference::middleware::RequestHandler for Capture {
+		async fn handle(&self, request: omniference::types::ChatRequestIR, _cancel: tokio_util::sync::CancellationToken) -> anyhow::Result<omniference::middleware::ChatStream> {
+			self.0.send(request.provider_routing)?;
+			Ok(Box::new(futures_util::stream::empty()))
+		}
+	}
+
+	async fn send(pool: &PgPool, chat_id: Uuid, model_id: Uuid) -> anyhow::Result<Option<ProviderRouting>> {
+		use omniference::middleware::Middleware;
+		let middleware = crate::types::ProviderRoutingMiddleware::new(job_state(pool.clone()));
+		let (sender, receiver) = std::sync::mpsc::channel();
+		let request = omniference::types::ChatRequestIR {
+			metadata: [(KNOWLEDGE_CHAT_METADATA_KEY.to_string(), chat_id.to_string()), ("oxide_model_id".to_string(), model_id.to_string())].into(),
+			..Default::default()
+		};
+		let _stream = middleware.handle(request, tokio_util::sync::CancellationToken::new(), &Capture(sender)).await?;
+		Ok(receiver.recv()?)
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn a_chat_holding_excerpts_only_reaches_allowed_models(pool: PgPool) -> TestResult {
+		crate::config::Config::init(&pool).await?;
+		crate::i18n::I18n::init(&pool).await;
+		let (base, admin, embedding_provider) = base(&pool).await?;
+		let (allowed_provider, allowed) = provider_with_model(&pool, "ANTHROPIC", "claude").await?;
+		let (_, other) = provider_with_model(&pool, "OPENAI", "gpt").await?;
+		let (router, routed_model) = provider_with_model(&pool, "OPENROUTER", "anthropic/claude").await?;
+		let targets = ModelTargets {
+			providers: vec![embedding_provider, allowed_provider, router],
+			upstream_providers: slugs(&["anthropic"]),
+			models: Vec::new(),
+		};
+		base.replace_model_access(&pool, &admin, &targets).await?;
+		let chat_id: Uuid = sqlx::query_scalar("INSERT INTO chats (user_id) VALUES ($1) RETURNING id")
+			.bind(admin.user_id)
+			.fetch_one(&pool)
+			.await?;
+
+		assert!(send(&pool, chat_id, other).await?.is_none(), "a chat without excerpts is not restricted");
+		assert!(chat_allows_model(&pool, &chat_id, &other).await?);
+
+		KnowledgeBase::record_chat_sources(&pool, &chat_id, &[base.id]).await?;
+		assert!(send(&pool, chat_id, allowed).await?.is_none());
+		let narrowed = send(&pool, chat_id, routed_model).await?.ok_or("expected routing")?;
+		assert_eq!(narrowed.only, Some(slugs(&["anthropic"])));
+		assert!(!chat_allows_model(&pool, &chat_id, &routed_model).await?, "image and embedding requests cannot narrow routing");
+
+		let error = send(&pool, chat_id, other).await.err().ok_or("expected a refusal")?;
+		use omniference::skins::SkinErrorHandler;
+		let response = omniference::skins::OpenAIErrorHandler.handle_inference_error(&omniference::adapter::InferenceError::from_handler_error(error));
+		assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+		let body: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 10_000).await?)?;
+		assert_eq!(body["error"]["code"], "knowledge_model_not_allowed");
+		assert!(!chat_allows_model(&pool, &chat_id, &other).await?);
+		Ok(())
+	}
+}

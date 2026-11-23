@@ -38,12 +38,15 @@
 				<label
 					v-for="base in knowledgeStore.usable"
 					:key="base.id"
-					class="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm text-foreground hover:bg-muted/50"
-					:title="base.description ?? ''"
+					class="flex items-center gap-2 rounded-md px-1 py-1 text-sm text-foreground"
+					:class="knowledgeAllowed(base) ? 'cursor-pointer hover:bg-muted/50' : 'cursor-not-allowed opacity-60'"
+					:title="knowledgeAllowed(base) ? (base.description ?? '') : store.getTranslation('chat.composer.knowledge_not_allowed')"
 					:data-testid="`composer-knowledge-${base.name}`"
+					:data-disabled="!knowledgeAllowed(base)"
 				>
-					<ShadCheckbox :model-value="knowledgeStore.selected.includes(base.id)" @update:model-value="knowledgeStore.toggle(base.id)" />
-					<span class="truncate">{{ base.name }}</span>
+					<ShadCheckbox :model-value="knowledgeStore.selected.includes(base.id)" :disabled="!knowledgeAllowed(base)" @update:model-value="knowledgeStore.toggle(base.id)" />
+					<span class="min-w-0 flex-1 truncate">{{ base.name }}</span>
+					<span v-if="!knowledgeAllowed(base)" class="shrink-0 text-xs text-muted-foreground">{{ store.getTranslation('chat.composer.knowledge_not_allowed') }}</span>
 				</label>
 			</div>
 		</ShadPopoverContent>
@@ -57,6 +60,7 @@ import {useMainStore} from '~/stores';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
 import {useKnowledgeStore} from '~/stores/knowledgeStore';
+import type {KnowledgeBaseResponse} from '~/types/generated/KnowledgeBaseResponse';
 import ReasoningSelector from './ReasoningSelector.vue';
 import SamplingSelector from './SamplingSelector.vue';
 import ProviderSelector from './ProviderSelector.vue';
@@ -67,6 +71,12 @@ const modelStore = useModelStore();
 const knowledgeStore = useKnowledgeStore();
 const open = ref(false);
 const knowledgeEnabled = computed(() => Boolean(store.base?.rag?.enabled));
+/** Whether the knowledge base's model access lets it reach the selected model; the server checks this again. */
+function knowledgeAllowed(base: KnowledgeBaseResponse) {
+	const model = modelStore.selectedModel;
+	const modelId = model?.level?.model_id ?? model?.id;
+	return !base.allowed_model_ids || !modelId || base.allowed_model_ids.includes(modelId);
+}
 const knowledgeVisible = computed(() => knowledgeEnabled.value && knowledgeStore.usable.length > 0);
 
 const effortKeys: Record<string, string> = {minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'extra_high'};

@@ -454,6 +454,7 @@ impl KnowledgeBase {
 				kind: self.connection_kind,
 			}),
 			view: actor.view_all.then(|| self.view.0.clone()),
+			allowed_model_ids: None,
 		}
 	}
 }

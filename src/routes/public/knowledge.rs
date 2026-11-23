@@ -1,7 +1,10 @@
 //! Knowledge base routes: the bases a user may search, their sharing and a test search.
 
 use crate::types::consts::{ADMIN_RAG_EDIT, ADMIN_RAG_VIEW};
-use crate::types::rag::{KnowledgeActor, KnowledgeBase, KnowledgeSearchRequest, RagError, SaveKnowledgeBaseRequest, TEST_SEARCH_HITS, check_view};
+use crate::types::rag::{
+	KnowledgeActor, KnowledgeBase, KnowledgeBaseResponse, KnowledgeSearchRequest, ModelTargets, RagError, RoutedModel, SaveKnowledgeBaseRequest, TEST_SEARCH_HITS,
+	check_embedding_allowed, check_view,
+};
 use crate::types::{AppError, AuthUser, JobState, ReplaceAssignmentsRequest, User, json_ok};
 use axum::{
 	Json,
@@ -21,6 +24,25 @@ async fn actor(state: &JobState, auth: &AuthUser) -> Result<KnowledgeActor, AppE
 	})
 }
 
+/// The viewer's view of `bases` with the models each one allows.
+async fn responses(state: &JobState, actor: &KnowledgeActor, bases: &[KnowledgeBase]) -> Result<Vec<KnowledgeBaseResponse>, AppError> {
+	let ids: Vec<Uuid> = bases.iter().map(|base| base.id).collect();
+	let targets = ModelTargets::load(&state.db, &ids).await?;
+	let models = if targets.is_empty() { Vec::new() } else { RoutedModel::all_enabled(&state.db).await? };
+	Ok(bases
+		.iter()
+		.map(|base| KnowledgeBaseResponse {
+			allowed_model_ids: targets.get(&base.id).and_then(|targets| targets.allowed_models(&models)),
+			..base.to_response(actor)
+		})
+		.collect())
+}
+
+async fn respond(state: &JobState, actor: &KnowledgeActor, id: &Uuid) -> Result<Response, AppError> {
+	let base = find(state, actor, id).await?;
+	json_ok(responses(state, actor, std::slice::from_ref(&base)).await?.pop())
+}
+
 async fn find(state: &JobState, actor: &KnowledgeActor, id: &Uuid) -> Result<KnowledgeBase, AppError> {
 	Ok(KnowledgeBase::find(&state.db, actor, id).await?.ok_or(RagError::NotFound)?)
 }
@@ -31,13 +53,13 @@ async fn find(state: &JobState, actor: &KnowledgeActor, id: &Uuid) -> Result<Kno
 pub async fn list_knowledge_bases(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
 	let bases = KnowledgeBase::list(&state.db, &actor).await?;
-	json_ok(bases.iter().map(|base| base.to_response(&actor)).collect::<Vec<_>>())
+	json_ok(responses(&state, &actor, &bases).await?)
 }
 
 /// GET /api/v1/knowledge-bases/{id}
 pub async fn get_knowledge_base(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
-	json_ok(find(&state, &actor, &id).await?.to_response(&actor))
+	respond(&state, &actor, &id).await
 }
 
 /// POST /api/v1/knowledge-bases
@@ -51,7 +73,7 @@ pub async fn create_knowledge_base(State(state): State<Arc<JobState>>, auth: Aut
 	req.validate()?;
 	let view = check_view(&state, &auth.id, req.view.as_ref().ok_or(RagError::InvalidCollection)?).await?;
 	let id = KnowledgeBase::create(&state.db, &actor, &req, &view).await?;
-	json_ok(find(&state, &actor, &id).await?.to_response(&actor))
+	respond(&state, &actor, &id).await
 }
 
 /// PUT /api/v1/knowledge-bases/{id}
@@ -70,11 +92,15 @@ pub async fn update_knowledge_base(
 	}
 	req.validate()?;
 	let view = match &req.view {
-		Some(view) if *view != base.view.0 => Some(check_view(&state, &auth.id, view).await?),
+		Some(view) if *view != base.view.0 => {
+			let targets = ModelTargets::load(&state.db, &[id]).await?.remove(&id).unwrap_or_default();
+			check_embedding_allowed(&state.db, &targets, &view.embedding.model_id).await?;
+			Some(check_view(&state, &auth.id, view).await?)
+		}
 		_ => None,
 	};
 	base.update(&state.db, &actor, &req, view.as_ref()).await?;
-	json_ok(find(&state, &actor, &id).await?.to_response(&actor))
+	respond(&state, &actor, &id).await
 }
 
 /// DELETE /api/v1/knowledge-bases/{id}
@@ -117,4 +143,26 @@ pub async fn search(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id)
 		return Err(RagError::Forbidden.into());
 	}
 	json_ok(base.search(&state, &auth.id, query, TEST_SEARCH_HITS).await?)
+}
+
+/// GET /api/v1/knowledge-bases/{id}/model-access
+///
+/// For editors and knowledge admins: which providers, upstream providers and models may see the content.
+pub async fn get_model_access(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	let actor = actor(&state, &auth).await?;
+	let base = find(&state, &actor, &id).await?;
+	if !actor.view_all && !actor.can_edit(&base) {
+		return Err(RagError::Forbidden.into());
+	}
+	json_ok(base.model_access(&state.db, &actor).await?)
+}
+
+/// PUT /api/v1/knowledge-bases/{id}/model-access
+///
+/// Whoever may edit the knowledge base replaces its model access; it must allow the embedding model.
+pub async fn replace_model_access(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<ModelTargets>) -> Result<Response, AppError> {
+	let actor = actor(&state, &auth).await?;
+	let base = find(&state, &actor, &id).await?;
+	base.replace_model_access(&state.db, &actor, &req).await?;
+	json_ok(base.model_access(&state.db, &actor).await?)
 }

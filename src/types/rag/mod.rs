@@ -1,6 +1,7 @@
 //! Knowledge (RAG): connections to vector stores and the models that index and rerank knowledge.
 
 mod knowledge_bases;
+mod model_access;
 mod models;
 mod repository;
 mod requests;
@@ -10,6 +11,7 @@ mod store;
 mod view;
 
 pub use knowledge_bases::*;
+pub use model_access::*;
 pub use models::*;
 pub use requests::*;
 pub use responses::*;
@@ -122,6 +124,10 @@ pub enum RagError {
 	InvalidAssignment,
 	#[error("invalid query")]
 	InvalidQuery,
+	#[error("invalid model access")]
+	InvalidModelAccess,
+	#[error("the model access does not allow the embedding model")]
+	EmbeddingModelNotAllowed,
 	#[error("not allowed")]
 	Forbidden,
 	#[error("connection not found")]
@@ -171,6 +177,8 @@ impl RagError {
 			Self::ConnectionInUse => "connection_in_use",
 			Self::InvalidAssignment => "invalid_assignment",
 			Self::InvalidQuery => "invalid_query",
+			Self::InvalidModelAccess => "invalid_model_access",
+			Self::EmbeddingModelNotAllowed => "embedding_model_not_allowed",
 			Self::Forbidden => "forbidden",
 			Self::NotFound => "not_found",
 			Self::Database(_) => "database",

@@ -228,6 +228,7 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 	ir.messages = get_omni_messages(db, inputs.user.id, messages, vision).await;
 	ir.metadata.insert("user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), inputs.chat_id.to_string());
+	ir.metadata.insert(crate::types::rag::KNOWLEDGE_CHAT_METADATA_KEY.to_string(), inputs.chat_id.to_string());
 	ir.metadata.insert("oxide_user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("oxide_model_id".to_string(), inputs.model.id.to_string());
 	ir.metadata.insert("oxide_request_type".to_string(), "chat".to_string());

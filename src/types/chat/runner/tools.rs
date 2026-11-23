@@ -20,7 +20,7 @@ pub(super) async fn get_client_tool_info(db: &PgPool, tool_name: &str, user_id: 
 	Some((config.mcp_server_id, config.tool_name, tool.id))
 }
 
-pub(super) async fn execute_tool_by_name(state: &JobState, user_id: Uuid, full_tool_name: &str, input: serde_json::Value) -> Result<crate::types::ToolExecutionResult, String> {
+pub(super) async fn execute_tool_by_name(state: &JobState, user_id: Uuid, chat_id: &Uuid, full_tool_name: &str, input: serde_json::Value) -> Result<crate::types::ToolExecutionResult, String> {
 	use crate::types::ToolSourceKind;
 
 	let db = &state.db;
@@ -76,6 +76,7 @@ pub(super) async fn execute_tool_by_name(state: &JobState, user_id: Uuid, full_t
 		function_name: function_name.map(|s| s.to_string()),
 		db: Some(std::sync::Arc::new(db.clone())),
 		budget_ledger: Some(state.budget_ledger.clone()),
+		chat_id: Some(*chat_id),
 	};
 
 	match tool.source_kind {

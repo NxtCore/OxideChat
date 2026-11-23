@@ -14,7 +14,7 @@ use axum::response::{
 	IntoResponse, Response,
 	sse::{Event, KeepAlive, Sse},
 };
-use crate::types::rag::{KnowledgeBase, add_knowledge_tool, turn_knowledge_bases};
+use crate::types::rag::{KnowledgeBase, ModelAccess, ModelTargets, RoutedModel, add_knowledge_tool, turn_knowledge_bases};
 use omniference::types::ChatRequestIR;
 use sqlx::PgPool;
 use std::{convert::Infallible, sync::Arc};
@@ -294,6 +294,7 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 	let chat_id = chat.id;
 
 	require_model_access(db, &user.id, &model).await?;
+	require_knowledge_access(db, &chat_id, &model.id).await?;
 
 	let provider_slugs = picked_provider(db, &user.id, &model, req).await?;
 
@@ -329,6 +330,7 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 	};
 	let mut ir = build_request(db, &inputs, messages).await?;
 	let mut knowledge = knowledge_bases(state, &user.id, &chat_id, req, preset.as_ref()).await?;
+	allowed_for_model(db, &model.id, &mut knowledge).await?;
 	// A model the catalog describes without `TOOLS` would refuse the request; one without any capabilities (self-hosted) may still call tools.
 	let capabilities = &model.capabilities.0;
 	if !capabilities.is_empty() && !capabilities.iter().any(|capability| capability == "TOOLS") {
@@ -367,4 +369,32 @@ async fn knowledge_bases(state: &JobState, user_id: &Uuid, chat_id: &Uuid, req: 
 		ids.extend(KnowledgeBase::preset_ids(db, &preset.id).await.map_err(internal("Failed to load knowledge bases"))?);
 	}
 	turn_knowledge_bases(state, user_id, &ids).await.map_err(internal("Failed to load knowledge bases"))
+}
+
+/// Refuses the turn before anything is stored when the chat holds excerpts its model may not see; the routing middleware checks every request again.
+async fn require_knowledge_access(db: &PgPool, chat_id: &Uuid, model_id: &Uuid) -> Result<(), TurnError> {
+	let targets = ModelTargets::for_chat(db, chat_id).await.map_err(internal("Failed to check knowledge access"))?;
+	if targets.iter().all(ModelTargets::is_unrestricted) {
+		return Ok(());
+	}
+	let model = RoutedModel::find(db, model_id).await.map_err(internal("Failed to check knowledge access"))?;
+	if model.is_some_and(|model| ModelTargets::decide_all(&targets, &model) != ModelAccess::Denied) {
+		return Ok(());
+	}
+	Err(TurnError::new("knowledge_model_not_allowed", I18n::get().translate("chat.errors.knowledge_model_not_allowed", &None)))
+}
+
+/// Keeps the knowledge bases whose model access lets them reach the turn's model.
+async fn allowed_for_model(db: &PgPool, model_id: &Uuid, bases: &mut Vec<KnowledgeBase>) -> Result<(), TurnError> {
+	let base_ids: Vec<Uuid> = bases.iter().map(|base| base.id).collect();
+	let targets = ModelTargets::load(db, &base_ids).await.map_err(internal("Failed to load knowledge bases"))?;
+	if !targets.is_empty() {
+		let model = RoutedModel::find(db, model_id).await.map_err(internal("Failed to load knowledge bases"))?;
+		bases.retain(|base| match (targets.get(&base.id), &model) {
+			(None, _) => true,
+			(Some(targets), Some(model)) => targets.decide(model) != ModelAccess::Denied,
+			(Some(_), None) => false,
+		});
+	}
+	Ok(())
 }

@@ -5,6 +5,8 @@ import type {InspectRequest} from '~/types/generated/InspectRequest';
 import type {InspectResponse} from '~/types/generated/InspectResponse';
 import type {KnowledgeBaseResponse} from '~/types/generated/KnowledgeBaseResponse';
 import type {KnowledgeSearchResponse} from '~/types/generated/KnowledgeSearchResponse';
+import type {ModelAccessResponse} from '~/types/generated/ModelAccessResponse';
+import type {ModelTargets} from '~/types/generated/ModelTargets';
 import type {SaveKnowledgeBaseRequest} from '~/types/generated/SaveKnowledgeBaseRequest';
 
 const base = '/api/v1/admin/rag';
@@ -41,5 +43,10 @@ export const deleteKnowledgeBase = (id: string) => useNuxtApp().$customFetch(`${
 export const searchKnowledgeBase = (id: string, query: string) => useNuxtApp().$customFetch<KnowledgeSearchResponse>(`${knowledgeBase}/${id}/search`, {method: 'POST', body: {query}});
 
 export const knowledgeAssignmentsPath = (id: string) => `${knowledgeBase}/${id}/assignments`;
+
+export const knowledgeModelAccess = (id: string) => useNuxtApp().$customFetch<ModelAccessResponse>(`${knowledgeBase}/${id}/model-access`);
+
+export const saveKnowledgeModelAccess = (id: string, body: ModelTargets) =>
+	useNuxtApp().$customFetch<ModelAccessResponse>(`${knowledgeBase}/${id}/model-access`, {method: 'PUT', body});
 
 export const inspectCollection = (connectionId: string, body: InspectRequest) => useNuxtApp().$customFetch<InspectResponse>(`${base}/connections/${connectionId}/inspect`, {method: 'POST', body});

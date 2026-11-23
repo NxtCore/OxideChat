@@ -1,6 +1,6 @@
 //! The knowledge tool: searches the knowledge bases a turn may use and merges the hits into numbered sources.
 
-use super::{EmbeddingSettings, KnowledgeBase, KnowledgeHit, RagConfig, RagConnection, RagError, VectorStore, embed, rerank};
+use super::{EmbeddingSettings, KnowledgeBase, KnowledgeHit, ModelTargets, RagConfig, RagConnection, RagError, RoutedModel, VectorStore, embed, rerank};
 use crate::types::JobState;
 use omniference::types::{ChatRequestIR, ToolChoice, ToolSpec};
 use serde::Serialize;
@@ -37,6 +37,8 @@ impl Candidate {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct KnowledgeSource {
 	pub n: usize,
+	#[serde(skip)]
+	pub knowledge_base_id: Uuid,
 	pub knowledge_base: String,
 	pub title: Option<String>,
 	pub section: Option<String>,
@@ -108,6 +110,7 @@ pub fn number(candidates: Vec<Candidate>) -> Vec<KnowledgeSource> {
 		.enumerate()
 		.map(|(index, (candidate, text))| KnowledgeSource {
 			n: index + 1,
+			knowledge_base_id: candidate.knowledge_base,
 			knowledge_base: candidate.knowledge_base_name,
 			title: candidate.hit.title,
 			section: candidate.hit.section,
@@ -264,11 +267,29 @@ async fn search_one(state: &JobState, base: &KnowledgeBase, vector: Option<&Vec<
 	}
 }
 
+/// Whether every knowledge base among the candidates lets its excerpts reach the reranker.
+async fn reranker_allowed(state: &JobState, model_id: &Uuid, candidates: &[Candidate]) -> Result<bool, RagError> {
+	let mut ids: Vec<Uuid> = candidates.iter().map(|candidate| candidate.knowledge_base).collect();
+	ids.sort_unstable();
+	ids.dedup();
+	let targets = ModelTargets::load(&state.db, &ids).await?;
+	if targets.is_empty() {
+		return Ok(true);
+	}
+	let Some(model) = RoutedModel::find(&state.db, model_id).await? else {
+		return Ok(false);
+	};
+	Ok(ModelTargets::decide_all(targets.values(), &model).is_allowed())
+}
+
 async fn rerank_candidates(state: &JobState, user_id: &Uuid, query: &str, candidates: Vec<Candidate>) -> Result<Vec<Candidate>, RagError> {
 	let config = RagConfig::get(&state.db).await?;
 	let Some(model_id) = config.reranker_model_id.filter(|_| candidates.len() > 1) else {
 		return Ok(candidates.into_iter().take(KEEP_WITHOUT_RERANK).collect());
 	};
+	if !reranker_allowed(state, &model_id, &candidates).await? {
+		return Ok(candidates.into_iter().take(KEEP_WITHOUT_RERANK).collect());
+	}
 	let top_n = usize::try_from(config.reranker_top_n).unwrap_or(KEEP_WITHOUT_RERANK);
 	let documents: Vec<&str> = candidates.iter().map(|candidate| candidate.hit.text.as_str()).collect();
 	match rerank(state, user_id, &model_id, query, &documents).await {

@@ -152,7 +152,7 @@ fn slug_matches(allowed: &str, requested: &str) -> bool {
 }
 
 /// The slugs both allowlists allow, keeping the narrower slug when one is a variant of the other.
-fn intersect(left: &[String], right: &[String]) -> Vec<String> {
+pub(crate) fn intersect(left: &[String], right: &[String]) -> Vec<String> {
 	let mut slugs: Vec<String> = left
 		.iter()
 		.flat_map(|a| right.iter().map(move |b| (a, b)))

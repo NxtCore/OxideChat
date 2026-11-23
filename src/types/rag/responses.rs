@@ -97,6 +97,9 @@ pub struct KnowledgeBaseResponse {
 	pub usable: bool,
 	pub connection: Option<KnowledgeBaseConnection>,
 	pub view: Option<ExternalView>,
+	/// Enabled models that may see the content; `None` without a restriction.
+	#[cfg_attr(test, ts(type = "string[] | null"))]
+	pub allowed_model_ids: Option<Vec<Uuid>>,
 }
 
 /// The connection a knowledge base reads, for knowledge admins.

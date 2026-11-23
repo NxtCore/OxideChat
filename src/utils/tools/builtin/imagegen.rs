@@ -158,6 +158,7 @@ impl ToolExecutor for ImageGenExecutor {
 				(input.prompt, vec![self.input_image(&reference, ctx).await?], ImageOptions::default())
 			}
 		};
+		check_knowledge_access(ctx, &model.id).await?;
 		let admission = reserve_budget(ctx, &model.id, image_tool_estimate(prompt.len() as u64, input_images.len() as u64)).await?;
 		let caption = prompt.clone();
 		let provider_config = provider_to_config(&provider).map_err(|error| ToolError::Internal(error.to_string()))?;
@@ -176,6 +177,23 @@ impl ToolExecutor for ImageGenExecutor {
 		let response = engine.image(request).await.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
 		drop(admission);
 		self.store_response(response, ctx, &caption).await
+	}
+}
+
+/// Refuses an image model that the knowledge in the chat may not reach, since the prompt can carry excerpts.
+async fn check_knowledge_access(ctx: &ToolContext, model_id: &Uuid) -> Result<(), ToolError> {
+	let (Some(chat_id), Some(db)) = (ctx.chat_id, ctx.db.as_ref()) else {
+		return Ok(());
+	};
+	match crate::types::rag::chat_allows_model(db, &chat_id, model_id).await {
+		Ok(true) => Ok(()),
+		Ok(false) => Err(ToolError::ExecutionFailed(
+			"This chat contains knowledge that the configured image model may not see, so no image was generated".to_string(),
+		)),
+		Err(error) => {
+			tracing::error!(%error, "failed to check knowledge model access for image tool");
+			Err(ToolError::Internal("Knowledge model access could not be checked".to_string()))
+		}
 	}
 }
 

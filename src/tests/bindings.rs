@@ -123,8 +123,8 @@ mod tests {
 
 	fn export_rag(cfg: &Config) -> Result<(), Box<dyn Error>> {
 		use crate::types::rag::{
-			ConnectionTestResponse, InspectRequest, InspectResponse, KnowledgeBaseResponse, KnowledgeSearchRequest, KnowledgeSearchResponse, RagSetupResponse,
-			SaveConnectionRequest, SaveKnowledgeBaseRequest, UpdateRagSetupRequest,
+			ConnectionTestResponse, InspectRequest, InspectResponse, KnowledgeBaseResponse, KnowledgeSearchRequest, KnowledgeSearchResponse, ModelAccessResponse,
+			ModelTargets, RagSetupResponse, SaveConnectionRequest, SaveKnowledgeBaseRequest, UpdateRagSetupRequest,
 		};
 		RagSetupResponse::export_all(cfg)?;
 		SaveConnectionRequest::export_all(cfg)?;
@@ -136,6 +136,8 @@ mod tests {
 		InspectResponse::export_all(cfg)?;
 		KnowledgeSearchRequest::export_all(cfg)?;
 		KnowledgeSearchResponse::export_all(cfg)?;
+		ModelTargets::export_all(cfg)?;
+		ModelAccessResponse::export_all(cfg)?;
 		write_permissions()
 	}
 

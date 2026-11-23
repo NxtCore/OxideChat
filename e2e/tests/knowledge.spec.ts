@@ -39,6 +39,7 @@ test.describe('knowledge bases', () => {
 	let embed: Embed;
 	let connectionId: string;
 	let baseId: string;
+	let chatId: string;
 
 	test.beforeAll(async ({browser, baseURL}) => {
 		const context = await browser.newContext({baseURL, storageState: AUTH_FILES.admin});
@@ -158,10 +159,44 @@ test.describe('knowledge bases', () => {
 			await expect(reply).toContainText('Mock answer: Holidays are booked in the HR portal. [1]', {timeout: 60_000});
 			await expect(page.getByTestId('knowledge-source-chip').first()).toContainText('[1] Holidays');
 
-			const chatId = page.url().match(/chats\/([0-9a-f-]{36})/)![1];
+			chatId = page.url().match(/chats\/([0-9a-f-]{36})/)![1]!;
 			expect((await (await page.request.get(`/api/v1/chats/${chatId}`)).json()).knowledge_base_ids).toEqual([baseId]);
 		} finally {
 			await member.close();
+		}
+	});
+
+	test('model access limits which models see the knowledge, also in a chat that already holds excerpts', async ({page, browser, baseURL, t, seed, allowErrors}) => {
+		test.skip(!LLM.isMock, 'needs the chat with excerpts from the stand-in');
+		allowErrors(/403|knowledge_model_not_allowed/);
+		await page.goto(`/settings/knowledge/${baseId}?tab=models`);
+		await expect(page.getByTestId('knowledge-models-unrestricted')).toBeVisible();
+		const embedProvider = (await (await page.request.get(`/api/v1/knowledge-bases/${baseId}/model-access`)).json()).providers.find((provider: {id: string}) => provider.id === embed.providerId);
+		await page.getByTestId(`knowledge-models-provider-${embedProvider.name}`).click();
+		await page.getByTestId('knowledge-models-save').click();
+		await expect(page.getByText(t('knowledge.models.saved')).first()).toBeVisible();
+		await expect(page.getByTestId('knowledge-models-unrestricted')).toHaveCount(0);
+
+		const member = await browser.newContext({baseURL, storageState: AUTH_FILES.member});
+		try {
+			const memberPage = await member.newPage();
+			await memberPage.goto(`/chats/${chatId}`);
+			await memberPage.getByTestId('model-selector').click();
+			const search = memberPage.getByPlaceholder(t('chat.model_selector.search_models'));
+			await search.fill(seed.model.displayName);
+			await memberPage.getByText(seed.model.displayName, {exact: true}).last().click();
+			await expect(search).toBeHidden();
+			await memberPage.getByTestId('composer-settings').click();
+			await expect(memberPage.getByTestId(`composer-knowledge-${BASE}`)).toHaveAttribute('data-disabled', 'true');
+			await memberPage.keyboard.press('Escape');
+
+			const composer = memberPage.locator('textarea').first();
+			await composer.fill('And sick days?');
+			await composer.press('Enter');
+			await expect(memberPage.getByText(t('chat.errors.knowledge_model_not_allowed')).first()).toBeVisible({timeout: 60_000});
+		} finally {
+			await member.close();
+			await page.request.put(`/api/v1/knowledge-bases/${baseId}/model-access`, {data: {providers: [], upstream_providers: [], models: []}});
 		}
 	});
 });

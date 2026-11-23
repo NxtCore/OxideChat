@@ -2,7 +2,7 @@ use super::history::tool_message_name;
 use super::prepare::PreparedTurn;
 use super::title::{TitleJob, first_user_text, generate_title};
 use super::tools::{execute_tool_by_name, get_client_tool_info};
-use crate::types::rag::{KNOWLEDGE_TOOL, run_knowledge_tool};
+use crate::types::rag::{KNOWLEDGE_TOOL, KnowledgeBase, RagError, run_knowledge_tool};
 use crate::ai;
 use crate::types::{
 	BUDGET_RESERVATION_METADATA_KEY, BudgetError, BudgetReservation, BudgetSubject, ChatMessageResponse, CostDetails, JobState, Message, MessagePart, PendingCall,
@@ -396,7 +396,17 @@ impl AgentRun {
 
 	async fn run_server_tool(&self, call: &ToolCall) -> ToolOutput {
 		if self.is_knowledge_call(call) {
-			return match run_knowledge_tool(&self.state, &self.user_id, &self.knowledge_base_ids, &call.args).await {
+			let result = match run_knowledge_tool(&self.state, &self.user_id, &self.knowledge_base_ids, &call.args).await {
+				Ok(output) => {
+					// Every later request of the chat must stay within these bases' model access, so they are recorded before the excerpts reach a model.
+					let mut sources: Vec<Uuid> = output.sources.iter().map(|source| source.knowledge_base_id).collect();
+					sources.sort_unstable();
+					sources.dedup();
+					KnowledgeBase::record_chat_sources(&self.state.db, &self.chat_id, &sources).await.map(|()| output).map_err(RagError::from)
+				}
+				Err(error) => Err(error),
+			};
+			return match result {
 				Ok(output) => ToolOutput {
 					output: serde_json::to_value(output).unwrap_or_default(),
 					error: None,
@@ -415,7 +425,7 @@ impl AgentRun {
 				}
 			};
 		}
-		match execute_tool_by_name(&self.state, self.user_id, &call.name, call.args.clone()).await {
+		match execute_tool_by_name(&self.state, self.user_id, &self.chat_id, &call.name, call.args.clone()).await {
 			Ok(result) => ToolOutput {
 				output: result.output,
 				error: None,

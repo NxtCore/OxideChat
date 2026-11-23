@@ -17,4 +17,8 @@ can_manage: boolean,
 /**
  * Shared with the viewer, so chats may search it; knowledge admins also see bases that are not.
  */
-usable: boolean, connection: KnowledgeBaseConnection | null, view: ExternalView | null, };
+usable: boolean, connection: KnowledgeBaseConnection | null, view: ExternalView | null, 
+/**
+ * Enabled models that may see the content; `None` without a restriction.
+ */
+allowed_model_ids: string[] | null, };
