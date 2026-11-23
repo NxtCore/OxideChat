@@ -8,7 +8,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, PgPool};
+use arc_swap::ArcSwap;
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -18,6 +22,8 @@ const MAX_COLLECTIONS: i64 = 500;
 const MIN_PGVECTOR: (u32, u32) = (0, 8);
 const SAMPLE_SIZE: i64 = 3;
 const MAX_SEARCH_HITS: u32 = 50;
+const POOL_SIZE: u32 = 4;
+const POOL_IDLE: Duration = Duration::from_secs(60);
 
 /// Most distinct access labels discovery reads from a collection.
 pub const MAX_ACCESS_LABELS: u32 = 500;
@@ -441,10 +447,27 @@ fn qdrant_vectors(config: &Value) -> Vec<VectorInfo> {
 	}
 }
 
+/// Pools of external pgvector stores, keyed by everything they connect with, so searches reuse connections and a changed
+/// address, secret or mode gets a new pool. Pools of old keys close their idle connections after [`POOL_IDLE`].
+static PG_POOLS: LazyLock<ArcSwap<HashMap<[u8; 32], PgPool>>> = LazyLock::new(ArcSwap::default);
+
+fn pool_key(url: &str, password: Option<&str>, mode: ConnectionMode) -> [u8; 32] {
+	let mut hasher = Sha256::new();
+	for part in [url, password.unwrap_or_default(), if mode == ConnectionMode::ReadOnly { "read_only" } else { "managed" }] {
+		hasher.update(part.as_bytes());
+		hasher.update([0]);
+	}
+	hasher.finalize().into()
+}
+
 async fn connect_postgres(url: &str, password: Option<&str>, mode: ConnectionMode, trusted: bool) -> Result<VectorStore<'static>, StoreError> {
 	let mut options = PgConnectOptions::from_str(url).map_err(|_| StoreError::InvalidUrl)?;
 	if !trusted {
 		check_host(options.get_host(), options.get_port()).await?;
+	}
+	let key = pool_key(url, password, mode);
+	if let Some(pool) = PG_POOLS.load().get(&key) {
+		return Ok(VectorStore::Pgvector(Cow::Owned(pool.clone())));
 	}
 	if let Some(password) = password {
 		options = options.password(password);
@@ -453,11 +476,18 @@ async fn connect_postgres(url: &str, password: Option<&str>, mode: ConnectionMod
 		options = options.options([("default_transaction_read_only", "on")]);
 	}
 	let pool = PgPoolOptions::new()
-		.max_connections(2)
+		.max_connections(POOL_SIZE)
+		.min_connections(0)
+		.idle_timeout(POOL_IDLE)
 		.acquire_timeout(TIMEOUT)
 		.connect_with(options)
 		.await
 		.map_err(|error| store_error(&error))?;
+	PG_POOLS.rcu(|pools| {
+		let mut pools = HashMap::clone(pools);
+		pools.entry(key).or_insert_with(|| pool.clone());
+		pools
+	});
 	Ok(VectorStore::Pgvector(Cow::Owned(pool)))
 }
 
