@@ -132,6 +132,10 @@ pub enum RagError {
 	InvalidModelAccess,
 	#[error("the model access does not allow the embedding model")]
 	EmbeddingModelNotAllowed,
+	#[error("upstream providers need a routing provider")]
+	UpstreamNeedsProvider,
+	#[error("invalid description")]
+	InvalidDescription,
 	#[error("not allowed")]
 	Forbidden,
 	#[error("connection not found")]
@@ -184,6 +188,8 @@ impl RagError {
 			Self::InvalidLabel => "invalid_label",
 			Self::InvalidModelAccess => "invalid_model_access",
 			Self::EmbeddingModelNotAllowed => "embedding_model_not_allowed",
+			Self::UpstreamNeedsProvider => "upstream_needs_provider",
+			Self::InvalidDescription => "invalid_description",
 			Self::Forbidden => "forbidden",
 			Self::NotFound => "not_found",
 			Self::Database(_) => "database",

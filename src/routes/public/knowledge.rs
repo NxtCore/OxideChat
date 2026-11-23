@@ -2,13 +2,13 @@
 
 use crate::types::consts::{ADMIN_RAG_EDIT, ADMIN_RAG_VIEW};
 use crate::types::rag::{
-	KnowledgeActor, KnowledgeBase, KnowledgeBaseResponse, KnowledgeSearchRequest, KnowledgeSearchResponse, ModelTargets, RagError, RoutedModel, SaveKnowledgeBaseRequest,
+	KnowledgeActor, KnowledgeBase, KnowledgeBaseResponse, KnowledgeSearchRequest, LabelQuery, KnowledgeSearchResponse, ModelTargets, RagError, RoutedModel, SaveKnowledgeBaseRequest,
 	check_embedding_allowed, check_label, check_view,
 };
 use crate::types::{AppError, AuthUser, JobState, ReplaceAssignmentsRequest, User, json_ok};
 use axum::{
 	Json,
-	extract::{Path, State},
+	extract::{Path, Query, State},
 	response::Response,
 };
 use std::sync::Arc;
@@ -20,7 +20,7 @@ async fn actor(state: &JobState, auth: &AuthUser) -> Result<KnowledgeActor, AppE
 	Ok(KnowledgeActor {
 		user_id: auth.id,
 		manage: holds(ADMIN_RAG_EDIT),
-		view_all: holds(ADMIN_RAG_VIEW),
+		view_all: holds(ADMIN_RAG_VIEW) || holds(ADMIN_RAG_EDIT),
 	})
 }
 
@@ -172,34 +172,37 @@ pub async fn access_labels(State(state): State<Arc<JobState>>, auth: AuthUser, P
 	json_ok(find(&state, &actor, &id).await?.access_labels(&state).await?)
 }
 
-/// GET /api/v1/knowledge-bases/{id}/access-labels/{label}/assignments
-pub async fn get_label_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path((id, label)): Path<(Uuid, String)>) -> Result<Response, AppError> {
+/// GET /api/v1/knowledge-bases/{id}/access-labels/assignments?label=…
+///
+/// The label is a query parameter: as a path segment, a label such as `..` would be resolved away by the client.
+pub async fn get_label_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Query(query): Query<LabelQuery>) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
 	if !actor.view_all {
 		return Err(RagError::Forbidden.into());
 	}
-	let label = check_label(&label)?;
+	let label = check_label(&query.label)?;
 	json_ok(find(&state, &actor, &id).await?.label_assignments(&state.db, &actor, label).await?)
 }
 
-/// PUT /api/v1/knowledge-bases/{id}/access-labels/{label}/assignments
+/// PUT /api/v1/knowledge-bases/{id}/access-labels/assignments?label=…
 ///
 /// Knowledge admins replace the teams, roles and users holding a label.
 pub async fn replace_label_assignments(
 	State(state): State<Arc<JobState>>,
 	auth: AuthUser,
-	Path((id, label)): Path<(Uuid, String)>,
+	Path(id): Path<Uuid>,
+	Query(query): Query<LabelQuery>,
 	Json(req): Json<ReplaceAssignmentsRequest>,
 ) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
 	let base = find(&state, &actor, &id).await?;
-	base.replace_label_assignments(&state.db, &actor, &label, &req).await?;
-	json_ok(base.label_assignments(&state.db, &actor, &label).await?)
+	base.replace_label_assignments(&state.db, &actor, &query.label, &req).await?;
+	json_ok(base.label_assignments(&state.db, &actor, &query.label).await?)
 }
 
 /// GET /api/v1/knowledge-bases/{id}/model-access
 ///
-/// For editors and knowledge admins: which providers, upstream providers and models may see the content.
+/// For editors (read only) and knowledge admins: which providers, upstream providers and models may see the content.
 pub async fn get_model_access(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
 	let base = find(&state, &actor, &id).await?;
@@ -211,7 +214,7 @@ pub async fn get_model_access(State(state): State<Arc<JobState>>, auth: AuthUser
 
 /// PUT /api/v1/knowledge-bases/{id}/model-access
 ///
-/// Whoever may edit the knowledge base replaces its model access; it must allow the embedding model.
+/// Knowledge admins replace the model access; it must allow the embedding model.
 pub async fn replace_model_access(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<ModelTargets>) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
 	let base = find(&state, &actor, &id).await?;

@@ -125,6 +125,8 @@ pub async fn branch_from_message(State(state): State<Arc<JobState>>, user: AuthU
 	)
 	.await?;
 
+	crate::types::rag::KnowledgeBase::copy_chat_sources(&state.db, &chat_id, &new_chat.id).await?;
+
 	let is_user_message = source_message.role == "user";
 
 	let messages_to_copy = if is_user_message {
@@ -134,7 +136,6 @@ pub async fn branch_from_message(State(state): State<Arc<JobState>>, user: AuthU
 	};
 
 	Message::copy_to_chat(&state.db, &new_chat.id, &messages_to_copy).await?;
-	crate::types::rag::KnowledgeBase::copy_chat_sources(&state.db, &chat_id, &new_chat.id).await?;
 
 	let message_count = messages_to_copy.len() as i64;
 	let last_message_at = messages_to_copy.last().map(|m| m.created_at);

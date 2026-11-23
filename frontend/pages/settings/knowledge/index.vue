@@ -41,20 +41,21 @@
 import {BookOpen, Loader2, Plus} from 'lucide-vue-next';
 import {useMainStore} from '~/stores';
 import {ADMIN_RAG_EDIT} from '~/types/generated/permissions';
-import type {KnowledgeBaseResponse} from '~/types/generated/KnowledgeBaseResponse';
+import {useKnowledgeStore} from '~/stores/knowledgeStore';
 
 const store = useMainStore();
 const router = useRouter();
 const t = (key: string) => store.getTranslation(`knowledge.list.${key}`);
 const canManage = computed(() => store.hasPermission(ADMIN_RAG_EDIT));
-const bases = ref<KnowledgeBaseResponse[] | null>(null);
+const knowledgeStore = useKnowledgeStore();
+const failed = ref(false);
+const bases = computed(() => (knowledgeStore.loaded ? knowledgeStore.bases : failed.value ? [] : null));
 
 onMounted(async () => {
-	try {
-		bases.value = await knowledgeBases();
-	} catch (error: any) {
-		bases.value = [];
-		store.toast(t('load_error'), {type: 'error', description: errorMessage(error, '')});
+	await knowledgeStore.ensure();
+	if (!knowledgeStore.loaded) {
+		failed.value = true;
+		store.toast(t('load_error'), {type: 'error'});
 	}
 });
 </script>

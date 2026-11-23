@@ -1,6 +1,6 @@
 //! The knowledge tool: searches the knowledge bases a turn may use and merges the hits into numbered sources.
 
-use super::{EmbeddingSettings, KnowledgeBase, KnowledgeHit, ModelTargets, RagConfig, RagConnection, RagError, RoutedModel, VectorStore, embed, rerank};
+use super::{EmbeddingSettings, KnowledgeBase, KnowledgeHit, ModelTargets, RagConfig, RagConnection, RagError, VectorStore, embed, rerank};
 use crate::types::JobState;
 use omniference::types::{ChatRequestIR, ToolChoice, ToolSpec};
 use serde::Serialize;
@@ -171,11 +171,13 @@ pub fn add_knowledge_tool(ir: &mut ChatRequestIR, bases: &[KnowledgeBase]) {
 /// Runs the knowledge tool for `user_id` over the knowledge bases attached to the turn.
 ///
 /// The bases are checked again here, and the model's `knowledge_base` argument only narrows them; an empty list searches nothing.
+/// The query may quote excerpts already in `chat_id`, so the embedding models and the reranker must also be allowed by the
+/// knowledge bases whose excerpts the chat holds.
 ///
 /// # Errors
 ///
 /// Returns why the query could not be embedded, or a database error.
-pub async fn run_knowledge_tool(state: &JobState, user_id: &Uuid, attached: &[Uuid], args: &serde_json::Value) -> Result<KnowledgeToolOutput, RagError> {
+pub async fn run_knowledge_tool(state: &JobState, user_id: &Uuid, chat_id: Option<&Uuid>, attached: &[Uuid], args: &serde_json::Value) -> Result<KnowledgeToolOutput, RagError> {
 	let query = args
 		.get("query")
 		.and_then(serde_json::Value::as_str)
@@ -187,10 +189,14 @@ pub async fn run_knowledge_tool(state: &JobState, user_id: &Uuid, attached: &[Uu
 	if let Some(name) = only {
 		bases.retain(|base| base.name == name || base.id.to_string() == name);
 	}
-	search(state, user_id, &bases, query).await
+	let chat_targets = match chat_id {
+		Some(chat_id) => ModelTargets::for_chat(&state.db, chat_id).await?,
+		None => Vec::new(),
+	};
+	search(state, user_id, &bases, query, &chat_targets).await
 }
 
-async fn search(state: &JobState, user_id: &Uuid, bases: &[KnowledgeBase], query: &str) -> Result<KnowledgeToolOutput, RagError> {
+async fn search(state: &JobState, user_id: &Uuid, bases: &[KnowledgeBase], query: &str, chat_targets: &[ModelTargets]) -> Result<KnowledgeToolOutput, RagError> {
 	if bases.is_empty() {
 		return Ok(KnowledgeToolOutput {
 			note: NOTE,
@@ -204,7 +210,11 @@ async fn search(state: &JobState, user_id: &Uuid, bases: &[KnowledgeBase], query
 			models.push(base.view.embedding);
 		}
 	}
-	let vectors = query_vectors(state, user_id, &models, query).await?;
+	let mut permitted = Vec::with_capacity(models.len());
+	for settings in &models {
+		permitted.push(ModelTargets::allow_outright(&state.db, chat_targets, &settings.model_id).await?);
+	}
+	let vectors = query_vectors(state, user_id, &models, &permitted, query).await?;
 	let searches = bases.iter().map(|base| {
 		let vector = models.iter().position(|model| *model == base.view.embedding).and_then(|index| vectors[index].as_ref());
 		search_one(state, user_id, base, vector)
@@ -219,7 +229,7 @@ async fn search(state: &JobState, user_id: &Uuid, bases: &[KnowledgeBase], query
 		}
 	}
 	let candidates: Vec<Candidate> = per_document(rrf(lists)).into_iter().take(CANDIDATES as usize).collect();
-	let ranked = rerank_candidates(state, user_id, query, candidates).await?;
+	let ranked = rerank_candidates(state, user_id, query, candidates, chat_targets).await?;
 	Ok(KnowledgeToolOutput {
 		note: NOTE,
 		sources: number(ranked),
@@ -227,14 +237,18 @@ async fn search(state: &JobState, user_id: &Uuid, bases: &[KnowledgeBase], query
 	})
 }
 
-/// One query vector per model, `None` where the model failed so only its knowledge bases become unavailable; a used-up budget stops the search.
-async fn query_vectors(state: &JobState, user_id: &Uuid, models: &[EmbeddingSettings], query: &str) -> Result<Vec<Option<Vec<f32>>>, RagError> {
-	let embedded = futures_util::future::join_all(models.iter().map(|settings| embed(state, user_id, settings, query, "rag_query"))).await;
+/// One query vector per model, `None` where the model is not `permitted` or failed so only its knowledge bases become
+/// unavailable; a used-up budget stops the search.
+async fn query_vectors(state: &JobState, user_id: &Uuid, models: &[EmbeddingSettings], permitted: &[bool], query: &str) -> Result<Vec<Option<Vec<f32>>>, RagError> {
+	let embedded = futures_util::future::join_all(models.iter().zip(permitted).map(|(settings, permitted)| async move {
+		if *permitted { embed(state, user_id, settings, query, "rag_query").await.map(Some) } else { Ok(None) }
+	}))
+	.await;
 	models
 		.iter()
 		.zip(embedded)
 		.map(|(settings, result)| match result {
-			Ok(vector) => Ok(Some(vector)),
+			Ok(vector) => Ok(vector),
 			Err(RagError::BudgetExceeded) => Err(RagError::BudgetExceeded),
 			Err(error) => {
 				tracing::warn!(model_id = %settings.model_id, %error, "query embedding failed; its knowledge bases are unavailable");
@@ -272,27 +286,22 @@ async fn search_one(state: &JobState, user_id: &Uuid, base: &KnowledgeBase, vect
 	}
 }
 
-/// Whether every knowledge base among the candidates lets its excerpts reach the reranker.
-async fn reranker_allowed(state: &JobState, model_id: &Uuid, candidates: &[Candidate]) -> Result<bool, RagError> {
+/// Whether every knowledge base among the candidates and in the chat lets its excerpts reach the reranker.
+async fn reranker_allowed(state: &JobState, model_id: &Uuid, candidates: &[Candidate], chat_targets: &[ModelTargets]) -> Result<bool, RagError> {
 	let mut ids: Vec<Uuid> = candidates.iter().map(|candidate| candidate.knowledge_base).collect();
 	ids.sort_unstable();
 	ids.dedup();
-	let targets = ModelTargets::load(&state.db, &ids).await?;
-	if targets.is_empty() {
-		return Ok(true);
-	}
-	let Some(model) = RoutedModel::find(&state.db, model_id).await? else {
-		return Ok(false);
-	};
-	Ok(ModelTargets::decide_all(targets.values(), &model).is_allowed())
+	let mut targets: Vec<ModelTargets> = ModelTargets::load(&state.db, &ids).await?.into_values().collect();
+	targets.extend_from_slice(chat_targets);
+	Ok(ModelTargets::allow_outright(&state.db, &targets, model_id).await?)
 }
 
-async fn rerank_candidates(state: &JobState, user_id: &Uuid, query: &str, candidates: Vec<Candidate>) -> Result<Vec<Candidate>, RagError> {
+async fn rerank_candidates(state: &JobState, user_id: &Uuid, query: &str, candidates: Vec<Candidate>, chat_targets: &[ModelTargets]) -> Result<Vec<Candidate>, RagError> {
 	let config = RagConfig::get(&state.db).await?;
 	let Some(model_id) = config.reranker_model_id.filter(|_| candidates.len() > 1) else {
 		return Ok(candidates.into_iter().take(KEEP_WITHOUT_RERANK).collect());
 	};
-	if !reranker_allowed(state, &model_id, &candidates).await? {
+	if !reranker_allowed(state, &model_id, &candidates, chat_targets).await? {
 		return Ok(candidates.into_iter().take(KEEP_WITHOUT_RERANK).collect());
 	}
 	let top_n = usize::try_from(config.reranker_top_n).unwrap_or(KEEP_WITHOUT_RERANK);

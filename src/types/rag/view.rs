@@ -224,16 +224,16 @@ pub fn pg_access_value(field: &str, columns: &[String], path: usize) -> Option<(
 
 /// The condition that keeps records whose `field` holds one of the labels in `$labels`, and the path parameter at `$path`.
 ///
-/// A `text[]` column is compared with `&&`, so a GIN index on it applies; anything else is read as JSON, where a single string counts as one label.
+/// A `text[]` column is compared with `&&`, so a GIN index on it applies, and a `varchar[]` one after a cast to `text[]`;
+/// anything else is read as JSON, where a single string counts as one label.
 /// A record without the field never matches.
 #[must_use]
 pub fn pg_access(field: &str, columns: &[(String, String, i32)], labels: usize, path: usize) -> Option<(String, Vec<String>)> {
 	let names: Vec<String> = columns.iter().map(|(name, _, _)| name.clone()).collect();
-	let array = columns
-		.iter()
-		.any(|(name, kind, _)| name == field && matches!(kind.as_str(), "_text" | "_varchar"));
-	if array {
-		return Some((format!("t.{} && ${labels}::text[]", quote_ident(field)), Vec::new()));
+	let array = columns.iter().find(|(name, kind, _)| name == field && matches!(kind.as_str(), "_text" | "_varchar"));
+	if let Some((_, kind, _)) = array {
+		let cast = if kind == "_varchar" { "::text[]" } else { "" };
+		return Some((format!("t.{}{cast} && ${labels}::text[]", quote_ident(field)), Vec::new()));
 	}
 	let (value, segments) = pg_access_value(field, &names, path)?;
 	Some((format!("{value} ?| ${labels}::text[]"), segments))

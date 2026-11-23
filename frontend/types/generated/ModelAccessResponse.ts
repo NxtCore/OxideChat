@@ -10,4 +10,8 @@ export type ModelAccessResponse = { can_edit: boolean, targets: ModelTargets, pr
 /**
  * Upstream provider slugs known from the routing providers.
  */
-upstream_providers: Array<string>, };
+upstream_providers: Array<string>, 
+/**
+ * A provider or model the stored list named was deleted, so nothing may see the content until the list is saved again.
+ */
+removed_targets: boolean, };

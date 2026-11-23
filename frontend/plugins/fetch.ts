@@ -14,7 +14,7 @@ const STALE_AFTER_WRITE: {path: RegExp; markStale: () => void}[] = [
     {path: /^\/api\/v1\/admin\/providers(\/|$)/, markStale: () => clearNuxtState('upstream-gateways')},
     {path: /^\/api\/v1\/(presets|admin\/(models|providers|teams|users|tools|presets))(\/|$)/, markStale: () => (usePresetStore().stale = true)},
     {path: /^\/api\/v1\/admin\/(teams|users)(\/|$)/, markStale: () => (usePresetStore().scopes = null)},
-    {path: /^\/api\/v1\/(knowledge-bases|admin\/(rag|teams|users|roles))(\/|$)/, markStale: () => (useKnowledgeStore().stale = true)},
+    {path: /^(?!.*\/(search|test|inspect)$)\/api\/v1\/(knowledge-bases|admin\/(rag|teams|users|roles))(\/|$)/, markStale: () => (useKnowledgeStore().stale = true)},
 ];
 
 function markStaleAfterWrite(request: RequestInfo, method: string | undefined) {

@@ -461,7 +461,8 @@ async fn connect_postgres(url: &str, password: Option<&str>, mode: ConnectionMod
 	Ok(VectorStore::Pgvector(Cow::Owned(pool)))
 }
 
-// shortcut: sqlx resolves the host again when it connects, so a DNS answer that changes in between is not caught; pin the address once sqlx can keep TLS host verification with it.
+/// Refuses hosts that resolve to blocked addresses. sqlx resolves the host again when it connects, so a DNS answer that
+/// changes in between is not caught; pin the address once sqlx can keep TLS host verification with it.
 async fn check_host(host: &str, port: u16) -> Result<(), StoreError> {
 	if host.is_empty() || host.starts_with('/') {
 		return Err(StoreError::InvalidUrl);

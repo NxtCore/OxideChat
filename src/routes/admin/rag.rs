@@ -5,7 +5,7 @@ use crate::types::rag::{
 	ConnectionMode, ConnectionTestResponse, InspectRequest, InspectResponse, RagConfig, RagConnection, RagError, SaveConnectionRequest, StoreError,
 	UpdateRagSetupRequest, VectorStore, check_reranker, probe_embedding,
 };
-use crate::types::{AppError, AuthUser, JobState, json_ok};
+use crate::types::{AppError, AuthUser, JobState, User, json_ok};
 use crate::utils::response::ErrorCode;
 use axum::{
 	Json,
@@ -15,9 +15,19 @@ use axum::{
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// `admin.rag.edit` includes seeing what it edits.
+async fn require_view(state: &JobState, auth: &AuthUser) -> Result<(), AppError> {
+	let permissions = auth.permissions(&state.db).await?;
+	if [ADMIN_RAG_VIEW, ADMIN_RAG_EDIT].iter().any(|permission| permissions.iter().any(|held| User::permission_matches(held, permission))) {
+		Ok(())
+	} else {
+		Err(ErrorCode::InsufficientPermissions.into())
+	}
+}
+
 /// GET /api/v1/admin/rag
 pub async fn get_setup(State(state): State<Arc<JobState>>, auth: AuthUser) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_RAG_VIEW).await?;
+	require_view(&state, &auth).await?;
 	json_ok(RagConfig::setup(&state.db).await?)
 }
 
@@ -81,7 +91,7 @@ pub async fn delete_connection(State(state): State<Arc<JobState>>, auth: AuthUse
 ///
 /// Reports the store's version and, for read-only connections, its collections. Never returns the server's own error text.
 pub async fn test_connection(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
-	auth.require(&state.db, ADMIN_RAG_VIEW).await?;
+	require_view(&state, &auth).await?;
 	let connection = RagConnection::find(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
 	let env_url = RagConfig::get(&state.db).await?.env_url_for(&connection);
 	let result = test(&connection, &state, env_url.as_deref()).await;

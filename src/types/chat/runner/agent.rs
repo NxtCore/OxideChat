@@ -396,9 +396,8 @@ impl AgentRun {
 
 	async fn run_server_tool(&self, call: &ToolCall) -> ToolOutput {
 		if self.is_knowledge_call(call) {
-			let result = match run_knowledge_tool(&self.state, &self.user_id, &self.knowledge_base_ids, &call.args).await {
+			let result = match run_knowledge_tool(&self.state, &self.user_id, Some(&self.chat_id), &self.knowledge_base_ids, &call.args).await {
 				Ok(output) => {
-					// Every later request of the chat must stay within these bases' model access, so they are recorded before the excerpts reach a model.
 					let mut sources: Vec<Uuid> = output.sources.iter().map(|source| source.knowledge_base_id).collect();
 					sources.sort_unstable();
 					sources.dedup();

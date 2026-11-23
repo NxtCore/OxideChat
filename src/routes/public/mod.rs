@@ -67,7 +67,7 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/knowledge-bases/{id}/search", post(knowledge::search))
 		.route("/api/v1/knowledge-bases/{id}/access-labels", get(knowledge::access_labels))
 		.route(
-			"/api/v1/knowledge-bases/{id}/access-labels/{label}/assignments",
+			"/api/v1/knowledge-bases/{id}/access-labels/assignments",
 			get(knowledge::get_label_assignments).put(knowledge::replace_label_assignments),
 		)
 		.route("/api/v1/presets", get(presets::list_presets).post(presets::create_preset))

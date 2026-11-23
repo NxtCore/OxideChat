@@ -99,7 +99,8 @@ fn view_metadata(name: &str, view: &ExternalView) -> serde_json::Value {
 	serde_json::json!({ "name": name, "connection_id": view.connection_id, "collection": view.collection, "filter": view.filter, "embedding_model_id": view.embedding.model_id })
 }
 
-/// Checks `view` against its store: a read-only connection, an existing vector and an embedding model whose vectors have the collection's size.
+/// Checks `view` against its store: a read-only connection, an existing vector, filter values the store can match
+/// (Qdrant matches no decimal numbers) and an embedding model whose vectors have the collection's size.
 ///
 /// Sends one test embedding billed to `user_id`. Returns the view with Qdrant's own distance.
 ///
@@ -110,6 +111,9 @@ pub async fn check_view(state: &JobState, user_id: &Uuid, view: &ExternalView) -
 	let connection = RagConnection::find(&state.db, &view.connection_id).await?.ok_or(RagError::NotFound)?;
 	if connection.mode != ConnectionMode::ReadOnly {
 		return Err(RagError::NotReadOnly);
+	}
+	if connection.kind == ConnectionKind::Qdrant && view.filter.iter().any(|filter| filter.value.as_number().is_some_and(|number| !number.is_i64() && !number.is_u64())) {
+		return Err(RagError::InvalidFilter);
 	}
 	let store = VectorStore::connect(&connection, &state.db, None).await?;
 	let info = store.describe(&view.collection, &view.filter).await?;

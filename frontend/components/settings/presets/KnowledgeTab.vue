@@ -17,6 +17,15 @@
 				<span v-if="base.description" class="block truncate text-xs text-muted-foreground">{{ base.description }}</span>
 			</span>
 		</label>
+		<div
+			v-for="id in hidden"
+			:key="id"
+			class="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground"
+			data-testid="preset-knowledge-not-shared"
+		>
+			<span>{{ t('not_shared') }}</span>
+			<ShadButton type="button" variant="ghost" size="sm" @click="toggle(id)">{{ t('remove') }}</ShadButton>
+		</div>
 		<p class="text-xs text-muted-foreground">{{ t('note') }}</p>
 	</div>
 </template>
@@ -29,6 +38,8 @@ const props = defineProps<{form: {knowledge_base_ids: string[]}}>();
 const store = useMainStore();
 const knowledgeStore = useKnowledgeStore();
 const t = (key: string) => store.getTranslation(`presets.editor.knowledge.${key}`);
+
+const hidden = computed(() => (knowledgeStore.loaded ? props.form.knowledge_base_ids.filter(id => !knowledgeStore.usable.some(base => base.id === id)) : []));
 
 function toggle(id: string) {
 	const ids = props.form.knowledge_base_ids;

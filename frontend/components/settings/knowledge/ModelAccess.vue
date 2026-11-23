@@ -10,7 +10,11 @@
 		</div>
 
 		<fieldset v-else :disabled="!data.can_edit || saving" class="space-y-5">
-			<p v-if="unrestricted" class="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground" data-testid="knowledge-models-unrestricted">
+			<p v-if="!data.can_edit" class="text-sm text-muted-foreground" data-testid="knowledge-models-admins-only">{{ t('admins_only') }}</p>
+			<p v-if="data.removed_targets" class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" data-testid="knowledge-models-removed">
+				{{ t('removed_targets') }}
+			</p>
+			<p v-else-if="unrestricted" class="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground" data-testid="knowledge-models-unrestricted">
 				{{ t('unrestricted') }}
 			</p>
 

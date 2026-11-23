@@ -76,6 +76,12 @@ pub struct InspectRequest {
 	pub filter: Vec<super::FieldFilter>,
 }
 
+/// The access label a label assignment route acts on.
+#[derive(Debug, Deserialize)]
+pub struct LabelQuery {
+	pub label: String,
+}
+
 /// A test search of one knowledge base.
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -120,7 +126,7 @@ impl SaveKnowledgeBaseRequest {
 			return Err(RagError::InvalidName);
 		}
 		if self.description().is_some_and(|text| text.chars().count() > 2000) {
-			return Err(RagError::InvalidName);
+			return Err(RagError::InvalidDescription);
 		}
 		self.view.as_ref().map_or(Ok(()), ExternalView::validate)
 	}

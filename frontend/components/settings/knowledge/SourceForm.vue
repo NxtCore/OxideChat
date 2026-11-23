@@ -142,7 +142,7 @@ import type {ConnectionResponse} from '~/types/generated/ConnectionResponse';
 import type {Distance} from '~/types/generated/Distance';
 import type {ExternalView} from '~/types/generated/ExternalView';
 import type {StoreError} from '~/types/generated/StoreError';
-import {parseFilterValue} from '~/utils/knowledge';
+import {parseFilterValue, sampleValue} from '~/utils/knowledge';
 
 const NONE = '__none';
 const DEFAULT_VECTOR = '__default';
@@ -177,7 +177,7 @@ const dimensions = computed({
 
 watch(
 	filterRows,
-	rows => (view.value.filter = rows.filter(row => row.field && row.value.trim()).map(row => ({field: row.field, value: parseFilterValue(row.value)}))),
+	rows => (view.value.filter = rows.filter(row => row.field && row.value.trim()).map(row => ({field: row.field, value: parseFilterValue(row.value, sampleValue(info.value?.sample ?? [], row.field))}))),
 	{deep: true},
 );
 

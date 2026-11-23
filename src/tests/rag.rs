@@ -381,8 +381,10 @@ mod views {
 		let columns = vec![
 			("oxide_access".to_string(), "_text".to_string(), -1),
 			("metadata".to_string(), "jsonb".to_string(), -1),
+			("groups".to_string(), "_varchar".to_string(), -1),
 		];
 		assert_eq!(pg_access("oxide_access", &columns, 4, 5), Some(("t.\"oxide_access\" && $4::text[]".to_string(), Vec::new())));
+		assert_eq!(pg_access("groups", &columns, 4, 5), Some(("t.\"groups\"::text[] && $4::text[]".to_string(), Vec::new())));
 		assert_eq!(
 			pg_access("metadata.acl.groups", &columns, 4, 5),
 			Some(("(to_jsonb(t.\"metadata\") #> $5::text[]) ?| $4::text[]".to_string(), vec!["acl".to_string(), "groups".to_string()]))
@@ -797,6 +799,8 @@ mod pgvector {
 		)
 		.execute(pool)
 		.await?;
+		sqlx::query("ALTER TABLE acl ADD COLUMN groups varchar(64)[]").execute(pool).await?;
+		sqlx::query("UPDATE acl SET groups = oxide_access::varchar(64)[]").execute(pool).await?;
 		Ok(parse_version(&version) >= (0, 8))
 	}
 
@@ -806,7 +810,7 @@ mod pgvector {
 			return Ok(());
 		}
 		let store = VectorStore::Pgvector(Cow::Borrowed(&pool));
-		for field in ["oxide_access", "metadata.acl.groups"] {
+		for field in ["oxide_access", "metadata.acl.groups", "groups"] {
 			let mut acl = view("acl", Some("embedding"));
 			acl.filter = vec![FieldFilter {
 				field: "site".to_string(),
@@ -968,7 +972,7 @@ mod retrieval {
 		enable(&pool, &admin.user_id, true).await?;
 		assert!(turn_knowledge_bases(&state, &member, &[base.id]).await?.is_empty());
 		assert!(turn_knowledge_bases(&state, &member, &[]).await?.is_empty());
-		let unshared = run_knowledge_tool(&state, &member, &[base.id], &json!({"query": "holidays"})).await?;
+		let unshared = run_knowledge_tool(&state, &member, None, &[base.id], &json!({"query": "holidays"})).await?;
 		assert!(unshared.sources.is_empty() && unshared.unavailable.is_empty());
 
 		let everyone = ReplaceAssignmentsRequest {
@@ -980,12 +984,12 @@ mod retrieval {
 		};
 		base.replace_assignments(&pool, &admin, &everyone).await?;
 		assert_eq!(turn_knowledge_bases(&state, &member, &[base.id, Uuid::new_v4()]).await?.len(), 1);
-		let broken = run_knowledge_tool(&state, &member, &[base.id], &json!({"query": "holidays"})).await?;
+		let broken = run_knowledge_tool(&state, &member, None, &[base.id], &json!({"query": "holidays"})).await?;
 		assert!(broken.sources.is_empty());
 		assert_eq!(broken.unavailable, ["Handbook"]);
-		let other = run_knowledge_tool(&state, &member, &[base.id], &json!({"query": "holidays", "knowledge_base": "Elsewhere"})).await?;
+		let other = run_knowledge_tool(&state, &member, None, &[base.id], &json!({"query": "holidays", "knowledge_base": "Elsewhere"})).await?;
 		assert!(other.sources.is_empty());
-		assert!(run_knowledge_tool(&state, &member, &[base.id], &json!({"query": " "})).await.is_err());
+		assert!(run_knowledge_tool(&state, &member, None, &[base.id], &json!({"query": " "})).await.is_err());
 
 		enable(&pool, &admin.user_id, false).await?;
 		assert!(turn_knowledge_bases(&state, &member, &[base.id]).await?.is_empty());
@@ -1075,8 +1079,8 @@ mod model_access {
 	use crate::tests::support::{TestResult, create_user};
 	use crate::types::providers::ProviderKind;
 	use crate::types::rag::{
-		ConnectionKind, ConnectionMode, KNOWLEDGE_CHAT_METADATA_KEY, KnowledgeActor, KnowledgeBase, ModelAccess, ModelTargets, RagConnection, RagError, RoutedModel,
-		SaveKnowledgeBaseRequest, chat_allows_model,
+		ConnectionKind, ConnectionMode, FieldFilter, KNOWLEDGE_CHAT_METADATA_KEY, KnowledgeActor, KnowledgeBase, ModelAccess, ModelTargets, RagConnection, RagError,
+		RoutedModel, SaveKnowledgeBaseRequest, chat_allows_model, check_view,
 	};
 	use omniference::types::ProviderRouting;
 	use sqlx::PgPool;
@@ -1137,9 +1141,9 @@ mod model_access {
 		let targets = ModelTargets {
 			providers: vec![id, id],
 			upstream_providers: slugs(&[" Azure ", "azure"]),
-			models: Vec::new(),
+			..Default::default()
 		};
-		assert_eq!(targets.normalized()?, ModelTargets { providers: vec![id], upstream_providers: slugs(&["azure"]), models: Vec::new() });
+		assert_eq!(targets.normalized()?, ModelTargets { providers: vec![id], upstream_providers: slugs(&["azure"]), ..Default::default() });
 		let bad = ModelTargets { upstream_providers: slugs(&["no spaces"]), ..Default::default() };
 		assert!(matches!(bad.normalized(), Err(RagError::InvalidModelAccess)));
 		Ok(())
@@ -1199,6 +1203,10 @@ mod model_access {
 		let viewer = KnowledgeActor { user_id: create_user(&pool).await?, manage: false, view_all: false };
 		let targets = ModelTargets { providers: vec![embedding_provider], models: vec![chat_model], ..Default::default() };
 		assert!(matches!(base.replace_model_access(&pool, &viewer, &targets).await, Err(RagError::Forbidden)));
+		let editor = KnowledgeBase { editor: true, ..base.clone() };
+		assert!(matches!(editor.replace_model_access(&pool, &viewer, &targets).await, Err(RagError::Forbidden)), "editors cannot lift the restriction");
+		let upstream_only = ModelTargets { providers: vec![embedding_provider], upstream_providers: slugs(&["anthropic"]), ..Default::default() };
+		assert!(matches!(base.replace_model_access(&pool, &admin, &upstream_only).await, Err(RagError::UpstreamNeedsProvider)));
 
 		base.replace_model_access(&pool, &admin, &targets).await?;
 		let stored = base.model_access(&pool, &admin).await?.targets;
@@ -1209,6 +1217,48 @@ mod model_access {
 			.fetch_one(&pool)
 			.await?;
 		assert_eq!(audited, 1);
+		Ok(())
+	}
+
+	#[test]
+	fn long_descriptions_are_refused_with_their_own_reason() {
+		let request = SaveKnowledgeBaseRequest {
+			name: "Docs".to_string(),
+			description: Some("x".repeat(2001)),
+			view: None,
+		};
+		assert!(matches!(request.validate(), Err(RagError::InvalidDescription)));
+	}
+
+	#[sqlx::test]
+	async fn qdrant_views_refuse_decimal_filters(pool: PgPool) -> TestResult {
+		let user = create_user(&pool).await?;
+		let connection = RagConnection::create(&pool, &user, &request(ConnectionKind::Qdrant, ConnectionMode::ReadOnly, Some("https://qdrant.example.com"), None), None).await?;
+		let mut decimal = view("docs", None);
+		decimal.connection_id = connection.id;
+		decimal.filter = vec![FieldFilter {
+			field: "version".to_string(),
+			value: serde_json::json!(2.1),
+		}];
+		let state = job_state(pool.clone());
+		assert!(matches!(check_view(&state, &user, &decimal).await, Err(RagError::InvalidFilter)));
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn a_deleted_model_or_provider_keeps_the_restriction(pool: PgPool) -> TestResult {
+		let (base, admin, embedding_provider) = base(&pool).await?;
+		let (chat_provider, chat_model) = provider_with_model(&pool, "ANTHROPIC", "claude").await?;
+		let (_, other) = provider_with_model(&pool, "OPENAI", "gpt").await?;
+		let targets = ModelTargets { providers: vec![embedding_provider], models: vec![chat_model], ..Default::default() };
+		base.replace_model_access(&pool, &admin, &targets).await?;
+
+		sqlx::query("DELETE FROM providers WHERE id = ANY($1)").bind([embedding_provider, chat_provider]).execute(&pool).await?;
+		let stored = ModelTargets::load(&pool, &[base.id]).await?.remove(&base.id).ok_or("targets gone")?;
+		assert!(!stored.is_unrestricted(), "a deleted target must not lift the restriction");
+		let model = RoutedModel::find(&pool, &other).await?.ok_or("model missing")?;
+		assert_eq!(stored.decide(&model), ModelAccess::Denied);
+		assert!(base.model_access(&pool, &admin).await?.removed_targets);
 		Ok(())
 	}
 
@@ -1245,7 +1295,7 @@ mod model_access {
 		let targets = ModelTargets {
 			providers: vec![embedding_provider, allowed_provider, router],
 			upstream_providers: slugs(&["anthropic"]),
-			models: Vec::new(),
+			..Default::default()
 		};
 		base.replace_model_access(&pool, &admin, &targets).await?;
 		let chat_id: Uuid = sqlx::query_scalar("INSERT INTO chats (user_id) VALUES ($1) RETURNING id")

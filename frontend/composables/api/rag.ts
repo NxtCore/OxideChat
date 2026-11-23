@@ -46,7 +46,7 @@ export const searchKnowledgeBase = (id: string, query: string, asUser?: string |
 
 export const knowledgeAccessLabels = (id: string) => useNuxtApp().$customFetch<AccessLabelsResponse>(`${knowledgeBase}/${id}/access-labels`);
 
-export const knowledgeLabelAssignmentsPath = (id: string, label: string) => `${knowledgeBase}/${id}/access-labels/${encodeURIComponent(label)}/assignments`;
+export const knowledgeLabelAssignmentsPath = (id: string, label: string) => `${knowledgeBase}/${id}/access-labels/assignments?label=${encodeURIComponent(label)}`;
 
 export const knowledgeAssignmentsPath = (id: string) => `${knowledgeBase}/${id}/assignments`;
 

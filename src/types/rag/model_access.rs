@@ -24,6 +24,10 @@ pub struct ModelTargets {
 	pub upstream_providers: Vec<String>,
 	#[cfg_attr(test, ts(type = "string[]"))]
 	pub models: Vec<Uuid>,
+	/// A provider or model the list named was deleted; the list stays a restriction until it is saved again.
+	#[serde(skip)]
+	#[cfg_attr(test, ts(skip))]
+	pub removed: bool,
 }
 
 /// The model a request goes to, as far as model access cares.
@@ -73,7 +77,7 @@ type TargetRow = (Uuid, Option<Uuid>, Option<Uuid>, Option<String>);
 impl ModelTargets {
 	#[must_use]
 	pub fn is_unrestricted(&self) -> bool {
-		self.providers.is_empty() && self.upstream_providers.is_empty() && self.models.is_empty()
+		!self.removed && self.providers.is_empty() && self.upstream_providers.is_empty() && self.models.is_empty()
 	}
 
 	/// Whether `model` may see the content: a listed model is allowed, otherwise its provider must be listed, and a
@@ -117,7 +121,12 @@ impl ModelTargets {
 		if providers.len() + models.len() + upstream_providers.len() > MAX_TARGETS {
 			return Err(RagError::InvalidModelAccess);
 		}
-		Ok(Self { providers, upstream_providers, models })
+		Ok(Self {
+			providers,
+			upstream_providers,
+			models,
+			removed: false,
+		})
 	}
 
 	/// The targets of each knowledge base among `ids`; bases without any are left out.
@@ -136,6 +145,7 @@ impl ModelTargets {
 		let mut targets: HashMap<Uuid, Self> = HashMap::new();
 		for (base, provider, model, upstream) in rows {
 			let entry = targets.entry(base).or_default();
+			entry.removed |= provider.is_none() && model.is_none() && upstream.is_none();
 			entry.providers.extend(provider);
 			entry.models.extend(model);
 			entry.upstream_providers.extend(upstream);
@@ -157,6 +167,18 @@ impl ModelTargets {
 			return Ok(Vec::new());
 		}
 		Ok(Self::load(pool, &ids).await?.into_values().collect())
+	}
+
+	/// Whether every list allows `model_id` without upstream narrowing, which only chat requests can apply.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the model cannot be loaded.
+	pub async fn allow_outright(pool: &PgPool, lists: &[Self], model_id: &Uuid) -> Result<bool, sqlx::Error> {
+		if lists.iter().all(Self::is_unrestricted) {
+			return Ok(true);
+		}
+		Ok(RoutedModel::find(pool, model_id).await?.is_some_and(|model| Self::decide_all(lists, &model).is_allowed()))
 	}
 
 	/// The models among `models` these targets let knowledge reach, upstream-narrowed ones included since chat requests
@@ -222,6 +244,8 @@ pub struct ModelAccessResponse {
 	pub models: Vec<ModelAccessModel>,
 	/// Upstream provider slugs known from the routing providers.
 	pub upstream_providers: Vec<String>,
+	/// A provider or model the stored list named was deleted, so nothing may see the content until the list is saved again.
+	pub removed_targets: bool,
 }
 
 impl KnowledgeBase {
@@ -248,7 +272,8 @@ impl KnowledgeBase {
 		.await?;
 		let upstream_providers = sqlx::query_scalar("SELECT DISTINCT slug FROM upstream_providers ORDER BY slug").fetch_all(pool).await?;
 		Ok(ModelAccessResponse {
-			can_edit: actor.can_edit(self),
+			can_edit: actor.manage,
+			removed_targets: targets.removed,
 			targets,
 			providers,
 			models,
@@ -256,17 +281,24 @@ impl KnowledgeBase {
 		})
 	}
 
-	/// Replaces the model access, audited; it must allow the knowledge base's embedding model.
+	/// Replaces the model access, audited; it must allow the knowledge base's embedding model. Only knowledge admins may,
+	/// since lifting it lets content reach other models; editors only change name and description.
 	///
 	/// # Errors
 	///
-	/// Returns `Forbidden` unless the actor may edit the base, `InvalidModelAccess` for bad or unknown targets,
-	/// `EmbeddingModelNotAllowed`, or a database error.
+	/// Returns `Forbidden` unless the actor manages knowledge, `InvalidModelAccess` for bad or unknown targets,
+	/// `UpstreamNeedsProvider` for upstream providers without a routing provider, `EmbeddingModelNotAllowed`, or a database error.
 	pub async fn replace_model_access(&self, pool: &PgPool, actor: &KnowledgeActor, targets: &ModelTargets) -> Result<(), RagError> {
-		if !actor.can_edit(self) {
+		if !actor.manage {
 			return Err(RagError::Forbidden);
 		}
 		let targets = targets.normalized()?;
+		if !targets.upstream_providers.is_empty() {
+			let kinds: Vec<ProviderKind> = sqlx::query_scalar("SELECT kind FROM providers WHERE id = ANY($1)").bind(&targets.providers).fetch_all(pool).await?;
+			if !kinds.iter().any(ProviderKind::routes_upstream) {
+				return Err(RagError::UpstreamNeedsProvider);
+			}
+		}
 		check_embedding_allowed(pool, &targets, &self.view.embedding.model_id).await?;
 		let mut tx = pool.begin().await?;
 		sqlx::query("DELETE FROM knowledge_base_model_targets WHERE knowledge_base_id = $1")
@@ -344,13 +376,7 @@ impl KnowledgeBase {
 ///
 /// Returns a database error when a query fails.
 pub async fn chat_allows_model(pool: &PgPool, chat_id: &Uuid, model_id: &Uuid) -> Result<bool, sqlx::Error> {
-	let targets = ModelTargets::for_chat(pool, chat_id).await?;
-	if targets.iter().all(ModelTargets::is_unrestricted) {
-		return Ok(true);
-	}
-	Ok(RoutedModel::find(pool, model_id)
-		.await?
-		.is_some_and(|model| ModelTargets::decide_all(&targets, &model).is_allowed()))
+	ModelTargets::allow_outright(pool, &ModelTargets::for_chat(pool, chat_id).await?, model_id).await
 }
 
 /// Refuses targets that do not allow `embedding_model_id` outright.

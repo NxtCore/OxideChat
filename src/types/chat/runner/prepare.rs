@@ -331,9 +331,8 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 	};
 	let mut ir = build_request(db, &inputs, messages).await?;
 	let mut knowledge = knowledge_bases(state, &user.id, &chat_id, req, preset.as_ref()).await?;
-	allowed_for_model(db, &model.id, ir.provider_routing.as_ref(), &mut knowledge).await?;
-	// A model the catalog describes without `TOOLS` would refuse the request; one without any capabilities (self-hosted) may still call tools.
-	let capabilities = &model.capabilities.0;
+	allowed_for_model(db, &user.id, &model.id, ir.provider_routing.as_ref(), &mut knowledge).await?;
+	let capabilities = system_config.as_ref().and_then(|config| config.capabilities.as_ref()).unwrap_or(&model.capabilities).0.as_slice();
 	if !capabilities.is_empty() && !capabilities.iter().any(|capability| capability == "TOOLS") {
 		knowledge.clear();
 	}
@@ -385,17 +384,26 @@ pub(super) async fn require_knowledge_access(db: &PgPool, chat_id: &Uuid, model_
 	Err(TurnError::new("knowledge_model_not_allowed", I18n::get().translate("chat.errors.knowledge_model_not_allowed", &None)))
 }
 
-/// Keeps the knowledge bases whose model access lets them reach the turn's model through its provider routing.
-async fn allowed_for_model(db: &PgPool, model_id: &Uuid, routing: Option<&ProviderRouting>, bases: &mut Vec<KnowledgeBase>) -> Result<(), TurnError> {
+/// Keeps the knowledge bases whose model access lets them reach the turn's model through its provider routing, after the
+/// user's routing policy narrowed it the way the routing middleware will.
+async fn allowed_for_model(db: &PgPool, user_id: &Uuid, model_id: &Uuid, routing: Option<&ProviderRouting>, bases: &mut Vec<KnowledgeBase>) -> Result<(), TurnError> {
 	let base_ids: Vec<Uuid> = bases.iter().map(|base| base.id).collect();
 	let targets = ModelTargets::load(db, &base_ids).await.map_err(internal("Failed to load knowledge bases"))?;
 	if !targets.is_empty() {
 		let model = RoutedModel::find(db, model_id).await.map_err(internal("Failed to load knowledge bases"))?;
+		let routing = match &model {
+			Some(model) if model.kind.routes_upstream() => EffectiveProviderRouting::for_user(db, user_id)
+				.await
+				.map_err(internal("Failed to load knowledge bases"))?
+				.restrict(&model.kind, routing.cloned())
+				.unwrap_or_else(|_| routing.cloned()),
+			_ => routing.cloned(),
+		};
 		bases.retain(|base| match (targets.get(&base.id), &model) {
 			(None, _) => true,
 			(Some(targets), Some(model)) => match targets.decide(model) {
 				ModelAccess::Allowed => true,
-				ModelAccess::Upstream(allowed) => narrow(routing.cloned(), &allowed).is_some(),
+				ModelAccess::Upstream(allowed) => narrow(routing.clone(), &allowed).is_some(),
 				ModelAccess::Denied => false,
 			},
 			(Some(_), None) => false,
