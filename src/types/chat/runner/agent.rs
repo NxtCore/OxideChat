@@ -414,7 +414,9 @@ impl AgentRun {
 				},
 				Err(error) => {
 					tracing::warn!(%error, "knowledge search failed");
-					let message = format!("knowledge search failed: {}", error.reason());
+					let reason = crate::i18n::I18n::get().translate(&format!("rag.error.{}", error.reason()), &None);
+					let args = std::collections::HashMap::from([("reason".to_string(), reason)]);
+					let message = crate::i18n::I18n::get().translate("chat.errors.knowledge_search_failed", &Some(args));
 					ToolOutput {
 						output: serde_json::json!({"error": message}),
 						error: Some(message),

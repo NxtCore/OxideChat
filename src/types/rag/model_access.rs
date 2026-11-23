@@ -250,28 +250,37 @@ pub struct ModelAccessResponse {
 }
 
 impl KnowledgeBase {
-	/// The knowledge base's model access with every installation provider and model to pick from.
+	/// The knowledge base's model access; knowledge admins also get every installation provider and model to pick from,
+	/// editors only the ones the list names.
 	///
 	/// # Errors
 	///
 	/// Returns a database error when a query fails.
 	pub async fn model_access(&self, pool: &PgPool, actor: &KnowledgeActor) -> Result<ModelAccessResponse, sqlx::Error> {
 		let targets = ModelTargets::load(pool, &[self.id]).await?.remove(&self.id).unwrap_or_default();
-		let mut providers: Vec<ModelAccessProvider> =
-			sqlx::query_as("SELECT id, name, kind, FALSE AS routes_upstream FROM providers WHERE owner_id IS NULL ORDER BY lower(name), id")
-				.fetch_all(pool)
-				.await?;
+		let mut providers: Vec<ModelAccessProvider> = sqlx::query_as(
+			"SELECT id, name, kind, FALSE AS routes_upstream FROM providers WHERE owner_id IS NULL AND ($1 OR id = ANY($2)) ORDER BY lower(name), id",
+		)
+		.bind(actor.view_all)
+		.bind(&targets.providers)
+		.fetch_all(pool)
+		.await?;
 		for provider in &mut providers {
 			provider.routes_upstream = provider.kind.routes_upstream();
 		}
 		let models = sqlx::query_as(
 			"SELECT m.id, m.display_name AS name, m.provider_id FROM models m JOIN providers p ON p.id = m.provider_id
-			 WHERE p.owner_id IS NULL AND (m.is_enabled OR m.id = ANY($1)) ORDER BY lower(m.display_name), m.id",
+			 WHERE p.owner_id IS NULL AND (($2 AND m.is_enabled) OR m.id = ANY($1)) ORDER BY lower(m.display_name), m.id",
 		)
 		.bind(&targets.models)
+		.bind(actor.view_all)
 		.fetch_all(pool)
 		.await?;
-		let upstream_providers = sqlx::query_scalar("SELECT DISTINCT slug FROM upstream_providers ORDER BY slug").fetch_all(pool).await?;
+		let upstream_providers = if actor.view_all {
+			sqlx::query_scalar("SELECT DISTINCT slug FROM upstream_providers ORDER BY slug").fetch_all(pool).await?
+		} else {
+			targets.upstream_providers.clone()
+		};
 		Ok(ModelAccessResponse {
 			can_edit: actor.manage,
 			removed_targets: targets.removed,
@@ -300,8 +309,12 @@ impl KnowledgeBase {
 				return Err(RagError::UpstreamNeedsProvider);
 			}
 		}
-		check_embedding_allowed(pool, &targets, &self.view.embedding.model_id).await?;
 		let mut tx = pool.begin().await?;
+		let embedding_model_id: Option<Option<Uuid>> = sqlx::query_scalar("SELECT (view->'embedding'->>'model_id')::uuid FROM knowledge_bases WHERE id = $1 FOR UPDATE")
+			.bind(self.id)
+			.fetch_optional(&mut *tx)
+			.await?;
+		check_embedding_allowed(pool, &targets, &embedding_model_id.flatten().ok_or(RagError::NotFound)?).await?;
 		sqlx::query("DELETE FROM knowledge_base_model_targets WHERE knowledge_base_id = $1")
 			.bind(self.id)
 			.execute(&mut *tx)
@@ -338,20 +351,29 @@ impl KnowledgeBase {
 		Ok(())
 	}
 
-	/// Gives a branched chat the knowledge sources of the chat it was branched from, since it holds the same excerpts.
+	/// Gives a branched chat the knowledge sources of the chat it was branched from, since it holds the same excerpts,
+	/// and its attached knowledge bases, so the branch keeps searching them.
 	///
 	/// # Errors
 	///
-	/// Returns a database error when the insert fails.
+	/// Returns a database error when an insert fails.
 	pub async fn copy_chat_sources(pool: &PgPool, from_chat_id: &Uuid, to_chat_id: &Uuid) -> Result<(), sqlx::Error> {
+		let mut tx = pool.begin().await?;
 		sqlx::query(
 			"INSERT INTO chat_knowledge_sources (chat_id, knowledge_base_id) SELECT $2, knowledge_base_id FROM chat_knowledge_sources WHERE chat_id = $1 ON CONFLICT DO NOTHING",
 		)
 		.bind(from_chat_id)
 		.bind(to_chat_id)
-		.execute(pool)
+		.execute(&mut *tx)
 		.await?;
-		Ok(())
+		sqlx::query(
+			"INSERT INTO chat_knowledge_bases (chat_id, knowledge_base_id) SELECT $2, knowledge_base_id FROM chat_knowledge_bases WHERE chat_id = $1 ON CONFLICT DO NOTHING",
+		)
+		.bind(from_chat_id)
+		.bind(to_chat_id)
+		.execute(&mut *tx)
+		.await?;
+		tx.commit().await
 	}
 
 	/// Records that the chat now holds excerpts of these knowledge bases; the list only grows.

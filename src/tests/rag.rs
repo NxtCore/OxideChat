@@ -1213,6 +1213,12 @@ mod model_access {
 		let stored = base.model_access(&pool, &admin).await?.targets;
 		assert_eq!(stored.providers, [embedding_provider]);
 		assert_eq!(stored.models, [chat_model]);
+		let (other_provider, _) = provider_with_model(&pool, "MISTRAL", "mistral-small").await?;
+		let everything = base.model_access(&pool, &admin).await?;
+		assert!(everything.providers.iter().any(|provider| provider.id == other_provider), "knowledge admins pick from every provider");
+		let named = editor.model_access(&pool, &viewer).await?;
+		assert_eq!(named.providers.iter().map(|provider| provider.id).collect::<Vec<_>>(), [embedding_provider], "editors see only the listed providers");
+		assert_eq!(named.models.iter().map(|model| model.id).collect::<Vec<_>>(), [chat_model]);
 		let audited: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_logs WHERE event = 'knowledge_base_model_access_updated' AND target_id = $1")
 			.bind(base.id)
 			.fetch_one(&pool)
@@ -1367,8 +1373,14 @@ mod model_access {
 			.bind(admin.user_id)
 			.fetch_one(&pool)
 			.await?;
+		sqlx::query("INSERT INTO chat_knowledge_bases (chat_id, knowledge_base_id) VALUES ($1, $2)")
+			.bind(chat_id)
+			.bind(base.id)
+			.execute(&pool)
+			.await?;
 		KnowledgeBase::copy_chat_sources(&pool, &chat_id, &branch).await?;
 		assert!(!chat_allows_model(&pool, &branch, &other).await?, "a branch keeps the restriction");
+		assert_eq!(KnowledgeBase::chat_ids(&pool, &branch).await?, vec![base.id], "a branch keeps the attached bases");
 
 		base.delete(&pool, &admin).await?;
 		assert!(!chat_allows_model(&pool, &chat_id, &other).await?, "deleting the knowledge base keeps the restriction");

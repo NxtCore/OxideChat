@@ -56,6 +56,11 @@ pub(super) async fn prepare_arena_turn(state: &Arc<JobState>, user: &User, chat:
 		levels.push((model, level_preset, config, budget));
 	}
 	levels.shuffle(&mut rand::rng());
+	if let Some(ids) = &req.knowledge_base_ids {
+		crate::types::rag::KnowledgeBase::attach_to_chat(db, &user.id, &chat.id, ids)
+			.await
+			.map_err(internal("Failed to load knowledge bases"))?;
+	}
 
 	let settings = RequestSettings {
 		model_key: Some(req.model_key.clone()),

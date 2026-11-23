@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::str::FromStr;
 use std::time::Duration;
+use uuid::Uuid;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -157,8 +158,8 @@ impl<'a> VectorStore<'a> {
 		let secret = connection.secret.as_deref().map(decrypt_api_key).transpose().map_err(|_| StoreError::Secret)?;
 		match connection.kind {
 			ConnectionKind::Pgvector => match (env_url, connection.url.as_deref()) {
-				(Some(url), _) => connect_postgres(url, None, connection.mode, true).await,
-				(None, Some(url)) => connect_postgres(url, secret.as_deref(), connection.mode, false).await,
+				(Some(url), _) => connect_postgres(connection, url, None, true).await,
+				(None, Some(url)) => connect_postgres(connection, url, secret.as_deref(), false).await,
 				(None, None) => Ok(Self::Pgvector(Cow::Borrowed(main))),
 			},
 			ConnectionKind::Qdrant => {
@@ -447,9 +448,23 @@ fn qdrant_vectors(config: &Value) -> Vec<VectorInfo> {
 	}
 }
 
-/// Pools of external pgvector stores, keyed by everything they connect with, so searches reuse connections and a changed
-/// address, secret or mode gets a new pool. Pools of old keys close their idle connections after [`POOL_IDLE`].
-static PG_POOLS: LazyLock<ArcSwap<HashMap<[u8; 32], PgPool>>> = LazyLock::new(ArcSwap::default);
+/// Pools of external pgvector stores by connection, with a hash of everything they connect with, so searches reuse
+/// connections and a changed address, secret or mode replaces the pool. Idle connections close after [`POOL_IDLE`].
+static PG_POOLS: LazyLock<ArcSwap<HashMap<Uuid, CachedPool>>> = LazyLock::new(ArcSwap::default);
+
+/// A pool and the hash of the settings it connects with.
+type CachedPool = ([u8; 32], PgPool);
+
+/// Drops the cached pool of a connection that was changed or deleted.
+pub fn forget_pool(connection_id: &Uuid) {
+	if PG_POOLS.load().contains_key(connection_id) {
+		PG_POOLS.rcu(|pools| {
+			let mut pools = HashMap::clone(pools);
+			pools.remove(connection_id);
+			pools
+		});
+	}
+}
 
 fn pool_key(url: &str, password: Option<&str>, mode: ConnectionMode) -> [u8; 32] {
 	let mut hasher = Sha256::new();
@@ -460,13 +475,14 @@ fn pool_key(url: &str, password: Option<&str>, mode: ConnectionMode) -> [u8; 32]
 	hasher.finalize().into()
 }
 
-async fn connect_postgres(url: &str, password: Option<&str>, mode: ConnectionMode, trusted: bool) -> Result<VectorStore<'static>, StoreError> {
+async fn connect_postgres(connection: &RagConnection, url: &str, password: Option<&str>, trusted: bool) -> Result<VectorStore<'static>, StoreError> {
+	let mode = connection.mode;
 	let mut options = PgConnectOptions::from_str(url).map_err(|_| StoreError::InvalidUrl)?;
 	if !trusted {
 		check_host(options.get_host(), options.get_port()).await?;
 	}
 	let key = pool_key(url, password, mode);
-	if let Some(pool) = PG_POOLS.load().get(&key) {
+	if let Some((_, pool)) = PG_POOLS.load().get(&connection.id).filter(|(cached, _)| *cached == key) {
 		return Ok(VectorStore::Pgvector(Cow::Owned(pool.clone())));
 	}
 	if !trusted || password.is_some() {
@@ -485,7 +501,7 @@ async fn connect_postgres(url: &str, password: Option<&str>, mode: ConnectionMod
 		.map_err(|error| store_error(&error))?;
 	PG_POOLS.rcu(|pools| {
 		let mut pools = HashMap::clone(pools);
-		pools.entry(key).or_insert_with(|| pool.clone());
+		pools.insert(connection.id, (key, pool.clone()));
 		pools
 	});
 	Ok(VectorStore::Pgvector(Cow::Owned(pool)))

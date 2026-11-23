@@ -234,6 +234,7 @@ impl RagConnection {
 		)
 		.await?;
 		tx.commit().await?;
+		super::forget_pool(&connection.id);
 		Ok(connection)
 	}
 
@@ -263,6 +264,7 @@ impl RagConnection {
 		)
 		.await?;
 		tx.commit().await?;
+		super::forget_pool(id);
 		Ok(true)
 	}
 

@@ -188,7 +188,7 @@ async fn check_knowledge_access(ctx: &ToolContext, model_id: &Uuid) -> Result<()
 	match crate::types::rag::chat_allows_model(db, &chat_id, model_id).await {
 		Ok(true) => Ok(()),
 		Ok(false) => Err(ToolError::ExecutionFailed(
-			"This chat contains knowledge that the configured image model may not see, so no image was generated".to_string(),
+			crate::i18n::I18n::get().translate("chat.errors.knowledge_image_model_not_allowed", &None),
 		)),
 		Err(error) => {
 			tracing::error!(%error, "failed to check knowledge model access for image tool");

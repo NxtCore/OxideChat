@@ -173,8 +173,8 @@ test.describe('knowledge bases', () => {
 		await expect(page.getByTestId('knowledge-models-unrestricted')).toBeVisible();
 		const embedProvider = (await (await page.request.get(`/api/v1/knowledge-bases/${baseId}/model-access`)).json()).providers.find((provider: {id: string}) => provider.id === embed.providerId);
 		await page.getByTestId(`knowledge-models-provider-${embedProvider.name}`).click();
-		await page.getByTestId('knowledge-models-save').click();
-		await expect(page.getByText(t('knowledge.models.saved')).first()).toBeVisible();
+		await page.getByTestId('settings-save-bar-save').click();
+		await expect(page.getByText(t('knowledge.editor.saved')).first()).toBeVisible();
 		await expect(page.getByTestId('knowledge-models-unrestricted')).toHaveCount(0);
 
 		const member = await browser.newContext({baseURL, storageState: AUTH_FILES.member});

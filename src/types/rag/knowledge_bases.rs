@@ -270,17 +270,29 @@ impl KnowledgeBase {
 
 	/// Changes name and description and, with `view`, the source; the view must have been checked with [`check_view`].
 	///
+	/// A new source is written under a row lock after checking its embedding model against the model access stored then,
+	/// so it cannot race a model access change; without one the stored source is left as it is.
+	///
 	/// # Errors
 	///
-	/// Returns `Forbidden` when an editor sends a view, `NotFound` when the knowledge base is gone, or a database error.
+	/// Returns `Forbidden` when an editor sends a view, `EmbeddingModelNotAllowed`, `NotFound` when the knowledge base is gone, or a database error.
 	pub async fn update(&self, pool: &PgPool, actor: &KnowledgeActor, request: &SaveKnowledgeBaseRequest, view: Option<&ExternalView>) -> Result<(), RagError> {
 		if !actor.can_edit(self) || (view.is_some() && !actor.manage) {
 			return Err(RagError::Forbidden);
 		}
 		request.validate()?;
-		let view = view.unwrap_or(&self.view.0);
 		let mut tx = pool.begin().await?;
-		let updated = sqlx::query("UPDATE knowledge_bases SET name = $2, description = $3, connection_id = $4, view = $5, updated_at = NOW() WHERE id = $1")
+		let stored: Option<Json<ExternalView>> = sqlx::query_scalar("SELECT view FROM knowledge_bases WHERE id = $1 FOR UPDATE")
+			.bind(self.id)
+			.fetch_optional(&mut *tx)
+			.await?;
+		let stored = stored.ok_or(RagError::NotFound)?.0;
+		if let Some(view) = view {
+			let targets = super::ModelTargets::load(pool, &[self.id]).await?.remove(&self.id).unwrap_or_default();
+			super::check_embedding_allowed(pool, &targets, &view.embedding.model_id).await?;
+		}
+		let view = view.unwrap_or(&stored);
+		sqlx::query("UPDATE knowledge_bases SET name = $2, description = $3, connection_id = $4, view = $5, updated_at = NOW() WHERE id = $1")
 			.bind(self.id)
 			.bind(request.name.trim())
 			.bind(request.description())
@@ -288,9 +300,6 @@ impl KnowledgeBase {
 			.bind(Json(view))
 			.execute(&mut *tx)
 			.await?;
-		if updated.rows_affected() == 0 {
-			return Err(RagError::NotFound);
-		}
 		audit(&mut tx, "knowledge_base_updated", &actor.user_id, &self.id, view_metadata(request.name.trim(), view)).await?;
 		tx.commit().await?;
 		Ok(())

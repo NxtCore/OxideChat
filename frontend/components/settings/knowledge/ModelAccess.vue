@@ -9,7 +9,7 @@
 			<Loader2 class="h-5 w-5 animate-spin" />
 		</div>
 
-		<fieldset v-else :disabled="!data.can_edit || saving" class="space-y-5">
+		<fieldset v-else :disabled="!data.can_edit" class="space-y-5">
 			<p v-if="!data.can_edit" class="text-sm text-muted-foreground" data-testid="knowledge-models-admins-only">{{ t('admins_only') }}</p>
 			<p v-if="data.removed_targets" class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" data-testid="knowledge-models-removed">
 				{{ t('removed_targets') }}
@@ -72,7 +72,6 @@
 				</div>
 			</section>
 
-			<ShadButton v-if="data.can_edit" type="button" data-testid="knowledge-models-save" :disabled="saving" @click="save">{{ t('save') }}</ShadButton>
 		</fieldset>
 	</div>
 </template>
@@ -83,36 +82,29 @@ import {useMainStore} from '~/stores';
 import type {ModelAccessResponse} from '~/types/generated/ModelAccessResponse';
 import type {ModelTargets} from '~/types/generated/ModelTargets';
 
-const props = defineProps<{id: string}>();
+const props = defineProps<{data: ModelAccessResponse | null; form: {models: ModelTargets}}>();
 const store = useMainStore();
 const t = (key: string) => store.getTranslation(`knowledge.models.${key}`);
-const data = ref<ModelAccessResponse | null>(null);
-const targets = reactive<ModelTargets>({providers: [], upstream_providers: [], models: []});
 const search = ref('');
 const slug = ref('');
-const saving = ref(false);
+const targets = computed(() => props.form.models);
 
-const unrestricted = computed(() => !targets.providers.length && !targets.upstream_providers.length && !targets.models.length);
-const routesUpstream = computed(() => data.value?.providers.some(provider => provider.routes_upstream) ?? false);
-const upstreamOptions = computed(() => [...new Set([...(data.value?.upstream_providers ?? []), ...targets.upstream_providers])].sort());
+const unrestricted = computed(() => !targets.value.providers.length && !targets.value.upstream_providers.length && !targets.value.models.length);
+const routesUpstream = computed(() => props.data?.providers.some(provider => provider.routes_upstream) ?? false);
+const upstreamOptions = computed(() => [...new Set([...(props.data?.upstream_providers ?? []), ...targets.value.upstream_providers])].sort());
 const visibleModels = computed(() => {
 	const term = search.value.trim().toLowerCase();
-	const models = data.value?.models ?? [];
+	const models = props.data?.models ?? [];
 	return term ? models.filter(model => model.name.toLowerCase().includes(term)) : models;
 });
 
 function providerName(id: string) {
-	return data.value?.providers.find(provider => provider.id === id)?.name ?? '';
-}
-
-function fill(value: ModelAccessResponse) {
-	data.value = value;
-	Object.assign(targets, structuredClone(toRaw(value.targets)));
+	return props.data?.providers.find(provider => provider.id === id)?.name ?? '';
 }
 
 function toggle(list: keyof ModelTargets, value: string, selected: boolean) {
-	const rest = targets[list].filter(item => item !== value);
-	targets[list] = selected ? [...rest, value] : rest;
+	const rest = props.form.models[list].filter(item => item !== value);
+	props.form.models[list] = selected ? [...rest, value] : rest;
 }
 
 function addSlug() {
@@ -121,24 +113,4 @@ function addSlug() {
 	toggle('upstream_providers', value, true);
 	slug.value = '';
 }
-
-async function save() {
-	saving.value = true;
-	try {
-		fill(await saveKnowledgeModelAccess(props.id, toRaw(targets)));
-		store.toast(t('saved'), {type: 'success'});
-	} catch (error: any) {
-		store.toast(t('save_error'), {type: 'error', description: ragErrorMessage(error, '')});
-	} finally {
-		saving.value = false;
-	}
-}
-
-onMounted(async () => {
-	try {
-		fill(await knowledgeModelAccess(props.id));
-	} catch {
-		store.toast(t('load_error'), {type: 'error'});
-	}
-});
 </script>

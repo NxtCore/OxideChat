@@ -43,7 +43,7 @@
 
 			<SettingsKnowledgeAccessLabels v-if="!isNew && canManage && currentTab === 'access'" :id="id" :can-manage="canManage" />
 
-			<SettingsKnowledgeModelAccess v-if="!isNew && canEdit && currentTab === 'models'" :id="id" />
+			<SettingsKnowledgeModelAccess v-if="!isNew && canEdit && currentTab === 'models'" :data="modelAccess" :form="form" />
 
 			<SettingsKnowledgeTestSearch v-if="!isNew && canSearch && currentTab === 'search'" :id="id" :can-search-as="canManage" />
 		</template>
@@ -69,6 +69,8 @@ import {useMainStore} from '~/stores';
 import {ADMIN_RAG_EDIT} from '~/types/generated/permissions';
 import type {ExternalView} from '~/types/generated/ExternalView';
 import type {KnowledgeBaseResponse} from '~/types/generated/KnowledgeBaseResponse';
+import type {ModelAccessResponse} from '~/types/generated/ModelAccessResponse';
+import type {ModelTargets} from '~/types/generated/ModelTargets';
 import {emptyView} from '~/utils/knowledge';
 
 const store = useMainStore();
@@ -91,7 +93,15 @@ const sourceOpened = ref(false);
 watch(currentTab, tab => (sourceOpened.value ||= tab === 'source'), {immediate: true});
 const pageTitle = computed(() => (isNew ? t('new_title') : form.name || base.value?.name || ''));
 
-const form = reactive({name: '', description: '', view: emptyView() as ExternalView});
+const form = reactive({name: '', description: '', view: emptyView() as ExternalView, models: {providers: [], upstream_providers: [], models: []} as ModelTargets});
+const modelAccess = ref<ModelAccessResponse | null>(null);
+
+function fillModels(value: ModelAccessResponse) {
+	modelAccess.value = value;
+	form.models = structuredClone(toRaw(value.targets));
+}
+
+const modelsChanged = () => !!modelAccess.value?.can_edit && JSON.stringify(form.models) !== JSON.stringify(modelAccess.value.targets);
 
 function fill(value: KnowledgeBaseResponse) {
 	base.value = value;
@@ -120,7 +130,9 @@ const settingsForm = useSettingsForm({
 				settingsForm.markSaved();
 				await router.replace(`/settings/knowledge/${created.id}?tab=sharing`);
 			} else {
+				const models = modelsChanged() ? toRaw(form.models) : null;
 				fill(await updateKnowledgeBase(id, body));
+				if (models) fillModels(await saveKnowledgeModelAccess(id, models));
 			}
 		} catch (error: any) {
 			throw new Error(ragErrorMessage(error, ''));
@@ -143,6 +155,7 @@ onMounted(async () => {
 	if (!isNew) {
 		try {
 			fill(await getKnowledgeBase(id));
+			if (canEdit.value) fillModels(await knowledgeModelAccess(id));
 		} catch {
 			notFound.value = true;
 		} finally {
