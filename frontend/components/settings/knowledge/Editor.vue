@@ -39,11 +39,13 @@
 
 			<SettingsKnowledgeSourceForm v-if="canManage && sourceOpened" v-show="currentTab === 'source'" v-model="form.view" />
 
-			<SettingsKnowledgeSharing v-if="!isNew && canManage && currentTab === 'sharing'" :id="id" />
+			<SettingsKnowledgeSharing v-if="!isNew && canManage && currentTab === 'sharing'" :id="id" :per-record="!!base?.view?.access" />
+
+			<SettingsKnowledgeAccessLabels v-if="!isNew && canManage && currentTab === 'access'" :id="id" :can-manage="canManage" />
 
 			<SettingsKnowledgeModelAccess v-if="!isNew && canEdit && currentTab === 'models'" :id="id" />
 
-			<SettingsKnowledgeTestSearch v-if="!isNew && canSearch && currentTab === 'search'" :id="id" />
+			<SettingsKnowledgeTestSearch v-if="!isNew && canSearch && currentTab === 'search'" :id="id" :can-search-as="canManage" />
 		</template>
 
 		<ShadDialog v-model:open="deleteOpen">
@@ -83,7 +85,7 @@ const base = ref<KnowledgeBaseResponse | null>(null);
 const canManage = computed(() => (isNew ? store.hasPermission(ADMIN_RAG_EDIT) : !!base.value?.can_manage));
 const canEdit = computed(() => (isNew ? canManage.value : !!base.value?.can_edit));
 const canSearch = computed(() => canManage.value || !!base.value?.usable);
-const tabs = computed(() => (isNew ? ['general', 'source'] : ['general', ...(canManage.value ? ['source', 'sharing'] : []), ...(canEdit.value ? ['models'] : []), ...(canSearch.value ? ['search'] : [])]));
+const tabs = computed(() => (isNew ? ['general', 'source'] : ['general', ...(canManage.value ? ['source', 'sharing', 'access'] : []), ...(canEdit.value ? ['models'] : []), ...(canSearch.value ? ['search'] : [])]));
 const currentTab = ref(String(route.query.tab ?? 'general'));
 const sourceOpened = ref(false);
 watch(currentTab, tab => (sourceOpened.value ||= tab === 'source'), {immediate: true});

@@ -105,10 +105,30 @@
 				<ShadInput v-model.number="dimensions" type="number" min="1" max="4000" class="w-32" :placeholder="t('dimensions_placeholder')" data-testid="knowledge-source-dimensions" />
 			</section>
 
-			<p class="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="knowledge-source-access-note">
-				<Info class="mt-px h-3.5 w-3.5 shrink-0" />
-				{{ t('access_note') }}
-			</p>
+			<section class="space-y-2">
+				<ShadLabel>{{ t('step_access') }}</ShadLabel>
+				<ShadSelect :model-value="view.access === null ? EVERYONE : PER_RECORD" @update:model-value="setAccessMode(String($event))">
+					<ShadSelectTrigger data-testid="knowledge-source-access"><ShadSelectValue /></ShadSelectTrigger>
+					<ShadSelectContent>
+						<ShadSelectItem :value="EVERYONE">{{ t('access_everyone') }}</ShadSelectItem>
+						<ShadSelectItem :value="PER_RECORD">{{ t('access_per_record') }}</ShadSelectItem>
+					</ShadSelectContent>
+				</ShadSelect>
+				<template v-if="view.access !== null">
+					<span class="block text-xs text-muted-foreground">{{ t('access_field') }}</span>
+					<ShadSelect v-model="view.access">
+						<ShadSelectTrigger data-testid="knowledge-source-access-field"><ShadSelectValue /></ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem v-for="path in accessFields" :key="path" :value="path">{{ path }}</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+					<p class="text-xs text-muted-foreground">{{ t('access_hint') }}</p>
+				</template>
+				<p v-else class="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="knowledge-source-access-note">
+					<Info class="mt-px h-3.5 w-3.5 shrink-0" />
+					{{ t('access_note') }}
+				</p>
+			</section>
 		</template>
 	</div>
 </template>
@@ -128,6 +148,9 @@ const NONE = '__none';
 const DEFAULT_VECTOR = '__default';
 const FIELDS = ['text', 'title', 'url', 'section'] as const;
 const DISTANCES: Distance[] = ['cosine', 'dot', 'euclid', 'manhattan'];
+const ACCESS_FIELD = 'oxide_access';
+const EVERYONE = 'everyone';
+const PER_RECORD = 'per_record';
 
 const view = defineModel<ExternalView>({required: true});
 const store = useMainStore();
@@ -141,6 +164,7 @@ const filterRows = ref(view.value.filter.map(condition => ({field: condition.fie
 
 const kind = computed(() => connections.value.find(connection => connection.id === view.value.connection_id)?.kind);
 const collectionNames = computed(() => [...new Set([...collections.value, ...(view.value.collection ? [view.value.collection] : [])])]);
+const accessFields = computed(() => [...new Set([ACCESS_FIELD, ...(info.value?.fields ?? []), ...(view.value.access ? [view.value.access] : [])])]);
 const vectorSize = computed(() => info.value?.vectors.find(vector => vector.name === view.value.vector_name)?.size ?? null);
 const embeddingModel = computed({
 	get: () => view.value.embedding.model_id || null,
@@ -160,6 +184,10 @@ watch(
 function setField(field: (typeof FIELDS)[number], value: string) {
 	if (field === 'text') view.value.fields.text = value === NONE ? '' : value;
 	else view.value.fields[field] = value === NONE ? null : value;
+}
+
+function setAccessMode(mode: string) {
+	view.value.access = mode === PER_RECORD ? (view.value.access ?? ACCESS_FIELD) : null;
 }
 
 function pickVector(value: string) {
@@ -203,6 +231,7 @@ async function pickCollection(name: string) {
 	await inspect();
 	const first = info.value?.vectors[0];
 	if (first && !info.value?.vectors.some(vector => vector.name === view.value.vector_name)) pickVector(first.name ?? DEFAULT_VECTOR);
+	if (view.value.access === null && info.value?.sample.some(record => typeof record === 'object' && record !== null && ACCESS_FIELD in record)) view.value.access = ACCESS_FIELD;
 }
 
 

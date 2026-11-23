@@ -112,9 +112,51 @@ pub struct KnowledgeBaseConnection {
 }
 
 /// Result of a test search; a store failure is data for the page.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct KnowledgeSearchResponse {
 	pub error: Option<StoreError>,
 	pub hits: Vec<KnowledgeHit>,
+	/// Only when searching as another user: why they get these hits.
+	pub access: Option<SearchAccess>,
+}
+
+/// What a user may find in a knowledge base, for "Search as".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct SearchAccess {
+	/// The knowledge base is shared with them.
+	pub usable: bool,
+	/// Records list who may see them.
+	pub per_record: bool,
+	/// Labels they hold.
+	pub held: u32,
+	/// Labels found in the collection or mapped.
+	pub labels: u32,
+	/// Labels found in the collection that nobody holds; `None` when the collection could not be read.
+	pub unassigned: Option<u32>,
+}
+
+/// One access label of a knowledge base.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AccessLabel {
+	pub label: String,
+	/// Found in the collection; mapped labels may not be.
+	pub found: bool,
+	/// Teams, roles and users holding it.
+	pub holders: u32,
+}
+
+/// The access labels of a knowledge base and who holds them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AccessLabelsResponse {
+	/// The payload field holding the labels; `None` without per-record access.
+	pub field: Option<String>,
+	pub labels: Vec<AccessLabel>,
+	/// Labels found in the collection that nobody holds; their records are found by nobody.
+	pub unassigned: u32,
+	/// Why the collection's labels could not be read.
+	pub error: Option<StoreError>,
 }

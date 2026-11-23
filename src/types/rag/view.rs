@@ -106,6 +106,9 @@ pub struct ExternalView {
 	pub fields: FieldMapping,
 	#[serde(default)]
 	pub filter: Vec<FieldFilter>,
+	/// The payload field that lists who may see each record (labels such as `HR Members`); `None`: everyone who may use the knowledge base sees every record.
+	#[serde(default)]
+	pub access: Option<String>,
 }
 
 fn valid_path(path: &str) -> bool {
@@ -122,7 +125,7 @@ impl ExternalView {
 		if self.collection.trim().is_empty() || self.collection.len() > 255 {
 			return Err(RagError::InvalidCollection);
 		}
-		let optional = [&self.vector_name, &self.fields.title, &self.fields.url, &self.fields.section];
+		let optional = [&self.vector_name, &self.fields.title, &self.fields.url, &self.fields.section, &self.access];
 		if !valid_path(&self.fields.text) || optional.into_iter().flatten().any(|path| !valid_path(path)) {
 			return Err(RagError::InvalidField);
 		}
@@ -202,6 +205,46 @@ pub fn shorten(value: Value) -> Value {
 	}
 }
 
+/// The column a field names and the path inside it: `site` is a column, `metadata.title` reaches into the `metadata` column.
+fn pg_column<'a>(field: &'a str, columns: &'a [String]) -> Option<(&'a String, Option<&'a str>)> {
+	if let Some(column) = columns.iter().find(|column| **column == field) {
+		return Some((column, None));
+	}
+	let (column, path) = field.split_once('.')?;
+	Some((columns.iter().find(|known| *known == column)?, Some(path)))
+}
+
+/// The labels of `field` as JSON, for discovery and for matching JSON columns; `$path` is the path inside the column as `text[]`.
+#[must_use]
+pub fn pg_access_value(field: &str, columns: &[String], path: usize) -> Option<(String, Vec<String>)> {
+	let (column, inner) = pg_column(field, columns)?;
+	let segments = inner.map(|inner| inner.split('.').map(str::to_string).collect()).unwrap_or_default();
+	Some((format!("(to_jsonb(t.{}) #> ${path}::text[])", quote_ident(column)), segments))
+}
+
+/// The condition that keeps records whose `field` holds one of the labels in `$labels`, and the path parameter at `$path`.
+///
+/// A `text[]` column is compared with `&&`, so a GIN index on it applies; anything else is read as JSON, where a single string counts as one label.
+/// A record without the field never matches.
+#[must_use]
+pub fn pg_access(field: &str, columns: &[(String, String, i32)], labels: usize, path: usize) -> Option<(String, Vec<String>)> {
+	let names: Vec<String> = columns.iter().map(|(name, _, _)| name.clone()).collect();
+	let array = columns
+		.iter()
+		.any(|(name, kind, _)| name == field && matches!(kind.as_str(), "_text" | "_varchar"));
+	if array {
+		return Some((format!("t.{} && ${labels}::text[]", quote_ident(field)), Vec::new()));
+	}
+	let (value, segments) = pg_access_value(field, &names, path)?;
+	Some((format!("{value} ?| ${labels}::text[]"), segments))
+}
+
+/// The Qdrant condition that keeps records whose `field` holds one of `labels`.
+#[must_use]
+pub fn qdrant_access(field: &str, labels: &[String]) -> Value {
+	serde_json::json!({ "key": field, "match": { "any": labels } })
+}
+
 /// A quoted Postgres identifier.
 #[must_use]
 pub fn quote_ident(name: &str) -> String {
@@ -216,13 +259,7 @@ pub fn pg_filter(filter: &[FieldFilter], columns: &[String], first: usize) -> Op
 	let mut conditions = Vec::with_capacity(filter.len());
 	let mut params = Vec::with_capacity(filter.len());
 	for (offset, condition) in filter.iter().enumerate() {
-		let (column, path) = match columns.iter().find(|column| **column == condition.field) {
-			Some(column) => (column, None),
-			None => {
-				let (column, path) = condition.field.split_once('.')?;
-				(columns.iter().find(|known| *known == column)?, Some(path))
-			}
-		};
+		let (column, path) = pg_column(&condition.field, columns)?;
 		let parameter = first + offset;
 		match path {
 			None => {
@@ -244,14 +281,13 @@ pub fn pg_filter(filter: &[FieldFilter], columns: &[String], first: usize) -> Op
 	Some((clause, params))
 }
 
-/// The Qdrant filter of a view, or `None` without conditions.
+/// The Qdrant filter of a view plus `extra` conditions, or `None` without any.
 #[must_use]
-pub fn qdrant_filter(filter: &[FieldFilter]) -> Option<Value> {
-	(!filter.is_empty()).then(|| {
-		let must: Vec<Value> = filter
-			.iter()
-			.map(|condition| serde_json::json!({ "key": condition.field, "match": { "value": condition.value } }))
-			.collect();
-		serde_json::json!({ "must": must })
-	})
+pub fn qdrant_filter(filter: &[FieldFilter], extra: Option<Value>) -> Option<Value> {
+	let must: Vec<Value> = filter
+		.iter()
+		.map(|condition| serde_json::json!({ "key": condition.field, "match": { "value": condition.value } }))
+		.chain(extra)
+		.collect();
+	(!must.is_empty()).then(|| serde_json::json!({ "must": must }))
 }

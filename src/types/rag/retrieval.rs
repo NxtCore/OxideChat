@@ -207,7 +207,7 @@ async fn search(state: &JobState, user_id: &Uuid, bases: &[KnowledgeBase], query
 	let vectors = query_vectors(state, user_id, &models, query).await?;
 	let searches = bases.iter().map(|base| {
 		let vector = models.iter().position(|model| *model == base.view.embedding).and_then(|index| vectors[index].as_ref());
-		search_one(state, base, vector)
+		search_one(state, user_id, base, vector)
 	});
 	let results = futures_util::future::join_all(searches).await;
 	let mut lists = Vec::with_capacity(results.len());
@@ -244,11 +244,16 @@ async fn query_vectors(state: &JobState, user_id: &Uuid, models: &[EmbeddingSett
 		.collect()
 }
 
-async fn search_one(state: &JobState, base: &KnowledgeBase, vector: Option<&Vec<f32>>) -> Option<Vec<Candidate>> {
-	let vector = vector?;
-	let connection = RagConnection::find(&state.db, &base.connection_id).await.ok()??;
-	let store = VectorStore::connect(&connection, &state.db, None).await.ok()?;
-	match store.search(&base.view, vector, CANDIDATES).await {
+/// The records of `base` nearest to `vector` that `user_id` may see.
+async fn search_store(state: &JobState, user_id: &Uuid, base: &KnowledgeBase, vector: &[f32]) -> Result<Vec<(serde_json::Value, f64)>, RagError> {
+	let labels = base.held_labels(&state.db, user_id).await?;
+	let connection = RagConnection::find(&state.db, &base.connection_id).await?.ok_or(RagError::NotFound)?;
+	let store = VectorStore::connect(&connection, &state.db, None).await?;
+	Ok(store.search(&base.view, vector, CANDIDATES, &labels).await?)
+}
+
+async fn search_one(state: &JobState, user_id: &Uuid, base: &KnowledgeBase, vector: Option<&Vec<f32>>) -> Option<Vec<Candidate>> {
+	match search_store(state, user_id, base, vector?).await {
 		Ok(records) => Some(
 			records
 				.iter()

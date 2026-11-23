@@ -1,4 +1,5 @@
 import {useMainStore} from '~/stores';
+import type {AccessLabelsResponse} from '~/types/generated/AccessLabelsResponse';
 import type {RagSetupResponse} from '~/types/generated/RagSetupResponse';
 import type {ConnectionTestResponse} from '~/types/generated/ConnectionTestResponse';
 import type {InspectRequest} from '~/types/generated/InspectRequest';
@@ -40,7 +41,12 @@ export const updateKnowledgeBase = (id: string, body: SaveKnowledgeBaseRequest) 
 
 export const deleteKnowledgeBase = (id: string) => useNuxtApp().$customFetch(`${knowledgeBase}/${id}`, {method: 'DELETE'});
 
-export const searchKnowledgeBase = (id: string, query: string) => useNuxtApp().$customFetch<KnowledgeSearchResponse>(`${knowledgeBase}/${id}/search`, {method: 'POST', body: {query}});
+export const searchKnowledgeBase = (id: string, query: string, asUser?: string | null) =>
+	useNuxtApp().$customFetch<KnowledgeSearchResponse>(`${knowledgeBase}/${id}/search`, {method: 'POST', body: {query, ...(asUser ? {as_user: asUser} : {})}});
+
+export const knowledgeAccessLabels = (id: string) => useNuxtApp().$customFetch<AccessLabelsResponse>(`${knowledgeBase}/${id}/access-labels`);
+
+export const knowledgeLabelAssignmentsPath = (id: string, label: string) => `${knowledgeBase}/${id}/access-labels/${encodeURIComponent(label)}/assignments`;
 
 export const knowledgeAssignmentsPath = (id: string) => `${knowledgeBase}/${id}/assignments`;
 

@@ -3,4 +3,8 @@
 /**
  * A test search of one knowledge base.
  */
-export type KnowledgeSearchRequest = { query: string, };
+export type KnowledgeSearchRequest = { query: string, 
+/**
+ * Search as this user (`admin.rag.edit`, audited): only the hits they would get.
+ */
+as_user?: string, };

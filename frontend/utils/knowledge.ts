@@ -9,6 +9,7 @@ export function emptyView(): ExternalView {
 		embedding: {model_id: '', dimensions: null},
 		fields: {text: '', title: null, url: null, section: null},
 		filter: [],
+		access: null,
 	};
 }
 

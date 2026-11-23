@@ -1,6 +1,6 @@
 //! Read access to the vector stores behind connections.
 
-use super::view::{field_paths, pg_filter, qdrant_filter, quote_ident, shorten};
+use super::view::{field_paths, pg_access, pg_access_value, pg_filter, qdrant_access, qdrant_filter, quote_ident, shorten};
 use super::{CollectionInfo, ConnectionKind, ConnectionMode, Distance, ExternalView, FieldFilter, RagConnection, VectorInfo};
 use crate::utils::encryption::decrypt_api_key;
 use crate::utils::outbound::{guarded_client, is_allowed_ip, private_hosts_allowed, read_limited};
@@ -18,6 +18,9 @@ const MAX_COLLECTIONS: i64 = 500;
 const MIN_PGVECTOR: (u32, u32) = (0, 8);
 const SAMPLE_SIZE: i64 = 3;
 const MAX_SEARCH_HITS: u32 = 50;
+
+/// Most distinct access labels discovery reads from a collection.
+pub const MAX_ACCESS_LABELS: u32 = 500;
 
 /// Why a vector store could not be used; translated as `rag.store_error.<value>` and never carries the server's own text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, thiserror::Error)]
@@ -87,6 +90,16 @@ struct QdrantResult<T> {
 #[derive(Deserialize)]
 struct QdrantPoints {
 	points: Vec<QdrantPoint>,
+}
+
+#[derive(Deserialize)]
+struct QdrantFacet {
+	hits: Vec<QdrantFacetHit>,
+}
+
+#[derive(Deserialize)]
+struct QdrantFacetHit {
+	value: Value,
 }
 
 #[derive(Deserialize)]
@@ -257,7 +270,7 @@ impl<'a> VectorStore<'a> {
 				let info: QdrantResult<Value> = qdrant.send(reqwest::Method::GET, &["collections", collection], None).await?;
 				let vectors = qdrant_vectors(info.result.pointer("/config/params/vectors").unwrap_or(&Value::Null));
 				let mut body = serde_json::json!({ "limit": SAMPLE_SIZE, "with_payload": true, "with_vector": false });
-				if let Some(filter) = qdrant_filter(filter) {
+				if let Some(filter) = qdrant_filter(filter, None) {
 					body["filter"] = filter;
 				}
 				let points: QdrantResult<QdrantPoints> = qdrant
@@ -275,17 +288,29 @@ impl<'a> VectorStore<'a> {
 
 	/// The `limit` records of `view` nearest to `vector` as (payload, score), nearest first.
 	///
+	/// With per-record access (`view.access`) only records listing one of `labels` are searched, inside the query so the limit is not cut short;
+	/// without labels nothing is.
+	///
 	/// # Errors
 	///
 	/// Returns a `StoreError` when the store cannot be read, the collection is missing or the view names an unknown field.
-	pub async fn search(&self, view: &ExternalView, vector: &[f32], limit: u32) -> Result<Vec<(Value, f64)>, StoreError> {
+	pub async fn search(&self, view: &ExternalView, vector: &[f32], limit: u32, labels: &[String]) -> Result<Vec<(Value, f64)>, StoreError> {
 		let limit = limit.clamp(1, MAX_SEARCH_HITS);
+		if view.access.is_some() && labels.is_empty() {
+			return Ok(Vec::new());
+		}
 		match self {
 			Self::Pgvector(pool) => {
 				let table = pg_table(pool, &view.collection).await?;
 				let column = view.vector_name.as_deref().ok_or(StoreError::UnknownField)?;
 				let kind = table.vector_type(column).ok_or(StoreError::UnknownField)?;
-				let (clause, params) = pg_filter(&view.filter, &table.columns(), 4).ok_or(StoreError::UnknownField)?;
+				let (mut clause, params) = pg_filter(&view.filter, &table.columns(), 6).ok_or(StoreError::UnknownField)?;
+				let mut path = Vec::new();
+				if let Some(field) = &view.access {
+					let (condition, segments) = pg_access(field, &table.columns, 4, 5).ok_or(StoreError::UnknownField)?;
+					clause = if clause.is_empty() { format!(" WHERE {condition}") } else { format!("{clause} AND {condition}") };
+					path = segments;
+				}
 				let cast = if kind == "halfvec" { "::vector::halfvec" } else { "::vector" };
 				let distance = format!("(t.{} {} $2::real[]{cast})", quote_ident(column), view.distance.pg_operator());
 				let sql = format!(
@@ -295,7 +320,9 @@ impl<'a> VectorStore<'a> {
 				let query = sqlx::query_as::<_, (Value, f64)>(AssertSqlSafe(sql))
 					.bind(table.vector_columns())
 					.bind(vector)
-					.bind(i64::from(limit));
+					.bind(i64::from(limit))
+					.bind(labels)
+					.bind(path);
 				let query = params.iter().fold(query, sqlx::query::QueryAs::bind);
 				let mut tx = timed(pool.begin()).await?;
 				timed(sqlx::query("SET LOCAL hnsw.iterative_scan = relaxed_order").execute(&mut *tx)).await?;
@@ -307,7 +334,8 @@ impl<'a> VectorStore<'a> {
 				if let Some(name) = &view.vector_name {
 					body["using"] = Value::String(name.clone());
 				}
-				if let Some(filter) = qdrant_filter(&view.filter) {
+				let access = view.access.as_deref().map(|field| qdrant_access(field, labels));
+				if let Some(filter) = qdrant_filter(&view.filter, access) {
 					body["filter"] = filter;
 				}
 				let points: QdrantResult<QdrantPoints> = qdrant
@@ -321,6 +349,48 @@ impl<'a> VectorStore<'a> {
 					.collect())
 			}
 		}
+	}
+
+	/// Up to [`MAX_ACCESS_LABELS`] distinct labels in the view's access field, sorted; empty without per-record access.
+	///
+	/// Qdrant needs a keyword payload index on the field to count them.
+	///
+	/// # Errors
+	///
+	/// Returns a `StoreError` when the store cannot be read or the field is unknown.
+	pub async fn access_labels(&self, view: &ExternalView) -> Result<Vec<String>, StoreError> {
+		let Some(field) = &view.access else {
+			return Ok(Vec::new());
+		};
+		let mut labels: Vec<String> = match self {
+			Self::Pgvector(pool) => {
+				let table = pg_table(pool, &view.collection).await?;
+				let columns = table.columns();
+				let (value, path) = pg_access_value(field, &columns, 1).ok_or(StoreError::UnknownField)?;
+				let (clause, params) = pg_filter(&view.filter, &columns, 3).ok_or(StoreError::UnknownField)?;
+				let sql = format!(
+					"SELECT DISTINCT label FROM (SELECT {value} AS v FROM {} t{clause}) r,
+					 jsonb_array_elements_text(CASE jsonb_typeof(r.v) WHEN 'array' THEN r.v ELSE jsonb_build_array(r.v) END) AS label
+					 WHERE label IS NOT NULL ORDER BY label LIMIT $2",
+					table.from
+				);
+				let query = sqlx::query_scalar::<_, String>(AssertSqlSafe(sql)).bind(path).bind(i64::from(MAX_ACCESS_LABELS));
+				timed(params.iter().fold(query, sqlx::query::QueryScalar::bind).fetch_all(pool.as_ref())).await?
+			}
+			Self::Qdrant(qdrant) => {
+				let mut body = serde_json::json!({ "key": field, "limit": MAX_ACCESS_LABELS, "exact": false });
+				if let Some(filter) = qdrant_filter(&view.filter, None) {
+					body["filter"] = filter;
+				}
+				let facet: QdrantResult<QdrantFacet> = qdrant
+					.send(reqwest::Method::POST, &["collections", &view.collection, "facet"], Some(&body))
+					.await?;
+				facet.result.hits.into_iter().filter_map(|hit| hit.value.as_str().map(str::to_string)).collect()
+			}
+		};
+		labels.sort();
+		labels.dedup();
+		Ok(labels)
 	}
 }
 

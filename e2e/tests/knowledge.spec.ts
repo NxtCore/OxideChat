@@ -1,7 +1,7 @@
 import type {Page} from '@playwright/test';
 import {test, expect, Api} from './support/fixtures';
 import {uniqueName} from './support/gateway';
-import {AUTH_FILES, LLM, MOCK_LLM_KEY, MOCK_LLM_URL} from './support/constants';
+import {AUTH_FILES, LLM, MEMBER, MOCK_LLM_KEY, MOCK_LLM_URL} from './support/constants';
 
 const CONNECTION = 'E2E handbook store';
 const BASE = 'E2E handbook';
@@ -197,6 +197,53 @@ test.describe('knowledge bases', () => {
 		} finally {
 			await member.close();
 			await page.request.put(`/api/v1/knowledge-bases/${baseId}/model-access`, {data: {providers: [], upstream_providers: [], models: []}});
+		}
+	});
+
+	test('records list who may see them: an admin maps labels to people and searches as a member', async ({page, browser, baseURL, t}) => {
+		const access = {...view(connectionId, 'intranet', embed.modelId), access: 'oxide_access'};
+		const created = await page.request.post('/api/v1/knowledge-bases', {data: {name: 'E2E intranet', view: access}});
+		expect(created.status()).toBe(200);
+		const intranetId = (await created.json()).id;
+		await page.request.put(`/api/v1/knowledge-bases/${intranetId}/assignments`, {data: {targets: [{kind: 'everyone'}]}});
+		const users = await (await page.request.get('/api/v1/admin/users', {params: {page: 1, size: 5, search: MEMBER.username}})).json();
+		const member = users.items.find((user: {username: string}) => user.username === MEMBER.username);
+
+		await page.goto(`/settings/knowledge/${intranetId}?tab=source`);
+		await expect(page.getByTestId('knowledge-source-access-field')).toContainText('oxide_access');
+		await expect(page.getByTestId('knowledge-source-access-note')).toHaveCount(0);
+
+		await page.getByTestId('knowledge-tab-access').click();
+		await expect(page.getByTestId('knowledge-access-unassigned')).toContainText(t('knowledge.access.unassigned', {count: '3'}));
+		await page.getByTestId('knowledge-access-label-HR Members').click();
+		await page.getByTestId('knowledge-access-holders-add').click();
+		await page.getByTestId('knowledge-access-holders-search').fill(MEMBER.username);
+		await page.getByTestId(`knowledge-access-holders-option-user:${member.id}`).click();
+		await expect(page.getByText(t('assignments.save_success')).first()).toBeVisible();
+		await expect(page.getByTestId('knowledge-access-unassigned')).toContainText(t('knowledge.access.unassigned', {count: '2'}));
+
+		await page.getByTestId('knowledge-tab-search').click();
+		await page.getByTestId('knowledge-search-query').fill('What is confidential?');
+		await page.getByTestId('knowledge-search-run').click();
+		await expect(page.getByTestId('knowledge-search-empty')).toBeVisible();
+
+		await page.getByTestId('knowledge-search-as').click();
+		await page.getByTestId('knowledge-search-as-search').fill(MEMBER.username);
+		await page.getByTestId(`knowledge-search-as-user-${member.id}`).click();
+		await page.getByTestId('knowledge-search-run').click();
+		const hits = page.getByTestId('knowledge-search-hit');
+		await expect(hits).toHaveCount(1);
+		await expect(hits.first()).toContainText('Salary bands are reviewed in March.');
+		await expect(page.getByTestId('knowledge-search-explanation')).toContainText(t('knowledge.search.explain_held', {name: MEMBER.username, held: '1', labels: '3'}));
+
+		const memberContext = await browser.newContext({baseURL, storageState: AUTH_FILES.member});
+		try {
+			const own = await (await memberContext.request.post(`/api/v1/knowledge-bases/${intranetId}/search`, {data: {query: 'anything'}})).json();
+			expect(own.hits.map((hit: {text: string}) => hit.text)).toEqual(['Salary bands are reviewed in March.']);
+			const spying = await memberContext.request.post(`/api/v1/knowledge-bases/${intranetId}/search`, {data: {query: 'anything', as_user: member.id}});
+			expect(spying.status()).toBe(403);
+		} finally {
+			await memberContext.close();
 		}
 	});
 });

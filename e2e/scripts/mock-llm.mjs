@@ -123,14 +123,31 @@ const QDRANT_COLLECTIONS = {
 		],
 	},
 	wide: {size: 4, points: []},
+	// Every record lists who may see it in `oxide_access`; one lists nobody and must never be found.
+	intranet: {
+		size: 3,
+		points: [
+			{id: 1, vector: [0.1, 0.2, 0.3], payload: {page_content: 'Salary bands are reviewed in March.', oxide_access: ['HR Members']}},
+			{id: 2, vector: [0.2, 0.2, 0.2], payload: {page_content: 'Deploys freeze on Fridays.', oxide_access: ['space:ENG', 'site-42/owners']}},
+			{id: 3, vector: [0.3, 0.2, 0.1], payload: {page_content: 'Board minutes are confidential.'}},
+		],
+	},
 };
 
+function qdrantValue(point, key) {
+	return key.split('.').reduce((value, part) => value?.[part], point.payload);
+}
+
 function qdrantMatches(point, filter) {
-	return (filter?.must ?? []).every(condition => condition.key.split('.').reduce((value, key) => value?.[key], point.payload) === condition.match.value);
+	return (filter?.must ?? []).every(condition => {
+		const value = qdrantValue(point, condition.key);
+		if (condition.match.any) return [value].flat().some(item => condition.match.any.includes(item));
+		return value === condition.match.value;
+	});
 }
 
 async function qdrant(req, res, path) {
-	const [, collection, action] = path.match(/^\/collections\/([^/]+)(?:\/points\/(\w+))?$/) ?? [];
+	const [, collection, action] = path.match(/^\/collections\/([^/]+)(?:\/(?:points\/)?(\w+))?$/) ?? [];
 	const found = QDRANT_COLLECTIONS[collection];
 	if (req.method === 'GET' && path === '/') return sendJson(res, 200, {title: 'qdrant - vector search engine', version: '1.12.0'});
 	if (req.method === 'GET' && path === '/collections') {
@@ -142,6 +159,11 @@ async function qdrant(req, res, path) {
 	}
 	const body = await readBody(req);
 	const points = found.points.filter(point => qdrantMatches(point, body.filter));
+	if (action === 'facet') {
+		const counts = new Map();
+		for (const point of points) for (const label of [qdrantValue(point, body.key) ?? []].flat()) counts.set(label, (counts.get(label) ?? 0) + 1);
+		return sendJson(res, 200, {result: {hits: [...counts].map(([value, count]) => ({value, count}))}});
+	}
 	if (action === 'scroll') return sendJson(res, 200, {result: {points: points.slice(0, body.limit).map(({id, payload}) => ({id, payload})), next_page_offset: null}});
 	if (action === 'query') {
 		const score = point => point.vector.reduce((sum, value, index) => sum + value * body.query[index], 0);

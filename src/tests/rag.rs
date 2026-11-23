@@ -280,7 +280,9 @@ mod stores {
 
 #[cfg(test)]
 mod views {
-	use crate::types::rag::{Distance, EmbeddingSettings, ExternalView, FieldFilter, FieldMapping, field_paths, field_text, pg_filter, qdrant_filter, shorten};
+	use crate::types::rag::{
+		Distance, EmbeddingSettings, ExternalView, FieldFilter, FieldMapping, field_paths, field_text, pg_access, pg_filter, qdrant_access, qdrant_filter, shorten,
+	};
 	use serde_json::json;
 	use uuid::Uuid;
 
@@ -301,6 +303,7 @@ mod views {
 				section: None,
 			},
 			filter: Vec::new(),
+			access: None,
 		}
 	}
 
@@ -356,12 +359,40 @@ mod views {
 
 	#[test]
 	fn qdrant_filters_match_every_condition() {
-		assert_eq!(qdrant_filter(&[]), None);
+		assert_eq!(qdrant_filter(&[], None), None);
 		let filter = vec![FieldFilter {
 			field: "metadata.site".to_string(),
 			value: json!("HR"),
 		}];
-		assert_eq!(qdrant_filter(&filter), Some(json!({"must": [{"key": "metadata.site", "match": {"value": "HR"}}]})));
+		assert_eq!(qdrant_filter(&filter, None), Some(json!({"must": [{"key": "metadata.site", "match": {"value": "HR"}}]})));
+		let labels = vec!["HR Members".to_string()];
+		assert_eq!(
+			qdrant_filter(&filter, Some(qdrant_access("oxide_access", &labels))),
+			Some(json!({"must": [
+				{"key": "metadata.site", "match": {"value": "HR"}},
+				{"key": "oxide_access", "match": {"any": ["HR Members"]}}
+			]}))
+		);
+		assert_eq!(qdrant_filter(&[], Some(qdrant_access("acl", &[]))), Some(json!({"must": [{"key": "acl", "match": {"any": []}}]})));
+	}
+
+	#[test]
+	fn access_filters_match_inside_the_query_and_only_known_columns() {
+		let columns = vec![
+			("oxide_access".to_string(), "_text".to_string(), -1),
+			("metadata".to_string(), "jsonb".to_string(), -1),
+		];
+		assert_eq!(pg_access("oxide_access", &columns, 4, 5), Some(("t.\"oxide_access\" && $4::text[]".to_string(), Vec::new())));
+		assert_eq!(
+			pg_access("metadata.acl.groups", &columns, 4, 5),
+			Some(("(to_jsonb(t.\"metadata\") #> $5::text[]) ?| $4::text[]".to_string(), vec!["acl".to_string(), "groups".to_string()]))
+		);
+		assert_eq!(
+			pg_access("metadata", &columns, 4, 5),
+			Some(("(to_jsonb(t.\"metadata\") #> $5::text[]) ?| $4::text[]".to_string(), Vec::new()))
+		);
+		assert_eq!(pg_access("unknown", &columns, 4, 5), None);
+		assert_eq!(pg_access("x; DROP TABLE y", &columns, 4, 5), None);
 	}
 
 	#[test]
@@ -378,6 +409,9 @@ mod views {
 			value: json!({"$ne": "HR"}),
 		}];
 		assert_eq!(reason(&nested), Err("invalid_filter"));
+		let mut access = view("docs", None);
+		access.access = Some(" ".to_string());
+		assert_eq!(reason(&access), Err("invalid_field"));
 	}
 
 	#[test]
@@ -572,6 +606,71 @@ mod knowledge_bases {
 	}
 
 	#[sqlx::test]
+	async fn labels_are_held_through_teams_roles_and_users_and_checked_live(pool: PgPool) -> TestResult {
+		let fixture = fixture(&pool).await?;
+		let member = insert_user(&pool, "member").await?;
+		let holder = insert_user(&pool, "holder").await?;
+		let named = insert_user(&pool, "named").await?;
+		let outsider = insert_user(&pool, "outsider").await?;
+		let team: Uuid = sqlx::query_scalar("INSERT INTO teams (name) VALUES ('HR') RETURNING id").fetch_one(&pool).await?;
+		sqlx::query("INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)")
+			.bind(team)
+			.bind(member)
+			.execute(&pool)
+			.await?;
+		let role: Uuid = sqlx::query_scalar("INSERT INTO roles (name) VALUES ('engineers') RETURNING id").fetch_one(&pool).await?;
+		sqlx::query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)")
+			.bind(holder)
+			.bind(role)
+			.execute(&pool)
+			.await?;
+		let base = KnowledgeBase::find(&pool, &fixture.admin, &fixture.base).await?.ok_or("missing")?;
+		let map = |label: &'static str, kind, id| {
+			let base = base.clone();
+			let pool = pool.clone();
+			let admin = fixture.admin;
+			async move { base.replace_label_assignments(&pool, &admin, label, &targets(&[(kind, Some(id), None)])).await }
+		};
+
+		let refused = base.replace_label_assignments(&pool, &user(member), "HR Members", &targets(&[(AssignmentKind::Team, Some(team), None)])).await;
+		assert!(matches!(refused, Err(RagError::Forbidden)));
+		assert!(matches!(map("", AssignmentKind::Team, team).await, Err(RagError::InvalidLabel)));
+		let everyone = base.replace_label_assignments(&pool, &fixture.admin, "HR Members", &targets(&[(AssignmentKind::Everyone, None, None)])).await;
+		assert!(matches!(everyone, Err(RagError::InvalidAssignment)));
+		assert!(matches!(map("HR Members", AssignmentKind::Team, Uuid::new_v4()).await, Err(RagError::InvalidAssignment)));
+
+		map("HR Members", AssignmentKind::Team, team).await?;
+		map("space:ENG", AssignmentKind::Role, role).await?;
+		map("site-42/owners", AssignmentKind::User, named).await?;
+		assert!(base.held_labels(&pool, &member).await?.is_empty(), "labels only count with per-record access");
+
+		sqlx::query("UPDATE knowledge_bases SET view = jsonb_set(view, '{access}', '\"oxide_access\"') WHERE id = $1")
+			.bind(base.id)
+			.execute(&pool)
+			.await?;
+		let base = KnowledgeBase::find(&pool, &fixture.admin, &fixture.base).await?.ok_or("missing")?;
+		assert_eq!(base.held_labels(&pool, &member).await?, ["HR Members"]);
+		assert_eq!(base.held_labels(&pool, &holder).await?, ["space:ENG"]);
+		assert_eq!(base.held_labels(&pool, &named).await?, ["site-42/owners"]);
+		assert!(base.held_labels(&pool, &outsider).await?.is_empty());
+
+		sqlx::query("DELETE FROM team_members WHERE user_id = $1").bind(member).execute(&pool).await?;
+		assert!(base.held_labels(&pool, &member).await?.is_empty());
+
+		let holders = base.label_assignments(&pool, &fixture.admin, "space:ENG").await?;
+		assert_eq!(holders.targets.iter().map(|target| target.id).collect::<Vec<_>>(), [Some(role)]);
+		assert!(base.label_assignments(&pool, &user(member), "space:ENG").await?.kinds.is_empty());
+		base.replace_label_assignments(&pool, &fixture.admin, "space:ENG", &targets(&[])).await?;
+		assert!(base.held_labels(&pool, &holder).await?.is_empty());
+
+		let events: Vec<String> = sqlx::query_scalar("SELECT event FROM audit_logs WHERE event = 'knowledge_base_access_label_updated'")
+			.fetch_all(&pool)
+			.await?;
+		assert_eq!(events.len(), 4);
+		Ok(())
+	}
+
+	#[sqlx::test]
 	async fn a_connection_in_use_cannot_be_deleted(pool: PgPool) -> TestResult {
 		let fixture = fixture(&pool).await?;
 		assert!(matches!(
@@ -658,7 +757,7 @@ mod pgvector {
 			.await?;
 		if parse_version(&version) < (0, 8) {
 			let hr = view("docs.\"Chunks\"", Some("embedding"));
-			assert_eq!(store.search(&hr, &[1.0, 0.0, 0.0], 5).await.err(), Some(StoreError::ExtensionTooOld));
+			assert_eq!(store.search(&hr, &[1.0, 0.0, 0.0], 5, &[]).await.err(), Some(StoreError::ExtensionTooOld));
 			return Ok(());
 		}
 		for column in columns {
@@ -668,16 +767,89 @@ mod pgvector {
 				field: "site".to_string(),
 				value: json!("HR"),
 			}];
-			let records = store.search(&hr, &[1.0, 0.05, 0.0], 5).await?;
+			let records = store.search(&hr, &[1.0, 0.05, 0.0], 5, &[]).await?;
 			let hits: Vec<String> = records.iter().filter_map(|(payload, score)| hr.hit(payload, *score)).map(|hit| hit.text).collect();
 			assert_eq!(hits, ["Holiday rules", "Expense rules"], "{column}");
 			assert!(records[0].1 > records[1].1);
 			hr.distance = Distance::Euclid;
-			assert_eq!(store.search(&hr, &[0.0, 1.0, 0.0], 1).await?.len(), 1);
+			assert_eq!(store.search(&hr, &[0.0, 1.0, 0.0], 1, &[]).await?.len(), 1);
 		}
 		let mut wrong = view("docs.\"Chunks\"", Some("page_content"));
 		wrong.fields.text = "page_content".to_string();
-		assert_eq!(store.search(&wrong, &[1.0, 0.0, 0.0], 1).await.err(), Some(StoreError::UnknownField));
+		assert_eq!(store.search(&wrong, &[1.0, 0.0, 0.0], 1, &[]).await.err(), Some(StoreError::UnknownField));
+		Ok(())
+	}
+	/// Records list who may see them in a `text[]` column and, nested, in a JSON column; one record lists nobody.
+	async fn labelled(pool: &PgPool) -> TestResult<bool> {
+		sqlx::query("CREATE EXTENSION IF NOT EXISTS vector").execute(pool).await?;
+		let version: String = sqlx::query_scalar("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+			.fetch_one(pool)
+			.await?;
+		sqlx::query("CREATE TABLE acl (page_content text, site text, oxide_access text[], metadata jsonb, embedding vector(3))")
+			.execute(pool)
+			.await?;
+		sqlx::query(
+			"INSERT INTO acl VALUES
+			 ('HR only', 'intranet', ARRAY['HR Members'], '{\"acl\": {\"groups\": [\"HR Members\"]}}', '[1,0,0]'),
+			 ('Engineering', 'intranet', ARRAY['space:ENG', 'site-42/owners'], '{\"acl\": {\"groups\": \"space:ENG\"}}', '[0.9,0.1,0]'),
+			 ('Nobody listed', 'intranet', NULL, '{}', '[1,0,0]'),
+			 ('Other site', 'extranet', ARRAY['HR Members'], '{\"acl\": {\"groups\": [\"HR Members\"]}}', '[1,0,0]')",
+		)
+		.execute(pool)
+		.await?;
+		Ok(parse_version(&version) >= (0, 8))
+	}
+
+	#[sqlx::test]
+	async fn search_only_finds_records_listing_a_held_label(pool: PgPool) -> TestResult {
+		if !labelled(&pool).await? {
+			return Ok(());
+		}
+		let store = VectorStore::Pgvector(Cow::Borrowed(&pool));
+		for field in ["oxide_access", "metadata.acl.groups"] {
+			let mut acl = view("acl", Some("embedding"));
+			acl.filter = vec![FieldFilter {
+				field: "site".to_string(),
+				value: json!("intranet"),
+			}];
+			acl.access = Some(field.to_string());
+			let texts = |records: Vec<(serde_json::Value, f64)>| -> Vec<String> {
+				records.iter().filter_map(|(payload, score)| acl.hit(payload, *score)).map(|hit| hit.text).collect()
+			};
+			let hr = vec!["HR Members".to_string()];
+			assert_eq!(texts(store.search(&acl, &[1.0, 0.0, 0.0], 10, &hr).await?), ["HR only"], "{field}");
+			let both = vec!["HR Members".to_string(), "space:ENG".to_string()];
+			assert_eq!(texts(store.search(&acl, &[1.0, 0.0, 0.0], 10, &both).await?), ["HR only", "Engineering"], "{field}");
+			assert!(store.search(&acl, &[1.0, 0.0, 0.0], 10, &[]).await?.is_empty(), "{field}");
+			let stranger = vec!["Sales".to_string()];
+			assert!(store.search(&acl, &[1.0, 0.0, 0.0], 10, &stranger).await?.is_empty(), "{field}");
+		}
+		let mut open = view("acl", Some("embedding"));
+		open.filter = vec![FieldFilter {
+			field: "site".to_string(),
+			value: json!("intranet"),
+		}];
+		assert_eq!(store.search(&open, &[1.0, 0.0, 0.0], 10, &[]).await?.len(), 3);
+		let mut unknown = open.clone();
+		unknown.access = Some("missing".to_string());
+		assert_eq!(store.search(&unknown, &[1.0, 0.0, 0.0], 10, &["x".to_string()]).await.err(), Some(StoreError::UnknownField));
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn access_labels_are_discovered_inside_the_fixed_filter(pool: PgPool) -> TestResult {
+		labelled(&pool).await?;
+		let store = VectorStore::Pgvector(Cow::Borrowed(&pool));
+		let mut acl = view("acl", Some("embedding"));
+		assert!(store.access_labels(&acl).await?.is_empty());
+		acl.access = Some("oxide_access".to_string());
+		assert_eq!(store.access_labels(&acl).await?, ["HR Members", "site-42/owners", "space:ENG"]);
+		acl.access = Some("metadata.acl.groups".to_string());
+		acl.filter = vec![FieldFilter {
+			field: "site".to_string(),
+			value: json!("intranet"),
+		}];
+		assert_eq!(store.access_labels(&acl).await?, ["HR Members", "space:ENG"]);
 		Ok(())
 	}
 }

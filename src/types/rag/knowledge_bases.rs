@@ -412,28 +412,30 @@ impl KnowledgeBase {
 		Ok(())
 	}
 
-	/// Searches the knowledge base for `query`, billing the query embedding to `user_id` as `rag_query`.
+	/// Searches the knowledge base for `query` with the access `labels` of whoever the search is for, billing the query embedding to `user_id` as `rag_query`.
 	///
 	/// A store that cannot be reached is reported in the response, not as an error.
 	///
 	/// # Errors
 	///
 	/// Returns why the query could not be embedded, or a database error.
-	pub async fn search(&self, state: &JobState, user_id: &Uuid, query: &str, limit: u32) -> Result<KnowledgeSearchResponse, RagError> {
+	pub async fn search(&self, state: &JobState, user_id: &Uuid, query: &str, labels: &[String]) -> Result<KnowledgeSearchResponse, RagError> {
 		let connection = RagConnection::find(&state.db, &self.connection_id).await?.ok_or(RagError::NotFound)?;
 		let vector = embed(state, user_id, &self.view.embedding, query, "rag_query").await?;
 		let result = match VectorStore::connect(&connection, &state.db, None).await {
-			Ok(store) => store.search(&self.view, &vector, limit).await,
+			Ok(store) => store.search(&self.view, &vector, TEST_SEARCH_HITS, labels).await,
 			Err(error) => Err(error),
 		};
 		Ok(match result {
 			Ok(records) => KnowledgeSearchResponse {
 				error: None,
 				hits: records.iter().filter_map(|(payload, score)| self.view.hit(payload, *score)).collect(),
+				access: None,
 			},
 			Err(error) => KnowledgeSearchResponse {
 				error: Some(error),
 				hits: Vec::new(),
+				access: None,
 			},
 		})
 	}

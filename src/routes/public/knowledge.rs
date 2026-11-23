@@ -2,8 +2,8 @@
 
 use crate::types::consts::{ADMIN_RAG_EDIT, ADMIN_RAG_VIEW};
 use crate::types::rag::{
-	KnowledgeActor, KnowledgeBase, KnowledgeBaseResponse, KnowledgeSearchRequest, ModelTargets, RagError, RoutedModel, SaveKnowledgeBaseRequest, TEST_SEARCH_HITS,
-	check_embedding_allowed, check_view,
+	KnowledgeActor, KnowledgeBase, KnowledgeBaseResponse, KnowledgeSearchRequest, KnowledgeSearchResponse, ModelTargets, RagError, RoutedModel, SaveKnowledgeBaseRequest,
+	check_embedding_allowed, check_label, check_view,
 };
 use crate::types::{AppError, AuthUser, JobState, ReplaceAssignmentsRequest, User, json_ok};
 use axum::{
@@ -134,7 +134,8 @@ pub async fn replace_assignments(
 
 /// POST /api/v1/knowledge-bases/{id}/search
 ///
-/// A test search as the user, for bases shared with them or by knowledge admins (`admin.rag.edit`); the query embedding is billed to them.
+/// A test search with the user's own access, for bases shared with them or by knowledge admins (`admin.rag.edit`); the query embedding is billed to them.
+/// With `as_user`, a knowledge admin gets exactly that user's hits and why (audited as `rag_search_as`).
 pub async fn search(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>, Json(req): Json<KnowledgeSearchRequest>) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
 	let query = req.query()?;
@@ -142,7 +143,58 @@ pub async fn search(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id)
 	if !actor.can_search(&base) {
 		return Err(RagError::Forbidden.into());
 	}
-	json_ok(base.search(&state, &auth.id, query, TEST_SEARCH_HITS).await?)
+	let Some(user_id) = req.as_user else {
+		let labels = base.held_labels(&state.db, &auth.id).await?;
+		return json_ok(base.search(&state, &auth.id, query, &labels).await?);
+	};
+	if !actor.manage {
+		return Err(RagError::Forbidden.into());
+	}
+	base.audit_search_as(&state.db, &auth.id, &user_id, query).await?;
+	let (access, labels) = base.access_for(&state, &user_id).await?;
+	let mut result = if access.usable {
+		base.search(&state, &auth.id, query, &labels).await?
+	} else {
+		KnowledgeSearchResponse::default()
+	};
+	result.access = Some(access);
+	json_ok(result)
+}
+
+/// GET /api/v1/knowledge-bases/{id}/access-labels
+///
+/// For knowledge admins: the labels found in the collection and the mapped ones, with how many hold each.
+pub async fn access_labels(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
+	let actor = actor(&state, &auth).await?;
+	if !actor.view_all {
+		return Err(RagError::Forbidden.into());
+	}
+	json_ok(find(&state, &actor, &id).await?.access_labels(&state).await?)
+}
+
+/// GET /api/v1/knowledge-bases/{id}/access-labels/{label}/assignments
+pub async fn get_label_assignments(State(state): State<Arc<JobState>>, auth: AuthUser, Path((id, label)): Path<(Uuid, String)>) -> Result<Response, AppError> {
+	let actor = actor(&state, &auth).await?;
+	if !actor.view_all {
+		return Err(RagError::Forbidden.into());
+	}
+	let label = check_label(&label)?;
+	json_ok(find(&state, &actor, &id).await?.label_assignments(&state.db, &actor, label).await?)
+}
+
+/// PUT /api/v1/knowledge-bases/{id}/access-labels/{label}/assignments
+///
+/// Knowledge admins replace the teams, roles and users holding a label.
+pub async fn replace_label_assignments(
+	State(state): State<Arc<JobState>>,
+	auth: AuthUser,
+	Path((id, label)): Path<(Uuid, String)>,
+	Json(req): Json<ReplaceAssignmentsRequest>,
+) -> Result<Response, AppError> {
+	let actor = actor(&state, &auth).await?;
+	let base = find(&state, &actor, &id).await?;
+	base.replace_label_assignments(&state.db, &actor, &label, &req).await?;
+	json_ok(base.label_assignments(&state.db, &actor, &label).await?)
 }
 
 /// GET /api/v1/knowledge-bases/{id}/model-access

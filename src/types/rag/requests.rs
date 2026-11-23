@@ -81,6 +81,10 @@ pub struct InspectRequest {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct KnowledgeSearchRequest {
 	pub query: String,
+	/// Search as this user (`admin.rag.edit`, audited): only the hits they would get.
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub as_user: Option<Uuid>,
 }
 
 impl KnowledgeSearchRequest {

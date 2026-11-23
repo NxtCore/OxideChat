@@ -23,4 +23,8 @@ distance: Distance,
 /**
  * The model that built the collection; its vectors must have the collection's size.
  */
-embedding: EmbeddingSettings, fields: FieldMapping, filter: Array<FieldFilter>, };
+embedding: EmbeddingSettings, fields: FieldMapping, filter: Array<FieldFilter>, 
+/**
+ * The payload field that lists who may see each record (labels such as `HR Members`); `None`: everyone who may use the knowledge base sees every record.
+ */
+access: string | null, };
