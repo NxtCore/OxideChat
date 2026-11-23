@@ -38,7 +38,7 @@ mod sampling {
 
 	#[test]
 	fn reserved_or_malformed_custom_keys_are_rejected() {
-		for key in ["model", "Model", "messages", "stream", "tools", "", "has space", "quote\"key"] {
+		for key in ["model", "Model", "messages", "stream", "tools", "allowed_providers", "Provider_Order", "", "has space", "quote\"key"] {
 			let value = sampling(json!({"custom": {key: 1}}));
 			assert!(!value.is_valid(), "{key}");
 		}

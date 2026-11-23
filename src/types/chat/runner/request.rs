@@ -242,7 +242,13 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 		config: inputs.system_config,
 		model: inputs.model,
 	});
-	ir.extra_body.clone_from(&inputs.chat_sampling.custom);
+	ir.extra_body = inputs
+		.chat_sampling
+		.custom
+		.iter()
+		.filter(|(key, _)| !crate::types::chat::is_routing_custom_key(key))
+		.map(|(key, value)| (key.clone(), value.clone()))
+		.collect();
 	ir.reasoning = merge_reasoning_with_priority(
 		req.reasoning_effort.as_ref(),
 		req.reasoning_budget_tokens,
