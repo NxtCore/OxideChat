@@ -61,6 +61,7 @@ import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
 import {useKnowledgeStore} from '~/stores/knowledgeStore';
 import type {KnowledgeBaseResponse} from '~/types/generated/KnowledgeBaseResponse';
+import {baseModelId} from '~/utils/presets';
 import ReasoningSelector from './ReasoningSelector.vue';
 import SamplingSelector from './SamplingSelector.vue';
 import ProviderSelector from './ProviderSelector.vue';
@@ -74,8 +75,7 @@ const knowledgeEnabled = computed(() => Boolean(store.base?.rag?.enabled));
 /** Whether the knowledge base's model access lets it reach the selected model; the server checks this again. */
 function knowledgeAllowed(base: KnowledgeBaseResponse) {
 	const model = modelStore.selectedModel;
-	const modelId = model?.level?.model_id ?? model?.id;
-	return !base.allowed_model_ids || !modelId || base.allowed_model_ids.includes(modelId);
+	return !base.allowed_model_ids || !model || base.allowed_model_ids.includes(baseModelId(model));
 }
 const knowledgeVisible = computed(() => knowledgeEnabled.value && knowledgeStore.usable.length > 0);
 

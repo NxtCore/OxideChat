@@ -76,18 +76,18 @@ impl ModelTargets {
 		self.providers.is_empty() && self.upstream_providers.is_empty() && self.models.is_empty()
 	}
 
-	/// Whether `model` may see the content: a listed model is allowed, a routing provider with upstream providers listed
-	/// is narrowed to them, and otherwise its provider must be listed.
+	/// Whether `model` may see the content: a listed model is allowed, otherwise its provider must be listed, and a
+	/// listed routing provider is narrowed to the listed upstream providers.
 	#[must_use]
 	pub fn decide(&self, model: &RoutedModel) -> ModelAccess {
 		if self.is_unrestricted() || self.models.contains(&model.id) {
 			ModelAccess::Allowed
+		} else if !self.providers.contains(&model.provider_id) {
+			ModelAccess::Denied
 		} else if model.kind.routes_upstream() && !self.upstream_providers.is_empty() {
 			ModelAccess::Upstream(self.upstream_providers.clone())
-		} else if self.providers.contains(&model.provider_id) {
-			ModelAccess::Allowed
 		} else {
-			ModelAccess::Denied
+			ModelAccess::Allowed
 		}
 	}
 
@@ -302,6 +302,22 @@ impl KnowledgeBase {
 		)
 		.await?;
 		tx.commit().await?;
+		Ok(())
+	}
+
+	/// Gives a branched chat the knowledge sources of the chat it was branched from, since it holds the same excerpts.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the insert fails.
+	pub async fn copy_chat_sources(pool: &PgPool, from_chat_id: &Uuid, to_chat_id: &Uuid) -> Result<(), sqlx::Error> {
+		sqlx::query(
+			"INSERT INTO chat_knowledge_sources (chat_id, knowledge_base_id) SELECT $2, knowledge_base_id FROM chat_knowledge_sources WHERE chat_id = $1 ON CONFLICT DO NOTHING",
+		)
+		.bind(from_chat_id)
+		.bind(to_chat_id)
+		.execute(pool)
+		.await?;
 		Ok(())
 	}
 

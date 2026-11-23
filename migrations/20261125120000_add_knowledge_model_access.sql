@@ -1,8 +1,8 @@
 -- Which providers, upstream providers and models may see a knowledge base's content, and which chats hold it.
 
--- An empty list means no restriction.
+-- An empty list means no restriction. No foreign key on the knowledge base: the targets outlive a deleted base, so chats holding its excerpts stay restricted.
 CREATE TABLE knowledge_base_model_targets (
-    knowledge_base_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+    knowledge_base_id UUID NOT NULL,
     provider_id UUID REFERENCES providers(id) ON DELETE CASCADE,
     model_id UUID REFERENCES models(id) ON DELETE CASCADE,
     -- Slug of an upstream provider of a routing provider (OpenRouter, Cortecs).
@@ -14,11 +14,12 @@ CREATE TABLE knowledge_base_model_targets (
 -- Knowledge bases whose excerpts are in a chat's history; only grows, so every later request of the chat keeps their restrictions.
 CREATE TABLE chat_knowledge_sources (
     chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    knowledge_base_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+    knowledge_base_id UUID NOT NULL,
     PRIMARY KEY (chat_id, knowledge_base_id)
 );
 
 CREATE INDEX idx_chat_knowledge_sources_base ON chat_knowledge_sources(knowledge_base_id);
+CREATE INDEX idx_knowledge_base_model_targets_base ON knowledge_base_model_targets(knowledge_base_id);
 
 INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.errors.knowledge_model_not_allowed', 'This chat contains knowledge that this model or provider may not see. Pick an allowed model or start a new chat.'),

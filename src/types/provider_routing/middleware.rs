@@ -72,7 +72,7 @@ impl ProviderRoutingMiddleware {
 }
 
 /// Keeps a routing to the `allowed` upstream providers; `None` when the request names only others.
-fn narrow(routing: Option<ProviderRouting>, allowed: &[String]) -> Option<Option<ProviderRouting>> {
+pub(crate) fn narrow(routing: Option<ProviderRouting>, allowed: &[String]) -> Option<Option<ProviderRouting>> {
 	let mut routing = routing.unwrap_or_default();
 	let only = match routing.only.take().filter(|only| !only.is_empty()) {
 		Some(only) => super::intersect(&only, allowed),

@@ -948,10 +948,12 @@ mod model_access {
 	#[test]
 	fn every_knowledge_base_must_allow_the_model() {
 		let router = routed(ProviderKind::Openrouter);
-		let anthropic = ModelTargets { upstream_providers: slugs(&["anthropic", "azure"]), ..Default::default() };
-		let azure = ModelTargets { upstream_providers: slugs(&["azure/eu"]), ..Default::default() };
+		let anthropic = ModelTargets { providers: vec![router.provider_id], upstream_providers: slugs(&["anthropic", "azure"]), ..Default::default() };
+		let azure = ModelTargets { providers: vec![router.provider_id], upstream_providers: slugs(&["azure/eu"]), ..Default::default() };
 		assert_eq!(ModelTargets::decide_all([&anthropic, &azure], &router), ModelAccess::Upstream(slugs(&["azure/eu"])));
-		let other = ModelTargets { upstream_providers: slugs(&["mistral"]), ..Default::default() };
+		let other = ModelTargets { providers: vec![router.provider_id], upstream_providers: slugs(&["mistral"]), ..Default::default() };
+		let without_router = ModelTargets { upstream_providers: slugs(&["anthropic"]), ..Default::default() };
+		assert_eq!(without_router.decide(&router), ModelAccess::Denied, "upstream providers only narrow a listed routing provider");
 		assert_eq!(ModelTargets::decide_all([&anthropic, &other], &router), ModelAccess::Denied);
 		assert_eq!(ModelTargets::decide_all([&ModelTargets::default()], &router), ModelAccess::Allowed);
 		assert!(!ModelAccess::Upstream(slugs(&["azure"])).is_allowed());
@@ -1095,6 +1097,16 @@ mod model_access {
 		let body: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 10_000).await?)?;
 		assert_eq!(body["error"]["code"], "knowledge_model_not_allowed");
 		assert!(!chat_allows_model(&pool, &chat_id, &other).await?);
+
+		let branch: Uuid = sqlx::query_scalar("INSERT INTO chats (user_id) VALUES ($1) RETURNING id")
+			.bind(admin.user_id)
+			.fetch_one(&pool)
+			.await?;
+		KnowledgeBase::copy_chat_sources(&pool, &chat_id, &branch).await?;
+		assert!(!chat_allows_model(&pool, &branch, &other).await?, "a branch keeps the restriction");
+
+		base.delete(&pool, &admin).await?;
+		assert!(!chat_allows_model(&pool, &chat_id, &other).await?, "deleting the knowledge base keeps the restriction");
 		Ok(())
 	}
 }

@@ -11,6 +11,7 @@ pub mod sources;
 mod upstream;
 
 pub use middleware::ProviderRoutingMiddleware;
+pub(crate) use middleware::narrow;
 pub use upstream::sync_one as sync_upstream_providers;
 
 use crate::types::providers::ProviderKind;
