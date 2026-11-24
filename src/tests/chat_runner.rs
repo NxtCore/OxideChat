@@ -166,6 +166,7 @@ mod agent {
 				cached_tokens: cached,
 				audio_tokens: 0,
 				cache_write_tokens: cache_write,
+				cache_write_1h_tokens: 0,
 			}),
 			completion_tokens_details: Some(CompletionTokensDetails {
 				reasoning_tokens: reasoning,
