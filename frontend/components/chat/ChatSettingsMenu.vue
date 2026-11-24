@@ -44,7 +44,7 @@
 					:data-testid="`composer-knowledge-${base.name}`"
 					:data-disabled="!knowledgeAllowed(base)"
 				>
-					<ShadCheckbox :model-value="knowledgeStore.selected.includes(base.id)" :disabled="!knowledgeAllowed(base)" @update:model-value="knowledgeStore.toggle(base.id)" />
+					<ShadCheckbox :model-value="knowledgeStore.selected.includes(base.id)" :disabled="!knowledgeAllowed(base)" @update:model-value="toggleKnowledge(base.id)" />
 					<span class="min-w-0 flex-1 truncate">{{ base.name }}</span>
 					<span v-if="!knowledgeAllowed(base)" class="shrink-0 text-xs text-muted-foreground">{{ store.getTranslation('chat.composer.knowledge_not_allowed') }}</span>
 				</label>
@@ -60,6 +60,8 @@ import {useMainStore} from '~/stores';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
 import {useKnowledgeStore} from '~/stores/knowledgeStore';
+import {usePreferencesStore} from '~/stores/preferencesStore';
+import {KNOWLEDGE_TOOL_NAME} from '~/composables/useBuiltinToolTemplates';
 import type {KnowledgeBaseResponse} from '~/types/generated/KnowledgeBaseResponse';
 import {baseModelId} from '~/utils/presets';
 import ReasoningSelector from './ReasoningSelector.vue';
@@ -70,6 +72,7 @@ const store = useMainStore();
 const chatStore = useChatStore();
 const modelStore = useModelStore();
 const knowledgeStore = useKnowledgeStore();
+const preferencesStore = usePreferencesStore();
 const open = ref(false);
 const knowledgeEnabled = computed(() => Boolean(store.base?.rag?.enabled));
 /** Whether the knowledge base's model access lets it reach the selected model; the server checks this again. */
@@ -77,7 +80,20 @@ function knowledgeAllowed(base: KnowledgeBaseResponse) {
 	const model = modelStore.selectedModel;
 	return !base.allowed_model_ids || !model || base.allowed_model_ids.includes(baseModelId(model));
 }
-const knowledgeVisible = computed(() => knowledgeEnabled.value && knowledgeStore.usable.length > 0);
+/** The knowledge tool row; a turn searches the attached bases only while this tool is among its tools. */
+const knowledgeTool = computed(() => preferencesStore.userTools.find(tool => tool.source_kind === 'BUILTIN' && tool.name === KNOWLEDGE_TOOL_NAME));
+const knowledgeUsable = computed(() => {
+	const tool = knowledgeTool.value;
+	const preset = modelStore.selectedModel?.preset;
+	return Boolean(tool) && !(preset?.tools_locked && !preset.tool_ids.includes(tool!.id));
+});
+const knowledgeVisible = computed(() => knowledgeEnabled.value && knowledgeUsable.value && knowledgeStore.usable.length > 0);
+
+function toggleKnowledge(id: string) {
+	knowledgeStore.toggle(id);
+	const tool = knowledgeTool.value;
+	if (tool && knowledgeStore.selected.includes(id) && !modelStore.enabledTools.includes(tool.id)) modelStore.toggleTool(tool.id);
+}
 
 const effortKeys: Record<string, string> = {minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'extra_high'};
 
@@ -100,7 +116,7 @@ const chips = computed(() => {
 	}
 	if (modelStore.providerSelectorVisible && modelStore.selectedProviderName) list.push({key: 'provider', label: modelStore.selectedProviderName});
 	const attached = knowledgeStore.usable.filter(base => knowledgeStore.selected.includes(base.id)).length;
-	if (knowledgeEnabled.value && attached > 0) list.push({key: 'knowledge', label: store.getTranslation('chat.composer.knowledge_chip', {count: attached})});
+	if (knowledgeVisible.value && attached > 0) list.push({key: 'knowledge', label: store.getTranslation('chat.composer.knowledge_chip', {count: attached})});
 	return list;
 });
 
@@ -112,7 +128,9 @@ const triggerLabel = computed(() => {
 watch(
 	knowledgeEnabled,
 	enabled => {
-		if (enabled) knowledgeStore.ensure();
+		if (!enabled) return;
+		knowledgeStore.ensure();
+		preferencesStore.ensureTools();
 	},
 	{immediate: true},
 );

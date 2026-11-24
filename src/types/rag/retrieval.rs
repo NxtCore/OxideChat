@@ -9,6 +9,8 @@ use uuid::Uuid;
 
 /// Name of the knowledge tool in chat requests.
 pub const KNOWLEDGE_TOOL: &str = "knowledge_search";
+/// `builtin_id` of the tool row that turns the knowledge tool on for a turn.
+pub const KNOWLEDGE_BUILTIN: &str = "knowledge";
 
 const CANDIDATES: u32 = 20;
 const KEEP_WITHOUT_RERANK: usize = 8;
@@ -132,12 +134,15 @@ pub async fn turn_knowledge_bases(state: &JobState, user_id: &Uuid, ids: &[Uuid]
 	KnowledgeBase::accessible(&state.db, user_id, ids).await
 }
 
-/// Adds the knowledge tool for `bases` to a chat request, replacing any other tool of the same name.
+/// Replaces the knowledge tool's stored spec with one for `bases`, or leaves it out when there are none.
 pub fn add_knowledge_tool(ir: &mut ChatRequestIR, bases: &[KnowledgeBase]) {
+	ir.tools.retain(|tool| !matches!(tool, ToolSpec::JsonSchema { name, .. } if name == KNOWLEDGE_TOOL));
 	if bases.is_empty() {
+		if ir.tools.is_empty() {
+			ir.tool_choice = ToolChoice::None;
+		}
 		return;
 	}
-	ir.tools.retain(|tool| !matches!(tool, ToolSpec::JsonSchema { name, .. } if name == KNOWLEDGE_TOOL));
 	let listing: Vec<String> = bases
 		.iter()
 		.map(|base| match base.description.as_deref().map(str::trim).filter(|text| !text.is_empty()) {

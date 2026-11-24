@@ -24,6 +24,19 @@ async function connection(api: Api): Promise<string> {
 	return setup.connections.find((item: {name: string}) => item.name === CONNECTION).id;
 }
 
+async function knowledgeTool(api: Api): Promise<string> {
+	const existing = (await api.get('/api/v1/admin/tools')).find((tool: {name: string}) => tool.name === 'knowledge_search');
+	if (existing) return existing.id;
+	const tool = await api.post('/api/v1/admin/tools', {
+		name: 'knowledge_search',
+		display_name: 'Knowledge Search',
+		source_kind: 'BUILTIN',
+		source_config: {builtin_id: 'knowledge'},
+		functions: [{name: 'knowledge_search', input_schema: {type: 'object', properties: {query: {type: 'string'}}, required: ['query']}}],
+	});
+	return tool.id;
+}
+
 async function choose(page: Page, testId: string, option: string) {
 	await page.getByTestId(testId).click();
 	await page.getByRole('option', {name: option, exact: true}).click();
@@ -40,12 +53,14 @@ test.describe('knowledge bases', () => {
 	let connectionId: string;
 	let baseId: string;
 	let chatId: string;
+	let toolId: string;
 
 	test.beforeAll(async ({browser, baseURL}) => {
 		const context = await browser.newContext({baseURL, storageState: AUTH_FILES.admin});
 		const api = new Api(context.request);
 		embed = await embeddingModel(api);
 		connectionId = await connection(api);
+		toolId = await knowledgeTool(api);
 		await api.put('/api/v1/admin/rag', {enabled: true, reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
 		await context.close();
 	});
@@ -55,6 +70,7 @@ test.describe('knowledge bases', () => {
 		const api = new Api(context.request);
 		for (const base of await api.get('/api/v1/knowledge-bases')) await api.delete(`/api/v1/knowledge-bases/${base.id}`);
 		await api.delete(`/api/v1/admin/rag/connections/${connectionId}`);
+		await api.delete(`/api/v1/admin/tools/${toolId}`);
 		await api.put('/api/v1/admin/rag', {enabled: false, reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
 		await api.delete(`/api/v1/admin/providers/${embed.providerId}`);
 		await context.close();
@@ -134,6 +150,12 @@ test.describe('knowledge bases', () => {
 			await member.close();
 		}
 	});
+	test('the knowledge tool on the tools page leads to the knowledge setup', async ({page}) => {
+		await page.goto('/settings/tools');
+		await page.getByTestId('tool-knowledge-setup').click();
+		await expect(page).toHaveURL(/\/settings\/knowledge-setup$/);
+	});
+
 	test('a member attaches the knowledge base in the composer and the answer cites its record', async ({browser, baseURL, t, seed}) => {
 		test.skip(!LLM.isMock, 'only the local stand-in calls the knowledge tool on cue');
 		const member = await browser.newContext({baseURL, storageState: AUTH_FILES.member});

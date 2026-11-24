@@ -1,5 +1,5 @@
 use super::arena::{ArenaTurn, prepare_arena_turn};
-use super::request::{RequestInputs, build_request, turn_routing};
+use super::request::{RequestInputs, build_request, turn_routing, turn_tool_ids};
 use crate::types::catalog::GatewayCatalogModel;
 use crate::types::models::Model;
 use crate::types::providers::ProviderKind;
@@ -8,13 +8,13 @@ use crate::i18n::I18n;
 use crate::types::presets::preset_key_parts;
 use crate::types::{
 	ArenaRound, BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, MessagePart, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
-	StreamingUserMessageCreate, TokenEstimate, UsageDetails, User,
+	StreamingUserMessageCreate, TokenEstimate, Tool, UsageDetails, User,
 };
 use axum::response::{
 	IntoResponse, Response,
 	sse::{Event, KeepAlive, Sse},
 };
-use crate::types::rag::{KnowledgeBase, ModelAccess, ModelTargets, RoutedModel, add_knowledge_tool, turn_knowledge_bases};
+use crate::types::rag::{KNOWLEDGE_BUILTIN, KnowledgeBase, ModelAccess, ModelTargets, RoutedModel, add_knowledge_tool, turn_knowledge_bases};
 use crate::types::provider_routing::narrow;
 use omniference::types::{ChatRequestIR, ProviderRouting};
 use sqlx::PgPool;
@@ -332,10 +332,8 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 	let mut knowledge = knowledge_bases(state, &user.id, &chat_id, req, preset.as_ref()).await?;
 	allowed_for_model(db, &knowledge_check, &mut knowledge).await?;
 	let capabilities = system_config.as_ref().and_then(|config| config.capabilities.as_ref()).unwrap_or(&model.capabilities).0.as_slice();
-	if !capabilities.is_empty() && !capabilities.iter().any(|capability| capability == "TOOLS") {
-		knowledge.clear();
-	}
-	add_knowledge_tool(&mut ir, &knowledge);
+	let tool_enabled = knowledge_tool_enabled(db, &request_settings.enabled_tools, system_config.as_ref()).await?;
+	offer_knowledge(&mut ir, &mut knowledge, tool_enabled, capabilities);
 
 	Ok(PreparedTurn {
 		chat_id,
@@ -355,6 +353,28 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 		arena_round_id: None,
 		knowledge_base_ids: knowledge.iter().map(|base| base.id).collect(),
 	})
+}
+
+/// Offers the knowledge tool for `knowledge` while its tool row is on and the model calls tools; otherwise no base is searched.
+fn offer_knowledge(ir: &mut ChatRequestIR, knowledge: &mut Vec<KnowledgeBase>, tool_enabled: bool, capabilities: &[String]) {
+	if !tool_enabled {
+		knowledge.clear();
+		return;
+	}
+	if !capabilities.is_empty() && !capabilities.iter().any(|capability| capability == "TOOLS") {
+		knowledge.clear();
+	}
+	add_knowledge_tool(ir, knowledge);
+}
+
+/// Whether the knowledge tool row is among the tools this turn may call.
+async fn knowledge_tool_enabled(db: &PgPool, enabled_tools: &[String], system_config: Option<&ModelConfig>) -> Result<bool, TurnError> {
+	let ids: Vec<Uuid> = turn_tool_ids(enabled_tools, system_config).iter().filter_map(|id| Uuid::parse_str(id).ok()).collect();
+	if ids.is_empty() {
+		return Ok(false);
+	}
+	let tool = Tool::enabled_builtin_among(db, &ids, KNOWLEDGE_BUILTIN).await.map_err(internal("Failed to load tools"))?;
+	Ok(tool.is_some())
 }
 
 async fn knowledge_bases(state: &JobState, user_id: &Uuid, chat_id: &Uuid, req: &StreamRequest, preset: Option<&Preset>) -> Result<Vec<KnowledgeBase>, TurnError> {

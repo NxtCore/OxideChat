@@ -865,11 +865,11 @@ mod retrieval {
 	use crate::tests::gateway::support::job_state;
 	use crate::tests::support::{TestResult, create_user, insert_user};
 	use crate::types::rag::{
-		Candidate, ConnectionKind, ConnectionMode, KNOWLEDGE_TOOL, KnowledgeActor, KnowledgeBase, KnowledgeHit, RagConfig, RagConnection, RagDefaults, RerankerSettings,
+		Candidate, ConnectionKind, ConnectionMode, KNOWLEDGE_BUILTIN, KNOWLEDGE_TOOL, KnowledgeActor, KnowledgeBase, KnowledgeHit, RagConfig, RagConnection, RagDefaults, RerankerSettings,
 		SaveKnowledgeBaseRequest, UpdateRagSetupRequest, add_knowledge_tool, number, per_document, rrf, run_knowledge_tool, turn_knowledge_bases,
 	};
-	use crate::types::{AssignmentKind, AssignmentRef, ReplaceAssignmentsRequest};
-	use omniference::types::{ChatRequestIR, ToolSpec};
+	use crate::types::{AssignmentKind, AssignmentRef, ReplaceAssignmentsRequest, Tool};
+	use omniference::types::{ChatRequestIR, ToolChoice, ToolSpec};
 	use serde_json::json;
 	use sqlx::PgPool;
 	use uuid::Uuid;
@@ -1040,6 +1040,24 @@ mod retrieval {
 		assert_eq!(name, KNOWLEDGE_TOOL);
 		assert!(description.as_deref().is_some_and(|text| text.contains("- Handbook: HR policies")));
 		assert_eq!(schema["properties"]["knowledge_base"]["enum"], json!(["Handbook"]));
+		add_knowledge_tool(&mut ir, &[]);
+		assert!(ir.tools.is_empty());
+		assert!(matches!(ir.tool_choice, ToolChoice::None));
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn only_an_enabled_system_knowledge_tool_turns_knowledge_on(pool: PgPool) -> TestResult {
+		let owner = create_user(&pool).await?;
+		let insert = "INSERT INTO tools (owner_id, name, display_name, source_kind, source_config, input_schema, is_enabled)
+			VALUES ($1, $2, $2, 'BUILTIN', $3, '{}', $4) RETURNING id";
+		let system: Uuid = sqlx::query_scalar(insert).bind(None::<Uuid>).bind("knowledge_search").bind(json!({"builtin_id": KNOWLEDGE_BUILTIN})).bind(true).fetch_one(&pool).await?;
+		let personal: Uuid = sqlx::query_scalar(insert).bind(owner).bind("knowledge_search").bind(json!({"builtin_id": KNOWLEDGE_BUILTIN})).bind(true).fetch_one(&pool).await?;
+		let other: Uuid = sqlx::query_scalar(insert).bind(None::<Uuid>).bind("websearch").bind(json!({"builtin_id": "websearch"})).bind(true).fetch_one(&pool).await?;
+		assert_eq!(Tool::enabled_builtin_among(&pool, &[other, system], KNOWLEDGE_BUILTIN).await?, Some(system));
+		assert_eq!(Tool::enabled_builtin_among(&pool, &[other, personal], KNOWLEDGE_BUILTIN).await?, None);
+		sqlx::query("UPDATE tools SET is_enabled = false WHERE id = $1").bind(system).execute(&pool).await?;
+		assert_eq!(Tool::enabled_builtin_among(&pool, &[system], KNOWLEDGE_BUILTIN).await?, None);
 		Ok(())
 	}
 	#[sqlx::test]

@@ -5649,5 +5649,13 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.errors.knowledge_image_model_not_allowed', 'This chat contains knowledge that the configured image model may not see, so no image was generated.'),
     ('de', 'chat.errors.knowledge_image_model_not_allowed', 'Dieser Chat enthält Wissen, das das eingestellte Bildmodell nicht sehen darf, daher wurde kein Bild erzeugt.'),
     ('en', 'rag.error.database', 'The knowledge settings could not be read.'),
-    ('de', 'rag.error.database', 'Die Wissenseinstellungen konnten nicht gelesen werden.')
+    ('de', 'rag.error.database', 'Die Wissenseinstellungen konnten nicht gelesen werden.'),
+    ('en', 'settings.tools.knowledge.display_name', 'Knowledge Search'),
+    ('de', 'settings.tools.knowledge.display_name', 'Wissenssuche'),
+    ('en', 'settings.tools.knowledge.description', 'Search the knowledge bases attached to the chat and cite their excerpts'),
+    ('de', 'settings.tools.knowledge.description', 'Die an den Chat angehängten Wissensdatenbanken durchsuchen und ihre Auszüge zitieren'),
+    ('en', 'settings.tools.knowledge.query', 'What to look for, as a full question or keywords'),
+    ('de', 'settings.tools.knowledge.query', 'Wonach gesucht wird, als ganze Frage oder Stichwörter'),
+    ('en', 'settings.tools.knowledge.knowledge_base', 'Search only this knowledge base; leave out to search all'),
+    ('de', 'settings.tools.knowledge.knowledge_base', 'Nur diese Wissensdatenbank durchsuchen; weglassen, um alle zu durchsuchen')
 ON CONFLICT (language, key_path) DO NOTHING;

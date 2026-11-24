@@ -1,5 +1,8 @@
-import {Globe, Sparkles} from 'lucide-vue-next';
+import {BookOpen, Globe, Sparkles} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
+
+/** Name of the builtin tool row that turns knowledge search on; the model calls it under this name. */
+export const KNOWLEDGE_TOOL_NAME = 'knowledge_search';
 
 export function useBuiltinToolTemplates() {
 	const store = useMainStore();
@@ -108,6 +111,29 @@ export function useBuiltinToolTemplates() {
 					},
 				},
 			},
+		},
+		{
+			name: KNOWLEDGE_TOOL_NAME,
+			display_name: store.getTranslation('settings.tools.knowledge.display_name'),
+			description: store.getTranslation('settings.tools.knowledge.description'),
+			source_kind: 'BUILTIN',
+			icon: BookOpen,
+			source_config: {builtin_id: 'knowledge'},
+			functions: [
+				{
+					name: KNOWLEDGE_TOOL_NAME,
+					description: store.getTranslation('settings.tools.knowledge.description'),
+					input_schema: {
+						type: 'object',
+						properties: {
+							query: {type: 'string', description: store.getTranslation('settings.tools.knowledge.query')},
+							knowledge_base: {type: 'string', description: store.getTranslation('settings.tools.knowledge.knowledge_base')},
+						},
+						required: ['query'],
+					},
+				},
+			],
+			settings_schema: null,
 		},
 	]);
 }

@@ -76,7 +76,10 @@
 								<ShadButton variant="outline" size="sm" class="gap-2" @click="openEditDialog(tool)">
 									<Settings2 class="h-4 w-4" />
 								</ShadButton>
-								<ShadButton variant="outline" size="sm" class="gap-2" @click="testTool(tool)">
+								<ShadButton v-if="isKnowledgeTool(tool)" variant="outline" size="sm" class="gap-2" :title="store.getTranslation('settings.tabs.knowledge_setup')" data-testid="tool-knowledge-setup" @click="navigateTo('/settings/knowledge-setup')">
+									<Library class="h-4 w-4" />
+								</ShadButton>
+								<ShadButton v-else variant="outline" size="sm" class="gap-2" @click="testTool(tool)">
 									<Play class="h-4 w-4" />
 								</ShadButton>
 								<ShadSwitch :modelValue="tool.is_enabled" @update:modelValue="(val: boolean) => toggleTool(tool, val)" />
@@ -94,11 +97,12 @@
 </template>
 
 <script setup lang="ts">
-import {Plus, Settings2, Loader2, Wrench, Globe, Code, Server, Sparkles, Key, Play} from 'lucide-vue-next';
+import {Plus, Settings2, Loader2, Wrench, Globe, Code, Server, Sparkles, Key, Play, Library} from 'lucide-vue-next';
 import ToolTestDialog from '@/components/settings/ToolTestDialog.vue';
 import McpManagerDialog from '@/components/mcp/McpManagerDialog.vue';
 import McpServerEditDialog from '@/components/mcp/McpServerEditDialog.vue';
 import {useMainStore} from '@/stores';
+import {KNOWLEDGE_TOOL_NAME} from '~/composables/useBuiltinToolTemplates';
 import type {Tool} from '~/types/tools';
 
 const store = useMainStore();
@@ -155,6 +159,10 @@ async function openMcpServerEdit(serverId: string) {
 	} catch (e: any) {
 		store.toast('Failed to load MCP server', {type: 'error'});
 	}
+}
+
+function isKnowledgeTool(tool: Tool) {
+	return tool.source_kind === 'BUILTIN' && tool.name === KNOWLEDGE_TOOL_NAME;
 }
 
 function getToolIcon(sourceKind: string) {
