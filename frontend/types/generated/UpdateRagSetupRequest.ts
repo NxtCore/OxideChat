@@ -5,4 +5,4 @@ import type { RerankerSettings } from "./RerankerSettings";
 /**
  * Saves the installation's knowledge settings; `GET` returns the same objects.
  */
-export type UpdateRagSetupRequest = { enabled: boolean, reranker: RerankerSettings, defaults: RagDefaults, };
+export type UpdateRagSetupRequest = { reranker: RerankerSettings, defaults: RagDefaults, };

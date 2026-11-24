@@ -442,6 +442,20 @@ impl Tool {
 		.await
 	}
 
+	/// Whether an enabled system builtin tool `builtin_id` exists.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the query fails.
+	pub async fn builtin_enabled(pool: &sqlx::PgPool, builtin_id: &str) -> Result<bool, sqlx::Error> {
+		sqlx::query_scalar(
+			"SELECT EXISTS (SELECT 1 FROM tools WHERE is_enabled = true AND owner_id IS NULL AND source_kind = 'BUILTIN' AND source_config->>'builtin_id' = $1)",
+		)
+		.bind(builtin_id)
+		.fetch_one(pool)
+		.await
+	}
+
 	/// Look up an enabled tool by name that the user may use, preferring the
 	/// user-owned tool over a global one on a name collision.
 	pub async fn find_enabled_by_name_for_user(pool: &sqlx::PgPool, name: &str, user_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {

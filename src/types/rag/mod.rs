@@ -65,7 +65,6 @@ pub struct RagConnection {
 /// The installation's knowledge settings (single row).
 #[derive(Debug, Clone)]
 pub struct RagConfig {
-	pub enabled: bool,
 	pub reranker_model_id: Option<Uuid>,
 	pub reranker_top_n: i32,
 	pub default_connection_id: Option<Uuid>,

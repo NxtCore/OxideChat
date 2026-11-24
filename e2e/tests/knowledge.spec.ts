@@ -61,7 +61,7 @@ test.describe('knowledge bases', () => {
 		embed = await embeddingModel(api);
 		connectionId = await connection(api);
 		toolId = await knowledgeTool(api);
-		await api.put('/api/v1/admin/rag', {enabled: true, reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
+		await api.put('/api/v1/admin/rag', {reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
 		await context.close();
 	});
 
@@ -71,7 +71,7 @@ test.describe('knowledge bases', () => {
 		for (const base of await api.get('/api/v1/knowledge-bases')) await api.delete(`/api/v1/knowledge-bases/${base.id}`);
 		await api.delete(`/api/v1/admin/rag/connections/${connectionId}`);
 		await api.delete(`/api/v1/admin/tools/${toolId}`);
-		await api.put('/api/v1/admin/rag', {enabled: false, reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
+		await api.put('/api/v1/admin/rag', {reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
 		await api.delete(`/api/v1/admin/providers/${embed.providerId}`);
 		await context.close();
 	});
@@ -153,7 +153,7 @@ test.describe('knowledge bases', () => {
 	test('the knowledge tool on the tools page leads to the knowledge setup', async ({page}) => {
 		await page.goto('/settings/tools');
 		await page.getByTestId('tool-knowledge-setup').click();
-		await expect(page).toHaveURL(/\/settings\/knowledge-setup$/);
+		await expect(page).toHaveURL(/\/settings\/tools\/knowledge$/);
 	});
 
 	test('a member attaches the knowledge base in the composer and the answer cites its record', async ({browser, baseURL, t, seed}) => {

@@ -6,7 +6,7 @@
 			<ShadLabel>{{ t('step_connection') }}</ShadLabel>
 			<p v-if="connections.length === 0" class="text-sm text-muted-foreground" data-testid="knowledge-source-no-connections">
 				{{ t('no_connections') }}
-				<NuxtLink to="/settings/knowledge-setup" class="text-primary underline">{{ t('to_setup') }}</NuxtLink>
+				<NuxtLink to="/settings/tools/knowledge" class="text-primary underline">{{ t('to_setup') }}</NuxtLink>
 			</p>
 			<ShadSelect v-else :model-value="view.connection_id || undefined" @update:model-value="pickConnection(String($event))">
 				<ShadSelectTrigger data-testid="knowledge-source-connection"><ShadSelectValue :placeholder="t('pick')" /></ShadSelectTrigger>

@@ -29,13 +29,22 @@ fn env_pgvector_url() -> Option<String> {
 }
 
 impl RagConfig {
+	/// Whether knowledge is on: the Knowledge Search tool row exists and is enabled.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the query fails.
+	pub async fn enabled(pool: &PgPool) -> Result<bool, sqlx::Error> {
+		crate::types::Tool::builtin_enabled(pool, super::KNOWLEDGE_BUILTIN).await
+	}
+
 	/// The installation's knowledge settings.
 	///
 	/// # Errors
 	///
 	/// Returns a database error when the query fails.
 	pub async fn get(pool: &PgPool) -> Result<Self, sqlx::Error> {
-		sqlx::query_as!(Self, "SELECT enabled, reranker_model_id, reranker_top_n, default_connection_id FROM rag_config")
+		sqlx::query_as!(Self, "SELECT reranker_model_id, reranker_top_n, default_connection_id FROM rag_config")
 			.fetch_one(pool)
 			.await
 	}
@@ -55,15 +64,14 @@ impl RagConfig {
 		}
 		let mut tx = pool.begin().await?;
 		sqlx::query!(
-			"UPDATE rag_config SET enabled = $1, reranker_model_id = $2, reranker_top_n = $3, default_connection_id = $4, updated_at = NOW()",
-			request.enabled,
+			"UPDATE rag_config SET reranker_model_id = $1, reranker_top_n = $2, default_connection_id = $3, updated_at = NOW()",
 			request.reranker.model_id,
 			to_i32(Some(request.reranker.top_n)),
 			request.defaults.connection_id,
 		)
 		.execute(&mut *tx)
 		.await?;
-		let metadata = serde_json::json!({ "enabled": request.enabled, "reranker": request.reranker, "defaults": request.defaults });
+		let metadata = serde_json::json!({ "reranker": request.reranker, "defaults": request.defaults });
 		AuditLog::write(
 			&mut tx,
 			AuditEntry {
@@ -89,7 +97,6 @@ impl RagConfig {
 		let env = env_pgvector_url().is_some();
 		let connections = RagConnection::list(pool).await?;
 		Ok(RagSetupResponse {
-			enabled: config.enabled,
 			connections: connections
 				.iter()
 				.map(|connection| connection.to_response(env && config.default_connection_id == Some(connection.id)))

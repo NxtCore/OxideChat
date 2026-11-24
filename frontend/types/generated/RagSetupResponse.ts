@@ -6,4 +6,4 @@ import type { RerankerSettings } from "./RerankerSettings";
 /**
  * Everything the knowledge setup page shows.
  */
-export type RagSetupResponse = { enabled: boolean, connections: Array<ConnectionResponse>, reranker: RerankerSettings, defaults: RagDefaults, };
+export type RagSetupResponse = { connections: Array<ConnectionResponse>, reranker: RerankerSettings, defaults: RagDefaults, };

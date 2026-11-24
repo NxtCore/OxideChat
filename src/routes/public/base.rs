@@ -64,7 +64,7 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 		title_generation: config.title_generation(),
 		registration: config.registration(),
 		rag: RagStatus {
-			enabled: RagConfig::get(&state.db).await.map_err(AppError::database)?.enabled,
+			enabled: RagConfig::enabled(&state.db).await.map_err(AppError::database)?,
 		},
 	})
 }

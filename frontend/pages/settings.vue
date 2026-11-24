@@ -39,7 +39,7 @@
 
 <script setup lang="ts">
 import {ADMIN_ANALYTICS_VIEW, ADMIN_BUDGETS_VIEW, ADMIN_CONFIG_VIEW, ADMIN_DEVELOPER_VIEW, ADMIN_I18N_VIEW, ADMIN_PRESETS_VIEW, ADMIN_PROVIDERS_VIEW, ADMIN_RAG_EDIT, ADMIN_RAG_VIEW, ADMIN_ROLES_VIEW, ADMIN_TEAMS_VIEW, ADMIN_TOOLS_VIEW, ADMIN_USERS_VIEW, SETTINGS_APPEARANCE_EDIT, SETTINGS_PRESETS_EDIT, SETTINGS_SESSIONS_VIEW} from '~/types/generated/permissions';
-import {Activity, User, Cpu, Bot, Package, Palette, Users, Network, CreditCard, BarChart3, SlidersHorizontal, ShieldCheck, Languages, MonitorSmartphone, Shield, Wand2, Swords, Library, BookOpen} from 'lucide-vue-next';
+import {Activity, User, Cpu, Bot, Package, Palette, Users, Network, CreditCard, BarChart3, SlidersHorizontal, ShieldCheck, Languages, MonitorSmartphone, Shield, Wand2, Swords, BookOpen} from 'lucide-vue-next';
 import {useMainStore} from '@/stores';
 
 definePageMeta({
@@ -70,8 +70,7 @@ const groups = [
 		tabs: [
 			{id: 'providers', label: 'settings.tabs.providers', icon: Cpu, permission: ADMIN_PROVIDERS_VIEW},
 			{id: 'models', label: 'settings.tabs.models', icon: Bot, permission: ADMIN_PROVIDERS_VIEW},
-			{id: 'tools', label: 'settings.tabs.tools', icon: Package, permission: ADMIN_TOOLS_VIEW},
-			{id: 'knowledge-setup', label: 'settings.tabs.knowledge_setup', icon: Library, permission: [ADMIN_RAG_VIEW, ADMIN_RAG_EDIT]},
+			{id: 'tools', label: 'settings.tabs.tools', icon: Package, permission: [ADMIN_TOOLS_VIEW, ADMIN_RAG_VIEW, ADMIN_RAG_EDIT]},
 		],
 	},
 	{

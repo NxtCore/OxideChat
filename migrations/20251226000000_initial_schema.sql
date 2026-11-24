@@ -1013,7 +1013,6 @@ CREATE TABLE IF NOT EXISTS rag_connections (
 
 CREATE TABLE IF NOT EXISTS rag_config (
     id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
-    enabled BOOLEAN NOT NULL DEFAULT FALSE,
     reranker_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
     reranker_top_n INTEGER NOT NULL DEFAULT 6 CHECK (reranker_top_n BETWEEN 1 AND 50),
     default_connection_id UUID REFERENCES rag_connections(id) ON DELETE SET NULL,
@@ -5176,8 +5175,12 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.knowledge_setup.description', 'Vektorspeicher verbinden und die Modelle wählen, die Wissen indexieren und sortieren. Dokumentinhalte werden an die hier gewählten Embedding- und Rerank-Anbieter gesendet.'),
     ('en', 'settings.knowledge_setup.enabled', 'Knowledge'),
     ('de', 'settings.knowledge_setup.enabled', 'Wissen'),
-    ('en', 'settings.knowledge_setup.enabled_hint', 'Lets people attach knowledge bases to chats once they exist.'),
-    ('de', 'settings.knowledge_setup.enabled_hint', 'Erlaubt, Wissensdatenbanken an Chats anzuhängen, sobald es welche gibt.'),
+    ('en', 'settings.knowledge_setup.enabled_hint', 'Knowledge is on while the Knowledge Search tool is enabled under Tools.'),
+    ('de', 'settings.knowledge_setup.enabled_hint', 'Wissen ist aktiv, solange das Werkzeug Wissenssuche unter Werkzeuge aktiviert ist.'),
+    ('en', 'settings.knowledge_setup.status_on', 'On'),
+    ('de', 'settings.knowledge_setup.status_on', 'An'),
+    ('en', 'settings.knowledge_setup.status_off', 'Off: enable the Knowledge Search tool'),
+    ('de', 'settings.knowledge_setup.status_off', 'Aus: Werkzeug Wissenssuche aktivieren'),
     ('en', 'settings.knowledge_setup.default_connection', 'Default storage'),
     ('de', 'settings.knowledge_setup.default_connection', 'Standardspeicher'),
     ('en', 'settings.knowledge_setup.default_connection_hint', 'New knowledge bases with uploads are stored in this managed connection.'),

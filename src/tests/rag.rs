@@ -102,7 +102,6 @@ mod validation {
 	#[test]
 	fn top_n_is_bounded() {
 		let setup = |top_n| UpdateRagSetupRequest {
-			enabled: true,
 			reranker: RerankerSettings { model_id: None, top_n },
 			defaults: RagDefaults { connection_id: None },
 		};
@@ -212,7 +211,6 @@ mod connections {
 		let external = read_only(&pool, &actor).await?;
 		let managed = RagConnection::create(&pool, &actor, &request(ConnectionKind::Pgvector, ConnectionMode::Managed, None, None), None).await?;
 		let setup = |connection_id| UpdateRagSetupRequest {
-			enabled: true,
 			reranker: RerankerSettings { model_id: None, top_n: 6 },
 			defaults: RagDefaults { connection_id },
 		};
@@ -223,9 +221,7 @@ mod connections {
 		));
 		assert!(matches!(RagConfig::save(&pool, &actor, &setup(Some(Uuid::new_v4()))).await, Err(RagError::NotFound)));
 		RagConfig::save(&pool, &actor, &setup(Some(managed.id))).await?;
-		let config = RagConfig::get(&pool).await?;
-		assert!(config.enabled);
-		assert_eq!(config.default_connection_id, Some(managed.id));
+		assert_eq!(RagConfig::get(&pool).await?.default_connection_id, Some(managed.id));
 
 		assert!(RagConnection::delete(&pool, &actor, &managed.id).await?);
 		assert_eq!(RagConfig::get(&pool).await?.default_connection_id, None);
@@ -865,8 +861,8 @@ mod retrieval {
 	use crate::tests::gateway::support::job_state;
 	use crate::tests::support::{TestResult, create_user, insert_user};
 	use crate::types::rag::{
-		Candidate, ConnectionKind, ConnectionMode, KNOWLEDGE_BUILTIN, KNOWLEDGE_TOOL, KnowledgeActor, KnowledgeBase, KnowledgeHit, RagConfig, RagConnection, RagDefaults, RerankerSettings,
-		SaveKnowledgeBaseRequest, UpdateRagSetupRequest, add_knowledge_tool, number, per_document, rrf, run_knowledge_tool, turn_knowledge_bases,
+		Candidate, ConnectionKind, ConnectionMode, KNOWLEDGE_BUILTIN, KNOWLEDGE_TOOL, KnowledgeActor, KnowledgeBase, KnowledgeHit, RagConnection,
+		SaveKnowledgeBaseRequest, add_knowledge_tool, number, per_document, rrf, run_knowledge_tool, turn_knowledge_bases,
 	};
 	use crate::types::{AssignmentKind, AssignmentRef, ReplaceAssignmentsRequest, Tool};
 	use omniference::types::{ChatRequestIR, ToolChoice, ToolSpec};
@@ -954,13 +950,16 @@ mod retrieval {
 		Ok((KnowledgeBase::find(pool, &admin, &id).await?.ok_or("missing")?, admin))
 	}
 
-	async fn enable(pool: &PgPool, actor: &Uuid, enabled: bool) -> TestResult {
-		let setup = UpdateRagSetupRequest {
-			enabled,
-			reranker: RerankerSettings { model_id: None, top_n: 6 },
-			defaults: RagDefaults { connection_id: None },
-		};
-		Ok(RagConfig::save(pool, actor, &setup).await?)
+	async fn enable(pool: &PgPool, enabled: bool) -> TestResult {
+		let updated = sqlx::query("UPDATE tools SET is_enabled = $1 WHERE name = 'knowledge_search' AND owner_id IS NULL").bind(enabled).execute(pool).await?;
+		if updated.rows_affected() == 0 {
+			sqlx::query("INSERT INTO tools (name, display_name, source_kind, source_config, input_schema, is_enabled) VALUES ('knowledge_search', 'Knowledge Search', 'BUILTIN', $1, '{}', $2)")
+				.bind(json!({"builtin_id": KNOWLEDGE_BUILTIN}))
+				.bind(enabled)
+				.execute(pool)
+				.await?;
+		}
+		Ok(())
 	}
 
 	#[sqlx::test]
@@ -969,7 +968,7 @@ mod retrieval {
 		let member = insert_user(&pool, "member").await?;
 		let state = job_state(pool.clone());
 
-		enable(&pool, &admin.user_id, true).await?;
+		enable(&pool, true).await?;
 		assert!(turn_knowledge_bases(&state, &member, &[base.id]).await?.is_empty());
 		assert!(turn_knowledge_bases(&state, &member, &[]).await?.is_empty());
 		let unshared = run_knowledge_tool(&state, &member, None, &[base.id], &json!({"query": "holidays"})).await?;
@@ -991,7 +990,7 @@ mod retrieval {
 		assert!(other.sources.is_empty());
 		assert!(run_knowledge_tool(&state, &member, None, &[base.id], &json!({"query": " "})).await.is_err());
 
-		enable(&pool, &admin.user_id, false).await?;
+		enable(&pool, false).await?;
 		assert!(turn_knowledge_bases(&state, &member, &[base.id]).await?.is_empty());
 		Ok(())
 	}

@@ -76,7 +76,7 @@
 								<ShadButton variant="outline" size="sm" class="gap-2" @click="openEditDialog(tool)">
 									<Settings2 class="h-4 w-4" />
 								</ShadButton>
-								<ShadButton v-if="isKnowledgeTool(tool)" variant="outline" size="sm" class="gap-2" :title="store.getTranslation('settings.tabs.knowledge_setup')" data-testid="tool-knowledge-setup" @click="navigateTo('/settings/knowledge-setup')">
+								<ShadButton v-if="isKnowledgeTool(tool)" variant="outline" size="sm" class="gap-2" :title="store.getTranslation('settings.tabs.knowledge_setup')" data-testid="tool-knowledge-setup" @click="navigateTo('/settings/tools/knowledge')">
 									<Library class="h-4 w-4" />
 								</ShadButton>
 								<ShadButton v-else variant="outline" size="sm" class="gap-2" @click="testTool(tool)">
@@ -102,6 +102,7 @@ import ToolTestDialog from '@/components/settings/ToolTestDialog.vue';
 import McpManagerDialog from '@/components/mcp/McpManagerDialog.vue';
 import McpServerEditDialog from '@/components/mcp/McpServerEditDialog.vue';
 import {useMainStore} from '@/stores';
+import {ADMIN_TOOLS_VIEW} from '~/types/generated/permissions';
 import {KNOWLEDGE_TOOL_NAME} from '~/composables/useBuiltinToolTemplates';
 import type {Tool} from '~/types/tools';
 
@@ -237,6 +238,7 @@ async function configureTemplate(template: any) {
 		};
 
 		const created = (await saveAdminTool(undefined, body)) as Tool;
+		if (isKnowledgeTool(created) && store.base) store.base.rag = {enabled: true};
 		store.toast('Tool added! Please configure your API key.', {type: 'success'});
 		await loadTools();
 
@@ -257,6 +259,7 @@ async function toggleTool(tool: Tool, enabled: boolean) {
 	try {
 		await saveAdminTool(tool.id, {is_enabled: enabled});
 		tool.is_enabled = enabled;
+		if (isKnowledgeTool(tool) && store.base) store.base.rag = {enabled};
 	} catch (e: any) {
 		store.toast('Failed to toggle tool', {type: 'error'});
 	}
@@ -267,5 +270,14 @@ function testTool(tool: Tool) {
 	testDialogOpen.value = true;
 }
 
-onMounted(loadTools);
+const stopUserWatch = watch(
+	() => store.auth.user,
+	user => {
+		if (!user) return;
+		queueMicrotask(() => stopUserWatch());
+		if (store.hasPermission(ADMIN_TOOLS_VIEW)) loadTools();
+		else navigateTo('/settings/tools/knowledge', {replace: true});
+	},
+	{immediate: true},
+);
 </script>

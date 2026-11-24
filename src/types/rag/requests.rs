@@ -33,7 +33,6 @@ pub struct EmbeddingSettings {
 #[derive(Debug, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct UpdateRagSetupRequest {
-	pub enabled: bool,
 	pub reranker: RerankerSettings,
 	pub defaults: RagDefaults,
 }

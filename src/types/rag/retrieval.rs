@@ -128,7 +128,7 @@ pub fn number(candidates: Vec<Candidate>) -> Vec<KnowledgeSource> {
 ///
 /// Returns a database error when a query fails.
 pub async fn turn_knowledge_bases(state: &JobState, user_id: &Uuid, ids: &[Uuid]) -> Result<Vec<KnowledgeBase>, sqlx::Error> {
-	if ids.is_empty() || !RagConfig::get(&state.db).await?.enabled {
+	if ids.is_empty() || !RagConfig::enabled(&state.db).await? {
 		return Ok(Vec::new());
 	}
 	KnowledgeBase::accessible(&state.db, user_id, ids).await

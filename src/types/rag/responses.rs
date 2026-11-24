@@ -6,7 +6,6 @@ use uuid::Uuid;
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RagSetupResponse {
-	pub enabled: bool,
 	pub connections: Vec<ConnectionResponse>,
 	pub reranker: RerankerSettings,
 	pub defaults: RagDefaults,

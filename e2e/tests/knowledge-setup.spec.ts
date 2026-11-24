@@ -24,7 +24,7 @@ async function fillConnection(page: Page, fields: {name?: string; kind?: string;
 async function reset(api: Api) {
 	for (const base of await api.get('/api/v1/knowledge-bases')) await api.delete(`/api/v1/knowledge-bases/${base.id}`);
 	const setup = await api.get('/api/v1/admin/rag');
-	await api.put('/api/v1/admin/rag', {enabled: false, reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
+	await api.put('/api/v1/admin/rag', {reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
 	for (const connection of setup.connections) await api.delete(`/api/v1/admin/rag/connections/${connection.id}`);
 }
 
@@ -33,7 +33,7 @@ test.describe.configure({mode: 'serial'});
 test.describe('knowledge setup', () => {
 	test('an admin connects the main database as managed storage and tests it', async ({page, api, t}) => {
 		await reset(api);
-		await page.goto('/settings/knowledge-setup');
+		await page.goto('/settings/tools/knowledge');
 		await expect(page.getByTestId('knowledge-connections-empty')).toBeVisible();
 
 		await page.getByTestId('knowledge-connection-add').click();
@@ -55,7 +55,7 @@ test.describe('knowledge setup', () => {
 			await api.patch(`/api/v1/admin/models/${embed.id}`, {output_modalities: ['EMBEDDINGS']});
 			await api.put(`/api/v1/admin/models/${embed.id}/pricing`, {pricing: {input: 10, output: 0, tiers: []}});
 
-			await page.goto('/settings/knowledge-setup');
+			await page.goto('/settings/tools/knowledge');
 			await page.getByTestId(`knowledge-connection-configure-${MANAGED}`).click();
 			const listRequest = page.waitForRequest(request => /\/api\/v1\/admin\/models\?/.test(request.url()));
 			await page.getByRole('button', {name: t('settings.knowledge_setup.connections.embedding_none')}).click();
@@ -71,7 +71,7 @@ test.describe('knowledge setup', () => {
 
 	test('a Qdrant key is refused over http and never returned', async ({page, api, t, allowErrors}) => {
 		allowErrors(/400/);
-		await page.goto('/settings/knowledge-setup');
+		await page.goto('/settings/tools/knowledge');
 		await page.getByTestId('knowledge-connection-add').click();
 		await fillConnection(page, {name: QDRANT, kind: 'Qdrant', url: 'http://qdrant.e2e.test:6333', secret: KEY});
 		await page.getByTestId('knowledge-connection-save').click();
@@ -89,7 +89,7 @@ test.describe('knowledge setup', () => {
 
 	test('moving a connection to another host needs its key again', async ({page, t, allowErrors}) => {
 		allowErrors(/400/);
-		await page.goto('/settings/knowledge-setup');
+		await page.goto('/settings/tools/knowledge');
 		await page.getByTestId(`knowledge-connection-configure-${QDRANT}`).click();
 		await fillConnection(page, {url: 'https://elsewhere.e2e.test:6333'});
 		await page.getByTestId('knowledge-connection-save').click();
@@ -97,19 +97,43 @@ test.describe('knowledge setup', () => {
 		await expect(page.getByText(t('settings.knowledge_setup.connections.save_error'))).toBeVisible();
 	});
 
-	test('the default storage and switch are saved through the save bar', async ({page, api}) => {
-		await page.goto('/settings/knowledge-setup');
-		await page.getByTestId('knowledge-enabled').click();
+	test('the default storage is saved through the save bar', async ({page, api}) => {
+		await page.goto('/settings/tools/knowledge');
 		await page.getByTestId('knowledge-default-connection').click();
 		await page.getByRole('option', {name: MANAGED}).click();
 		await page.getByTestId('settings-save-bar-save').click();
 		await expect(page.getByTestId('settings-save-bar')).toBeHidden();
 
-		for (const base of await api.get('/api/v1/knowledge-bases')) await api.delete(`/api/v1/knowledge-bases/${base.id}`);
-	const setup = await api.get('/api/v1/admin/rag');
+		const setup = await api.get('/api/v1/admin/rag');
 		const managed = setup.connections.find((connection: {name: string}) => connection.name === MANAGED);
-		expect(setup).toMatchObject({enabled: true, defaults: {connection_id: managed.id}});
-		expect((await api.get('/api/v1/base')).rag).toEqual({enabled: true});
+		expect(setup).toMatchObject({defaults: {connection_id: managed.id}});
 		await reset(api);
+	});
+
+	test('knowledge is on while the Knowledge Search tool is enabled', async ({page, api, t}) => {
+		expect((await api.get('/api/v1/base')).rag).toEqual({enabled: false});
+		const tool = await api.post('/api/v1/admin/tools', {
+			name: 'knowledge_search',
+			display_name: 'Knowledge Search',
+			source_kind: 'BUILTIN',
+			source_config: {builtin_id: 'knowledge'},
+			functions: [{name: 'knowledge_search', input_schema: {type: 'object', properties: {query: {type: 'string'}}, required: ['query']}}],
+		});
+		try {
+			expect((await api.get('/api/v1/base')).rag).toEqual({enabled: true});
+			await page.goto('/settings/tools/knowledge');
+			await expect(page.getByTestId('knowledge-status')).toHaveText(t('settings.knowledge_setup.status_on'));
+			await page.getByTestId('knowledge-setup-back').click();
+			await expect(page).toHaveURL(/\/settings\/tools$/);
+			await api.put(`/api/v1/admin/tools/${tool.id}`, {is_enabled: false});
+			expect((await api.get('/api/v1/base')).rag).toEqual({enabled: false});
+		} finally {
+			await api.delete(`/api/v1/admin/tools/${tool.id}`);
+		}
+	});
+
+	test('the old setup address leads to the page under Tools', async ({page}) => {
+		await page.goto('/settings/knowledge-setup');
+		await expect(page).toHaveURL(/\/settings\/tools\/knowledge$/);
 	});
 });
