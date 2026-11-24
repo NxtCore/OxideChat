@@ -7,7 +7,7 @@ use super::{
 use crate::logging::AuditLog;
 use crate::types::{AssignmentKind, AssignmentRole, AssignmentTarget, AssignmentsResponse, AuditEntry, JobState, ReplaceAssignmentsRequest};
 use sqlx::types::Json;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -164,7 +164,7 @@ impl KnowledgeBase {
 	/// # Errors
 	///
 	/// Returns a database error when the query fails.
-	pub async fn accessible(pool: &PgPool, user_id: &Uuid, ids: &[Uuid]) -> Result<Vec<Self>, sqlx::Error> {
+	pub async fn accessible(executor: impl PgExecutor<'_>, user_id: &Uuid, ids: &[Uuid]) -> Result<Vec<Self>, sqlx::Error> {
 		if ids.is_empty() {
 			return Ok(Vec::new());
 		}
@@ -177,7 +177,7 @@ impl KnowledgeBase {
 		))
 		.bind(user_id)
 		.bind(ids)
-		.fetch_all(pool)
+		.fetch_all(executor)
 		.await
 	}
 
@@ -198,10 +198,10 @@ impl KnowledgeBase {
 	/// # Errors
 	///
 	/// Returns a database error when the query fails.
-	pub async fn preset_ids(pool: &PgPool, preset_id: &Uuid) -> Result<Vec<Uuid>, sqlx::Error> {
+	pub async fn preset_ids(executor: impl PgExecutor<'_>, preset_id: &Uuid) -> Result<Vec<Uuid>, sqlx::Error> {
 		sqlx::query_scalar("SELECT knowledge_base_id FROM preset_knowledge_bases WHERE preset_id = $1 ORDER BY knowledge_base_id")
 			.bind(preset_id)
-			.fetch_all(pool)
+			.fetch_all(executor)
 			.await
 	}
 
@@ -268,30 +268,39 @@ impl KnowledgeBase {
 		Ok(id)
 	}
 
-	/// Changes name and description and, with `view`, the source; the view must have been checked with [`check_view`].
+	/// Changes name and description and, with `view`, the source and, with `request.model_access`, the model access, in one
+	/// transaction; the view must have been checked with [`check_view`].
 	///
-	/// A new source is written under a row lock after checking its embedding model against the model access stored then,
-	/// so it cannot race a model access change; without one the stored source is left as it is.
+	/// The embedding model of the source that will be stored is checked under a row lock against the model access that
+	/// will be stored, so neither can race the other; without a view the stored source is left as it is.
 	///
 	/// # Errors
 	///
-	/// Returns `Forbidden` when an editor sends a view, `EmbeddingModelNotAllowed`, `NotFound` when the knowledge base is gone, or a database error.
+	/// Returns `Forbidden` when an editor sends a view or model access, `EmbeddingModelNotAllowed`, `InvalidModelAccess`,
+	/// `UpstreamNeedsProvider`, `NotFound` when the knowledge base is gone, or a database error.
 	pub async fn update(&self, pool: &PgPool, actor: &KnowledgeActor, request: &SaveKnowledgeBaseRequest, view: Option<&ExternalView>) -> Result<(), RagError> {
-		if !actor.can_edit(self) || (view.is_some() && !actor.manage) {
+		if !actor.can_edit(self) || ((view.is_some() || request.model_access.is_some()) && !actor.manage) {
 			return Err(RagError::Forbidden);
 		}
 		request.validate()?;
+		let targets = request.model_access.as_ref().map(super::ModelTargets::normalized).transpose()?;
+		if let Some(targets) = &targets {
+			super::check_upstream_needs_provider(pool, targets).await?;
+		}
 		let mut tx = pool.begin().await?;
 		let stored: Option<Json<ExternalView>> = sqlx::query_scalar("SELECT view FROM knowledge_bases WHERE id = $1 FOR UPDATE")
 			.bind(self.id)
 			.fetch_optional(&mut *tx)
 			.await?;
 		let stored = stored.ok_or(RagError::NotFound)?.0;
-		if let Some(view) = view {
-			let targets = super::ModelTargets::load(pool, &[self.id]).await?.remove(&self.id).unwrap_or_default();
-			super::check_embedding_allowed(pool, &targets, &view.embedding.model_id).await?;
-		}
 		let view = view.unwrap_or(&stored);
+		if targets.is_some() || *view != stored {
+			let current = match targets.clone() {
+				Some(targets) => targets,
+				None => super::ModelTargets::load(&mut *tx, &[self.id]).await?.remove(&self.id).unwrap_or_default(),
+			};
+			super::check_embedding_allowed(&mut *tx, &current, &view.embedding.model_id).await?;
+		}
 		sqlx::query("UPDATE knowledge_bases SET name = $2, description = $3, connection_id = $4, view = $5, updated_at = NOW() WHERE id = $1")
 			.bind(self.id)
 			.bind(request.name.trim())
@@ -301,6 +310,9 @@ impl KnowledgeBase {
 			.execute(&mut *tx)
 			.await?;
 		audit(&mut tx, "knowledge_base_updated", &actor.user_id, &self.id, view_metadata(request.name.trim(), view)).await?;
+		if let Some(targets) = &targets {
+			self.store_model_access(&mut tx, &actor.user_id, targets).await?;
+		}
 		tx.commit().await?;
 		Ok(())
 	}
@@ -315,7 +327,10 @@ impl KnowledgeBase {
 			return Err(RagError::Forbidden);
 		}
 		let mut tx = pool.begin().await?;
-		sqlx::query("DELETE FROM knowledge_bases WHERE id = $1").bind(self.id).execute(&mut *tx).await?;
+		let deleted = sqlx::query("DELETE FROM knowledge_bases WHERE id = $1").bind(self.id).execute(&mut *tx).await?;
+		if deleted.rows_affected() == 0 {
+			return Err(RagError::NotFound);
+		}
 		audit(&mut tx, "knowledge_base_deleted", &actor.user_id, &self.id, serde_json::json!({ "name": self.name })).await?;
 		tx.commit().await?;
 		Ok(())

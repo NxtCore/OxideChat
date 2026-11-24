@@ -166,6 +166,7 @@ export function presetToRequest(preset: PresetResponse): SavePresetRequest {
 		levels: preset.levels.map(levelToRequest),
 		default_level: preset.default_level,
 		tool_ids: [...preset.tool_ids],
+		knowledge_base_ids: [...preset.knowledge_base_ids],
 		tools_locked: preset.tools_locked,
 		starters: [...preset.starters],
 		prompt_visible: preset.prompt_visible,

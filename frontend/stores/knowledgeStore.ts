@@ -28,6 +28,19 @@ export const useKnowledgeStore = defineStore('knowledge', {
 			});
 		},
 
+		/** Whether a knowledge base's model access lets it reach `modelId`; the server checks this again. */
+		allowsModel(base: KnowledgeBaseResponse, modelId: string | null) {
+			return !base.allowed_model_ids || !modelId || base.allowed_model_ids.includes(modelId);
+		},
+
+		/** The selected knowledge bases that may reach `modelId`. */
+		selectedFor(modelId: string | null) {
+			return this.selected.filter(id => {
+				const base = this.bases.find(candidate => candidate.id === id);
+				return !base || this.allowsModel(base, modelId);
+			});
+		},
+
 		toggle(id: string) {
 			this.selected = this.selected.includes(id) ? this.selected.filter(selected => selected !== id) : [...this.selected, id];
 		},

@@ -9,11 +9,12 @@
 			<Loader2 class="h-5 w-5 animate-spin" />
 		</div>
 
-		<fieldset v-else :disabled="!data.can_edit" class="space-y-5">
+		<div v-else class="space-y-5">
 			<p v-if="!data.can_edit" class="text-sm text-muted-foreground" data-testid="knowledge-models-admins-only">{{ t('admins_only') }}</p>
-			<p v-if="data.removed_targets" class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" data-testid="knowledge-models-removed">
-				{{ t('removed_targets') }}
-			</p>
+			<div v-if="data.removed_targets" class="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" data-testid="knowledge-models-removed">
+				<p>{{ t('removed_targets') }}</p>
+				<ShadButton v-if="data.can_edit" type="button" size="sm" variant="outline" data-testid="knowledge-models-confirm" @click="emit('confirm')">{{ t('confirm_removed') }}</ShadButton>
+			</div>
 			<p v-else-if="unrestricted" class="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground" data-testid="knowledge-models-unrestricted">
 				{{ t('unrestricted') }}
 			</p>
@@ -28,7 +29,7 @@
 						class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
 						:data-testid="`knowledge-models-provider-${provider.name}`"
 					>
-						<ShadCheckbox :model-value="targets.providers.includes(provider.id)" @update:model-value="toggle('providers', provider.id, $event === true)" />
+						<ShadCheckbox :disabled="!data.can_edit" :model-value="targets.providers.includes(provider.id)" @update:model-value="toggle('providers', provider.id, $event === true)" />
 						<span class="truncate">{{ provider.name }}</span>
 					</label>
 				</div>
@@ -39,11 +40,11 @@
 				<p class="text-xs text-muted-foreground">{{ t('upstream_hint') }}</p>
 				<div class="rounded-md border border-border">
 					<div class="border-b border-border p-2">
-						<ShadInput v-model="slug" class="h-8" :placeholder="t('upstream_placeholder')" data-testid="knowledge-models-upstream-input" @keydown.enter.prevent="addSlug" />
+						<ShadInput v-model="slug" class="h-8" :disabled="!data.can_edit" :placeholder="t('upstream_placeholder')" data-testid="knowledge-models-upstream-input" @keydown.enter.prevent="addSlug" />
 					</div>
 					<div class="max-h-56 overflow-y-auto p-1">
 						<label v-for="option in upstreamOptions" :key="option" class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent">
-							<ShadCheckbox :model-value="targets.upstream_providers.includes(option)" @update:model-value="toggle('upstream_providers', option, $event === true)" />
+							<ShadCheckbox :disabled="!data.can_edit" :model-value="targets.upstream_providers.includes(option)" @update:model-value="toggle('upstream_providers', option, $event === true)" />
 							<span class="truncate">{{ option }}</span>
 						</label>
 					</div>
@@ -64,7 +65,7 @@
 							class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
 							:data-testid="`knowledge-models-model-${model.name}`"
 						>
-							<ShadCheckbox :model-value="targets.models.includes(model.id)" @update:model-value="toggle('models', model.id, $event === true)" />
+							<ShadCheckbox :disabled="!data.can_edit" :model-value="targets.models.includes(model.id)" @update:model-value="toggle('models', model.id, $event === true)" />
 							<span class="min-w-0 flex-1 truncate">{{ model.name }}</span>
 							<span class="shrink-0 text-xs text-muted-foreground">{{ providerName(model.provider_id) }}</span>
 						</label>
@@ -72,7 +73,7 @@
 				</div>
 			</section>
 
-		</fieldset>
+		</div>
 	</div>
 </template>
 
@@ -83,6 +84,7 @@ import type {ModelAccessResponse} from '~/types/generated/ModelAccessResponse';
 import type {ModelTargets} from '~/types/generated/ModelTargets';
 
 const props = defineProps<{data: ModelAccessResponse | null; form: {models: ModelTargets}}>();
+const emit = defineEmits<{confirm: []}>();
 const store = useMainStore();
 const t = (key: string) => store.getTranslation(`knowledge.models.${key}`);
 const search = ref('');

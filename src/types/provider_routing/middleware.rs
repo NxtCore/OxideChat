@@ -81,9 +81,19 @@ pub(crate) fn narrow(routing: Option<ProviderRouting>, allowed: &[String]) -> Op
 	if only.is_empty() {
 		return None;
 	}
-	if let Some(order) = routing.order.as_mut() {
-		order.retain(|slug| !super::intersect(std::slice::from_ref(slug), &only).is_empty());
-	}
+	routing.order = routing
+		.order
+		.take()
+		.map(|order| {
+			let mut narrowed: Vec<String> = Vec::with_capacity(order.len());
+			for slug in order.iter().flat_map(|slug| super::intersect(std::slice::from_ref(slug), &only)) {
+				if !narrowed.contains(&slug) {
+					narrowed.push(slug);
+				}
+			}
+			narrowed
+		})
+		.filter(|order| !order.is_empty());
 	routing.only = Some(only);
 	Some(Some(routing))
 }
@@ -108,14 +118,19 @@ fn metadata_uuid(metadata: &BTreeMap<String, String>, key: &str) -> Option<Uuid>
 	metadata.get(key).and_then(|value| Uuid::parse_str(value).ok())
 }
 
-/// The error a refused request is answered with: an HTTP 403 in the `OpenAI` error format.
-fn not_allowed(error: &ProviderRoutingError) -> AdapterError {
-	let key = match error {
+/// The translation key of a refused routing.
+#[must_use]
+pub(crate) const fn not_allowed_key(error: &ProviderRoutingError) -> &'static str {
+	match error {
 		ProviderRoutingError::NotAllowed(_) => "chat.errors.provider_not_allowed",
 		ProviderRoutingError::NoneAllowed => "chat.errors.no_provider_allowed",
-	};
+	}
+}
+
+/// The error a refused request is answered with: an HTTP 403 in the `OpenAI` error format.
+fn not_allowed(error: &ProviderRoutingError) -> AdapterError {
 	AdapterError::Forbidden {
 		code: "provider_not_allowed".to_string(),
-		message: I18n::get().translate(key, &None),
+		message: I18n::get().translate(not_allowed_key(error), &None),
 	}
 }

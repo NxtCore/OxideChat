@@ -4,17 +4,20 @@ use super::{
 };
 use crate::logging::AuditLog;
 use crate::types::AuditEntry;
-use crate::utils::encryption::encrypt_secret_value;
+use crate::utils::encryption::encrypt_api_key;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 const AUDIT_CONNECTION: &str = "rag_connection";
+
+/// Address, secret, embedding model, dimensions and vector size of a connection, read under a row lock.
+type LockedRow = (Option<String>, Option<String>, Option<Uuid>, Option<i32>, Option<i32>);
 const AUDIT_CONFIG: &str = "rag_config";
 
 fn protect(secret: Option<&str>) -> Result<Option<String>, RagError> {
 	secret
 		.filter(|secret| !secret.is_empty())
-		.map(|secret| encrypt_secret_value(secret, None).map_err(|error| RagError::Database(sqlx::Error::Protocol(error.to_string()))))
+		.map(|secret| encrypt_api_key(secret).map_err(|error| RagError::Database(sqlx::Error::Protocol(error.to_string()))))
 		.transpose()
 }
 
@@ -70,7 +73,8 @@ impl RagConfig {
 			request.defaults.connection_id,
 		)
 		.execute(&mut *tx)
-		.await?;
+		.await
+		.map_err(|error| RagError::foreign_key_or(error, RagError::NotFound))?;
 		let metadata = serde_json::json!({ "reranker": request.reranker, "defaults": request.defaults });
 		AuditLog::write(
 			&mut tx,
@@ -176,7 +180,8 @@ impl RagConnection {
 			to_i32(vector_size),
 		)
 		.fetch_one(&mut *tx)
-		.await?;
+		.await
+		.map_err(|error| RagError::foreign_key_or(error, RagError::ModelUnavailable))?;
 		AuditLog::write(
 			&mut tx,
 			AuditEntry {
@@ -198,14 +203,18 @@ impl RagConnection {
 	///
 	/// # Errors
 	///
-	/// Returns `NotFound` when the connection is gone, or a database error.
+	/// Returns `NotFound` when the connection is gone, `SecretRequiredForNewHost` when the stored secret would follow a
+	/// changed address, or a database error.
 	pub async fn update(&self, pool: &PgPool, actor_id: &Uuid, request: &SaveConnectionRequest, vector_size: Option<u32>) -> Result<Self, RagError> {
 		let new_secret = protect(request.secret.as_deref())?;
 		let clear_secret = request.secret.as_deref() == Some("");
 		let embedding = request.embedding.as_ref();
-		let vector_size = to_i32(vector_size).or(self.vector_size);
-		let reindex = vector_size != self.vector_size || (request.embedding.is_some() && request.embedding != self.embedding_settings());
 		let mut tx = pool.begin().await?;
+		let current = self.locked(&mut tx).await?;
+		if current.redirects_secret(request) {
+			return Err(RagError::SecretRequiredForNewHost);
+		}
+		let (vector_size, reindex) = current.next_index(request, vector_size);
 		let connection = sqlx::query_as!(
 			Self,
 			r#"UPDATE rag_connections SET
@@ -227,7 +236,8 @@ impl RagConnection {
 			reindex,
 		)
 		.fetch_optional(&mut *tx)
-		.await?
+		.await
+		.map_err(|error| RagError::foreign_key_or(error, RagError::ModelUnavailable))?
 		.ok_or(RagError::NotFound)?;
 		AuditLog::write(
 			&mut tx,
@@ -243,6 +253,33 @@ impl RagConnection {
 		tx.commit().await?;
 		super::forget_pool(&connection.id);
 		Ok(connection)
+	}
+
+	fn next_index(&self, request: &SaveConnectionRequest, vector_size: Option<u32>) -> (Option<i32>, bool) {
+		let vector_size = match (&request.embedding, to_i32(vector_size)) {
+			(_, Some(size)) => Some(size),
+			(None, None) => None,
+			(Some(_), None) => self.vector_size,
+		};
+		let reindex = vector_size != self.vector_size || (request.embedding.is_some() && request.embedding != self.embedding_settings());
+		(vector_size, reindex)
+	}
+
+	async fn locked(&self, tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> Result<Self, RagError> {
+		let row: Option<LockedRow> =
+			sqlx::query_as("SELECT url, secret, embedding_model_id, dimensions, vector_size FROM rag_connections WHERE id = $1 FOR UPDATE")
+				.bind(self.id)
+				.fetch_optional(&mut **tx)
+				.await?;
+		let (url, secret, embedding_model_id, dimensions, vector_size) = row.ok_or(RagError::NotFound)?;
+		Ok(Self {
+			url,
+			secret,
+			embedding_model_id,
+			dimensions,
+			vector_size,
+			..self.clone()
+		})
 	}
 
 	/// Removes a connection; returns whether it existed.
@@ -324,14 +361,15 @@ impl RagConnection {
 	}
 }
 
-/// Whether two connection addresses share scheme, host and port; `None` is the main database.
+/// Whether two connection addresses share scheme, host, port and `sslmode`; `None` is the main database.
 #[must_use]
 fn same_host(first: Option<&str>, second: Option<&str>) -> bool {
 	let parts = |url: Option<&str>| {
 		url.map(|url| {
-			reqwest::Url::parse(url)
-				.ok()
-				.map(|url| (url.scheme().to_owned(), url.host_str().map(str::to_owned), url.port_or_known_default()))
+			reqwest::Url::parse(url).ok().map(|url| {
+				let sslmode = url.query_pairs().find(|(key, _)| key == "sslmode").map(|(_, value)| value.into_owned());
+				(url.scheme().to_owned(), url.host_str().map(str::to_owned), url.port_or_known_default(), sslmode)
+			})
 		})
 	};
 	match (parts(first), parts(second)) {

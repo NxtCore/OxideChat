@@ -44,7 +44,11 @@
 					:data-testid="`composer-knowledge-${base.name}`"
 					:data-disabled="!knowledgeAllowed(base)"
 				>
-					<ShadCheckbox :model-value="knowledgeStore.selected.includes(base.id)" :disabled="!knowledgeAllowed(base)" @update:model-value="toggleKnowledge(base.id)" />
+					<ShadCheckbox
+						:model-value="knowledgeStore.selected.includes(base.id)"
+						:disabled="!knowledgeAllowed(base) && !knowledgeStore.selected.includes(base.id)"
+						@update:model-value="toggleKnowledge(base.id)"
+					/>
 					<span class="min-w-0 flex-1 truncate">{{ base.name }}</span>
 					<span v-if="!knowledgeAllowed(base)" class="shrink-0 text-xs text-muted-foreground">{{ store.getTranslation('chat.composer.knowledge_not_allowed') }}</span>
 				</label>
@@ -78,7 +82,7 @@ const knowledgeEnabled = computed(() => Boolean(store.base?.rag?.enabled));
 /** Whether the knowledge base's model access lets it reach the selected model; the server checks this again. */
 function knowledgeAllowed(base: KnowledgeBaseResponse) {
 	const model = modelStore.selectedModel;
-	return !base.allowed_model_ids || !model || base.allowed_model_ids.includes(baseModelId(model));
+	return knowledgeStore.allowsModel(base, model ? baseModelId(model) : null);
 }
 /** The knowledge tool row; a turn searches the attached bases only while this tool is among its tools. */
 const knowledgeTool = computed(() => preferencesStore.userTools.find(tool => tool.source_kind === 'BUILTIN' && tool.name === KNOWLEDGE_TOOL_NAME));
@@ -115,7 +119,7 @@ const chips = computed(() => {
 		list.push({key: 'sampling', label: store.getTranslation('chat.composer.sampling_chip', {count: chatStore.samplingActiveCount})});
 	}
 	if (modelStore.providerSelectorVisible && modelStore.selectedProviderName) list.push({key: 'provider', label: modelStore.selectedProviderName});
-	const attached = knowledgeStore.usable.filter(base => knowledgeStore.selected.includes(base.id)).length;
+	const attached = knowledgeStore.usable.filter(base => knowledgeStore.selected.includes(base.id) && knowledgeAllowed(base)).length;
 	if (knowledgeVisible.value && attached > 0) list.push({key: 'knowledge', label: store.getTranslation('chat.composer.knowledge_chip', {count: attached})});
 	return list;
 });

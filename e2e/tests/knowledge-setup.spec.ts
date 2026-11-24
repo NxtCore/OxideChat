@@ -42,7 +42,7 @@ test.describe('knowledge setup', () => {
 		await expect(page.getByTestId(`knowledge-connection-${MANAGED}`)).toContainText(t('settings.knowledge_setup.connections.main_database'));
 
 		await page.getByTestId(`knowledge-connection-test-${MANAGED}`).click();
-		await expect(page.getByTestId(`knowledge-connection-result-${MANAGED}`)).toBeVisible();
+		await expect(page.getByTestId(`knowledge-connection-result-${MANAGED}`)).toContainText(t('settings.knowledge_setup.connections.test_ok'));
 	});
 
 	test('a managed connection keeps the vector size of its test embedding', async ({page, api, t}) => {
@@ -81,8 +81,7 @@ test.describe('knowledge setup', () => {
 		await page.getByTestId('knowledge-connection-save').click();
 		await expect(page.getByTestId(`knowledge-connection-${QDRANT}`)).toContainText(t('settings.knowledge_setup.connections.mode_read_only'));
 
-		for (const base of await api.get('/api/v1/knowledge-bases')) await api.delete(`/api/v1/knowledge-bases/${base.id}`);
-	const setup = await api.get('/api/v1/admin/rag');
+		const setup = await api.get('/api/v1/admin/rag');
 		expect(setup.connections.find((connection: {name: string}) => connection.name === QDRANT)).toMatchObject({kind: 'qdrant', mode: 'read_only', has_secret: true});
 		expect(JSON.stringify(setup)).not.toContain(KEY);
 	});
@@ -95,6 +94,7 @@ test.describe('knowledge setup', () => {
 		await page.getByTestId('knowledge-connection-save').click();
 		await expect(page.getByTestId('knowledge-connection-save')).toBeVisible();
 		await expect(page.getByText(t('settings.knowledge_setup.connections.save_error'))).toBeVisible();
+		await expect(page.getByText(t('settings.errors.secret_required_for_new_host'))).toBeVisible();
 	});
 
 	test('the default storage is saved through the save bar', async ({page, api}) => {

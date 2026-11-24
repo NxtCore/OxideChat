@@ -3,6 +3,7 @@ use super::prepare::TurnError;
 use crate::ai;
 use crate::types::models::Model;
 use crate::types::models_configs::ModelConfig;
+use crate::types::rag::KNOWLEDGE_BUILTIN;
 use crate::types::{ChatSampling, Message, PRESET_METADATA_KEY, Preset, PresetReasoning, PresetSampling, StreamRequest, Tool, ToolFunction, User};
 use omniference::Sampling;
 use omniference::types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec};
@@ -177,6 +178,9 @@ async fn resolve_tools(db: &PgPool, user_id: Uuid, enabled_tool_ids: &[String]) 
 	let mut tool_specs: Vec<ToolSpec> = vec![];
 	let mut system_prompts: Vec<String> = vec![];
 	for tool in tools {
+		if tool.source_config.get("builtin_id").and_then(serde_json::Value::as_str) == Some(KNOWLEDGE_BUILTIN) {
+			continue;
+		}
 		if let Some(prompt) = tool.system_prompt.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
 			let label = if tool.display_name.trim().is_empty() {
 				tool.name.as_str()

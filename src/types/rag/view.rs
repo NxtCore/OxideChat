@@ -122,18 +122,12 @@ impl ExternalView {
 	///
 	/// Returns `InvalidCollection`, `InvalidField` or `InvalidFilter`.
 	pub fn validate(&self) -> Result<(), RagError> {
-		if self.collection.trim().is_empty() || self.collection.len() > 255 {
-			return Err(RagError::InvalidCollection);
-		}
+		validate_collection(&self.collection)?;
 		let optional = [&self.vector_name, &self.fields.title, &self.fields.url, &self.fields.section, &self.access];
 		if !valid_path(&self.fields.text) || optional.into_iter().flatten().any(|path| !valid_path(path)) {
 			return Err(RagError::InvalidField);
 		}
-		let scalar = |value: &Value| matches!(value, Value::String(_) | Value::Number(_) | Value::Bool(_));
-		if self.filter.len() > MAX_FILTERS || self.filter.iter().any(|filter| !valid_path(&filter.field) || !scalar(&filter.value)) {
-			return Err(RagError::InvalidFilter);
-		}
-		Ok(())
+		validate_filter(&self.filter)
 	}
 
 	/// The text, title, link and section of one record, or `None` when it has no text.
@@ -147,6 +141,29 @@ impl ExternalView {
 			section: read(&self.fields.section),
 			score,
 		})
+	}
+}
+
+/// Checks a collection name as views store it.
+///
+/// # Errors
+///
+/// Returns `InvalidCollection` for an empty or too long name.
+pub fn validate_collection(collection: &str) -> Result<(), RagError> {
+	if collection.trim().is_empty() || collection.len() > 255 { Err(RagError::InvalidCollection) } else { Ok(()) }
+}
+
+/// Checks a fixed filter: at most [`MAX_FILTERS`] conditions on valid field paths with scalar values.
+///
+/// # Errors
+///
+/// Returns `InvalidFilter` otherwise.
+pub fn validate_filter(filter: &[FieldFilter]) -> Result<(), RagError> {
+	let scalar = |value: &Value| matches!(value, Value::String(_) | Value::Number(_) | Value::Bool(_));
+	if filter.len() > MAX_FILTERS || filter.iter().any(|condition| !valid_path(&condition.field) || !scalar(&condition.value)) {
+		Err(RagError::InvalidFilter)
+	} else {
+		Ok(())
 	}
 }
 

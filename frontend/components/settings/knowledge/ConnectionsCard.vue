@@ -13,7 +13,7 @@
 		<SettingsRow v-for="item in setup.connections" :key="item.id" :label="item.name" :hint="summary(item)" :data-testid="`knowledge-connection-${item.name}`">
 			<div class="flex flex-col items-end gap-1">
 				<div class="flex gap-2">
-					<ShadButton variant="outline" size="sm" :disabled="testing === item.id" :data-testid="`knowledge-connection-test-${item.name}`" @click="test(item)">{{ t('test') }}</ShadButton>
+					<ShadButton variant="outline" size="sm" :disabled="testing.has(item.id)" :data-testid="`knowledge-connection-test-${item.name}`" @click="test(item)">{{ t('test') }}</ShadButton>
 					<ShadButton variant="outline" size="sm" :disabled="!canEdit" :data-testid="`knowledge-connection-configure-${item.name}`" @click="openEdit(item)">{{ t('configure') }}</ShadButton>
 				</div>
 				<p v-if="results[item.id]" class="max-w-xs text-right text-xs" :class="results[item.id]!.ok ? 'text-muted-foreground' : 'text-destructive'" :data-testid="`knowledge-connection-result-${item.name}`">
@@ -106,7 +106,7 @@
 
 				<ShadDialogFooter class="gap-2 sm:gap-0">
 					<ShadButton v-if="editing" variant="destructive" class="mr-auto" :disabled="saving" data-testid="knowledge-connection-remove" @click="remove">
-						{{ store.getTranslation('common.delete') }}
+						{{ confirmDelete ? t('delete_confirm') : store.getTranslation('common.delete') }}
 					</ShadButton>
 					<div class="flex flex-row gap-2">
 						<ShadButton variant="outline" @click="dialogOpen = false">{{ store.getTranslation('common.cancel') }}</ShadButton>
@@ -137,7 +137,8 @@ const t = (key: string, params?: Record<string, string>) => store.getTranslation
 const dialogOpen = ref(false);
 const saving = ref(false);
 const editing = ref<ConnectionResponse | null>(null);
-const testing = ref<string | null>(null);
+const testing = reactive(new Set<string>());
+const confirmDelete = ref(false);
 const results = reactive<Record<string, ConnectionTestResponse>>({});
 
 const form = reactive({
@@ -172,12 +173,14 @@ function resultText(result: ConnectionTestResponse): string {
 
 function openCreate() {
 	editing.value = null;
+	confirmDelete.value = false;
 	Object.assign(form, {name: '', kind: 'pgvector', mode: 'managed', url: '', secret: '', clearSecret: false, embeddingModelId: null, dimensions: null});
 	dialogOpen.value = true;
 }
 
 function openEdit(item: ConnectionResponse) {
 	editing.value = item;
+	confirmDelete.value = false;
 	Object.assign(form, {
 		name: item.name,
 		kind: item.kind,
@@ -199,18 +202,19 @@ function requestBody() {
 		mode: form.mode,
 		url: form.url.trim() || null,
 		secret,
-		embedding: form.mode === 'managed' && form.embeddingModelId ? {model_id: form.embeddingModelId, dimensions: form.dimensions || null} : null,
+		embedding: form.mode === 'managed' && form.embeddingModelId ? {model_id: form.embeddingModelId, dimensions: form.dimensions && form.dimensions > 0 ? Math.round(form.dimensions) : null} : null,
 	};
 }
 
-async function run(action: () => Promise<RagSetupResponse>, successKey: string) {
+async function run(action: () => Promise<RagSetupResponse>, successKey: string, errorKey: string, id?: string) {
 	saving.value = true;
 	try {
 		emit('changed', await action());
+		if (id) delete results[id];
 		dialogOpen.value = false;
 		store.toast(t(successKey), {type: 'success'});
 	} catch (error: any) {
-		store.toast(t('save_error'), {type: 'error', description: ragErrorMessage(error, '')});
+		store.toast(t(errorKey), {type: 'error', description: ragErrorMessage(error, '')});
 	} finally {
 		saving.value = false;
 	}
@@ -219,22 +223,27 @@ async function run(action: () => Promise<RagSetupResponse>, successKey: string) 
 function save() {
 	const body = requestBody();
 	const target = editing.value;
-	run(() => (target ? updateRagConnection(target.id, body) : createRagConnection(body)), 'saved');
+	run(() => (target ? updateRagConnection(target.id, body) : createRagConnection(body)), 'saved', 'save_error', target?.id);
 }
 
 function remove() {
 	const target = editing.value;
-	if (target) run(() => deleteRagConnection(target.id), 'deleted');
+	if (!target) return;
+	if (!confirmDelete.value) {
+		confirmDelete.value = true;
+		return;
+	}
+	run(() => deleteRagConnection(target.id), 'deleted', 'delete_error', target.id);
 }
 
 async function test(item: ConnectionResponse) {
-	testing.value = item.id;
+	testing.add(item.id);
 	try {
 		results[item.id] = await testRagConnection(item.id);
 	} catch (error: any) {
 		store.toast(t('test_failed'), {type: 'error', description: errorMessage(error, '')});
 	} finally {
-		testing.value = null;
+		testing.delete(item.id);
 	}
 }
 </script>

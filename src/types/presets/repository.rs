@@ -116,10 +116,14 @@ fn bind_fields<'q>(query: PresetQuery<'q>, request: &'q SavePresetRequest) -> Pr
 		.bind(Json(request.arena.clone().unwrap_or_default()))
 }
 
-async fn save_knowledge_bases(pool: &PgPool, tx: &mut Transaction<'_, Postgres>, actor: &PresetActor, preset_id: &Uuid, ids: Option<&[Uuid]>) -> Result<(), sqlx::Error> {
+fn knowledge_base_ids<'a>(preset: &Preset, request: &'a SavePresetRequest) -> Option<&'a [Uuid]> {
+	if preset.is_arena() { Some(&[]) } else { request.knowledge_base_ids.as_deref() }
+}
+
+async fn save_knowledge_bases(tx: &mut Transaction<'_, Postgres>, actor: &PresetActor, preset_id: &Uuid, ids: Option<&[Uuid]>) -> Result<(), sqlx::Error> {
 	let Some(ids) = ids else { return Ok(()) };
-	let current = KnowledgeBase::preset_ids(pool, preset_id).await?;
-	let usable: HashSet<Uuid> = KnowledgeBase::accessible(pool, &actor.user_id, ids).await?.into_iter().map(|base| base.id).collect();
+	let current = KnowledgeBase::preset_ids(&mut **tx, preset_id).await?;
+	let usable: HashSet<Uuid> = KnowledgeBase::accessible(&mut **tx, &actor.user_id, ids).await?.into_iter().map(|base| base.id).collect();
 	let mut kept: Vec<Uuid> = ids.iter().copied().filter(|id| usable.contains(id) || current.contains(id)).collect();
 	kept.sort_unstable();
 	kept.dedup();
@@ -312,7 +316,7 @@ impl Preset {
 			.fetch_one(&mut *tx)
 			.await
 			.map_err(map_write_error)?;
-		save_knowledge_bases(pool, &mut tx, actor, &preset.id, request.knowledge_base_ids.as_deref()).await?;
+		save_knowledge_bases(&mut tx, actor, &preset.id, knowledge_base_ids(&preset, &request)).await?;
 		audit(&mut tx, EVENT_CREATED, &actor.user_id, &preset).await?;
 		tx.commit().await?;
 		Ok(preset)
@@ -359,7 +363,7 @@ impl Preset {
 		if !shared && Shares::exist(&mut *tx, id).await? && Tool::any_personal(&mut *tx, &preset.tool_ids).await? {
 			return Err(PresetError::ToolsNotAllowed);
 		}
-		save_knowledge_bases(pool, &mut tx, actor, id, request.knowledge_base_ids.as_deref()).await?;
+		save_knowledge_bases(&mut tx, actor, id, knowledge_base_ids(&preset, &request)).await?;
 		audit(&mut tx, EVENT_UPDATED, &actor.user_id, &preset).await?;
 		tx.commit().await?;
 		Ok(preset)

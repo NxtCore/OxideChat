@@ -79,9 +79,10 @@ const result = ref<KnowledgeSearchResponse | null>(null);
 
 async function run() {
 	searching.value = true;
+	const as = asUser.value;
 	try {
-		result.value = await searchKnowledgeBase(props.id, query.value.trim(), asUser.value?.id);
-		searchedAs.value = asUser.value;
+		result.value = await searchKnowledgeBase(props.id, query.value.trim(), as?.id);
+		searchedAs.value = as;
 	} catch (error: any) {
 		store.toast(t('error'), {type: 'error', description: ragErrorMessage(error, '')});
 	} finally {

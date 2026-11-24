@@ -4,6 +4,7 @@ import {usePreferencesStore} from '~/stores/preferencesStore';
 import {useMainStore} from '~/stores';
 import {useBudgetStore} from '~/stores/budgetStore';
 import {useKnowledgeStore} from '~/stores/knowledgeStore';
+import {baseModelId} from '~/utils/presets';
 import type {ChatMessage} from '~/types/chat';
 
 function parseSseJsonRpc(body: string): any {
@@ -294,7 +295,7 @@ export function useChatStream() {
 				body.provider_routing_mode = modelStore.providerRoutingMode;
 			}
 
-			if (useMainStore().base?.rag?.enabled) body.knowledge_base_ids = useKnowledgeStore().selected;
+			if (useMainStore().base?.rag?.enabled) body.knowledge_base_ids = useKnowledgeStore().selectedFor(modelStore.selectedModel ? baseModelId(modelStore.selectedModel) : null);
 
 			if (parts && parts.length > 0) body.parts = parts;
 

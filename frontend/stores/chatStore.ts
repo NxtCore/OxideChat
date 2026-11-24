@@ -226,6 +226,7 @@ export const useChatStore = defineStore('chat', {
 				if (this.activeChat?.id === id) {
 					this.activeChat = null;
 					this.messages = [];
+					useKnowledgeStore().selected = [];
 				}
 				return true;
 			} catch (e) {

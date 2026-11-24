@@ -137,6 +137,8 @@ pub enum RagError {
 	InvalidDescription,
 	#[error("not allowed")]
 	Forbidden,
+	#[error("the secret must be entered again for a new host")]
+	SecretRequiredForNewHost,
 	#[error("connection not found")]
 	NotFound,
 	#[error(transparent)]
@@ -190,6 +192,7 @@ impl RagError {
 			Self::UpstreamNeedsProvider => "upstream_needs_provider",
 			Self::InvalidDescription => "invalid_description",
 			Self::Forbidden => "forbidden",
+			Self::SecretRequiredForNewHost => "secret_required_for_new_host",
 			Self::NotFound => "not_found",
 			Self::Database(_) => "database",
 		}

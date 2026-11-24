@@ -1,4 +1,4 @@
-use super::{ConnectionKind, ConnectionMode, ExternalView, RagError};
+use super::{ConnectionKind, ConnectionMode, ExternalView, ModelTargets, RagError};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -64,6 +64,10 @@ pub struct SaveKnowledgeBaseRequest {
 	#[serde(default)]
 	#[cfg_attr(test, ts(optional))]
 	pub view: Option<ExternalView>,
+	/// On an update, replaces the model access in the same transaction; only knowledge admins may send it.
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub model_access: Option<ModelTargets>,
 }
 
 /// Inspects a collection of a read-only connection, reading the sample with `filter`.
@@ -73,6 +77,18 @@ pub struct InspectRequest {
 	pub collection: String,
 	#[serde(default)]
 	pub filter: Vec<super::FieldFilter>,
+}
+
+impl InspectRequest {
+	/// Checks the collection name and the filter like a saved view.
+	///
+	/// # Errors
+	///
+	/// Returns `InvalidCollection` or `InvalidFilter`.
+	pub fn validate(&self) -> Result<(), RagError> {
+		super::view::validate_collection(&self.collection)?;
+		super::view::validate_filter(&self.filter)
+	}
 }
 
 /// The access label a label assignment route acts on.

@@ -6,7 +6,7 @@ use crate::types::provider_routing::intersect;
 use crate::types::providers::ProviderKind;
 use crate::types::{AuditEntry, normalize_allowed_providers};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -81,13 +81,13 @@ impl ModelTargets {
 		!self.removed && self.providers.is_empty() && self.upstream_providers.is_empty() && self.models.is_empty()
 	}
 
-	/// Whether `model` may see the content: a listed model is allowed, otherwise its provider must be listed, and a
-	/// listed routing provider is narrowed to the listed upstream providers.
+	/// Whether `model` may see the content: nothing while a listed target was deleted, otherwise the model or its provider
+	/// must be listed, and a model of a routing provider is narrowed to the listed upstream providers either way.
 	#[must_use]
 	pub fn decide(&self, model: &RoutedModel) -> ModelAccess {
-		if self.is_unrestricted() || self.models.contains(&model.id) {
+		if self.is_unrestricted() {
 			ModelAccess::Allowed
-		} else if !self.providers.contains(&model.provider_id) {
+		} else if self.removed || !(self.models.contains(&model.id) || self.providers.contains(&model.provider_id)) {
 			ModelAccess::Denied
 		} else if model.kind.routes_upstream() && !self.upstream_providers.is_empty() {
 			ModelAccess::Upstream(self.upstream_providers.clone())
@@ -135,13 +135,13 @@ impl ModelTargets {
 	/// # Errors
 	///
 	/// Returns a database error when the query fails.
-	pub async fn load(pool: &PgPool, ids: &[Uuid]) -> Result<HashMap<Uuid, Self>, sqlx::Error> {
+	pub async fn load(executor: impl PgExecutor<'_>, ids: &[Uuid]) -> Result<HashMap<Uuid, Self>, sqlx::Error> {
 		let rows: Vec<TargetRow> = sqlx::query_as(
 			"SELECT knowledge_base_id, provider_id, model_id, upstream_provider FROM knowledge_base_model_targets WHERE knowledge_base_id = ANY($1)
 			 ORDER BY knowledge_base_id, provider_id, model_id, upstream_provider",
 		)
 		.bind(ids)
-		.fetch_all(pool)
+		.fetch_all(executor)
 		.await?;
 		let mut targets: HashMap<Uuid, Self> = HashMap::new();
 		for (base, provider, model, upstream) in rows {
@@ -196,10 +196,10 @@ impl RoutedModel {
 	/// # Errors
 	///
 	/// Returns a database error when the query fails.
-	pub async fn find(pool: &PgPool, model_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
+	pub async fn find(executor: impl PgExecutor<'_>, model_id: &Uuid) -> Result<Option<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>("SELECT m.id, m.provider_id, p.kind FROM models m JOIN providers p ON p.id = m.provider_id WHERE m.id = $1")
 			.bind(model_id)
-			.fetch_optional(pool)
+			.fetch_optional(executor)
 			.await
 	}
 
@@ -303,51 +303,56 @@ impl KnowledgeBase {
 			return Err(RagError::Forbidden);
 		}
 		let targets = targets.normalized()?;
-		if !targets.upstream_providers.is_empty() {
-			let kinds: Vec<ProviderKind> = sqlx::query_scalar("SELECT kind FROM providers WHERE id = ANY($1)").bind(&targets.providers).fetch_all(pool).await?;
-			if !kinds.iter().any(ProviderKind::routes_upstream) {
-				return Err(RagError::UpstreamNeedsProvider);
-			}
-		}
+		check_upstream_needs_provider(pool, &targets).await?;
 		let mut tx = pool.begin().await?;
 		let embedding_model_id: Option<Option<Uuid>> = sqlx::query_scalar("SELECT (view->'embedding'->>'model_id')::uuid FROM knowledge_bases WHERE id = $1 FOR UPDATE")
 			.bind(self.id)
 			.fetch_optional(&mut *tx)
 			.await?;
-		check_embedding_allowed(pool, &targets, &embedding_model_id.flatten().ok_or(RagError::NotFound)?).await?;
+		check_embedding_allowed(&mut *tx, &targets, &embedding_model_id.flatten().ok_or(RagError::NotFound)?).await?;
+		self.store_model_access(&mut tx, &actor.user_id, &targets).await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	/// Writes normalized, checked targets in the caller's transaction, audited.
+	///
+	/// # Errors
+	///
+	/// Returns `InvalidModelAccess` for unknown targets or a database error.
+	pub(super) async fn store_model_access(&self, tx: &mut Transaction<'_, Postgres>, actor_id: &Uuid, targets: &ModelTargets) -> Result<(), RagError> {
 		sqlx::query("DELETE FROM knowledge_base_model_targets WHERE knowledge_base_id = $1")
 			.bind(self.id)
-			.execute(&mut *tx)
+			.execute(&mut **tx)
 			.await?;
 		sqlx::query("INSERT INTO knowledge_base_model_targets (knowledge_base_id, provider_id) SELECT $1, unnest($2::uuid[])")
-		.bind(self.id)
-		.bind(&targets.providers)
-		.execute(&mut *tx)
-		.await
-		.map_err(|error| RagError::foreign_key_or(error, RagError::InvalidModelAccess))?;
+			.bind(self.id)
+			.bind(&targets.providers)
+			.execute(&mut **tx)
+			.await
+			.map_err(|error| RagError::foreign_key_or(error, RagError::InvalidModelAccess))?;
 		sqlx::query("INSERT INTO knowledge_base_model_targets (knowledge_base_id, model_id) SELECT $1, unnest($2::uuid[])")
 			.bind(self.id)
 			.bind(&targets.models)
-			.execute(&mut *tx)
+			.execute(&mut **tx)
 			.await
 			.map_err(|error| RagError::foreign_key_or(error, RagError::InvalidModelAccess))?;
 		sqlx::query("INSERT INTO knowledge_base_model_targets (knowledge_base_id, upstream_provider) SELECT $1, unnest($2::text[])")
 			.bind(self.id)
 			.bind(&targets.upstream_providers)
-			.execute(&mut *tx)
+			.execute(&mut **tx)
 			.await?;
 		AuditLog::write(
-			&mut tx,
+			tx,
 			AuditEntry {
 				event: "knowledge_base_model_access_updated",
-				actor_id: &actor.user_id,
+				actor_id,
 				target_type: "knowledge_base",
 				target_id: &self.id,
 				metadata: serde_json::json!({ "name": self.name, "targets": targets }),
 			},
 		)
 		.await?;
-		tx.commit().await?;
 		Ok(())
 	}
 
@@ -402,15 +407,28 @@ pub async fn chat_allows_model(pool: &PgPool, chat_id: &Uuid, model_id: &Uuid) -
 	ModelTargets::allow_outright(pool, &ModelTargets::for_chat(pool, chat_id).await?, model_id).await
 }
 
+/// Refuses upstream providers without a routing provider to narrow.
+///
+/// # Errors
+///
+/// Returns `UpstreamNeedsProvider` or a database error.
+pub async fn check_upstream_needs_provider(pool: &PgPool, targets: &ModelTargets) -> Result<(), RagError> {
+	if targets.upstream_providers.is_empty() {
+		return Ok(());
+	}
+	let kinds: Vec<ProviderKind> = sqlx::query_scalar("SELECT kind FROM providers WHERE id = ANY($1)").bind(&targets.providers).fetch_all(pool).await?;
+	if kinds.iter().any(ProviderKind::routes_upstream) { Ok(()) } else { Err(RagError::UpstreamNeedsProvider) }
+}
+
 /// Refuses targets that do not allow `embedding_model_id` outright.
 ///
 /// # Errors
 ///
 /// Returns `EmbeddingModelNotAllowed`, `ModelUnavailable` when the model is gone, or a database error.
-pub async fn check_embedding_allowed(pool: &PgPool, targets: &ModelTargets, embedding_model_id: &Uuid) -> Result<(), RagError> {
+pub async fn check_embedding_allowed(executor: impl PgExecutor<'_>, targets: &ModelTargets, embedding_model_id: &Uuid) -> Result<(), RagError> {
 	if targets.is_unrestricted() {
 		return Ok(());
 	}
-	let model = RoutedModel::find(pool, embedding_model_id).await?.ok_or(RagError::ModelUnavailable)?;
+	let model = RoutedModel::find(executor, embedding_model_id).await?.ok_or(RagError::ModelUnavailable)?;
 	if targets.decide(&model).is_allowed() { Ok(()) } else { Err(RagError::EmbeddingModelNotAllowed) }
 }

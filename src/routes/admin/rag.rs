@@ -130,6 +130,7 @@ pub async fn inspect_collection(State(state): State<Arc<JobState>>, auth: AuthUs
 	if connection.mode != ConnectionMode::ReadOnly {
 		return Err(RagError::NotReadOnly.into());
 	}
+	req.validate()?;
 	let result = match VectorStore::connect(&connection, &state.db, None).await {
 		Ok(store) => store.describe(req.collection.trim(), &req.filter).await,
 		Err(error) => Err(error),

@@ -42,7 +42,12 @@ function lastUserText(body) {
 function replyFor(body) {
 	const last = (body.messages ?? []).at(-1);
 	if (last?.role === 'tool') {
-		const source = JSON.parse(typeof last.content === 'string' ? last.content : last.content?.[0]?.text ?? '{}').sources?.[0];
+		let source;
+		try {
+			source = JSON.parse(typeof last.content === 'string' ? last.content : last.content?.[0]?.text ?? '{}').sources?.[0];
+		} catch {
+			source = undefined;
+		}
 		return source ? `Mock answer: ${source.text} [${source.n}]` : 'Mock answer: nothing found';
 	}
 	return `Mock reply: ${lastUserText(body)}`;

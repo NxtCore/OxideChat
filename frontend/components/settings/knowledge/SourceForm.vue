@@ -1,5 +1,24 @@
 <template>
-	<div class="space-y-6" data-testid="knowledge-source">
+	<dl v-if="readonly" class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-[max-content_1fr]" data-testid="knowledge-source-readonly">
+		<dt class="text-muted-foreground">{{ t('step_connection') }}</dt>
+		<dd>{{ connectionName }}</dd>
+		<dt class="text-muted-foreground">{{ t('step_collection') }}</dt>
+		<dd class="font-mono">{{ view.collection }}</dd>
+		<dt class="text-muted-foreground">{{ t('vector') }}</dt>
+		<dd class="font-mono">{{ view.vector_name ?? t('default_vector') }}</dd>
+		<template v-for="field in FIELDS" :key="field">
+			<dt class="text-muted-foreground">{{ t(`field_${field}`) }}</dt>
+			<dd class="font-mono">{{ view.fields[field] || t('field_none') }}</dd>
+		</template>
+		<dt class="text-muted-foreground">{{ t('step_filter') }}</dt>
+		<dd class="font-mono">
+			<span v-if="view.filter.length === 0">–</span>
+			<span v-for="(condition, index) in view.filter" :key="index" class="block">{{ condition.field }} = {{ JSON.stringify(condition.value) }}</span>
+		</dd>
+		<dt class="text-muted-foreground">{{ t('step_access') }}</dt>
+		<dd>{{ view.access === null ? t('access_everyone') : `${t('access_per_record')} (${view.access})` }}</dd>
+	</dl>
+	<div v-else class="space-y-6" data-testid="knowledge-source">
 		<p class="text-sm text-muted-foreground">{{ t('intro') }}</p>
 
 		<section class="space-y-2">
@@ -26,6 +45,28 @@
 				</ShadSelectContent>
 			</ShadSelect>
 		</section>
+
+		<template v-if="view.collection">
+			<section class="space-y-2">
+				<ShadLabel>{{ t('step_filter') }}</ShadLabel>
+				<p class="text-xs text-muted-foreground">{{ t('filter_hint') }}</p>
+				<div v-for="(condition, index) in filterRows" :key="index" class="flex items-center gap-2">
+					<ShadSelect v-model="condition.field">
+						<ShadSelectTrigger class="w-48" :data-testid="`knowledge-source-filter-field-${index}`"><ShadSelectValue :placeholder="t('pick')" /></ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem v-for="path in filterFields" :key="path" :value="path">{{ path }}</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+					<span class="text-sm text-muted-foreground">=</span>
+					<ShadInput v-model="condition.value" class="flex-1" :data-testid="`knowledge-source-filter-value-${index}`" />
+					<ShadButton variant="ghost" size="icon" :title="t('filter_remove')" @click="filterRows.splice(index, 1)"><X class="h-4 w-4" /></ShadButton>
+				</div>
+				<div class="flex gap-2">
+					<ShadButton variant="outline" size="sm" data-testid="knowledge-source-filter-add" @click="filterRows.push({field: '', value: ''})">{{ t('filter_add') }}</ShadButton>
+					<ShadButton variant="outline" size="sm" data-testid="knowledge-source-filter-apply" @click="inspect">{{ t('filter_apply') }}</ShadButton>
+				</div>
+			</section>
+		</template>
 
 		<template v-if="info">
 			<section class="space-y-2">
@@ -68,26 +109,6 @@
 							</ShadSelectContent>
 						</ShadSelect>
 					</div>
-				</div>
-			</section>
-
-			<section class="space-y-2">
-				<ShadLabel>{{ t('step_filter') }}</ShadLabel>
-				<p class="text-xs text-muted-foreground">{{ t('filter_hint') }}</p>
-				<div v-for="(condition, index) in filterRows" :key="index" class="flex items-center gap-2">
-					<ShadSelect v-model="condition.field">
-						<ShadSelectTrigger class="w-48" :data-testid="`knowledge-source-filter-field-${index}`"><ShadSelectValue :placeholder="t('pick')" /></ShadSelectTrigger>
-						<ShadSelectContent>
-							<ShadSelectItem v-for="path in info.fields" :key="path" :value="path">{{ path }}</ShadSelectItem>
-						</ShadSelectContent>
-					</ShadSelect>
-					<span class="text-sm text-muted-foreground">=</span>
-					<ShadInput v-model="condition.value" class="flex-1" :data-testid="`knowledge-source-filter-value-${index}`" />
-					<ShadButton variant="ghost" size="icon" :title="t('filter_remove')" @click="filterRows.splice(index, 1)"><X class="h-4 w-4" /></ShadButton>
-				</div>
-				<div class="flex gap-2">
-					<ShadButton variant="outline" size="sm" data-testid="knowledge-source-filter-add" @click="filterRows.push({field: '', value: ''})">{{ t('filter_add') }}</ShadButton>
-					<ShadButton variant="outline" size="sm" data-testid="knowledge-source-filter-apply" @click="inspect">{{ t('filter_apply') }}</ShadButton>
 				</div>
 			</section>
 
@@ -153,6 +174,7 @@ const EVERYONE = 'everyone';
 const PER_RECORD = 'per_record';
 
 const view = defineModel<ExternalView>({required: true});
+const props = defineProps<{readonly?: boolean}>();
 const store = useMainStore();
 const t = (key: string, params?: Record<string, string>) => store.getTranslation(`knowledge.source.${key}`, params);
 
@@ -160,8 +182,10 @@ const connections = ref<ConnectionResponse[]>([]);
 const collections = ref<string[]>([]);
 const info = ref<CollectionInfo | null>(null);
 const storeError = ref<StoreError | null>(null);
-const filterRows = ref(view.value.filter.map(condition => ({field: condition.field, value: String(condition.value)})));
+const filterRows = ref<{field: string; value: string}[]>([]);
 
+const connectionName = computed(() => connections.value.find(connection => connection.id === view.value.connection_id)?.name ?? view.value.connection_id);
+const filterFields = computed(() => [...new Set([...(info.value?.fields ?? []), ...filterRows.value.map(row => row.field).filter(Boolean)])]);
 const kind = computed(() => connections.value.find(connection => connection.id === view.value.connection_id)?.kind);
 const collectionNames = computed(() => [...new Set([...collections.value, ...(view.value.collection ? [view.value.collection] : [])])]);
 const accessFields = computed(() => [...new Set([ACCESS_FIELD, ...(info.value?.fields ?? []), ...(view.value.access ? [view.value.access] : [])])]);
@@ -175,9 +199,14 @@ const dimensions = computed({
 	set: (value: number | string | undefined) => (view.value.embedding.dimensions = typeof value === 'number' && value > 0 ? value : null),
 });
 
+const rowsOf = (filter: ExternalView['filter']) => filter.map(condition => ({field: condition.field, value: String(condition.value)}));
+
 watch(
 	filterRows,
-	rows => (view.value.filter = rows.filter(row => row.field && row.value.trim()).map(row => ({field: row.field, value: parseFilterValue(row.value, sampleValue(info.value?.sample ?? [], row.field))}))),
+	rows => {
+		if (JSON.stringify(rows) === JSON.stringify(rowsOf(view.value.filter))) return;
+		view.value.filter = rows.filter(row => row.field && row.value.trim()).map(row => ({field: row.field, value: parseFilterValue(row.value, sampleValue(info.value?.sample ?? [], row.field))}));
+	},
 	{deep: true},
 );
 
@@ -219,15 +248,22 @@ async function inspect() {
 	}
 }
 
-async function pickConnection(id: string) {
-	Object.assign(view.value, {connection_id: id, collection: '', vector_name: null, filter: []});
+function resetCollection() {
+	Object.assign(view.value, {vector_name: null, filter: [], access: null, fields: {text: '', title: null, url: null, section: null}});
 	filterRows.value = [];
 	info.value = null;
+}
+
+async function pickConnection(id: string) {
+	Object.assign(view.value, {connection_id: id, collection: ''});
+	resetCollection();
 	await loadCollections();
 }
 
 async function pickCollection(name: string) {
+	if (name === view.value.collection) return;
 	view.value.collection = name;
+	resetCollection();
 	await inspect();
 	const first = info.value?.vectors[0];
 	if (first && !info.value?.vectors.some(vector => vector.name === view.value.vector_name)) pickVector(first.name ?? DEFAULT_VECTOR);
@@ -235,15 +271,24 @@ async function pickCollection(name: string) {
 }
 
 
-onMounted(async () => {
-	try {
-		connections.value = (await ragSetup()).connections.filter(connection => connection.mode === 'read_only');
-	} catch (error: any) {
-		store.toast(t('load_error'), {type: 'error', description: errorMessage(error, '')});
-	}
-	if (view.value.connection_id) {
+async function loadSource() {
+	filterRows.value = rowsOf(view.value.filter);
+	info.value = null;
+	collections.value = [];
+	if (view.value.connection_id && !props.readonly) {
 		await loadCollections();
 		await inspect();
 	}
+}
+
+watch(() => view.value, loadSource);
+
+onMounted(async () => {
+	try {
+		connections.value = (await ragSetup()).connections.filter(connection => props.readonly || connection.mode === 'read_only');
+	} catch (error: any) {
+		store.toast(t('load_error'), {type: 'error', description: errorMessage(error, '')});
+	}
+	await loadSource();
 });
 </script>

@@ -132,7 +132,11 @@ pub async fn guarded_client(url: &str) -> Result<(reqwest::Client, reqwest::Url)
 	}
 	let host = url.host_str().ok_or(OutboundError::InvalidUrl)?.trim_matches(['[', ']']).to_string();
 	let port = url.port_or_known_default().ok_or(OutboundError::InvalidUrl)?;
-	let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), port)).await.map_err(|_| OutboundError::Lookup)?.collect();
+	let addresses: Vec<SocketAddr> = tokio::time::timeout(REQUEST_TIMEOUT, tokio::net::lookup_host((host.as_str(), port)))
+		.await
+		.map_err(|_| OutboundError::Lookup)?
+		.map_err(|_| OutboundError::Lookup)?
+		.collect();
 	if addresses.is_empty() || addresses.iter().any(|address| !is_allowed_ip(address.ip(), allow_private)) {
 		return Err(OutboundError::Blocked);
 	}

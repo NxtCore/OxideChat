@@ -15,7 +15,7 @@ use axum::response::{
 	sse::{Event, KeepAlive, Sse},
 };
 use crate::types::rag::{KNOWLEDGE_BUILTIN, KnowledgeBase, ModelAccess, ModelTargets, RoutedModel, add_knowledge_tool, turn_knowledge_bases};
-use crate::types::provider_routing::narrow;
+use crate::types::provider_routing::{narrow, not_allowed_key};
 use omniference::types::{ChatRequestIR, ProviderRouting};
 use sqlx::PgPool;
 use std::{convert::Infallible, sync::Arc};
@@ -416,8 +416,8 @@ pub(crate) async fn require_knowledge_access(db: &PgPool, user_id: &Uuid, chat_i
 		Some(model) if model.kind.routes_upstream() => EffectiveProviderRouting::for_user(db, user_id)
 			.await
 			.map_err(internal("Failed to check knowledge access"))?
-			.restrict(&model.kind, routing.clone())
-			.unwrap_or(routing),
+			.restrict(&model.kind, routing)
+			.map_err(|error| TurnError::new("provider_not_allowed", I18n::get().translate(not_allowed_key(&error), &None)))?,
 		_ => routing,
 	};
 	let access = match &model {

@@ -87,6 +87,7 @@ function fill(value: RagSetupResponse) {
 function apply(value: RagSetupResponse) {
 	const dirty = settingsForm.isDirty;
 	setup.value = value;
+	if (form.defaults.connection_id && !value.connections.some(connection => connection.id === form.defaults.connection_id)) form.defaults.connection_id = null;
 	if (!dirty) {
 		fill(value);
 		settingsForm.markSaved();
@@ -99,6 +100,7 @@ const settingsForm = useSettingsForm({
 	canEdit: () => canEdit.value,
 	savedKey: 'settings.knowledge_setup.save_success',
 	errorKey: 'settings.knowledge_setup.save_error',
+	validate: () => (Number.isInteger(form.reranker.top_n) && form.reranker.top_n >= 1 && form.reranker.top_n <= 50 ? null : 'rag.error.invalid_top_n'),
 	save: async () => {
 		try {
 			setup.value = await saveRagSetup(form);
@@ -109,9 +111,13 @@ const settingsForm = useSettingsForm({
 });
 
 onMounted(async () => {
-	const value = await ragSetup();
-	setup.value = value;
-	fill(value);
-	settingsForm.markSaved();
+	try {
+		const value = await ragSetup();
+		setup.value = value;
+		fill(value);
+		settingsForm.markSaved();
+	} catch (error: any) {
+		store.toast(store.getTranslation('settings.knowledge_setup.load_error'), {type: 'error', description: ragErrorMessage(error, '')});
+	}
 });
 </script>

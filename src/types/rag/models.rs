@@ -2,7 +2,7 @@
 
 use super::{EmbeddingSettings, RagError};
 use crate::ai::provider_to_config;
-use crate::types::gateway::model_type;
+use crate::types::gateway::{MediaKind, knowledge_estimate, model_type};
 use crate::types::models::Model;
 use crate::types::providers::Provider;
 use crate::types::{BUDGET_RESERVATION_METADATA_KEY, BudgetAdmission, BudgetError, BudgetSubject, JobState, TokenEstimate};
@@ -28,8 +28,9 @@ async fn load(pool: &PgPool, model_id: &Uuid, expected_type: &str, wrong_type: R
 		   WHERE m.id = $1"#,
 		model.id
 	)
-	.fetch_one(pool)
-	.await?;
+	.fetch_optional(pool)
+	.await?
+	.ok_or(RagError::ModelUnavailable)?;
 	if model_type(&kind.capabilities.0, &kind.output_modalities.0) != expected_type {
 		return Err(wrong_type);
 	}
@@ -66,9 +67,9 @@ pub async fn probe_embedding(state: &JobState, user_id: &Uuid, settings: &Embedd
 /// Returns why the model cannot be used, the budget refused it or the provider failed.
 pub async fn embed(state: &JobState, user_id: &Uuid, settings: &EmbeddingSettings, text: &str, request_type: &str) -> Result<Vec<f32>, RagError> {
 	let (model, provider) = load(&state.db, &settings.model_id, "embedding", RagError::NotEmbeddingModel).await?;
-	let (admission, metadata) = reserve(state, user_id, &model, text.len(), request_type).await?;
+	let (admission, metadata) = reserve(state, user_id, &model, knowledge_estimate(text.len() as u64, MediaKind::Embeddings), request_type).await?;
 	let request = EmbeddingRequestIR {
-		model: model_ref(&model, &provider)?,
+		model: model_ref(&model, &provider).await?,
 		input: EmbeddingInput::Text(text.to_string()),
 		dimensions: settings.dimensions,
 		encoding_format: None,
@@ -97,9 +98,9 @@ pub async fn embed(state: &JobState, user_id: &Uuid, settings: &EmbeddingSetting
 pub async fn rerank(state: &JobState, user_id: &Uuid, model_id: &Uuid, query: &str, documents: &[&str]) -> Result<Vec<usize>, RagError> {
 	let (model, provider) = load(&state.db, model_id, "reranking", RagError::NotRerankingModel).await?;
 	let bytes = query.len() + documents.iter().map(|document| document.len()).sum::<usize>();
-	let (admission, metadata) = reserve(state, user_id, &model, bytes, "rag_query").await?;
+	let (admission, metadata) = reserve(state, user_id, &model, knowledge_estimate(bytes as u64, MediaKind::Rerank), "rag_query").await?;
 	let request = RerankRequestIR {
-		model: model_ref(&model, &provider)?,
+		model: model_ref(&model, &provider).await?,
 		query: query.to_string(),
 		documents: documents.iter().map(|document| serde_json::Value::String((*document).to_string())).collect(),
 		top_n: None,
@@ -114,8 +115,7 @@ pub async fn rerank(state: &JobState, user_id: &Uuid, model_id: &Uuid, query: &s
 	Ok(results.into_iter().filter_map(|result| usize::try_from(result.index).ok()).collect())
 }
 
-async fn reserve(state: &JobState, user_id: &Uuid, model: &Model, bytes: usize, request_type: &str) -> Result<(BudgetAdmission, BTreeMap<String, String>), RagError> {
-	let estimate = TokenEstimate::text(TokenEstimate::input_for_bytes(bytes as u64), 0);
+async fn reserve(state: &JobState, user_id: &Uuid, model: &Model, estimate: TokenEstimate, request_type: &str) -> Result<(BudgetAdmission, BTreeMap<String, String>), RagError> {
 	let admission = match state
 		.budget_ledger
 		.reserve_for_model(&state.db, BudgetSubject::user(*user_id), &model.id, estimate)
@@ -123,7 +123,8 @@ async fn reserve(state: &JobState, user_id: &Uuid, model: &Model, bytes: usize, 
 	{
 		Ok(admission) => admission,
 		Err(BudgetError::Exceeded) => return Err(RagError::BudgetExceeded),
-		Err(error) => return Err(RagError::EmbeddingFailed(error.to_string())),
+		Err(BudgetError::Database(error)) => return Err(RagError::Database(error)),
+		Err(BudgetError::Unavailable) => return Err(RagError::Database(sqlx::Error::PoolClosed)),
 	};
 	let mut metadata = BTreeMap::from([
 		("oxide_user_id".to_string(), user_id.to_string()),
@@ -136,11 +137,19 @@ async fn reserve(state: &JobState, user_id: &Uuid, model: &Model, bytes: usize, 
 	Ok((admission, metadata))
 }
 
-fn model_ref(model: &Model, provider: &Provider) -> Result<ModelRef, RagError> {
+async fn model_ref(model: &Model, provider: &Provider) -> Result<ModelRef, RagError> {
+	let engine = crate::ai::get();
+	let registered = engine.get_provider(&provider.name).await;
+	let provider_config = match registered {
+		Some(config) => config,
+		None => provider_to_config(provider).map_err(|error| RagError::EmbeddingFailed(error.to_string()))?,
+	};
+	let prefix = format!("{}/", provider.name.to_lowercase());
+	let bare = model.model_id.strip_prefix(&prefix).unwrap_or(&model.model_id);
 	Ok(ModelRef {
 		alias: model.display_name.clone(),
-		provider: provider_to_config(provider).map_err(|error| RagError::EmbeddingFailed(error.to_string()))?,
-		model_id: model.model_id.clone(),
+		provider: provider_config,
+		model_id: bare.to_string(),
 		input_modalities: Vec::new(),
 		output_modalities: Vec::new(),
 	})
@@ -150,12 +159,14 @@ fn model_ref(model: &Model, provider: &Provider) -> Result<ModelRef, RagError> {
 #[must_use]
 pub fn floats(vector: EmbeddingVector) -> Vec<f32> {
 	match vector {
-		EmbeddingVector::Float(values) => values,
+		EmbeddingVector::Float(values) if values.iter().all(|value| value.is_finite()) => values,
+		EmbeddingVector::Float(_) => Vec::new(),
 		EmbeddingVector::Base64(encoded) => BASE64
 			.decode(encoded)
 			.map(|bytes| {
 				let (chunks, _) = bytes.as_chunks::<4>();
-				chunks.iter().map(|chunk| f32::from_le_bytes(*chunk)).collect()
+				let values: Vec<f32> = chunks.iter().map(|chunk| f32::from_le_bytes(*chunk)).collect();
+				if values.iter().all(|value| value.is_finite()) { values } else { Vec::new() }
 			})
 			.unwrap_or_default(),
 	}

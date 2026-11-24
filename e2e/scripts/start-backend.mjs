@@ -22,6 +22,14 @@ await admin.connect();
 await admin.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
 await admin.query(`CREATE DATABASE ${database}`);
 await admin.end();
+const e2e = new pg.Client({...connection, database});
+await e2e.connect();
+try {
+	await e2e.query('CREATE EXTENSION IF NOT EXISTS vector');
+} catch (error) {
+	console.warn(`[e2e] pgvector is not available, knowledge storage tests will fail: ${error.message}`);
+}
+await e2e.end();
 console.log(`[e2e] reset database ${database} on ${connection.host}:${connection.port}`);
 
 const dataDir = path.join(root, 'e2e', '.data');

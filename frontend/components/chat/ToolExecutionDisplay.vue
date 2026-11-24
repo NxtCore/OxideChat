@@ -150,7 +150,21 @@ type KnowledgeSource = {n: number; knowledge_base: string; title: string | null;
 const knowledgeSources = computed<KnowledgeSource[]>(() => {
 	if (props.name !== 'knowledge_search' || !props.output) return [];
 	const out = typeof props.output === 'string' ? tryParseJson(props.output) : props.output;
-	return Array.isArray(out?.sources) ? out.sources : [];
+	if (!Array.isArray(out?.sources)) return [];
+	const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
+	return out.sources
+		.filter((source: unknown): source is Record<string, unknown> => typeof source === 'object' && source !== null)
+		.map((source: Record<string, unknown>, index: number) => {
+			const url = text(source.url);
+			return {
+				n: typeof source.n === 'number' ? source.n : index + 1,
+				knowledge_base: text(source.knowledge_base) ?? '',
+				title: text(source.title),
+				section: text(source.section),
+				url: url && /^https?:\/\//i.test(url) ? url : null,
+				text: text(source.text) ?? '',
+			};
+		});
 });
 
 const generatedImageUrl = computed(() => {

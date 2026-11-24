@@ -1095,6 +1095,8 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_base_model_targets_base ON knowledge_ba
 CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_base_model_targets_provider ON knowledge_base_model_targets(knowledge_base_id, provider_id) WHERE provider_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_base_model_targets_model ON knowledge_base_model_targets(knowledge_base_id, model_id) WHERE model_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_base_model_targets_upstream ON knowledge_base_model_targets(knowledge_base_id, upstream_provider) WHERE upstream_provider IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_knowledge_base_model_targets_provider_id ON knowledge_base_model_targets(provider_id) WHERE provider_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_knowledge_base_model_targets_model_id ON knowledge_base_model_targets(model_id) WHERE model_id IS NOT NULL;
 
 -- Per-record access: records of a knowledge base list labels, and these rows say which teams, roles and users hold each label.
 -- A label without rows grants nobody.
@@ -5197,6 +5199,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.knowledge_setup.top_n', 'Treffer nach dem Reranking'),
     ('en', 'settings.knowledge_setup.save_success', 'Knowledge setup saved'),
     ('de', 'settings.knowledge_setup.save_success', 'Wissenseinrichtung gespeichert'),
+    ('en', 'settings.knowledge_setup.load_error', 'Knowledge setup could not be loaded'),
+    ('de', 'settings.knowledge_setup.load_error', 'Die Wissenseinrichtung konnte nicht geladen werden'),
     ('en', 'settings.knowledge_setup.save_error', 'Knowledge setup could not be saved'),
     ('de', 'settings.knowledge_setup.save_error', 'Wissenseinrichtung konnte nicht gespeichert werden'),
     ('en', 'settings.knowledge_setup.connections.title', 'Connections'),
@@ -5257,6 +5261,10 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.knowledge_setup.connections.saved', 'Verbindung gespeichert'),
     ('en', 'settings.knowledge_setup.connections.deleted', 'Connection deleted'),
     ('de', 'settings.knowledge_setup.connections.deleted', 'Verbindung gelöscht'),
+    ('en', 'settings.knowledge_setup.connections.delete_error', 'Connection could not be deleted'),
+    ('de', 'settings.knowledge_setup.connections.delete_error', 'Die Verbindung konnte nicht gelöscht werden'),
+    ('en', 'settings.knowledge_setup.connections.delete_confirm', 'Click again to delete'),
+    ('de', 'settings.knowledge_setup.connections.delete_confirm', 'Zum Löschen erneut klicken'),
     ('en', 'settings.knowledge_setup.connections.save_error', 'Connection could not be saved'),
     ('de', 'settings.knowledge_setup.connections.save_error', 'Verbindung konnte nicht gespeichert werden'),
     ('en', 'settings.knowledge_setup.connections.test_ok', 'Connected'),
@@ -5641,6 +5649,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'rag.error.upstream_needs_provider', 'Upstream-Anbieter schränken nur OpenRouter oder Cortecs ein: wähle diesen Anbieter auch unter Anbieter.'),
     ('en', 'knowledge.models.removed_targets', 'A provider or model of this list was deleted, so no model may see the content until the list is saved again.'),
     ('de', 'knowledge.models.removed_targets', 'Ein Anbieter oder Modell dieser Liste wurde gelöscht, daher darf kein Modell den Inhalt sehen, bis die Liste erneut gespeichert wird.'),
+    ('en', 'knowledge.models.confirm_removed', 'Save the list as it is now'),
+    ('de', 'knowledge.models.confirm_removed', 'Liste so speichern, wie sie jetzt ist'),
     ('en', 'knowledge.models.admins_only', 'Only knowledge admins can change the model access.'),
     ('de', 'knowledge.models.admins_only', 'Nur Wissens-Admins können den Modellzugriff ändern.'),
     ('en', 'presets.editor.knowledge.not_shared', 'A knowledge base that is not shared with you'),
@@ -5655,6 +5665,10 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'rag.error.database', 'Die Wissenseinstellungen konnten nicht gelesen werden.'),
     ('en', 'settings.tools.knowledge.display_name', 'Knowledge Search'),
     ('de', 'settings.tools.knowledge.display_name', 'Wissenssuche'),
+    ('en', 'settings.tools.knowledge.added', 'Knowledge Search added. Set up connections and knowledge bases under Knowledge.'),
+    ('de', 'settings.tools.knowledge.added', 'Wissenssuche hinzugefügt. Richte Verbindungen und Wissensdatenbanken unter Wissen ein.'),
+    ('en', 'settings.tools.added', 'Tool added. Configure its settings if it needs any.'),
+    ('de', 'settings.tools.added', 'Tool hinzugefügt. Passe seine Einstellungen an, falls es welche braucht.'),
     ('en', 'settings.tools.knowledge.description', 'Search the knowledge bases attached to the chat and cite their excerpts'),
     ('de', 'settings.tools.knowledge.description', 'Die an den Chat angehängten Wissensdatenbanken durchsuchen und ihre Auszüge zitieren'),
     ('en', 'settings.tools.knowledge.query', 'What to look for, as a full question or keywords'),

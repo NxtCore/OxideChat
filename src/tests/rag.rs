@@ -162,6 +162,32 @@ mod connections {
 	}
 
 	#[sqlx::test]
+	async fn a_secret_that_looks_encrypted_is_still_encrypted(pool: PgPool) -> TestResult {
+		let actor = create_user(&pool).await?;
+		crate::utils::encryption::init_for_test([0x42; 32])?;
+		let ciphertext = read_only(&pool, &actor).await?.secret.ok_or("no secret")?;
+		for secret in [ciphertext.as_str(), "enc:not-a-ciphertext", "***"] {
+			let mut create = request(ConnectionKind::Pgvector, ConnectionMode::ReadOnly, Some("postgres://reader@db.example.com/kb"), Some(secret));
+			create.name = format!("Copy {}", secret.len());
+			let stored = RagConnection::create(&pool, &actor, &create, None).await?.secret.ok_or("no secret")?;
+			assert_ne!(stored, secret);
+			assert_eq!(decrypt_api_key(&stored)?, secret);
+		}
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn the_stored_address_is_checked_again_when_saving(pool: PgPool) -> TestResult {
+		let actor = create_user(&pool).await?;
+		let created = read_only(&pool, &actor).await?;
+		let moved = request(ConnectionKind::Pgvector, ConnectionMode::ReadOnly, Some("postgres://reader@evil.example/kb"), None);
+		assert!(matches!(created.update(&pool, &actor, &moved, None).await, Err(RagError::SecretRequiredForNewHost)));
+		let downgraded = request(ConnectionKind::Pgvector, ConnectionMode::ReadOnly, Some("postgres://reader@db.example.com/kb?sslmode=disable"), None);
+		assert!(created.redirects_secret(&downgraded));
+		Ok(())
+	}
+
+	#[sqlx::test]
 	async fn updates_keep_or_remove_the_secret(pool: PgPool) -> TestResult {
 		let actor = create_user(&pool).await?;
 		let created = read_only(&pool, &actor).await?;
@@ -464,6 +490,7 @@ mod knowledge_bases {
 			name: " HR handbook ".to_string(),
 			description: Some(" ".to_string()),
 			view: Some(external.clone()),
+			model_access: None,
 		};
 		let base = KnowledgeBase::create(pool, &admin, &save, &external).await?;
 		Ok(Fixture { admin, connection, base })
@@ -592,6 +619,7 @@ mod knowledge_bases {
 			name: "Handbook".to_string(),
 			description: Some("For everyone in HR".to_string()),
 			view: None,
+			model_access: None,
 		};
 		base.update(&pool, &editor, &rename, None).await?;
 		rename.view = Some(base.view.0.clone());
@@ -772,6 +800,12 @@ mod pgvector {
 			hr.distance = Distance::Euclid;
 			assert_eq!(store.search(&hr, &[0.0, 1.0, 0.0], 1, &[]).await?.len(), 1);
 		}
+		sqlx::query("INSERT INTO docs.\"Chunks\" (page_content, site) VALUES ('Not embedded yet', 'HR')").execute(&pool).await?;
+		let mut unembedded = view("docs.\"Chunks\"", Some("embedding"));
+		unembedded.fields.text = "page_content".to_string();
+		assert_eq!(store.search(&unembedded, &[1.0, 0.0, 0.0], 10, &[]).await?.len(), 3, "rows without a vector are skipped");
+		assert_eq!(store.describe("pg_catalog.pg_authid", &[]).await.err(), Some(StoreError::CollectionNotFound));
+		assert_eq!(store.describe("a.b.c.d", &[]).await.err(), Some(StoreError::CollectionNotFound));
 		let mut wrong = view("docs.\"Chunks\"", Some("page_content"));
 		wrong.fields.text = "page_content".to_string();
 		assert_eq!(store.search(&wrong, &[1.0, 0.0, 0.0], 1, &[]).await.err(), Some(StoreError::UnknownField));
@@ -920,9 +954,9 @@ mod retrieval {
 		let sources = number(vec![candidate(base, &long, None), candidate(base, &long, None), candidate(base, "short", None)]);
 		assert_eq!(sources.len(), 3);
 		assert_eq!(sources.iter().map(|source| source.n).collect::<Vec<_>>(), [1, 2, 3]);
-		assert_eq!(sources[0].text.chars().count(), 4_001);
+		assert_eq!(sources[0].text.chars().count(), 4_000);
 		let many: Vec<Candidate> = (0..10).map(|_| candidate(base, &long, None)).collect();
-		assert_eq!(number(many).len(), 3);
+		assert_eq!(number(many).len(), 4);
 	}
 
 	async fn shared_base(pool: &PgPool, name: &str) -> TestResult<(KnowledgeBase, KnowledgeActor)> {
@@ -945,6 +979,7 @@ mod retrieval {
 			name: name.to_string(),
 			description: Some("HR policies".to_string()),
 			view: Some(external.clone()),
+			model_access: None,
 		};
 		let id = KnowledgeBase::create(pool, &admin, &save, &external).await?;
 		Ok((KnowledgeBase::find(pool, &admin, &id).await?.ok_or("missing")?, admin))
@@ -1140,6 +1175,34 @@ mod model_access {
 	}
 
 	#[test]
+	fn a_listed_routing_model_is_still_narrowed_and_a_deleted_target_denies_everything() {
+		let router = routed(ProviderKind::Openrouter);
+		let direct = routed(ProviderKind::Openai);
+		let listed = ModelTargets {
+			models: vec![router.id],
+			upstream_providers: slugs(&["azure"]),
+			..Default::default()
+		};
+		assert_eq!(listed.decide(&router), ModelAccess::Upstream(slugs(&["azure"])));
+		let removed = ModelTargets {
+			providers: vec![direct.provider_id],
+			removed: true,
+			..Default::default()
+		};
+		assert_eq!(removed.decide(&direct), ModelAccess::Denied);
+		assert!(!removed.is_unrestricted());
+	}
+
+	#[test]
+	fn narrowing_drops_an_order_left_empty_and_narrows_parent_slugs() {
+		let order = |slugs_in_order: &[&str]| Some(ProviderRouting { order: Some(slugs(slugs_in_order)), ..Default::default() });
+		let narrowed = crate::types::provider_routing::narrow(order(&["mistral"]), &slugs(&["azure"])).flatten();
+		assert_eq!(narrowed.and_then(|routing| routing.order), None);
+		let narrowed = crate::types::provider_routing::narrow(order(&["deepinfra", "azure"]), &slugs(&["deepinfra/fp8"])).flatten();
+		assert_eq!(narrowed.and_then(|routing| routing.order), Some(slugs(&["deepinfra/fp8"])));
+	}
+
+	#[test]
 	fn every_knowledge_base_must_allow_the_model() {
 		let router = routed(ProviderKind::Openrouter);
 		let anthropic = ModelTargets { providers: vec![router.provider_id], upstream_providers: slugs(&["anthropic", "azure"]), ..Default::default() };
@@ -1203,6 +1266,7 @@ mod model_access {
 			name: "Contracts".to_string(),
 			description: None,
 			view: Some(external.clone()),
+			model_access: None,
 		};
 		let id = KnowledgeBase::create(pool, &admin, &save, &external).await?;
 		Ok((KnowledgeBase::find(pool, &admin, &id).await?.ok_or("missing")?, admin, embedding_provider))
@@ -1244,12 +1308,40 @@ mod model_access {
 		Ok(())
 	}
 
+	#[sqlx::test]
+	async fn the_name_and_model_access_are_saved_together_or_not_at_all(pool: PgPool) -> TestResult {
+		let (base, admin, embedding_provider) = base(&pool).await?;
+		let (_, chat_model) = provider_with_model(&pool, "ANTHROPIC", "claude").await?;
+		let save = |name: &str, targets: ModelTargets| SaveKnowledgeBaseRequest {
+			name: name.to_string(),
+			description: None,
+			view: None,
+			model_access: Some(targets),
+		};
+		let refused = save("Refused", ModelTargets { models: vec![chat_model], ..Default::default() });
+		assert!(matches!(base.update(&pool, &admin, &refused, None).await, Err(RagError::EmbeddingModelNotAllowed)));
+		let name: String = sqlx::query_scalar("SELECT name FROM knowledge_bases WHERE id = $1").bind(base.id).fetch_one(&pool).await?;
+		assert_ne!(name, "Refused");
+		assert!(base.model_access(&pool, &admin).await?.targets.is_unrestricted());
+
+		let viewer = KnowledgeActor { user_id: create_user(&pool).await?, manage: false, view_all: false };
+		let editor = KnowledgeBase { editor: true, ..base.clone() };
+		let targets = ModelTargets { providers: vec![embedding_provider], models: vec![chat_model], ..Default::default() };
+		assert!(matches!(editor.update(&pool, &viewer, &save("Editor", targets.clone()), None).await, Err(RagError::Forbidden)));
+
+		base.update(&pool, &admin, &save("Saved", targets), None).await?;
+		let stored = base.model_access(&pool, &admin).await?.targets;
+		assert_eq!((stored.providers, stored.models), (vec![embedding_provider], vec![chat_model]));
+		Ok(())
+	}
+
 	#[test]
 	fn long_descriptions_are_refused_with_their_own_reason() {
 		let request = SaveKnowledgeBaseRequest {
 			name: "Docs".to_string(),
 			description: Some("x".repeat(2001)),
 			view: None,
+			model_access: None,
 		};
 		assert!(matches!(request.validate(), Err(RagError::InvalidDescription)));
 	}
@@ -1317,6 +1409,7 @@ mod model_access {
 			name: "Policies".to_string(),
 			description: None,
 			view: Some(first.view.0.clone()),
+			model_access: None,
 		};
 		let id = KnowledgeBase::create(&pool, &admin, &save, &first.view.0).await?;
 		let second = KnowledgeBase::find(&pool, &admin, &id).await?.ok_or("missing")?;

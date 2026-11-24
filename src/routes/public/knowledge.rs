@@ -87,13 +87,16 @@ pub async fn update_knowledge_base(
 ) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
 	let base = find(&state, &actor, &id).await?;
-	if !actor.can_edit(&base) || (req.view.is_some() && !actor.manage) {
+	if !actor.can_edit(&base) || ((req.view.is_some() || req.model_access.is_some()) && !actor.manage) {
 		return Err(RagError::Forbidden.into());
 	}
 	req.validate()?;
 	let view = match &req.view {
 		Some(view) if *view != base.view.0 => {
-			let targets = ModelTargets::load(&state.db, &[id]).await?.remove(&id).unwrap_or_default();
+			let targets = match &req.model_access {
+				Some(targets) => targets.normalized()?,
+				None => ModelTargets::load(&state.db, &[id]).await?.remove(&id).unwrap_or_default(),
+			};
 			check_embedding_allowed(&state.db, &targets, &view.embedding.model_id).await?;
 			Some(check_view(&state, &auth.id, view).await?)
 		}

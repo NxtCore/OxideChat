@@ -99,6 +99,7 @@ impl AppError {
 			Self::Pricing(_) => ErrorCode::ValidationFailed,
 			Self::Rag(RagError::NotFound) => ErrorCode::NotFound,
 			Self::Rag(RagError::Forbidden) => ErrorCode::InsufficientPermissions,
+			Self::Rag(RagError::SecretRequiredForNewHost) => ErrorCode::SecretRequiredForNewHost,
 			Self::Rag(RagError::Database(error)) if is_unique_violation(error) => ErrorCode::AlreadyExists,
 			Self::Rag(RagError::Database(_)) => ErrorCode::InternalError,
 			Self::Rag(_) => ErrorCode::ValidationFailed,

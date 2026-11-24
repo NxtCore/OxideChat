@@ -138,6 +138,7 @@ impl ToolExecutor for ImageGenExecutor {
 			Some(other) => return Err(ToolError::InvalidInput(format!("Unknown image operation: {other}"))),
 		};
 		let (model, provider) = self.load_model(model_id, ctx).await?;
+		check_knowledge_access(ctx, &model.id).await?;
 		if operation == ImageOperation::Edit && !model.capabilities.0.iter().any(|capability| capability == "IMAGE_EDITING") {
 			return Err(ToolError::ExecutionFailed("Configured model does not support image editing".to_string()));
 		}
@@ -158,7 +159,6 @@ impl ToolExecutor for ImageGenExecutor {
 				(input.prompt, vec![self.input_image(&reference, ctx).await?], ImageOptions::default())
 			}
 		};
-		check_knowledge_access(ctx, &model.id).await?;
 		let admission = reserve_budget(ctx, &model.id, image_tool_estimate(prompt.len() as u64, input_images.len() as u64)).await?;
 		let caption = prompt.clone();
 		let provider_config = provider_to_config(&provider).map_err(|error| ToolError::Internal(error.to_string()))?;

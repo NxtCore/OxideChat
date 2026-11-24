@@ -6,6 +6,7 @@ use crate::utils::encryption::decrypt_api_key;
 use crate::utils::outbound::{guarded_client, is_allowed_ip, private_hosts_allowed, read_limited};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::postgres::types::Oid;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use arc_swap::ArcSwap;
@@ -13,6 +14,7 @@ use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -311,11 +313,13 @@ impl<'a> VectorStore<'a> {
 				let table = pg_table(pool, &view.collection).await?;
 				let column = view.vector_name.as_deref().ok_or(StoreError::UnknownField)?;
 				let kind = table.vector_type(column).ok_or(StoreError::UnknownField)?;
-				let (mut clause, params) = pg_filter(&view.filter, &table.columns(), 6).ok_or(StoreError::UnknownField)?;
+				let (clause, params) = pg_filter(&view.filter, &table.columns(), 6).ok_or(StoreError::UnknownField)?;
+				let not_null = format!("t.{} IS NOT NULL", quote_ident(column));
+				let mut clause = if clause.is_empty() { format!(" WHERE {not_null}") } else { format!("{clause} AND {not_null}") };
 				let mut path = Vec::new();
 				if let Some(field) = &view.access {
 					let (condition, segments) = pg_access(field, &table.columns, 4, 5).ok_or(StoreError::UnknownField)?;
-					clause = if clause.is_empty() { format!(" WHERE {condition}") } else { format!("{clause} AND {condition}") };
+					clause = format!("{clause} AND {condition}");
 					path = segments;
 				}
 				let cast = if kind == "halfvec" { "::vector::halfvec" } else { "::vector" };
@@ -332,7 +336,9 @@ impl<'a> VectorStore<'a> {
 					.bind(path);
 				let query = params.iter().fold(query, sqlx::query::QueryAs::bind);
 				let mut tx = timed(pool.begin()).await?;
-				timed(sqlx::query("SET LOCAL hnsw.iterative_scan = relaxed_order").execute(&mut *tx)).await?;
+				timed(sqlx::query("SET LOCAL hnsw.iterative_scan = relaxed_order").execute(&mut *tx))
+					.await
+					.map_err(|error| if error == StoreError::CollectionNotFound { StoreError::ExtensionTooOld } else { error })?;
 				let rows = timed(query.fetch_all(&mut *tx)).await?;
 				Ok(rows.into_iter().map(|(payload, distance)| (payload, view.distance.pg_score(distance))).collect())
 			}
@@ -376,9 +382,9 @@ impl<'a> VectorStore<'a> {
 				let (value, path) = pg_access_value(field, &columns, 1).ok_or(StoreError::UnknownField)?;
 				let (clause, params) = pg_filter(&view.filter, &columns, 3).ok_or(StoreError::UnknownField)?;
 				let sql = format!(
-					"SELECT DISTINCT label FROM (SELECT {value} AS v FROM {} t{clause}) r,
-					 jsonb_array_elements_text(CASE jsonb_typeof(r.v) WHEN 'array' THEN r.v ELSE jsonb_build_array(r.v) END) AS label
-					 WHERE label IS NOT NULL ORDER BY label LIMIT $2",
+					"SELECT DISTINCT e #>> '{{}}' FROM (SELECT {value} AS v FROM {} t{clause}) r,
+					 jsonb_array_elements(CASE jsonb_typeof(r.v) WHEN 'array' THEN r.v WHEN 'string' THEN jsonb_build_array(r.v) ELSE '[]'::jsonb END) AS e
+					 WHERE jsonb_typeof(e) = 'string' ORDER BY 1 LIMIT $2",
 					table.from
 				);
 				let query = sqlx::query_scalar::<_, String>(AssertSqlSafe(sql)).bind(path).bind(i64::from(MAX_ACCESS_LABELS));
@@ -402,10 +408,13 @@ impl<'a> VectorStore<'a> {
 }
 
 async fn pg_table(pool: &PgPool, collection: &str) -> Result<PgTable, StoreError> {
-	let name = timed(
-		sqlx::query_as::<_, (String, String)>(
-			"SELECT n.nspname::text, c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-			 WHERE c.oid = to_regclass($1) AND c.relkind IN ('r', 'v', 'm', 'p', 'f')",
+	let (oid, schema, name) = timed(
+		sqlx::query_as::<_, (Oid, String, String)>(
+			"SELECT c.oid, n.nspname::text, c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+			 WHERE c.oid = to_regclass($1) AND c.relkind IN ('r', 'v', 'm', 'p', 'f')
+			 AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%'
+			 AND EXISTS (SELECT 1 FROM pg_attribute a JOIN pg_type ty ON ty.oid = a.atttypid
+			             WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND ty.typname IN ('vector', 'halfvec'))",
 		)
 		.bind(collection)
 		.fetch_optional(pool),
@@ -415,14 +424,14 @@ async fn pg_table(pool: &PgPool, collection: &str) -> Result<PgTable, StoreError
 	let columns = timed(
 		sqlx::query_as::<_, (String, String, i32)>(
 			"SELECT a.attname::text, t.typname::text, a.atttypmod FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid
-			 WHERE a.attrelid = to_regclass($1) AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
+			 WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
 		)
-		.bind(collection)
+		.bind(oid)
 		.fetch_all(pool),
 	)
 	.await?;
 	Ok(PgTable {
-		from: format!("{}.{}", quote_ident(&name.0), quote_ident(&name.1)),
+		from: format!("{}.{}", quote_ident(&schema), quote_ident(&name)),
 		columns,
 	})
 }
@@ -452,18 +461,41 @@ fn qdrant_vectors(config: &Value) -> Vec<VectorInfo> {
 /// connections and a changed address, secret or mode replaces the pool. Idle connections close after [`POOL_IDLE`].
 static PG_POOLS: LazyLock<ArcSwap<HashMap<Uuid, CachedPool>>> = LazyLock::new(ArcSwap::default);
 
+/// Counts [`forget_pool`] calls, so a pool that finished connecting after its connection was changed or deleted is not cached.
+static POOLS_FORGOTTEN: AtomicU64 = AtomicU64::new(0);
+
 /// A pool and the hash of the settings it connects with.
 type CachedPool = ([u8; 32], PgPool);
 
 /// Drops the cached pool of a connection that was changed or deleted.
 pub fn forget_pool(connection_id: &Uuid) {
-	if PG_POOLS.load().contains_key(connection_id) {
-		PG_POOLS.rcu(|pools| {
-			let mut pools = HashMap::clone(pools);
-			pools.remove(connection_id);
-			pools
-		});
-	}
+	POOLS_FORGOTTEN.fetch_add(1, Ordering::SeqCst);
+	PG_POOLS.rcu(|pools| {
+		let mut pools = HashMap::clone(pools);
+		pools.remove(connection_id);
+		pools
+	});
+}
+
+/// Caches `pool` unless a pool was forgotten since `epoch`; returns the cached pool when another search cached one first.
+fn cache_pool(connection_id: Uuid, key: [u8; 32], pool: PgPool, epoch: u64) -> PgPool {
+	let mut cached = pool.clone();
+	PG_POOLS.rcu(|pools| {
+		if POOLS_FORGOTTEN.load(Ordering::SeqCst) != epoch {
+			return HashMap::clone(pools);
+		}
+		if let Some((existing, existing_pool)) = pools.get(&connection_id)
+			&& *existing == key
+		{
+			cached = existing_pool.clone();
+			return HashMap::clone(pools);
+		}
+		cached = pool.clone();
+		let mut pools = HashMap::clone(pools);
+		pools.insert(connection_id, (key, pool.clone()));
+		pools
+	});
+	cached
 }
 
 fn pool_key(url: &str, password: Option<&str>, mode: ConnectionMode) -> [u8; 32] {
@@ -477,8 +509,12 @@ fn pool_key(url: &str, password: Option<&str>, mode: ConnectionMode) -> [u8; 32]
 
 async fn connect_postgres(connection: &RagConnection, url: &str, password: Option<&str>, trusted: bool) -> Result<VectorStore<'static>, StoreError> {
 	let mode = connection.mode;
+	let epoch = POOLS_FORGOTTEN.load(Ordering::SeqCst);
 	let mut options = PgConnectOptions::from_str(url).map_err(|_| StoreError::InvalidUrl)?;
 	if !trusted {
+		if options.get_socket().is_some() {
+			return Err(StoreError::InvalidUrl);
+		}
 		check_host(options.get_host(), options.get_port()).await?;
 	}
 	let key = pool_key(url, password, mode);
@@ -499,12 +535,7 @@ async fn connect_postgres(connection: &RagConnection, url: &str, password: Optio
 		.connect_with(options)
 		.await
 		.map_err(|error| store_error(&error))?;
-	PG_POOLS.rcu(|pools| {
-		let mut pools = HashMap::clone(pools);
-		pools.insert(connection.id, (key, pool.clone()));
-		pools
-	});
-	Ok(VectorStore::Pgvector(Cow::Owned(pool)))
+	Ok(VectorStore::Pgvector(Cow::Owned(cache_pool(connection.id, key, pool, epoch))))
 }
 
 /// Refuses hosts that resolve to blocked addresses. sqlx resolves the host again when it connects, so a DNS answer that
@@ -513,8 +544,9 @@ async fn check_host(host: &str, port: u16) -> Result<(), StoreError> {
 	if host.is_empty() || host.starts_with('/') {
 		return Err(StoreError::InvalidUrl);
 	}
-	let addresses: Vec<_> = tokio::net::lookup_host((host.trim_matches(['[', ']']), port))
+	let addresses: Vec<_> = tokio::time::timeout(TIMEOUT, tokio::net::lookup_host((host.trim_matches(['[', ']']), port)))
 		.await
+		.map_err(|_| StoreError::Unreachable)?
 		.map_err(|_| StoreError::Unreachable)?
 		.collect();
 	let allow_private = private_hosts_allowed();
@@ -565,10 +597,10 @@ async fn timed<T>(query: impl Future<Output = Result<T, sqlx::Error>>) -> Result
 }
 
 fn store_error(error: &sqlx::Error) -> StoreError {
-	let code = error.as_database_error().and_then(|error| error.code().map(Cow::into_owned));
+	let code = error.as_database_error().and_then(sqlx::error::DatabaseError::code);
 	match code.as_deref() {
 		Some("28P01" | "28000" | "42501") => StoreError::Unauthorized,
-		Some("42602") => StoreError::ExtensionTooOld,
+		Some("42601" | "42602" | "42704") => StoreError::CollectionNotFound,
 		_ if matches!(error, sqlx::Error::Configuration(_)) => StoreError::InvalidUrl,
 		_ => StoreError::Unreachable,
 	}

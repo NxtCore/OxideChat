@@ -76,10 +76,10 @@
 								<ShadButton variant="outline" size="sm" class="gap-2" @click="openEditDialog(tool)">
 									<Settings2 class="h-4 w-4" />
 								</ShadButton>
-								<ShadButton v-if="isKnowledgeTool(tool)" variant="outline" size="sm" class="gap-2" :title="store.getTranslation('settings.tabs.knowledge_setup')" data-testid="tool-knowledge-setup" @click="navigateTo('/settings/tools/knowledge')">
+								<ShadButton v-if="isKnowledgeTool(tool) && store.hasPermission(ADMIN_RAG_VIEW)" variant="outline" size="sm" class="gap-2" :title="store.getTranslation('settings.tabs.knowledge_setup')" data-testid="tool-knowledge-setup" @click="navigateTo('/settings/tools/knowledge')">
 									<Library class="h-4 w-4" />
 								</ShadButton>
-								<ShadButton v-else variant="outline" size="sm" class="gap-2" @click="testTool(tool)">
+								<ShadButton v-else-if="!isKnowledgeTool(tool)" variant="outline" size="sm" class="gap-2" @click="testTool(tool)">
 									<Play class="h-4 w-4" />
 								</ShadButton>
 								<ShadSwitch :modelValue="tool.is_enabled" @update:modelValue="(val: boolean) => toggleTool(tool, val)" />
@@ -102,7 +102,7 @@ import ToolTestDialog from '@/components/settings/ToolTestDialog.vue';
 import McpManagerDialog from '@/components/mcp/McpManagerDialog.vue';
 import McpServerEditDialog from '@/components/mcp/McpServerEditDialog.vue';
 import {useMainStore} from '@/stores';
-import {ADMIN_TOOLS_VIEW} from '~/types/generated/permissions';
+import {ADMIN_RAG_VIEW, ADMIN_TOOLS_VIEW} from '~/types/generated/permissions';
 import {KNOWLEDGE_TOOL_NAME} from '~/composables/useBuiltinToolTemplates';
 import type {Tool} from '~/types/tools';
 
@@ -239,7 +239,7 @@ async function configureTemplate(template: any) {
 
 		const created = (await saveAdminTool(undefined, body)) as Tool;
 		if (isKnowledgeTool(created) && store.base) store.base.rag = {enabled: true};
-		store.toast('Tool added! Please configure your API key.', {type: 'success'});
+		store.toast(store.getTranslation(isKnowledgeTool(created) ? 'settings.tools.knowledge.added' : 'settings.tools.added'), {type: 'success'});
 		await loadTools();
 
 		if (created.settings_schema) {
@@ -276,7 +276,8 @@ const stopUserWatch = watch(
 		if (!user) return;
 		queueMicrotask(() => stopUserWatch());
 		if (store.hasPermission(ADMIN_TOOLS_VIEW)) loadTools();
-		else navigateTo('/settings/tools/knowledge', {replace: true});
+		else if (store.hasPermission(ADMIN_RAG_VIEW)) navigateTo('/settings/tools/knowledge', {replace: true});
+		else navigateTo('/settings', {replace: true});
 	},
 	{immediate: true},
 );

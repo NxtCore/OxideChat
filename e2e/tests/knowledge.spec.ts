@@ -142,7 +142,7 @@ test.describe('knowledge bases', () => {
 			await expect(memberPage.getByTestId('knowledge-tab-search')).toBeVisible();
 			await expect(memberPage.getByTestId('knowledge-tab-source')).toHaveCount(0);
 			await expect(memberPage.getByTestId('knowledge-tab-sharing')).toHaveCount(0);
-			await expect(memberPage.getByTestId('knowledge-name')).toBeDisabled();
+			await expect(memberPage.getByTestId('knowledge-name')).toHaveAttribute('readonly', '');
 			await expect(memberPage.getByTestId('knowledge-delete')).toHaveCount(0);
 			const response = await (await memberPage.request.get(`/api/v1/knowledge-bases/${baseId}`)).json();
 			expect(response).toMatchObject({name: BASE, can_edit: false, can_manage: false, view: null, connection: null});
