@@ -263,7 +263,18 @@ impl Message {
 	/// Returns an error when messages cannot be queried.
 	pub async fn active_prompt_bytes(pool: &PgPool, chat_id: &Uuid) -> Result<u64, sqlx::Error> {
 		let bytes: i64 = sqlx::query_scalar(
-			"SELECT COALESCE(SUM(octet_length(content) + octet_length(COALESCE(content_parts::text, ''))), 0)::bigint FROM messages WHERE chat_id = $1 AND is_active_fork = true",
+			r#"
+			SELECT ((
+				SELECT COALESCE(SUM(octet_length(content) + octet_length(COALESCE(content_parts::text, ''))), 0)
+				FROM messages WHERE chat_id = $1 AND is_active_fork = true
+			) + (
+				SELECT COALESCE(SUM(octet_length(a.text)), 0)
+				FROM messages m
+				CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(m.content_parts) = 'array' THEN m.content_parts ELSE '[]'::jsonb END) AS part
+				JOIN chat_attachments a ON a.id::text = part->>'attachment_id'
+				WHERE m.chat_id = $1 AND m.is_active_fork = true AND part->>'type' = 'file'
+			))::bigint
+			"#,
 		)
 		.bind(chat_id)
 		.fetch_one(pool)

@@ -20,6 +20,10 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
+	let mut args = std::env::args().skip(1);
+	if args.next().as_deref() == Some(utils::extract::SUBCOMMAND) {
+		std::process::exit(utils::extract::child_main(args.next().as_deref()));
+	}
 	dotenv::dotenv().ok();
 
 	let log_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,omniference=debug"));

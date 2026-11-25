@@ -160,6 +160,7 @@ pub enum MessagePart {
 	Text { text: String },
 	Reasoning { text: String },
 	Image { image_id: String },
+	File { attachment_id: Uuid, filename: String },
 	#[serde(rename = "tool_call")]
 	ToolCall { id: String, name: String, arguments: String },
 	#[serde(rename = "tool_result")]

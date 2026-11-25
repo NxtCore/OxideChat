@@ -357,6 +357,20 @@ CREATE TABLE IF NOT EXISTS images (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Text extracted from files attached to chat messages; a message part {type: 'file', attachment_id} points here.
+CREATE TABLE IF NOT EXISTS chat_attachments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL CHECK (char_length(filename) BETWEEN 1 AND 255),
+    mime_type VARCHAR(64) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    text TEXT NOT NULL,
+    token_count BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_attachments_user ON chat_attachments(user_id);
+
 INSERT INTO roles (name, is_builtin) VALUES ('admin', true), ('user', true) ON CONFLICT DO NOTHING;
 
 INSERT INTO permissions (name, description) VALUES
@@ -5674,5 +5688,37 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.tools.knowledge.query', 'What to look for, as a full question or keywords'),
     ('de', 'settings.tools.knowledge.query', 'Wonach gesucht wird, als ganze Frage oder Stichwörter'),
     ('en', 'settings.tools.knowledge.knowledge_base', 'Search only this knowledge base; leave out to search all'),
-    ('de', 'settings.tools.knowledge.knowledge_base', 'Nur diese Wissensdatenbank durchsuchen; weglassen, um alle zu durchsuchen')
+    ('de', 'settings.tools.knowledge.knowledge_base', 'Nur diese Wissensdatenbank durchsuchen; weglassen, um alle zu durchsuchen'),
+    ('en', 'chat.composer.attach_file', 'Attach file'),
+    ('de', 'chat.composer.attach_file', 'Datei anhängen'),
+    ('en', 'chat.composer.remove_attachment', 'Remove {name}'),
+    ('de', 'chat.composer.remove_attachment', '{name} entfernen'),
+    ('en', 'chat.composer.attachment_tokens', 'about {count} tokens'),
+    ('de', 'chat.composer.attachment_tokens', 'etwa {count} Tokens'),
+    ('en', 'chat.attachments.uploading', 'Reading {name}…'),
+    ('de', 'chat.attachments.uploading', '{name} wird gelesen…'),
+    ('en', 'chat.attachments.error.invalid_filename', 'The file name is empty or too long.'),
+    ('de', 'chat.attachments.error.invalid_filename', 'Der Dateiname ist leer oder zu lang.'),
+    ('en', 'chat.attachments.error.too_large', 'Files can be at most 25 MB.'),
+    ('de', 'chat.attachments.error.too_large', 'Dateien dürfen höchstens 25 MB groß sein.'),
+    ('en', 'chat.attachments.error.unsupported_type', 'This file type is not supported. Attach text, Markdown, HTML, CSV, JSON, code or PDF files.'),
+    ('de', 'chat.attachments.error.unsupported_type', 'Dieser Dateityp wird nicht unterstützt. Hänge Text-, Markdown-, HTML-, CSV-, JSON-, Code- oder PDF-Dateien an.'),
+    ('en', 'chat.attachments.error.not_text', 'The file is not a text file.'),
+    ('de', 'chat.attachments.error.not_text', 'Die Datei ist keine Textdatei.'),
+    ('en', 'chat.attachments.error.empty', 'No text was found in the file. Scanned PDFs are not read yet.'),
+    ('de', 'chat.attachments.error.empty', 'In der Datei wurde kein Text gefunden. Gescannte PDFs werden noch nicht gelesen.'),
+    ('en', 'chat.attachments.error.text_too_long', 'The file has too much text. Use a knowledge base for large documents.'),
+    ('de', 'chat.attachments.error.text_too_long', 'Die Datei enthält zu viel Text. Nutze für große Dokumente eine Wissensdatenbank.'),
+    ('en', 'chat.attachments.error.extract_failed', 'The file could not be read.'),
+    ('de', 'chat.attachments.error.extract_failed', 'Die Datei konnte nicht gelesen werden.'),
+    ('en', 'chat.attachments.error.timed_out', 'Reading the file took too long.'),
+    ('de', 'chat.attachments.error.timed_out', 'Das Lesen der Datei hat zu lange gedauert.'),
+    ('en', 'chat.attachments.error.database', 'The file could not be saved.'),
+    ('de', 'chat.attachments.error.database', 'Die Datei konnte nicht gespeichert werden.'),
+    ('en', 'chat.attachments.error.upload', 'The file could not be uploaded.'),
+    ('de', 'chat.attachments.error.upload', 'Die Datei konnte nicht hochgeladen werden.'),
+    ('en', 'chat.errors.attachment_not_found', 'An attached file was not found.'),
+    ('de', 'chat.errors.attachment_not_found', 'Eine angehängte Datei wurde nicht gefunden.'),
+    ('en', 'chat.errors.context_too_large', 'This chat with its attached files is about {tokens} tokens, more than the model''s context window of {limit}. Remove a file or use a knowledge base instead.'),
+    ('de', 'chat.errors.context_too_large', 'Dieser Chat ist mit den angehängten Dateien etwa {tokens} Tokens lang, mehr als das Kontextfenster des Modells von {limit}. Entferne eine Datei oder nutze stattdessen eine Wissensdatenbank.')
 ON CONFLICT (language, key_path) DO NOTHING;

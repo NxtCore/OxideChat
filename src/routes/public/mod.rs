@@ -2,6 +2,7 @@ pub mod anthropic;
 pub mod auth;
 pub mod base;
 pub mod arena;
+pub mod attachments;
 pub mod chats;
 pub mod developer;
 pub mod images;
@@ -22,6 +23,7 @@ pub mod workspaces;
 use crate::types::JobState;
 use axum::{
 	Router,
+	extract::DefaultBodyLimit,
 	routing::{delete, get, patch, post, put},
 };
 use std::sync::Arc;
@@ -111,4 +113,8 @@ pub fn router() -> Router<Arc<JobState>> {
 		// Images (session-authenticated)
 		.route("/api/v1/images/{id}", get(images::serve_image))
 		.route("/api/v1/images", post(images::upload_image))
+		.route(
+			"/api/v1/chat-attachments",
+			post(attachments::upload_attachment).layer(DefaultBodyLimit::max(crate::utils::extract::MAX_UPLOAD_BYTES)),
+		)
 }

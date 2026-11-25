@@ -7,7 +7,7 @@ use crate::types::models_configs::ModelConfig;
 use crate::i18n::I18n;
 use crate::types::presets::preset_key_parts;
 use crate::types::{
-	ArenaRound, BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, MessagePart, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
+	ArenaRound, BudgetAdmission, ChatAttachment, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, MessagePart, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
 	StreamingUserMessageCreate, TokenEstimate, Tool, UsageDetails, User,
 };
 use axum::response::{
@@ -18,7 +18,7 @@ use crate::types::rag::{KNOWLEDGE_BUILTIN, KnowledgeBase, ModelAccess, ModelTarg
 use crate::types::provider_routing::{narrow, not_allowed_key};
 use omniference::types::{ChatRequestIR, ProviderRouting};
 use sqlx::PgPool;
-use std::{convert::Infallible, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 use uuid::Uuid;
 
 const DEFAULT_OUTPUT_ESTIMATE: u64 = 4096;
@@ -89,19 +89,67 @@ pub(crate) fn request_bytes(req: &StreamRequest) -> u64 {
 	let parts = req.parts.iter().flatten().map(|part| match part {
 		MessagePart::Text { text } | MessagePart::Reasoning { text } => text.len(),
 		MessagePart::ToolCall { name, arguments, .. } => name.len() + arguments.len(),
-		MessagePart::Image { .. } | MessagePart::ToolResult { .. } => 0,
+		MessagePart::Image { .. } | MessagePart::File { .. } | MessagePart::ToolResult { .. } => 0,
 	});
 	(req.content.len() + parts.sum::<usize>()) as u64
 }
 
-pub(super) async fn prompt_bytes(db: &PgPool, chat_id: &Uuid, req: &StreamRequest, system_config: Option<&ModelConfig>, preset: Option<&Preset>) -> Result<u64, TurnError> {
+/// Bytes of the whole prompt, attached files included; refuses files the user may not attach and a prompt with files that does not fit the model.
+pub(super) async fn prompt_bytes(
+	db: &PgPool,
+	(user_id, chat_id): (&Uuid, &Uuid),
+	req: &StreamRequest,
+	(model, system_config): (&Model, Option<&ModelConfig>),
+	preset: Option<&Preset>,
+) -> Result<u64, TurnError> {
 	let history_bytes = Message::active_prompt_bytes(db, chat_id).await.map_err(internal("Failed to check budget status"))?;
+	let attached = attachment_bytes(db, user_id, req).await?;
 	let system_bytes = system_config.and_then(|config| config.system_prompt.as_deref()).map_or(0, str::len);
 	let preset_bytes = preset.and_then(|preset| preset.system_prompt.as_deref()).map_or(0, str::len);
-	Ok(history_bytes
+	let bytes = history_bytes
 		.saturating_add(request_bytes(req))
 		.saturating_add(system_bytes as u64)
-		.saturating_add(preset_bytes as u64))
+		.saturating_add(preset_bytes as u64);
+	fit_context(model, system_config, bytes, attached)
+}
+
+/// Text bytes of the files the new message attaches; refuses files that do not exist or belong to someone else.
+pub(crate) async fn attachment_bytes(db: &PgPool, user_id: &Uuid, req: &StreamRequest) -> Result<u64, TurnError> {
+	if req.skip_user_message {
+		return Ok(0);
+	}
+	let ids: Vec<Uuid> = req
+		.parts
+		.iter()
+		.flatten()
+		.filter_map(|part| match part {
+			MessagePart::File { attachment_id, .. } => Some(*attachment_id),
+			_ => None,
+		})
+		.collect();
+	let found = ChatAttachment::find_for_user(db, user_id, &ids).await.map_err(internal("Failed to load attachments"))?;
+	if ids.iter().any(|id| !found.contains_key(id)) {
+		return Err(TurnError::new("attachment_not_found", I18n::get().translate("chat.errors.attachment_not_found", &None)));
+	}
+	Ok(found.values().map(|attachment| attachment.prompt_text().len() as u64).sum())
+}
+
+/// The prompt bytes with the new message's attachments; refuses a turn with attachments whose prompt does not fit the model's context window.
+pub(crate) fn fit_context(model: &Model, system_config: Option<&ModelConfig>, prompt_bytes: u64, attached: u64) -> Result<u64, TurnError> {
+	let bytes = prompt_bytes.saturating_add(attached);
+	let limit = system_config
+		.and_then(|config| config.context_length)
+		.or(model.context_length)
+		.and_then(|limit| u64::try_from(limit).ok())
+		.filter(|limit| *limit > 0);
+	let tokens = bytes.div_ceil(4);
+	match limit {
+		Some(limit) if attached > 0 && tokens > limit => {
+			let args = HashMap::from([("tokens".to_owned(), tokens.to_string()), ("limit".to_owned(), limit.to_string())]);
+			Err(TurnError::new("context_too_large", I18n::get().translate("chat.errors.context_too_large", &Some(args))))
+		}
+		_ => Ok(bytes),
+	}
 }
 
 /// The model a key names: a provider model, or the model of a preset the user can see at the level the key asks for.
@@ -300,7 +348,7 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 
 	let system_config = ModelConfig::find_system_by_stable_key(db, &model.model_id).await.ok().flatten();
 
-	let bytes = prompt_bytes(db, &chat_id, req, system_config.as_ref(), preset.as_ref()).await?;
+	let bytes = prompt_bytes(db, (&user.id, &chat_id), req, (&model, system_config.as_ref()), preset.as_ref()).await?;
 	let budget = admit(state, user.id, &model, bytes).await?;
 
 	let request_settings = RequestSettings {

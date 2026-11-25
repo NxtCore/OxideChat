@@ -1,4 +1,5 @@
-use crate::types::{Message, MessagePart, ToolExecutionResponse};
+use crate::types::{ChatAttachment, Message, MessagePart, ToolExecutionResponse};
+use serde::Deserialize;
 use omniference::types::{ContentPart, Message as OmniMessage, Role};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
@@ -6,12 +7,13 @@ use uuid::Uuid;
 
 const MAX_HYDRATED_IMAGES: usize = 4;
 
-/// Whose history is being built and which of its images the model gets to see.
+/// Whose history is being built, which of its images the model gets to see, and the text of its attached files.
 struct ImageAccess<'a> {
 	db: &'a PgPool,
 	user_id: Uuid,
 	vision: bool,
 	hydrated_image_ids: &'a HashSet<String>,
+	attachments: &'a HashMap<Uuid, ChatAttachment>,
 }
 
 /// Hydrate a stored image into content parts. `generated` distinguishes an assistant-
@@ -102,12 +104,30 @@ fn recent_image_ids(messages: &[Message]) -> HashSet<String> {
 	hydrated_image_ids
 }
 
+fn attachment_ids(messages: &[Message]) -> Vec<Uuid> {
+	messages
+		.iter()
+		.filter(|message| message.role == "user")
+		.filter_map(|message| message.content_parts.as_ref())
+		.filter_map(|value| Vec::<MessagePart>::deserialize(value).ok())
+		.flatten()
+		.filter_map(|part| match part {
+			MessagePart::File { attachment_id, .. } => Some(attachment_id),
+			_ => None,
+		})
+		.collect()
+}
+
 async fn user_parts(access: &ImageAccess<'_>, stored_parts: Vec<MessagePart>, content: String) -> Vec<ContentPart> {
 	let mut parts = Vec::new();
 	for part in stored_parts {
 		match part {
 			MessagePart::Text { text } => parts.push(ContentPart::Text(text)),
 			MessagePart::Image { image_id } => parts.extend(hydrate_image(access, &image_id, false).await),
+			MessagePart::File { attachment_id, filename } => parts.push(ContentPart::Text(match access.attachments.get(&attachment_id) {
+				Some(attachment) => attachment.prompt_text(),
+				None => format!("[The attached file \"{}\" is no longer available.]", filename.replace('"', "'")),
+			})),
 			_ => {}
 		}
 	}
@@ -126,7 +146,7 @@ async fn assistant_messages(access: &ImageAccess<'_>, stored_parts: Vec<MessageP
 	for part in stored_parts {
 		match part {
 			MessagePart::Text { text } => buffer.push(ContentPart::Text(text)),
-			MessagePart::Reasoning { .. } => {}
+			MessagePart::Reasoning { .. } | MessagePart::File { .. } => {}
 			MessagePart::Image { image_id } => buffer.extend(hydrate_image(access, &image_id, true).await),
 			MessagePart::ToolCall { id, name, arguments } => {
 				call_names.insert(id.clone(), name.clone());
@@ -162,11 +182,16 @@ async fn assistant_messages(access: &ImageAccess<'_>, stored_parts: Vec<MessageP
 
 pub(super) async fn get_omni_messages(db: &PgPool, user_id: Uuid, messages: Vec<Message>, vision: bool) -> Vec<OmniMessage> {
 	let hydrated_image_ids = if vision { recent_image_ids(&messages) } else { HashSet::new() };
+	let attachments = ChatAttachment::find_for_user(db, &user_id, &attachment_ids(&messages))
+		.await
+		.inspect_err(|error| tracing::error!(%error, "failed to load chat attachments"))
+		.unwrap_or_default();
 	let access = ImageAccess {
 		db,
 		user_id,
 		vision,
 		hydrated_image_ids: &hydrated_image_ids,
+		attachments: &attachments,
 	};
 	let assistant_ids: Vec<Uuid> = messages.iter().filter(|m| m.role == "assistant").map(|m| m.id).collect();
 	let executions = Message::tool_executions_for_messages(db, &assistant_ids).await.unwrap_or_default();

@@ -55,6 +55,9 @@ thiserror = "2"
 async-trait = "0.1"
 anyhow = "1"
 infer = "0.22"
+pdf-extract = "0.12"
+html2text = "0.17"
+libc = "0.2"
 
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }

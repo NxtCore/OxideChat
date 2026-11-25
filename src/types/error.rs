@@ -1,6 +1,7 @@
 //! Handler error type shared by all routes.
 
 use crate::types::models::PriceSheetError;
+use crate::types::chat::AttachmentError;
 use crate::types::rag::RagError;
 use crate::types::{ArenaError, GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError, RoleError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
@@ -43,6 +44,9 @@ pub enum AppError {
 	/// Knowledge settings or a connection could not be saved.
 	#[error(transparent)]
 	Rag(#[from] RagError),
+	/// A file could not be attached to a chat.
+	#[error(transparent)]
+	Attachment(#[from] AttachmentError),
 }
 
 /// Returns true when the database rejected a statement because of a unique constraint.
@@ -103,6 +107,8 @@ impl AppError {
 			Self::Rag(RagError::Database(error)) if is_unique_violation(error) => ErrorCode::AlreadyExists,
 			Self::Rag(RagError::Database(_)) => ErrorCode::InternalError,
 			Self::Rag(_) => ErrorCode::ValidationFailed,
+			Self::Attachment(AttachmentError::Database(_)) => ErrorCode::InternalError,
+			Self::Attachment(_) => ErrorCode::ValidationFailed,
 		}
 	}
 }
@@ -132,6 +138,7 @@ impl IntoResponse for AppError {
 		match &self {
 			Self::Pricing(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
 			Self::Rag(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
+			Self::Attachment(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
 			_ => ErrorBuilder::new(code).build(),
 		}
 	}

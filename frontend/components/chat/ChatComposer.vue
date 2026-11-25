@@ -40,6 +40,35 @@
 						</button>
 					</div>
 				</div>
+				<div v-if="attachedFiles.length > 0 || uploadingFiles.length > 0" class="flex gap-2 px-4 pt-3 flex-wrap">
+					<div
+						v-for="(file, idx) in attachedFiles"
+						:key="file.id"
+						data-testid="attached-file"
+						class="flex max-w-60 items-center gap-1.5 rounded-lg border border-border bg-muted/50 py-1 pl-2 pr-1 text-xs"
+						:title="file.token_count ? store.getTranslation('chat.composer.attachment_tokens', {count: file.token_count.toLocaleString()}) : file.filename"
+					>
+						<FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+						<span class="truncate">{{ file.filename }}</span>
+						<button
+							type="button"
+							class="rounded p-0.5 hover:bg-accent"
+							:aria-label="store.getTranslation('chat.composer.remove_attachment', {name: file.filename})"
+							@click="attachedFiles.splice(idx, 1)"
+						>
+							<X class="h-3 w-3" />
+						</button>
+					</div>
+					<div
+						v-for="file in uploadingFiles"
+						:key="file.key"
+						data-testid="attached-file-uploading"
+						class="flex max-w-60 items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
+					>
+						<Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin" />
+						<span class="truncate">{{ store.getTranslation('chat.attachments.uploading', {name: file.filename}) }}</span>
+					</div>
+				</div>
 				<ShadTextarea
 					ref="textareaRef"
 					v-model="message"
@@ -67,6 +96,18 @@
 							<ImageIcon class="h-4 w-4" />
 						</button>
 						<input ref="fileInputRef" type="file" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
+						<button
+							type="button"
+							data-testid="composer-attach-file"
+							class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors"
+							:aria-label="store.getTranslation('chat.composer.attach_file')"
+							:title="store.getTranslation('chat.composer.attach_file')"
+							:disabled="chatStore.isStreaming"
+							@click="documentInputRef?.click()"
+						>
+							<Paperclip class="h-4 w-4" />
+						</button>
+						<input ref="documentInputRef" data-testid="composer-file-input" type="file" :accept="ATTACHMENT_ACCEPT" multiple class="hidden" @change="handleDocumentSelect" />
 						<ModelSelector class="border-none! bg-transparent! shadow-none! hover:bg-muted/50" />
 						<template v-if="!arenaSelected">
 							<ToolSelector v-if="modelStore.hasToolCapability(modelStore.selectedModel)" class="shrink-0" />
@@ -99,7 +140,9 @@
 </template>
 
 <script setup lang="ts">
-import {ArrowUp, Loader2, X, ImageIcon, Info, Swords} from 'lucide-vue-next';
+import {ArrowUp, Loader2, X, ImageIcon, Info, Swords, Paperclip, FileText} from 'lucide-vue-next';
+import type {ChatAttachment} from '~/types/generated/ChatAttachment';
+import {ATTACHMENT_ACCEPT, ATTACHMENT_MAX_BYTES, attachmentErrorMessage, postAttachment} from '~/composables/api/attachments';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
@@ -128,6 +171,9 @@ interface AttachedImage {
 }
 
 const attachedImages = ref<AttachedImage[]>([]);
+const documentInputRef = ref<HTMLInputElement | null>(null);
+const attachedFiles = ref<Pick<ChatAttachment, 'id' | 'filename' | 'token_count'>[]>([]);
+const uploadingFiles = ref<{key: string; filename: string}[]>([]);
 const isDragging = ref(false);
 let dragDepth = 0;
 
@@ -143,6 +189,9 @@ onMounted(() => {
 					id: part.image_id,
 					previewUrl: imageUrl(part.image_id, useRuntimeConfig().public.apiBase || ''),
 				});
+			}
+			if (part.type === 'file' && part.attachment_id) {
+				attachedFiles.value.push({id: part.attachment_id, filename: part.filename, token_count: 0});
 			}
 		}
 	}
@@ -164,7 +213,8 @@ const arenaSelected = computed(() => isArena(modelStore.selectedModel?.preset));
 const arenaPending = computed(() => !!chatStore.arenaRound && !chatStore.arenaRound.decided && !chatStore.isStreaming);
 
 const canSend = computed(() => {
-	return (message.value.trim().length > 0 || attachedImages.value.length > 0) && modelStore.selectedModel && !chatStore.isStreaming && !arenaPending.value;
+	const hasContent = message.value.trim().length > 0 || attachedImages.value.length > 0 || attachedFiles.value.length > 0;
+	return hasContent && uploadingFiles.value.length === 0 && modelStore.selectedModel && !chatStore.isStreaming && !arenaPending.value;
 });
 
 function handleEnter(e: KeyboardEvent) {
@@ -185,6 +235,9 @@ async function sendMessage() {
 	for (const img of attachedImages.value) {
 		parts.push({type: 'image', image_id: img.id});
 	}
+	for (const file of attachedFiles.value) {
+		parts.push({type: 'file', attachment_id: file.id, filename: file.filename});
+	}
 
 	emit('send', message.value.trim(), parts.length > 0 ? parts : undefined);
 	message.value = '';
@@ -192,6 +245,7 @@ async function sendMessage() {
 		URL.revokeObjectURL(img.previewUrl);
 	}
 	attachedImages.value = [];
+	attachedFiles.value = [];
 	nextTick(() => autoResize());
 }
 
@@ -216,6 +270,29 @@ async function handleFileSelect(event: Event) {
 	input.value = '';
 }
 
+async function handleDocumentSelect(event: Event) {
+	const input = event.target as HTMLInputElement;
+	const files = Array.from(input.files ?? []);
+	input.value = '';
+	await Promise.all(files.map(uploadFile));
+}
+
+async function uploadFile(file: File) {
+	if (file.size > ATTACHMENT_MAX_BYTES) {
+		store.toast(store.getTranslation('chat.attachments.error.too_large'), {type: 'error'});
+		return;
+	}
+	const pending = {key: crypto.randomUUID(), filename: file.name};
+	uploadingFiles.value.push(pending);
+	try {
+		attachedFiles.value.push(await postAttachment(file));
+	} catch (error) {
+		store.toast(attachmentErrorMessage(error), {type: 'error'});
+	} finally {
+		uploadingFiles.value = uploadingFiles.value.filter(item => item.key !== pending.key);
+	}
+}
+
 async function handlePaste(event: ClipboardEvent) {
 	if (!supportsImages.value) return;
 
@@ -238,14 +315,14 @@ function hasFiles(event: DragEvent) {
 }
 
 function handleDragEnter(event: DragEvent) {
-	if (!hasFiles(event) || !supportsImages.value || chatStore.isStreaming) return;
+	if (!hasFiles(event) || chatStore.isStreaming) return;
 	dragDepth++;
 	isDragging.value = true;
 }
 
 function handleDragOver(event: DragEvent) {
 	if (!event.dataTransfer) return;
-	event.dataTransfer.dropEffect = hasFiles(event) && supportsImages.value && !chatStore.isStreaming ? 'copy' : 'none';
+	event.dataTransfer.dropEffect = hasFiles(event) && !chatStore.isStreaming ? 'copy' : 'none';
 }
 
 function handleDragLeave() {
@@ -257,10 +334,12 @@ function handleDragLeave() {
 async function handleDrop(event: DragEvent) {
 	dragDepth = 0;
 	isDragging.value = false;
-	if (!supportsImages.value || chatStore.isStreaming) return;
+	if (chatStore.isStreaming) return;
 
-	const files = Array.from(event.dataTransfer?.files ?? []).filter(file => file.type.startsWith('image/'));
-	for (const file of files) {
+	const files = Array.from(event.dataTransfer?.files ?? []);
+	const images = supportsImages.value ? files.filter(file => file.type.startsWith('image/')) : [];
+	await Promise.all(files.filter(file => !images.includes(file)).map(uploadFile));
+	for (const file of images) {
 		await uploadImage(file);
 	}
 }
