@@ -10,9 +10,10 @@
 import DOMPurify from 'dompurify';
 import {Marked} from 'marked';
 import remend from 'remend';
+import {useMainStore} from '~/stores';
 
-// Inline styles the syntax highlighter writes: colours and font variants only, nothing that moves or resizes an element.
-const SAFE_STYLE = /^(?:\s*(?:color|background-color|font-style|font-weight|text-decoration|--shiki-[\w-]+)\s*:\s*[#\w\s(),.%-]+;?)*\s*$/i;
+// Inline styles the syntax highlighter and the streaming animation write: colours, font variants and animation delays only, nothing that moves or resizes an element.
+const SAFE_STYLE = /^(?:\s*(?:color|background-color|font-style|font-weight|text-decoration|animation-delay|--shiki-[\w-]+)\s*:\s*[#\w\s(),.%-]+;?)*\s*$/i;
 
 /**
  * Sanitize rendered markdown, which contains model output.
@@ -223,20 +224,21 @@ export function useMarkdown() {
 
 	/**
 	 * Render markdown for streaming content.
-	 * Uses remend to heal incomplete markdown before parsing.
+	 * Heals incomplete markdown with remend unless the user turned it off
+	 * (`use_remend`); `decorate` runs on the HTML before it is sanitized.
 	 */
-	function renderStreaming(content: string): string {
+	function renderStreaming(content: string, decorate: (html: string) => string = html => html): string {
 		// Access the reactive ref to ensure Vue tracks this dependency
 		const ready = globalHighlighterReady.value;
 
 		if (!content) return '';
 
-		const healed = remend(content);
+		const healed = useMainStore().preferences?.use_remend === false ? content : remend(content);
 		if (ready && globalMarkedInstance) {
-			return sanitize(globalMarkedInstance.parse(healed, {async: false}) as string);
+			return sanitize(decorate(globalMarkedInstance.parse(healed, {async: false}) as string));
 		}
 
-		return sanitize(renderFallback(healed));
+		return sanitize(decorate(renderFallback(healed)));
 	}
 
 	/**

@@ -8,6 +8,8 @@ import ThemeCard from '~/components/themes/ThemeCard.vue';
 import ImportThemeDialog from '~/components/themes/ImportThemeDialog.vue';
 import type {ThemePreference} from '~/lib/apply-theme';
 import type {Language} from '~/types/generated/Language';
+import type {StreamingAnimation} from '~/types/chat';
+import {STREAMING_ANIMATIONS} from '~/composables/useStreamAnimation';
 import {Sun, Moon, Monitor, Shuffle, Plus, RotateCcw, ExternalLink, Search, CheckCircle} from 'lucide-vue-next';
 
 const themeStore = useThemeStore();
@@ -20,6 +22,9 @@ const languageChoice = computed({
 	get: () => language.value ?? DEFAULT_LANGUAGE,
 	set: (value: string) => (language.value = value === DEFAULT_LANGUAGE ? null : (value as Language)),
 });
+
+const streamingAnimation = ref<StreamingAnimation>((mainStore.preferences?.streaming_animation as StreamingAnimation) ?? 'fade');
+const useRemend = ref(mainStore.preferences?.use_remend ?? true);
 
 const searchQuery = ref('');
 const showImportDialog = ref(false);
@@ -40,9 +45,13 @@ const filteredCustomThemes = computed(() => {
 	return themeStore.customThemes.filter(t => t.name.toLowerCase().includes(searchQuery.value.toLowerCase()));
 });
 
-const settingsForm = useSettingsForm<ThemeSnapshot & {language: Language | null}>({
+type ChatDisplay = {streamingAnimation: StreamingAnimation; useRemend: boolean};
+
+const settingsForm = useSettingsForm<ThemeSnapshot & ChatDisplay & {language: Language | null}>({
 	value: () => ({
 		language: language.value,
+		streamingAnimation: streamingAnimation.value,
+		useRemend: useRemend.value,
 		currentMode: themeStore.currentMode,
 		modePreference: themeStore.modePreference,
 		cssVars: themeStore.cssVars,
@@ -50,8 +59,10 @@ const settingsForm = useSettingsForm<ThemeSnapshot & {language: Language | null}
 		customThemeUrls: themeStore.customThemeUrls,
 	}),
 	normalize: ({currentMode, ...rest}) => rest,
-	restore: ({language: savedLanguage, ...saved}) => {
+	restore: ({language: savedLanguage, streamingAnimation: savedAnimation, useRemend: savedRemend, ...saved}) => {
 		language.value = savedLanguage;
+		streamingAnimation.value = savedAnimation;
+		useRemend.value = savedRemend;
 		const customThemesChanged = JSON.stringify(saved.customThemeUrls) !== JSON.stringify(themeStore.customThemeUrls);
 		themeStore.restoreSnapshot(saved);
 		if (customThemesChanged) themeStore.fetchAllThemes();
@@ -59,7 +70,13 @@ const settingsForm = useSettingsForm<ThemeSnapshot & {language: Language | null}
 	savedKey: 'settings.appearance.saved',
 	errorKey: 'common.error',
 	save: async () => {
-		const saved = await usePreferencesStore().updatePreferences({theme_css_vars: themeStore.cssVars, custom_theme_urls: themeStore.customThemeUrls, language: language.value});
+		const saved = await usePreferencesStore().updatePreferences({
+			theme_css_vars: themeStore.cssVars,
+			custom_theme_urls: themeStore.customThemeUrls,
+			language: language.value,
+			streaming_animation: streamingAnimation.value,
+			use_remend: useRemend.value,
+		});
 		if (!saved) throw new Error();
 		mainStore.applyLanguage();
 	},
@@ -70,6 +87,8 @@ watch(
 	(preferences, previous) => {
 		if (previous) return;
 		language.value = preferences?.language ?? null;
+		streamingAnimation.value = (preferences?.streaming_animation as StreamingAnimation) ?? 'fade';
+		useRemend.value = preferences?.use_remend ?? true;
 		settingsForm.markSaved();
 		themeStore.fetchAllThemes();
 	}
@@ -128,6 +147,38 @@ onMounted(() => {
 							</div>
 						</div>
 					</div>
+				</div>
+			</div>
+
+			<div class="space-y-4">
+				<div>
+					<h3 class="font-semibold text-foreground">{{ mainStore.getTranslation('settings.appearance.streaming_animation') }}</h3>
+					<p class="mt-1 text-sm text-muted-foreground">{{ mainStore.getTranslation('settings.appearance.streaming_animation_description') }}</p>
+				</div>
+
+				<div class="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+					<div
+						v-for="animation in STREAMING_ANIMATIONS"
+						:key="animation"
+						class="cursor-pointer rounded-lg border-0 bg-muted/20 p-4 transition-all duration-200 hover:bg-muted/40"
+						:class="streamingAnimation === animation ? 'bg-primary/5 ring-1 ring-primary/20' : 'hover:ring-1 hover:ring-border'"
+						:data-testid="`appearance-animation-${animation}`"
+						@click="streamingAnimation = animation"
+					>
+						<div class="flex items-center gap-2">
+							<ShadLabel class="cursor-pointer font-medium text-foreground">{{ mainStore.getTranslation(`settings.appearance.animation_${animation}`) }}</ShadLabel>
+							<CheckCircle v-if="streamingAnimation === animation" class="ml-auto h-4 w-4 text-primary" />
+						</div>
+						<p class="mt-1 text-xs text-muted-foreground">{{ mainStore.getTranslation(`settings.appearance.animation_${animation}_description`) }}</p>
+					</div>
+				</div>
+
+				<div class="flex max-w-2xl items-center justify-between gap-4 rounded-lg bg-muted/20 p-4">
+					<div>
+						<ShadLabel for="appearance-remend" class="font-medium text-foreground">{{ mainStore.getTranslation('settings.appearance.use_remend') }}</ShadLabel>
+						<p class="mt-1 text-xs text-muted-foreground">{{ mainStore.getTranslation('settings.appearance.use_remend_description') }}</p>
+					</div>
+					<ShadSwitch id="appearance-remend" v-model="useRemend" data-testid="appearance-remend" />
 				</div>
 			</div>
 
