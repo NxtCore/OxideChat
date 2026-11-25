@@ -339,14 +339,20 @@ async function handleDrop(event: DragEvent) {
 	if (chatStore.isStreaming) return;
 
 	const files = Array.from(event.dataTransfer?.files ?? []);
-	const images = supportsImages.value ? files.filter(file => file.type.startsWith('image/')) : [];
+	const images = files.filter(file => file.type.startsWith('image/'));
+	if (images.length > 0 && !supportsImages.value) store.toast(store.getTranslation('chat.composer.images_not_supported'), {type: 'error'});
 	await Promise.all(files.filter(file => !images.includes(file)).map(uploadFile));
+	if (!supportsImages.value) return;
 	for (const file of images) {
 		await uploadImage(file);
 	}
 }
 
 async function uploadImage(file: File) {
+	if (file.size > FILE_MAX_BYTES) {
+		store.toast(store.getTranslation('files.error.too_large'), {type: 'error'});
+		return;
+	}
 	const previewUrl = URL.createObjectURL(file);
 	try {
 		const stored = await postFile(file, 'image');

@@ -143,7 +143,7 @@ const form = reactive({
 		enabled: store.base?.registration.enabled ?? true,
 	},
 	storage: {
-		quota_mb: (store.base?.storage.quota_mb ?? null) as number | null,
+		quota_mb: (store.base?.storage.quota_mb ?? null) as number | string | null,
 	},
 	title_generation: {
 		enabled: store.base?.title_generation.enabled ?? false,
@@ -168,17 +168,23 @@ const selectedTheme = computed({
 	},
 });
 
+function quotaValue(value: number | string | null): number | null | undefined {
+	if (value === null || String(value).trim() === '') return null;
+	const quota = Number(value);
+	return Number.isInteger(quota) && quota > 0 ? quota : undefined;
+}
+
 const settingsForm = useSettingsForm({
 	value: () => form,
 	restore: saved => Object.assign(form, saved),
 	canEdit: () => canEdit.value,
-	validate: () => emptyAllowlistError(form.provider_routing.allowed_providers),
+	normalize: value => ({...value, storage: {quota_mb: quotaValue(value.storage.quota_mb)}}),
+	validate: () => (quotaValue(form.storage.quota_mb) === undefined ? 'settings.admin_config.storage_quota_invalid' : emptyAllowlistError(form.provider_routing.allowed_providers)),
 	savedKey: 'settings.admin_config.save_success',
 	errorKey: 'settings.admin_config.save_error',
 	save: async () => {
 		const selectorChanged = store.base?.provider_routing.selector_enabled !== form.provider_routing.selector_enabled;
-		const quota = Number(form.storage.quota_mb);
-		form.storage.quota_mb = Number.isInteger(quota) && quota > 0 ? quota : null;
+		form.storage.quota_mb = quotaValue(form.storage.quota_mb) ?? null;
 		await patchAdminConfig(form);
 		if (selectorChanged) store.refreshChatProviderSelector();
 		if (store.base) {

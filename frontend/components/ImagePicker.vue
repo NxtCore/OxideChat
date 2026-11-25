@@ -172,7 +172,7 @@ async function uploadFile(file: File) {
 		setValue(props.valueMode === 'id' ? stored.id : stored.url);
 		open.value = false;
 	} catch (error) {
-		store.toast(t(error instanceof ImageUploadError ? error.key.replace('image_picker.', '') : 'errors.upload'), {type: 'error'});
+		store.toast(store.getTranslation(error instanceof ImageUploadError ? error.key : 'image_picker.errors.upload'), {type: 'error'});
 	}
 }
 

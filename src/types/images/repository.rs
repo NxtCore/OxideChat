@@ -24,7 +24,7 @@ impl ImageInsert<'_> {
 	/// # Errors
 	///
 	/// Returns a database error when the insert fails.
-	pub async fn insert_data(&self, pool: &PgPool, data: &[u8]) -> Result<(), sqlx::Error> {
+	pub async fn insert_data<'e, E: sqlx::PgExecutor<'e>>(&self, pool: E, data: &[u8]) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
 				INSERT INTO files (id, kind, data, mime_type, size_bytes, user_id, source)
@@ -47,7 +47,7 @@ impl ImageInsert<'_> {
 	/// # Errors
 	///
 	/// Returns a database error when the insert fails.
-	pub async fn insert_file(&self, pool: &PgPool, file_path: &str) -> Result<(), sqlx::Error> {
+	pub async fn insert_file<'e, E: sqlx::PgExecutor<'e>>(&self, pool: E, file_path: &str) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
 				INSERT INTO files (id, kind, file_path, mime_type, size_bytes, user_id, source)

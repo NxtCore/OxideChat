@@ -264,7 +264,7 @@ export function useChatStream() {
 
 	function restoreUnsavedDraft(userMessageId: string | null, streamingMessageId: string, content: string, parts?: any[]): void {
 		const userMsg = userMessageId ? chatStore.messages.find(m => m.id === userMessageId) : undefined;
-		if (!userMsg || userMsg.client_id) return;
+		if (!userMsg) return;
 		chatStore.messages = chatStore.messages.filter(m => m.id !== streamingMessageId && m.id !== userMessageId);
 		chatStore.pendingBranchContent = content || null;
 		chatStore.pendingBranchParts = parts && parts.length > 0 ? parts : null;

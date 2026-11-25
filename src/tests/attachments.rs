@@ -16,6 +16,44 @@ mod extraction {
 	}
 
 	#[test]
+	fn html_without_text_is_empty_and_loses_nul_characters() {
+		assert_eq!(parse(DocumentKind::Html, b"<p>a\0b</p>").as_deref().map(str::trim), Some("ab"));
+		assert!(parse(DocumentKind::Html, b"<img src=x>").unwrap_or_default().trim().is_empty());
+	}
+
+	fn blank_pdf() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+		use pdf_extract::{Dictionary, Document, Object, Stream};
+		let mut doc = Document::with_version("1.5");
+		let pages_id = doc.new_object_id();
+		let content_id = doc.add_object(Stream::new(Dictionary::new(), Vec::new()));
+		let mut page = Dictionary::new();
+		page.set("Type", Object::Name(b"Page".to_vec()));
+		page.set("Parent", pages_id);
+		page.set("Contents", content_id);
+		page.set("MediaBox", vec![0.into(), 0.into(), 612.into(), 792.into()]);
+		let page_id = doc.add_object(page);
+		let mut pages = Dictionary::new();
+		pages.set("Type", Object::Name(b"Pages".to_vec()));
+		pages.set("Kids", vec![page_id.into()]);
+		pages.set("Count", 1);
+		doc.objects.insert(pages_id, Object::Dictionary(pages));
+		let mut catalog = Dictionary::new();
+		catalog.set("Type", Object::Name(b"Catalog".to_vec()));
+		catalog.set("Pages", pages_id);
+		let catalog_id = doc.add_object(catalog);
+		doc.trailer.set("Root", catalog_id);
+		let mut bytes = Vec::new();
+		doc.save_to(&mut bytes)?;
+		Ok(bytes)
+	}
+
+	#[test]
+	fn a_pdf_without_text_is_empty() -> Result<(), Box<dyn std::error::Error>> {
+		assert_eq!(parse(DocumentKind::Pdf, &blank_pdf()?).as_deref(), Some(""));
+		Ok(())
+	}
+
+	#[test]
 	fn pdf_pages_are_marked() {
 		let text = parse(DocumentKind::Pdf, PDF).unwrap_or_default();
 		assert!(text.starts_with("<!-- page 1 -->\nHello page one"), "{text}");
@@ -94,6 +132,12 @@ mod storage {
 		let req = request(json!([{"type": "file", "attachment_id": attachment.id, "filename": "notes.txt"}]))?;
 		let bytes = attachment_bytes(&pool, &owner, &req).await.map_err(|error| format!("{error:?}"))?;
 		assert_eq!(bytes, attachment.prompt_text().len() as u64);
+		let twice = request(json!([
+			{"type": "file", "attachment_id": attachment.id, "filename": "notes.txt"},
+			{"type": "file", "attachment_id": attachment.id, "filename": "notes.txt"}
+		]))?;
+		let doubled = attachment_bytes(&pool, &owner, &twice).await.map_err(|error| format!("{error:?}"))?;
+		assert_eq!(doubled, 2 * bytes);
 		assert!(attachment_bytes(&pool, &stranger, &req).await.is_err());
 		Ok(())
 	}
@@ -121,9 +165,11 @@ mod storage {
 			},
 		)
 		.await?;
-		let added = Message::active_prompt_bytes(&pool, &chat.id).await? - empty;
+		let history = Message::active_prompt_bytes(&pool, &chat.id).await?;
+		let added = history.total - empty.total;
 		let text = attachment.text.len() as u64;
 		assert!(added > text && added < text + 200, "{added}");
+		assert_eq!((empty.attached, history.attached), (0, text));
 		Ok(())
 	}
 
@@ -132,10 +178,10 @@ mod storage {
 		crate::config::Config::init(&pool).await?;
 		crate::i18n::I18n::init(&pool).await;
 		let small = model(Some(100));
-		assert!(fit_context(&small, None, 100, 400).is_err());
-		assert_eq!(fit_context(&small, None, 100, 200).ok(), Some(300));
+		assert!(fit_context(&small, None, 500, 400).is_err());
+		assert_eq!(fit_context(&small, None, 300, 200).ok(), Some(300));
 		assert_eq!(fit_context(&small, None, 4000, 0).ok(), Some(4000));
-		assert_eq!(fit_context(&model(None), None, 100, 4000).ok(), Some(4100));
+		assert_eq!(fit_context(&model(None), None, 4100, 4000).ok(), Some(4100));
 		Ok(())
 	}
 }
@@ -171,10 +217,11 @@ mod lifecycle {
 	#[test]
 	fn the_storage_quota_is_unlimited_unless_an_admin_sets_one() {
 		use crate::types::StorageSettings;
-		assert!(StorageSettings::default().allows_upload(i64::MAX));
+		assert!(StorageSettings::default().allows_upload(i64::MAX, usize::MAX));
 		let one_mb = StorageSettings { quota_mb: Some(1) };
-		assert!(one_mb.allows_upload(1024 * 1024 - 1));
-		assert!(!one_mb.allows_upload(1024 * 1024));
+		assert!(one_mb.allows_upload(1024 * 1024 - 1, 1));
+		assert!(!one_mb.allows_upload(1024 * 1024, 1));
+		assert!(!one_mb.allows_upload(0, 1024 * 1024 + 1), "the new file counts too");
 	}
 
 	#[test]
@@ -257,7 +304,7 @@ mod lifecycle {
 		use crate::types::{FilePurpose, FileUpload, UploadFileQuery};
 		crate::config::Config::init(&pool).await?;
 		let user_id = insert_user(&pool, "attach_upload").await?;
-		let query = |purpose| UploadFileQuery { filename: "pixel.png".to_string(), purpose };
+		let query = |purpose| UploadFileQuery { filename: None, purpose };
 
 		assert!(matches!(
 			FileUpload::store(&pool, &user_id, &query(FilePurpose::Image), b"not an image").await,
@@ -267,7 +314,7 @@ mod lifecycle {
 		assert_eq!(image.kind, "image");
 		assert_eq!(image.url, Some(format!("/api/v1/files/{}", image.id)));
 
-		let notes = UploadFileQuery { filename: "notes.txt".to_string(), purpose: FilePurpose::ChatAttachment };
+		let notes = UploadFileQuery { filename: Some("notes.txt".to_string()), purpose: FilePurpose::ChatAttachment };
 		let document = FileUpload::store(&pool, &user_id, &notes, b"plain text").await?;
 		assert_eq!((document.kind.as_str(), document.url, document.token_count.is_some()), ("document", None, true));
 		Ok(())

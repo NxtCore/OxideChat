@@ -180,12 +180,9 @@ async fn assistant_messages(access: &ImageAccess<'_>, stored_parts: Vec<MessageP
 	result
 }
 
-pub(super) async fn get_omni_messages(db: &PgPool, user_id: Uuid, messages: Vec<Message>, vision: bool) -> Vec<OmniMessage> {
+pub(super) async fn get_omni_messages(db: &PgPool, user_id: Uuid, messages: Vec<Message>, vision: bool) -> Result<Vec<OmniMessage>, sqlx::Error> {
 	let hydrated_image_ids = if vision { recent_image_ids(&messages) } else { HashSet::new() };
-	let attachments = ChatAttachment::find_for_user(db, &user_id, &attachment_ids(&messages))
-		.await
-		.inspect_err(|error| tracing::error!(%error, "failed to load chat attachments"))
-		.unwrap_or_default();
+	let attachments = ChatAttachment::find_for_user(db, &user_id, &attachment_ids(&messages)).await?;
 	let access = ImageAccess {
 		db,
 		user_id,
@@ -221,5 +218,5 @@ pub(super) async fn get_omni_messages(db: &PgPool, user_id: Uuid, messages: Vec<
 			});
 		}
 	}
-	result
+	Ok(result)
 }

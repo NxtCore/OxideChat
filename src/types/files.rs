@@ -4,9 +4,9 @@
 use crate::config::Config;
 use crate::types::ChatAttachment;
 use crate::utils::extract::MAX_UPLOAD_BYTES;
-use crate::utils::images::{detect_image_mime, image_url, store_image};
+use crate::utils::images::{detect_image_mime, image_url, store_image_in};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 /// The `source` of a document attached to a chat message.
@@ -40,7 +40,8 @@ pub enum FilePurpose {
 /// Query of a file upload; the body is the file itself.
 #[derive(Debug, Deserialize)]
 pub struct UploadFileQuery {
-	pub filename: String,
+	/// Required for documents; images are stored without a name.
+	pub filename: Option<String>,
 	pub purpose: FilePurpose,
 }
 
@@ -140,7 +141,7 @@ impl FileUpload {
 	/// Returns a [`FileError`] when the file is refused or cannot be stored.
 	pub async fn store(pool: &PgPool, user_id: &Uuid, query: &UploadFileQuery, bytes: &[u8]) -> Result<FileResponse, FileError> {
 		match query.purpose {
-			FilePurpose::ChatAttachment => Ok(ChatAttachment::upload(pool, user_id, &query.filename, bytes).await?.to_response()),
+			FilePurpose::ChatAttachment => Ok(ChatAttachment::upload(pool, user_id, query.filename.as_deref().unwrap_or_default(), bytes).await?.to_response()),
 			FilePurpose::Image => Self::store_image(pool, user_id, bytes, IMAGE_UPLOAD_SOURCE).await,
 			FilePurpose::Icon => Self::store_image(pool, user_id, bytes, ICON_SOURCE).await,
 		}
@@ -151,8 +152,9 @@ impl FileUpload {
 			return Err(FileError::TooLarge);
 		}
 		let mime_type = detect_image_mime(bytes).ok_or(FileError::UnsupportedType)?;
-		FileStorage::check_upload(pool, user_id).await?;
-		let stored = store_image(pool, bytes, mime_type, Some(*user_id), Some(source)).await.map_err(FileError::Storage)?;
+		let mut tx = FileStorage::begin_store(pool, user_id, bytes.len()).await?;
+		let stored = store_image_in(&mut tx, bytes, mime_type, Some(*user_id), Some(source)).await.map_err(FileError::Storage)?;
+		tx.commit().await?;
 		Ok(FileResponse {
 			id: stored.id,
 			kind: "image".to_owned(),
@@ -169,24 +171,41 @@ impl FileUpload {
 pub struct FileStorage;
 
 impl FileStorage {
-	/// Refuses an upload once the user has used up their hourly upload limit or the storage quota an admin set.
+	/// Refuses an upload once the user has used up their hourly upload limit; [`Self::begin_store`] checks it again.
 	///
 	/// # Errors
 	///
-	/// Returns [`FileError::RateLimited`], [`FileError::QuotaExceeded`] or a database error.
-	pub async fn check_upload(pool: &PgPool, user_id: &Uuid) -> Result<(), FileError> {
+	/// Returns [`FileError::RateLimited`] or a database error.
+	pub async fn check_rate(connection: &mut PgConnection, user_id: &Uuid) -> Result<(), FileError> {
 		let recent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files WHERE user_id = $1 AND source = ANY($2) AND created_at > NOW() - INTERVAL '1 hour'")
 			.bind(user_id)
 			.bind([CHAT_ATTACHMENT_SOURCE, IMAGE_UPLOAD_SOURCE, ICON_SOURCE])
-			.fetch_one(pool)
+			.fetch_one(&mut *connection)
 			.await?;
 		if recent >= UPLOADS_PER_HOUR {
 			return Err(FileError::RateLimited);
 		}
-		if !Self::has_room(pool, user_id).await? {
+		Ok(())
+	}
+
+	/// Starts the transaction a new file of `incoming` bytes is stored in: uploads of one user wait for each other,
+	/// and the file is refused when the hourly upload limit is used up or it does not fit the storage quota an admin set.
+	///
+	/// # Errors
+	///
+	/// Returns [`FileError::RateLimited`], [`FileError::QuotaExceeded`] or a database error.
+	pub async fn begin_store<'a>(pool: &'a PgPool, user_id: &Uuid, incoming: usize) -> Result<Transaction<'a, Postgres>, FileError> {
+		let mut tx = pool.begin().await?;
+		sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+			.bind(format!("files:{user_id}"))
+			.execute(&mut *tx)
+			.await?;
+		Self::check_rate(&mut tx, user_id).await?;
+		let storage = Config::get().storage();
+		if storage.quota_mb.is_some() && !storage.allows_upload(Self::used_bytes(&mut *tx, user_id).await?, incoming) {
 			return Err(FileError::QuotaExceeded);
 		}
-		Ok(())
+		Ok(tx)
 	}
 
 	/// Bytes the user's files take: originals that were kept, plus extracted text and captions.
@@ -194,7 +213,7 @@ impl FileStorage {
 	/// # Errors
 	///
 	/// Returns a database error when the query fails.
-	pub async fn used_bytes(pool: &PgPool, user_id: &Uuid) -> Result<i64, sqlx::Error> {
+	pub async fn used_bytes<'e, E: PgExecutor<'e>>(executor: E, user_id: &Uuid) -> Result<i64, sqlx::Error> {
 		sqlx::query_scalar(
 			r#"
 			SELECT COALESCE(SUM(CASE WHEN data IS NOT NULL OR file_path IS NOT NULL THEN size_bytes ELSE 0 END + COALESCE(octet_length(text), 0)), 0)::bigint
@@ -202,20 +221,7 @@ impl FileStorage {
 			"#,
 		)
 		.bind(user_id)
-		.fetch_one(pool)
+		.fetch_one(executor)
 		.await
-	}
-
-	/// Whether the user may store another file under the storage quota an admin set; always true without a quota.
-	///
-	/// # Errors
-	///
-	/// Returns a database error when the usage cannot be loaded.
-	pub async fn has_room(pool: &PgPool, user_id: &Uuid) -> Result<bool, sqlx::Error> {
-		let storage = Config::get().storage();
-		if storage.quota_mb.is_none() {
-			return Ok(true);
-		}
-		Ok(storage.allows_upload(Self::used_bytes(pool, user_id).await?))
 	}
 }

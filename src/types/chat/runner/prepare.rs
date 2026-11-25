@@ -102,15 +102,17 @@ pub(super) async fn prompt_bytes(
 	(model, system_config): (&Model, Option<&ModelConfig>),
 	preset: Option<&Preset>,
 ) -> Result<u64, TurnError> {
-	let history_bytes = Message::active_prompt_bytes(db, chat_id).await.map_err(internal("Failed to check budget status"))?;
+	let history = Message::active_prompt_bytes(db, chat_id).await.map_err(internal("Failed to check budget status"))?;
 	let attached = attachment_bytes(db, user_id, req).await?;
 	let system_bytes = system_config.and_then(|config| config.system_prompt.as_deref()).map_or(0, str::len);
 	let preset_bytes = preset.and_then(|preset| preset.system_prompt.as_deref()).map_or(0, str::len);
-	let bytes = history_bytes
+	let bytes = history
+		.total
+		.saturating_add(attached)
 		.saturating_add(request_bytes(req))
 		.saturating_add(system_bytes as u64)
 		.saturating_add(preset_bytes as u64);
-	fit_context(model, system_config, bytes, attached)
+	fit_context(model, system_config, bytes, history.attached.saturating_add(attached))
 }
 
 /// Text bytes of the files the new message attaches; refuses files that do not exist or belong to someone else.
@@ -131,12 +133,11 @@ pub(crate) async fn attachment_bytes(db: &PgPool, user_id: &Uuid, req: &StreamRe
 	if ids.iter().any(|id| !found.contains_key(id)) {
 		return Err(TurnError::new("attachment_not_found", I18n::get().translate("chat.errors.attachment_not_found", &None)));
 	}
-	Ok(found.values().map(|attachment| attachment.prompt_text().len() as u64).sum())
+	Ok(ids.iter().filter_map(|id| found.get(id)).map(|attachment| attachment.prompt_text().len() as u64).sum())
 }
 
-/// The prompt bytes with the new message's attachments; refuses a turn with attachments whose prompt does not fit the model's context window.
-pub(crate) fn fit_context(model: &Model, system_config: Option<&ModelConfig>, prompt_bytes: u64, attached: u64) -> Result<u64, TurnError> {
-	let bytes = prompt_bytes.saturating_add(attached);
+/// The prompt bytes, of which `attached` are attached files' text; refuses a prompt with attached files, new or earlier in the chat, that does not fit the model's context window.
+pub(crate) fn fit_context(model: &Model, system_config: Option<&ModelConfig>, bytes: u64, attached: u64) -> Result<u64, TurnError> {
 	let limit = system_config
 		.and_then(|config| config.context_length)
 		.or(model.context_length)

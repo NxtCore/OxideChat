@@ -107,7 +107,7 @@ fn decode_text(bytes: &[u8]) -> Result<String, FileError> {
 	if bytes.contains(&0) {
 		return Err(FileError::NotText);
 	}
-	String::from_utf8(bytes.to_vec()).map_err(|_| FileError::NotText)
+	std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| FileError::NotText)
 }
 
 async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, FileError> {
@@ -178,25 +178,41 @@ pub fn child_main(kind: Option<&str>) -> i32 {
 }
 
 /// Parses a file in the current process; only the child process calls this for HTML and PDF.
+///
+/// A file whose parsed text is only whitespace yields an empty string, and NUL characters, which Postgres cannot store, are left out.
 #[must_use]
 pub fn parse(kind: DocumentKind, input: &[u8]) -> Option<String> {
 	match kind {
 		DocumentKind::Text => decode_text(input).ok(),
-		DocumentKind::Html => html2text::from_read(input, HTML_WIDTH).ok(),
-		DocumentKind::Pdf => {
-			let pages = pdf_extract::extract_text_from_mem_by_pages(input).ok()?;
-			let total = pdf_extract::Document::load_mem(input).map_or(pages.len(), |doc| doc.get_pages().len());
-			let mut marked: Vec<String> = pages
-				.iter()
-				.enumerate()
-				.map(|(index, page)| format!("<!-- page {} -->\n{}", index + 1, page.trim()))
-				.collect();
-			if total > pages.len() {
-				marked.push(format!("<!-- pages {} to {total} could not be read -->", pages.len() + 1));
-			}
-			Some(marked.join("\n\n"))
-		}
+		DocumentKind::Html => html2text::from_read(input, HTML_WIDTH).ok().map(|text| text.replace('\0', "")),
+		DocumentKind::Pdf => pdf_text(input),
 	}
+}
+
+fn pdf_text(input: &[u8]) -> Option<String> {
+	let mut doc = pdf_extract::Document::load_mem(input).ok()?;
+	if doc.is_encrypted() {
+		doc.decrypt("").ok()?;
+	}
+	let pages: Vec<Option<String>> = doc.get_pages().into_keys().map(|number| pdf_page_text(&doc, number)).collect();
+	if pages.iter().flatten().all(|page| page.trim().is_empty()) {
+		return Some(String::new());
+	}
+	let marked: Vec<String> = pages
+		.iter()
+		.enumerate()
+		.map(|(index, page)| match page {
+			Some(page) => format!("<!-- page {} -->\n{}", index + 1, page.trim()),
+			None => format!("<!-- page {} could not be read -->", index + 1),
+		})
+		.collect();
+	Some(marked.join("\n\n"))
+}
+
+fn pdf_page_text(doc: &pdf_extract::Document, number: u32) -> Option<String> {
+	let mut text = String::new();
+	pdf_extract::output_doc_page(doc, &mut pdf_extract::PlainTextOutput::new(&mut text), number).ok()?;
+	Some(text.replace('\0', ""))
 }
 
 #[cfg(target_os = "linux")]

@@ -15,6 +15,13 @@ pub struct ChatAttachment {
 	pub token_count: i64,
 }
 
+/// Bytes of a chat's active messages as sent to the model, and how many of them are attached files' text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HistoryBytes {
+	pub total: u64,
+	pub attached: u64,
+}
+
 /// Rough token count of text, about four bytes per token.
 #[must_use]
 pub fn estimate_tokens(text: &str) -> i64 {
@@ -33,9 +40,10 @@ impl ChatAttachment {
 			return Err(FileError::TooLarge);
 		}
 		let kind = DocumentKind::detect(filename, bytes).ok_or(FileError::UnsupportedType)?;
-		FileStorage::check_upload(pool, user_id).await?;
+		FileStorage::check_rate(&mut *pool.acquire().await?, user_id).await?;
 		let text = extract::extract(kind, bytes).await?;
 		let size_bytes = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
+		let mut tx = FileStorage::begin_store(pool, user_id, text.len()).await?;
 		let attachment = sqlx::query_as::<_, Self>(
 			r#"
 			INSERT INTO files (user_id, kind, source, filename, mime_type, size_bytes, text, token_count)
@@ -50,8 +58,9 @@ impl ChatAttachment {
 		.bind(&text)
 		.bind(estimate_tokens(&text))
 		.bind(CHAT_ATTACHMENT_SOURCE)
-		.fetch_one(pool)
+		.fetch_one(&mut *tx)
 		.await?;
+		tx.commit().await?;
 		Ok(attachment)
 	}
 

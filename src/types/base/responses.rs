@@ -66,10 +66,11 @@ pub struct StorageSettings {
 }
 
 impl StorageSettings {
-	/// Whether a user whose files already take `stored_bytes` may store another one.
+	/// Whether a user whose files already take `stored_bytes` may store another one of `incoming` bytes.
 	#[must_use]
-	pub fn allows_upload(&self, stored_bytes: i64) -> bool {
-		self.quota_mb.is_none_or(|mb| stored_bytes < i64::from(mb) * 1024 * 1024)
+	pub fn allows_upload(&self, stored_bytes: i64, incoming: usize) -> bool {
+		let incoming = i64::try_from(incoming).unwrap_or(i64::MAX);
+		self.quota_mb.is_none_or(|mb| stored_bytes.saturating_add(incoming) <= i64::from(mb) * 1024 * 1024)
 	}
 }
 
