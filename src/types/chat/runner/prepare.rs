@@ -1,5 +1,5 @@
 use super::arena::{ArenaTurn, prepare_arena_turn};
-use super::request::{RequestInputs, build_request};
+use super::request::{RequestInputs, build_request, turn_routing, turn_tool_ids};
 use crate::types::catalog::GatewayCatalogModel;
 use crate::types::models::Model;
 use crate::types::providers::ProviderKind;
@@ -8,13 +8,15 @@ use crate::i18n::I18n;
 use crate::types::presets::preset_key_parts;
 use crate::types::{
 	ArenaRound, BudgetAdmission, EffectiveProviderRouting, BudgetError, BudgetReservation, BudgetSubject, Chat, CostDetails, JobState, Message, MessagePart, Preset, ReasoningDetails, RequestSettings, StreamData, StreamRequest,
-	StreamingUserMessageCreate, TokenEstimate, UsageDetails, User,
+	StreamingUserMessageCreate, TokenEstimate, Tool, UsageDetails, User,
 };
 use axum::response::{
 	IntoResponse, Response,
 	sse::{Event, KeepAlive, Sse},
 };
-use omniference::types::ChatRequestIR;
+use crate::types::rag::{KNOWLEDGE_BUILTIN, KnowledgeBase, ModelAccess, ModelTargets, RoutedModel, add_knowledge_tool, turn_knowledge_bases};
+use crate::types::provider_routing::{narrow, not_allowed_key};
+use omniference::types::{ChatRequestIR, ProviderRouting};
 use sqlx::PgPool;
 use std::{convert::Infallible, sync::Arc};
 use uuid::Uuid;
@@ -65,6 +67,8 @@ pub struct PreparedTurn {
 	/// Whether the reply becomes the chat's active one; arena answers stay inactive until one is picked.
 	pub(crate) active: bool,
 	pub(crate) arena_round_id: Option<Uuid>,
+	/// Knowledge bases the knowledge tool may search in this turn; checked again when it runs.
+	pub(crate) knowledge_base_ids: Vec<Uuid>,
 }
 
 /// A prepared turn: one reply, or an arena round where every model of the arena answers.
@@ -291,8 +295,8 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 	let chat_id = chat.id;
 
 	require_model_access(db, &user.id, &model).await?;
-
 	let provider_slugs = picked_provider(db, &user.id, &model, req).await?;
+	let knowledge_check = require_knowledge_access(db, &user.id, &chat_id, &model.id, turn_routing(req, &provider_slugs)).await?;
 
 	let system_config = ModelConfig::find_system_by_stable_key(db, &model.model_id).await.ok().flatten();
 
@@ -324,7 +328,12 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 		provider_slugs: &provider_slugs,
 		config_tools: true,
 	};
-	let ir = build_request(db, &inputs, messages).await?;
+	let mut ir = build_request(db, &inputs, messages).await?;
+	let mut knowledge = knowledge_bases(state, &user.id, &chat_id, req, preset.as_ref()).await?;
+	allowed_for_model(db, &knowledge_check, &mut knowledge).await?;
+	let capabilities = system_config.as_ref().and_then(|config| config.capabilities.as_ref()).unwrap_or(&model.capabilities).0.as_slice();
+	let tool_enabled = knowledge_tool_enabled(db, &request_settings.enabled_tools, system_config.as_ref()).await?;
+	offer_knowledge(&mut ir, &mut knowledge, tool_enabled, capabilities);
 
 	Ok(PreparedTurn {
 		chat_id,
@@ -342,5 +351,107 @@ async fn prepare_single(state: &Arc<JobState>, user: &User, chat: &Chat, req: &S
 		needs_title: chat.title.is_none(),
 		active: true,
 		arena_round_id: None,
+		knowledge_base_ids: knowledge.iter().map(|base| base.id).collect(),
 	})
+}
+
+/// Offers the knowledge tool for `knowledge` while its tool row is on and the model calls tools; otherwise no base is searched.
+fn offer_knowledge(ir: &mut ChatRequestIR, knowledge: &mut Vec<KnowledgeBase>, tool_enabled: bool, capabilities: &[String]) {
+	if !tool_enabled {
+		knowledge.clear();
+		return;
+	}
+	if !capabilities.is_empty() && !capabilities.iter().any(|capability| capability == "TOOLS") {
+		knowledge.clear();
+	}
+	add_knowledge_tool(ir, knowledge);
+}
+
+/// Whether the knowledge tool row is among the tools this turn may call.
+async fn knowledge_tool_enabled(db: &PgPool, enabled_tools: &[String], system_config: Option<&ModelConfig>) -> Result<bool, TurnError> {
+	let ids: Vec<Uuid> = turn_tool_ids(enabled_tools, system_config).iter().filter_map(|id| Uuid::parse_str(id).ok()).collect();
+	if ids.is_empty() {
+		return Ok(false);
+	}
+	let tool = Tool::enabled_builtin_among(db, &ids, KNOWLEDGE_BUILTIN).await.map_err(internal("Failed to load tools"))?;
+	Ok(tool.is_some())
+}
+
+async fn knowledge_bases(state: &JobState, user_id: &Uuid, chat_id: &Uuid, req: &StreamRequest, preset: Option<&Preset>) -> Result<Vec<KnowledgeBase>, TurnError> {
+	let db = &state.db;
+	let mut ids = match &req.knowledge_base_ids {
+		Some(ids) => KnowledgeBase::attach_to_chat(db, user_id, chat_id, ids).await,
+		None => KnowledgeBase::chat_ids(db, chat_id).await,
+	}
+	.map_err(internal("Failed to load knowledge bases"))?;
+	if let Some(preset) = preset {
+		ids.extend(KnowledgeBase::preset_ids(db, &preset.id).await.map_err(internal("Failed to load knowledge bases"))?);
+	}
+	turn_knowledge_bases(state, user_id, &ids).await.map_err(internal("Failed to load knowledge bases"))
+}
+
+/// What the knowledge in a chat allows the turn's model, and the routing the middleware will send the turn with.
+pub(crate) struct KnowledgeCheck {
+	model: Option<RoutedModel>,
+	routing: Option<ProviderRouting>,
+	access: ModelAccess,
+}
+
+impl KnowledgeCheck {
+	fn reaches(&self, access: &ModelAccess) -> bool {
+		match access {
+			ModelAccess::Allowed => true,
+			ModelAccess::Upstream(allowed) => narrow(self.routing.clone(), allowed).is_some(),
+			ModelAccess::Denied => false,
+		}
+	}
+}
+
+/// Refuses the turn before anything is stored when the chat holds excerpts its model may not see through `routing`, after
+/// the user's routing policy narrowed it the way the routing middleware will; the middleware checks every request again.
+pub(crate) async fn require_knowledge_access(db: &PgPool, user_id: &Uuid, chat_id: &Uuid, model_id: &Uuid, routing: Option<ProviderRouting>) -> Result<KnowledgeCheck, TurnError> {
+	let targets = ModelTargets::for_chat(db, chat_id).await.map_err(internal("Failed to check knowledge access"))?;
+	let model = RoutedModel::find(db, model_id).await.map_err(internal("Failed to check knowledge access"))?;
+	let routing = match &model {
+		Some(model) if model.kind.routes_upstream() => EffectiveProviderRouting::for_user(db, user_id)
+			.await
+			.map_err(internal("Failed to check knowledge access"))?
+			.restrict(&model.kind, routing)
+			.map_err(|error| TurnError::new("provider_not_allowed", I18n::get().translate(not_allowed_key(&error), &None)))?,
+		_ => routing,
+	};
+	let access = match &model {
+		Some(model) => ModelTargets::decide_all(&targets, model),
+		None if targets.iter().all(ModelTargets::is_unrestricted) => ModelAccess::Allowed,
+		None => ModelAccess::Denied,
+	};
+	let check = KnowledgeCheck { model, routing, access };
+	if check.reaches(&check.access) {
+		Ok(check)
+	} else {
+		Err(TurnError::new("knowledge_model_not_allowed", I18n::get().translate("chat.errors.knowledge_model_not_allowed", &None)))
+	}
+}
+
+/// Keeps the knowledge bases that, together with the excerpts the chat holds and the bases kept before them, still reach
+/// the turn's model through its routing, so a search is never followed by a refusal.
+pub(crate) async fn allowed_for_model(db: &PgPool, check: &KnowledgeCheck, bases: &mut Vec<KnowledgeBase>) -> Result<(), TurnError> {
+	let base_ids: Vec<Uuid> = bases.iter().map(|base| base.id).collect();
+	let targets = ModelTargets::load(db, &base_ids).await.map_err(internal("Failed to load knowledge bases"))?;
+	let mut access = check.access.clone();
+	bases.retain(|base| {
+		let Some(targets) = targets.get(&base.id) else {
+			return true;
+		};
+		let Some(model) = &check.model else {
+			return false;
+		};
+		let combined = access.clone().and(targets.decide(model));
+		let keep = check.reaches(&combined);
+		if keep {
+			access = combined;
+		}
+		keep
+	});
+	Ok(())
 }

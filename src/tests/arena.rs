@@ -130,6 +130,7 @@ pub(crate) mod support {
 				needs_title: false,
 				active: false,
 				arena_round_id: Some(round_id),
+				knowledge_base_ids: Vec::new(),
 			};
 			let mut run = AgentRun::new(Arc::clone(&fixture.state), turn, Instant::now());
 			run.next_request().await.map_err(|error| format!("{error:?}"))?;

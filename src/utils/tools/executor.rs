@@ -43,6 +43,8 @@ pub struct ToolContext {
 	pub db: Option<Arc<ToolDb>>,
 	/// Budget reservations for tools that send paid requests of their own (e.g., imagegen)
 	pub budget_ledger: Option<BudgetLedger>,
+	/// The chat the tool runs in; tools that send its content to a model check the chat's knowledge model access.
+	pub chat_id: Option<Uuid>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -66,6 +68,7 @@ impl Default for ToolContext {
 			function_name: None,
 			db: None,
 			budget_ledger: None,
+			chat_id: None,
 		}
 	}
 }

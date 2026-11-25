@@ -70,9 +70,10 @@ async fn reserve(job: &TitleJob, model_id: &Uuid, conversation: &str) -> Option<
 	}
 }
 
-fn usage_metadata(user_id: &Uuid, model_id: &Uuid, admission: &BudgetAdmission) -> Vec<(String, String)> {
+fn usage_metadata(job: &TitleJob, model_id: &Uuid, admission: &BudgetAdmission) -> Vec<(String, String)> {
 	let mut metadata = vec![
-		("oxide_user_id".to_string(), user_id.to_string()),
+		(crate::types::rag::KNOWLEDGE_CHAT_METADATA_KEY.to_string(), job.chat_id.to_string()),
+		("oxide_user_id".to_string(), job.user_id.to_string()),
 		("oxide_model_id".to_string(), model_id.to_string()),
 		("oxide_request_type".to_string(), "title".to_string()),
 	];
@@ -119,7 +120,7 @@ pub(crate) async fn generate_title(job: TitleJob) -> Option<String> {
 	let admission = reserve(&job, &model.id, &conversation).await?;
 	ir.messages = title_messages(conversation);
 	ir.sampling.max_tokens = Some(TITLE_OUTPUT_TOKENS);
-	ir.metadata.extend(usage_metadata(&job.user_id, &model.id, &admission));
+	ir.metadata.extend(usage_metadata(&job, &model.id, &admission));
 
 	let raw = ai::get()
 		.chat_complete(ir)

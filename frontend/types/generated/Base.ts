@@ -3,6 +3,7 @@ import type { ChatProviderSelectorResponse } from "./ChatProviderSelectorRespons
 import type { Instance } from "./Instance";
 import type { ProviderRoutingSettings } from "./ProviderRoutingSettings";
 import type { PublicOAuthProvider } from "./PublicOAuthProvider";
+import type { RagStatus } from "./RagStatus";
 import type { Registration } from "./Registration";
 import type { Role } from "./Role";
 import type { ThemeCssVars } from "./ThemeCssVars";
@@ -44,4 +45,8 @@ title_generation: TitleGeneration,
 /**
  * Whether visitors may create an account with email and password.
  */
-registration: Registration, };
+registration: Registration, 
+/**
+ * Whether knowledge bases are switched on.
+ */
+rag: RagStatus, };

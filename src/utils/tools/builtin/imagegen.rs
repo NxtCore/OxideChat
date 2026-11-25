@@ -138,6 +138,7 @@ impl ToolExecutor for ImageGenExecutor {
 			Some(other) => return Err(ToolError::InvalidInput(format!("Unknown image operation: {other}"))),
 		};
 		let (model, provider) = self.load_model(model_id, ctx).await?;
+		check_knowledge_access(ctx, &model.id).await?;
 		if operation == ImageOperation::Edit && !model.capabilities.0.iter().any(|capability| capability == "IMAGE_EDITING") {
 			return Err(ToolError::ExecutionFailed("Configured model does not support image editing".to_string()));
 		}
@@ -176,6 +177,23 @@ impl ToolExecutor for ImageGenExecutor {
 		let response = engine.image(request).await.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
 		drop(admission);
 		self.store_response(response, ctx, &caption).await
+	}
+}
+
+/// Refuses an image model that the knowledge in the chat may not reach, since the prompt can carry excerpts.
+async fn check_knowledge_access(ctx: &ToolContext, model_id: &Uuid) -> Result<(), ToolError> {
+	let (Some(chat_id), Some(db)) = (ctx.chat_id, ctx.db.as_ref()) else {
+		return Ok(());
+	};
+	match crate::types::rag::chat_allows_model(db, &chat_id, model_id).await {
+		Ok(true) => Ok(()),
+		Ok(false) => Err(ToolError::ExecutionFailed(
+			crate::i18n::I18n::get().translate("chat.errors.knowledge_image_model_not_allowed", &None),
+		)),
+		Err(error) => {
+			tracing::error!(%error, "failed to check knowledge model access for image tool");
+			Err(ToolError::Internal("Knowledge model access could not be checked".to_string()))
+		}
 	}
 }
 

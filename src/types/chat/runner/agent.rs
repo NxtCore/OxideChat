@@ -2,6 +2,7 @@ use super::history::tool_message_name;
 use super::prepare::PreparedTurn;
 use super::title::{TitleJob, first_user_text, generate_title};
 use super::tools::{execute_tool_by_name, get_client_tool_info};
+use crate::types::rag::{KNOWLEDGE_TOOL, KnowledgeBase, RagError, run_knowledge_tool};
 use crate::ai;
 use crate::types::{
 	BUDGET_RESERVATION_METADATA_KEY, BudgetError, BudgetReservation, BudgetSubject, ChatMessageResponse, CostDetails, JobState, Message, MessagePart, PendingCall,
@@ -81,6 +82,7 @@ pub(crate) struct AgentRun {
 	needs_title: bool,
 	active: bool,
 	arena_round_id: Option<Uuid>,
+	knowledge_base_ids: Vec<Uuid>,
 	start_time: Instant,
 	base_ir: ChatRequestIR,
 	current_messages: Vec<OmniMessage>,
@@ -170,6 +172,7 @@ impl AgentRun {
 			needs_title: turn.needs_title,
 			active: turn.active,
 			arena_round_id: turn.arena_round_id,
+			knowledge_base_ids: turn.knowledge_base_ids,
 			start_time,
 			base_ir,
 			current_messages,
@@ -357,7 +360,15 @@ impl AgentRun {
 		Some(ToolCall { id, name, args })
 	}
 
+	/// Whether `call` is the knowledge tool this turn offered; it wins over a user tool of the same name.
+	fn is_knowledge_call(&self, call: &ToolCall) -> bool {
+		call.name == KNOWLEDGE_TOOL && !self.knowledge_base_ids.is_empty()
+	}
+
 	async fn client_tool(&self, call: &ToolCall) -> Option<(StreamData, Uuid, PendingCall)> {
+		if self.is_knowledge_call(call) {
+			return None;
+		}
 		let (mcp_server_id, mcp_tool_name, tool_id) = get_client_tool_info(&self.state.db, &call.name, self.user_id).await?;
 		let event = StreamData::ClientToolCall {
 			id: call.id.clone(),
@@ -384,7 +395,38 @@ impl AgentRun {
 	}
 
 	async fn run_server_tool(&self, call: &ToolCall) -> ToolOutput {
-		match execute_tool_by_name(&self.state, self.user_id, &call.name, call.args.clone()).await {
+		if self.is_knowledge_call(call) {
+			let result = match run_knowledge_tool(&self.state, &self.user_id, Some(&self.chat_id), &self.knowledge_base_ids, &call.args).await {
+				Ok(output) => {
+					let mut sources: Vec<Uuid> = output.sources.iter().map(|source| source.knowledge_base_id).collect();
+					sources.sort_unstable();
+					sources.dedup();
+					KnowledgeBase::record_chat_sources(&self.state.db, &self.chat_id, &sources).await.map(|()| output).map_err(RagError::from)
+				}
+				Err(error) => Err(error),
+			};
+			return match result {
+				Ok(output) => ToolOutput {
+					output: serde_json::to_value(output).unwrap_or_default(),
+					error: None,
+					tool_id: None,
+					function_id: None,
+				},
+				Err(error) => {
+					tracing::warn!(%error, "knowledge search failed");
+					let reason = crate::i18n::I18n::get().translate(&format!("rag.error.{}", error.reason()), &None);
+					let args = std::collections::HashMap::from([("reason".to_string(), reason)]);
+					let message = crate::i18n::I18n::get().translate("chat.errors.knowledge_search_failed", &Some(args));
+					ToolOutput {
+						output: serde_json::json!({"error": message}),
+						error: Some(message),
+						tool_id: None,
+						function_id: None,
+					}
+				}
+			};
+		}
+		match execute_tool_by_name(&self.state, self.user_id, &self.chat_id, &call.name, call.args.clone()).await {
 			Ok(result) => ToolOutput {
 				output: result.output,
 				error: None,

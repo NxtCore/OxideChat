@@ -2,6 +2,7 @@ import {defineStore} from 'pinia';
 import {useWorkspaceStore} from './workspaceStore';
 import {useModelStore} from './modelStore';
 import {usePreferencesStore} from './preferencesStore';
+import {useKnowledgeStore} from './knowledgeStore';
 import type {ArenaRoundResponse} from '~/types/presets';
 import type {ArenaRoundState, Chat, ChatSampling, ChatMessage, ChatWithMessages, CreateChatRequest, UpdateChatRequest, ChatListParams, PaginatedResponse} from '~/types/chat';
 
@@ -156,6 +157,7 @@ export const useChatStore = defineStore('chat', {
 				this.messages = reconciled;
 				this.activeChat = chatWithMessages.chat;
 				this.arenaRound = chatWithMessages.pending_arena_round ? arenaRoundState(chatWithMessages.pending_arena_round) : null;
+				useKnowledgeStore().selected = chatWithMessages.knowledge_base_ids ?? [];
 				const modelStore = useModelStore();
 				await modelStore.hydrateComposerFromMessages(this.messages);
 				const lastAssistantMessage = this.messages.findLast(m => m.role === 'assistant');
@@ -224,6 +226,7 @@ export const useChatStore = defineStore('chat', {
 				if (this.activeChat?.id === id) {
 					this.activeChat = null;
 					this.messages = [];
+					useKnowledgeStore().selected = [];
 				}
 				return true;
 			} catch (e) {
@@ -239,6 +242,7 @@ export const useChatStore = defineStore('chat', {
 				const modelStore = useModelStore();
 				this.messages = [];
 				this.arenaRound = null;
+				useKnowledgeStore().selected = [];
 				modelStore.setContextTokens(0);
 				this.activeChat = null;
 				if (this.initialized) await modelStore.resetComposerToDefaults();

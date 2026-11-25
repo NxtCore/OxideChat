@@ -48,6 +48,10 @@ pub struct SavePresetRequest {
 	#[serde(default)]
 	#[cfg_attr(test, ts(optional))]
 	pub arena: Option<PresetArena>,
+	/// Knowledge bases the preset searches; `None` keeps the stored ones. Only bases the saving user may search can be added.
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub knowledge_base_ids: Option<Vec<Uuid>>,
 }
 
 /// Filter for preset lists by mode; all modes when empty.

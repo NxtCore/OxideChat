@@ -34,6 +34,8 @@ permissions! {
 	ADMIN_I18N_EDIT = "admin.i18n.edit",
 	ADMIN_ROLES_VIEW = "admin.roles.view",
 	ADMIN_ROLES_EDIT = "admin.roles.edit",
+	ADMIN_RAG_VIEW = "admin.rag.view",
+	ADMIN_RAG_EDIT = "admin.rag.edit",
 	SETTINGS_APPEARANCE_EDIT = "settings.appearance.edit",
 	SETTINGS_PRESETS_EDIT = "settings.presets.edit",
 	SETTINGS_SESSIONS_VIEW = "settings.sessions.view",

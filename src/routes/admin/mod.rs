@@ -10,6 +10,7 @@ pub mod oauth_providers;
 pub mod presets;
 pub mod provider_billing;
 pub mod providers;
+pub mod rag;
 pub mod roles;
 pub mod teams;
 pub mod tools;
@@ -46,6 +47,12 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/providers/{id}/sync", post(providers::sync_provider))
 		.route("/api/v1/admin/providers/{id}/models", get(providers::list_models))
 		.route("/api/v1/admin/providers/{id}/catalog", get(catalog::list_catalog))
+		// Admin knowledge setup
+		.route("/api/v1/admin/rag", get(rag::get_setup).put(rag::update_setup))
+		.route("/api/v1/admin/rag/connections", post(rag::create_connection))
+		.route("/api/v1/admin/rag/connections/{id}", put(rag::update_connection).delete(rag::delete_connection))
+		.route("/api/v1/admin/rag/connections/{id}/test", post(rag::test_connection))
+		.route("/api/v1/admin/rag/connections/{id}/inspect", post(rag::inspect_collection))
 		// Admin Tools
 		.route("/api/v1/admin/tools", get(tools::list_tools).post(tools::create_tool))
 		.route("/api/v1/admin/tools/wasm/upload", post(tools::upload_wasm))

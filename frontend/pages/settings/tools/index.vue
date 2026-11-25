@@ -76,7 +76,10 @@
 								<ShadButton variant="outline" size="sm" class="gap-2" @click="openEditDialog(tool)">
 									<Settings2 class="h-4 w-4" />
 								</ShadButton>
-								<ShadButton variant="outline" size="sm" class="gap-2" @click="testTool(tool)">
+								<ShadButton v-if="isKnowledgeTool(tool) && store.hasPermission(ADMIN_RAG_VIEW)" variant="outline" size="sm" class="gap-2" :title="store.getTranslation('settings.tabs.knowledge_setup')" data-testid="tool-knowledge-setup" @click="navigateTo('/settings/tools/knowledge')">
+									<Library class="h-4 w-4" />
+								</ShadButton>
+								<ShadButton v-else-if="!isKnowledgeTool(tool)" variant="outline" size="sm" class="gap-2" @click="testTool(tool)">
 									<Play class="h-4 w-4" />
 								</ShadButton>
 								<ShadSwitch :modelValue="tool.is_enabled" @update:modelValue="(val: boolean) => toggleTool(tool, val)" />
@@ -94,11 +97,13 @@
 </template>
 
 <script setup lang="ts">
-import {Plus, Settings2, Loader2, Wrench, Globe, Code, Server, Sparkles, Key, Play} from 'lucide-vue-next';
+import {Plus, Settings2, Loader2, Wrench, Globe, Code, Server, Sparkles, Key, Play, Library} from 'lucide-vue-next';
 import ToolTestDialog from '@/components/settings/ToolTestDialog.vue';
 import McpManagerDialog from '@/components/mcp/McpManagerDialog.vue';
 import McpServerEditDialog from '@/components/mcp/McpServerEditDialog.vue';
 import {useMainStore} from '@/stores';
+import {ADMIN_RAG_VIEW, ADMIN_TOOLS_VIEW} from '~/types/generated/permissions';
+import {KNOWLEDGE_TOOL_NAME} from '~/composables/useBuiltinToolTemplates';
 import type {Tool} from '~/types/tools';
 
 const store = useMainStore();
@@ -155,6 +160,10 @@ async function openMcpServerEdit(serverId: string) {
 	} catch (e: any) {
 		store.toast('Failed to load MCP server', {type: 'error'});
 	}
+}
+
+function isKnowledgeTool(tool: Tool) {
+	return tool.source_kind === 'BUILTIN' && tool.name === KNOWLEDGE_TOOL_NAME;
 }
 
 function getToolIcon(sourceKind: string) {
@@ -229,7 +238,8 @@ async function configureTemplate(template: any) {
 		};
 
 		const created = (await saveAdminTool(undefined, body)) as Tool;
-		store.toast('Tool added! Please configure your API key.', {type: 'success'});
+		if (isKnowledgeTool(created) && store.base) store.base.rag = {enabled: true};
+		store.toast(store.getTranslation(isKnowledgeTool(created) ? 'settings.tools.knowledge.added' : 'settings.tools.added'), {type: 'success'});
 		await loadTools();
 
 		if (created.settings_schema) {
@@ -249,6 +259,7 @@ async function toggleTool(tool: Tool, enabled: boolean) {
 	try {
 		await saveAdminTool(tool.id, {is_enabled: enabled});
 		tool.is_enabled = enabled;
+		if (isKnowledgeTool(tool) && store.base) store.base.rag = {enabled};
 	} catch (e: any) {
 		store.toast('Failed to toggle tool', {type: 'error'});
 	}
@@ -259,5 +270,15 @@ function testTool(tool: Tool) {
 	testDialogOpen.value = true;
 }
 
-onMounted(loadTools);
+const stopUserWatch = watch(
+	() => store.auth.user,
+	user => {
+		if (!user) return;
+		queueMicrotask(() => stopUserWatch());
+		if (store.hasPermission(ADMIN_TOOLS_VIEW)) loadTools();
+		else if (store.hasPermission(ADMIN_RAG_VIEW)) navigateTo('/settings/tools/knowledge', {replace: true});
+		else navigateTo('/settings', {replace: true});
+	},
+	{immediate: true},
+);
 </script>

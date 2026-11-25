@@ -3,6 +3,7 @@ use super::prepare::TurnError;
 use crate::ai;
 use crate::types::models::Model;
 use crate::types::models_configs::ModelConfig;
+use crate::types::rag::KNOWLEDGE_BUILTIN;
 use crate::types::{ChatSampling, Message, PRESET_METADATA_KEY, Preset, PresetReasoning, PresetSampling, StreamRequest, Tool, ToolFunction, User};
 use omniference::Sampling;
 use omniference::types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec};
@@ -177,6 +178,9 @@ async fn resolve_tools(db: &PgPool, user_id: Uuid, enabled_tool_ids: &[String]) 
 	let mut tool_specs: Vec<ToolSpec> = vec![];
 	let mut system_prompts: Vec<String> = vec![];
 	for tool in tools {
+		if tool.source_config.get("builtin_id").and_then(serde_json::Value::as_str) == Some(KNOWLEDGE_BUILTIN) {
+			continue;
+		}
 		if let Some(prompt) = tool.system_prompt.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
 			let label = if tool.display_name.trim().is_empty() {
 				tool.name.as_str()
@@ -228,6 +232,7 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 	ir.messages = get_omni_messages(db, inputs.user.id, messages, vision).await;
 	ir.metadata.insert("user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), inputs.chat_id.to_string());
+	ir.metadata.insert(crate::types::rag::KNOWLEDGE_CHAT_METADATA_KEY.to_string(), inputs.chat_id.to_string());
 	ir.metadata.insert("oxide_user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("oxide_model_id".to_string(), inputs.model.id.to_string());
 	ir.metadata.insert("oxide_request_type".to_string(), "chat".to_string());
@@ -241,7 +246,13 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 		config: inputs.system_config,
 		model: inputs.model,
 	});
-	ir.extra_body.clone_from(&inputs.chat_sampling.custom);
+	ir.extra_body = inputs
+		.chat_sampling
+		.custom
+		.iter()
+		.filter(|(key, _)| !crate::types::chat::is_routing_custom_key(key))
+		.map(|(key, value)| (key.clone(), value.clone()))
+		.collect();
 	ir.reasoning = merge_reasoning_with_priority(
 		req.reasoning_effort.as_ref(),
 		req.reasoning_budget_tokens,
@@ -252,20 +263,26 @@ async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Mes
 }
 
 fn apply_provider_routing(ir: &mut ChatRequestIR, inputs: &RequestInputs<'_>) {
-	let Some(slug) = inputs.provider_slugs.first() else {
-		return;
-	};
-	ir.provider_routing = Some(match inputs.req.provider_routing_mode.as_deref() {
+	if let Some(routing) = turn_routing(inputs.req, inputs.provider_slugs) {
+		ir.provider_routing = Some(routing);
+	}
+}
+
+/// The provider routing a turn sends: the picked provider locked or preferred; `None` without one.
+#[must_use]
+pub(crate) fn turn_routing(req: &StreamRequest, provider_slugs: &[String]) -> Option<omniference::types::ProviderRouting> {
+	let slug = provider_slugs.first()?;
+	Some(match req.provider_routing_mode.as_deref() {
 		Some("lock") => omniference::types::ProviderRouting {
 			only: Some(vec![slug.clone()]),
 			allow_fallbacks: Some(false),
 			..Default::default()
 		},
 		_ => omniference::types::ProviderRouting {
-			order: Some(inputs.provider_slugs.to_vec()),
+			order: Some(provider_slugs.to_vec()),
 			..Default::default()
 		},
-	});
+	})
 }
 
 /// The tools a turn may call: the turn's own tools plus those the admin enabled for the model, without duplicates.

@@ -79,6 +79,8 @@ pub struct ChatWithMessagesResponse {
 	pub messages: Vec<ChatMessageResponse>,
 	/// An arena round still waiting for the user's pick, shown blind.
 	pub pending_arena_round: Option<crate::types::ArenaRoundResponse>,
+	/// Knowledge bases attached to the chat.
+	pub knowledge_base_ids: Vec<Uuid>,
 }
 
 #[derive(Debug, Serialize, Clone)]

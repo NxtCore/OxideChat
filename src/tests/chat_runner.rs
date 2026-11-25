@@ -88,6 +88,7 @@ mod agent {
 			needs_title: false,
 			active: true,
 			arena_round_id: None,
+			knowledge_base_ids: Vec::new(),
 		};
 		AgentRun::new(Arc::clone(&fixture.state), turn, Instant::now())
 	}

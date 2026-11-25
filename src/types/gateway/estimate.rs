@@ -160,6 +160,12 @@ pub fn image_tool_estimate(prompt_bytes: u64, input_images: u64) -> TokenEstimat
 	media_tokens(MediaKind::Image { images: input_images }, &Map::new(), TokenEstimate::input_for_bytes(prompt_bytes))
 }
 
+/// Bounds one knowledge embedding or rerank request over `bytes` of text, counting the request and, for a rerank, the search.
+#[must_use]
+pub fn knowledge_estimate(bytes: u64, kind: MediaKind) -> TokenEstimate {
+	media_tokens(kind, &Map::new(), TokenEstimate::input_for_bytes(bytes))
+}
+
 fn media_tokens(kind: MediaKind, fields: &Map<String, Value>, input: u64) -> TokenEstimate {
 	let mut units = UnitEstimate { requests: 1, ..UnitEstimate::default() };
 	let mut estimate = TokenEstimate::text(input, 0);

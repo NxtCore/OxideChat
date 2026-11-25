@@ -259,6 +259,7 @@ export const useMainStore = defineStore('main', {
 			usePreferencesStore().$reset();
 			useBudgetStore().$reset();
 			useModelStore().$reset();
+			useKnowledgeStore().$reset();
 		},
 		applyLanguage() {
 			if (this.base) this.base.language = this.preferences?.language ?? this.base.default_language;

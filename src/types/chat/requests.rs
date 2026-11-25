@@ -185,6 +185,9 @@ pub struct StreamRequest {
 	/// How the picked provider is applied: `"prefer"` (order, fallbacks on) or `"lock"`
 	/// (only, no fallback). Defaults to `"prefer"`.
 	pub provider_routing_mode: Option<String>,
+	/// Knowledge bases to attach to the chat from this turn on; `None` keeps the chat's current ones.
+	#[serde(default)]
+	pub knowledge_base_ids: Option<Vec<Uuid>>,
 }
 
 const MAX_CUSTOM_SAMPLING_FIELDS: usize = 32;
@@ -217,11 +220,21 @@ fn in_range(value: Option<f32>, min: f32, max: f32) -> bool {
 	value.is_none_or(|v| v.is_finite() && (min..=max).contains(&v))
 }
 
+/// Cortecs routing fields, which Omniference does not reserve; set by a user they would override the routing the turn is restricted to.
+const ROUTING_CUSTOM_KEYS: [&str; 2] = ["allowed_providers", "provider_order"];
+
+/// Whether `key` would set upstream provider routing, which only the turn's provider routing may.
+#[must_use]
+pub fn is_routing_custom_key(key: &str) -> bool {
+	ROUTING_CUSTOM_KEYS.iter().any(|reserved| reserved.eq_ignore_ascii_case(key))
+}
+
 fn valid_custom_key(key: &str) -> bool {
 	!key.is_empty()
 		&& key.len() <= MAX_CUSTOM_SAMPLING_KEY_LEN
 		&& key.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 		&& !omniference::adapter::is_reserved_extra_body_key(key)
+		&& !is_routing_custom_key(key)
 }
 
 impl ChatSampling {

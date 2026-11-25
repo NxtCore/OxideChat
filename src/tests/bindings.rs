@@ -118,6 +118,27 @@ mod tests {
 			WorkspaceResponse,
 		);
 
+		export_rag(&cfg)
+	}
+
+	fn export_rag(cfg: &Config) -> Result<(), Box<dyn Error>> {
+		use crate::types::rag::{
+			AccessLabelsResponse, ConnectionTestResponse, InspectRequest, InspectResponse, KnowledgeBaseResponse, KnowledgeSearchRequest, KnowledgeSearchResponse, ModelAccessResponse,
+			ModelTargets, RagSetupResponse, SaveConnectionRequest, SaveKnowledgeBaseRequest, UpdateRagSetupRequest,
+		};
+		RagSetupResponse::export_all(cfg)?;
+		SaveConnectionRequest::export_all(cfg)?;
+		UpdateRagSetupRequest::export_all(cfg)?;
+		ConnectionTestResponse::export_all(cfg)?;
+		KnowledgeBaseResponse::export_all(cfg)?;
+		SaveKnowledgeBaseRequest::export_all(cfg)?;
+		InspectRequest::export_all(cfg)?;
+		InspectResponse::export_all(cfg)?;
+		KnowledgeSearchRequest::export_all(cfg)?;
+		KnowledgeSearchResponse::export_all(cfg)?;
+		ModelTargets::export_all(cfg)?;
+		ModelAccessResponse::export_all(cfg)?;
+		AccessLabelsResponse::export_all(cfg)?;
 		write_permissions()
 	}
 

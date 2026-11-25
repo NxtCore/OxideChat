@@ -5,6 +5,7 @@ pub mod arena;
 pub mod chats;
 pub mod developer;
 pub mod images;
+pub mod knowledge;
 pub mod mcp;
 pub mod messages;
 pub mod models;
@@ -59,6 +60,16 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/models/{id}/favorite", post(models::set_model_favorite))
 		.route("/api/v1/models/{id}/provider-options", get(models::get_provider_options))
 		// Presets
+		.route("/api/v1/knowledge-bases", get(knowledge::list_knowledge_bases).post(knowledge::create_knowledge_base))
+		.route("/api/v1/knowledge-bases/{id}", get(knowledge::get_knowledge_base).put(knowledge::update_knowledge_base).delete(knowledge::delete_knowledge_base))
+		.route("/api/v1/knowledge-bases/{id}/assignments", get(knowledge::get_assignments).put(knowledge::replace_assignments))
+		.route("/api/v1/knowledge-bases/{id}/model-access", get(knowledge::get_model_access).put(knowledge::replace_model_access))
+		.route("/api/v1/knowledge-bases/{id}/search", post(knowledge::search))
+		.route("/api/v1/knowledge-bases/{id}/access-labels", get(knowledge::access_labels))
+		.route(
+			"/api/v1/knowledge-bases/{id}/access-labels/assignments",
+			get(knowledge::get_label_assignments).put(knowledge::replace_label_assignments),
+		)
 		.route("/api/v1/presets", get(presets::list_presets).post(presets::create_preset))
 		.route("/api/v1/presets/check-slug", get(presets::check_slug))
 		.route("/api/v1/presets/scopes", get(presets::list_scopes))

@@ -2,6 +2,7 @@ use super::rows::preset_columns;
 use super::{Preset, PresetActor, PresetBaseModel, PresetMode, PresetError, PresetResponse, PresetScope, PresetScopesResponse, PresetTeam, SavePresetRequest};
 use crate::logging::AuditLog;
 use crate::types::models::{Model, ModelListPublic};
+use crate::types::rag::KnowledgeBase;
 use crate::types::{AssignmentKind, AssignmentRole, AssignmentTarget, AssignmentsResponse, AuditEntry, ReplaceAssignmentsRequest, Tool, is_unique_violation};
 use sqlx::postgres::PgArguments;
 use sqlx::query::QueryAs;
@@ -113,6 +114,20 @@ fn bind_fields<'q>(query: PresetQuery<'q>, request: &'q SavePresetRequest) -> Pr
 		.bind(request.prompt_visible)
 		.bind(request.is_enabled)
 		.bind(Json(request.arena.clone().unwrap_or_default()))
+}
+
+fn knowledge_base_ids<'a>(preset: &Preset, request: &'a SavePresetRequest) -> Option<&'a [Uuid]> {
+	if preset.is_arena() { Some(&[]) } else { request.knowledge_base_ids.as_deref() }
+}
+
+async fn save_knowledge_bases(tx: &mut Transaction<'_, Postgres>, actor: &PresetActor, preset_id: &Uuid, ids: Option<&[Uuid]>) -> Result<(), sqlx::Error> {
+	let Some(ids) = ids else { return Ok(()) };
+	let current = KnowledgeBase::preset_ids(&mut **tx, preset_id).await?;
+	let usable: HashSet<Uuid> = KnowledgeBase::accessible(&mut **tx, &actor.user_id, ids).await?.into_iter().map(|base| base.id).collect();
+	let mut kept: Vec<Uuid> = ids.iter().copied().filter(|id| usable.contains(id) || current.contains(id)).collect();
+	kept.sort_unstable();
+	kept.dedup();
+	KnowledgeBase::attach_to_preset(tx, preset_id, &kept).await
 }
 
 impl PresetActor {
@@ -301,6 +316,7 @@ impl Preset {
 			.fetch_one(&mut *tx)
 			.await
 			.map_err(map_write_error)?;
+		save_knowledge_bases(&mut tx, actor, &preset.id, knowledge_base_ids(&preset, &request)).await?;
 		audit(&mut tx, EVENT_CREATED, &actor.user_id, &preset).await?;
 		tx.commit().await?;
 		Ok(preset)
@@ -347,6 +363,7 @@ impl Preset {
 		if !shared && Shares::exist(&mut *tx, id).await? && Tool::any_personal(&mut *tx, &preset.tool_ids).await? {
 			return Err(PresetError::ToolsNotAllowed);
 		}
+		save_knowledge_bases(&mut tx, actor, id, knowledge_base_ids(&preset, &request)).await?;
 		audit(&mut tx, EVENT_UPDATED, &actor.user_id, &preset).await?;
 		tx.commit().await?;
 		Ok(preset)
@@ -539,6 +556,14 @@ impl Preset {
 				.await?
 				.into_iter()
 				.collect();
+		let mut knowledge: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+		let rows: Vec<(Uuid, Uuid)> = sqlx::query_as("SELECT preset_id, knowledge_base_id FROM preset_knowledge_bases WHERE preset_id = ANY($1) ORDER BY knowledge_base_id")
+			.bind(&preset_ids)
+			.fetch_all(pool)
+			.await?;
+		for (preset_id, base_id) in rows {
+			knowledge.entry(preset_id).or_default().push(base_id);
+		}
 		Ok(presets
 			.into_iter()
 			.map(|preset| {
@@ -546,8 +571,10 @@ impl Preset {
 				let base = preset.base_model_id.as_ref().and_then(lookup);
 				let levels = preset.levels.iter().map(|level| lookup(&level.model_id)).collect();
 				let has_gateway_usage = used.contains(&preset.id);
+				let knowledge_base_ids = knowledge.remove(&preset.id).unwrap_or_default();
 				PresetResponse {
 					has_gateway_usage,
+					knowledge_base_ids,
 					..PresetResponse::build(preset, base, levels, actor)
 				}
 			})

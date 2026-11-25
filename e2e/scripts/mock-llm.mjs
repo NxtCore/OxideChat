@@ -40,7 +40,23 @@ function lastUserText(body) {
 }
 
 function replyFor(body) {
+	const last = (body.messages ?? []).at(-1);
+	if (last?.role === 'tool') {
+		let source;
+		try {
+			source = JSON.parse(typeof last.content === 'string' ? last.content : last.content?.[0]?.text ?? '{}').sources?.[0];
+		} catch {
+			source = undefined;
+		}
+		return source ? `Mock answer: ${source.text} [${source.n}]` : 'Mock answer: nothing found';
+	}
 	return `Mock reply: ${lastUserText(body)}`;
+}
+
+// Calls the knowledge tool once when it is offered, then answers from its first source.
+function wantsKnowledge(body) {
+	const offered = (body.tools ?? []).some(tool => tool.function?.name === 'knowledge_search');
+	return offered && (body.messages ?? []).at(-1)?.role === 'user';
 }
 
 function usage() {
@@ -99,6 +115,67 @@ function imageReply(count) {
 		data: Array.from({length: count}, () => ({b64_json: PNG})),
 		usage: {input_tokens: MEDIA_USAGE.imageInput, output_tokens: MEDIA_USAGE.imageOutput, total_tokens: MEDIA_USAGE.imageInput + MEDIA_USAGE.imageOutput},
 	};
+}
+
+// A read-only Qdrant collection someone else's pipeline filled; vectors match mock-embed's size.
+const QDRANT_COLLECTIONS = {
+	handbook: {
+		size: 3,
+		points: [
+			{id: 1, vector: [0.1, 0.2, 0.3], payload: {page_content: 'Holidays are booked in the HR portal.', metadata: {title: 'Holidays', url: 'https://intranet.example/holidays', site: 'HR'}}},
+			{id: 2, vector: [0.3, 0.2, 0.1], payload: {page_content: 'Expenses are paid monthly.', metadata: {title: 'Expenses', site: 'HR'}}},
+			{id: 3, vector: [0.2, 0.2, 0.2], payload: {page_content: 'Servers are patched on Tuesdays.', metadata: {title: 'Servers', site: 'IT'}}},
+		],
+	},
+	wide: {size: 4, points: []},
+	// Every record lists who may see it in `oxide_access`; one lists nobody and must never be found.
+	intranet: {
+		size: 3,
+		points: [
+			{id: 1, vector: [0.1, 0.2, 0.3], payload: {page_content: 'Salary bands are reviewed in March.', oxide_access: ['HR Members']}},
+			{id: 2, vector: [0.2, 0.2, 0.2], payload: {page_content: 'Deploys freeze on Fridays.', oxide_access: ['space:ENG', 'site-42/owners']}},
+			{id: 3, vector: [0.3, 0.2, 0.1], payload: {page_content: 'Board minutes are confidential.'}},
+		],
+	},
+};
+
+function qdrantValue(point, key) {
+	return key.split('.').reduce((value, part) => value?.[part], point.payload);
+}
+
+function qdrantMatches(point, filter) {
+	return (filter?.must ?? []).every(condition => {
+		const value = qdrantValue(point, condition.key);
+		if (condition.match.any) return [value].flat().some(item => condition.match.any.includes(item));
+		return value === condition.match.value;
+	});
+}
+
+async function qdrant(req, res, path) {
+	const [, collection, action] = path.match(/^\/collections\/([^/]+)(?:\/(?:points\/)?(\w+))?$/) ?? [];
+	const found = QDRANT_COLLECTIONS[collection];
+	if (req.method === 'GET' && path === '/') return sendJson(res, 200, {title: 'qdrant - vector search engine', version: '1.12.0'});
+	if (req.method === 'GET' && path === '/collections') {
+		return sendJson(res, 200, {result: {collections: Object.keys(QDRANT_COLLECTIONS).map(name => ({name}))}, status: 'ok'});
+	}
+	if (!found) return sendJson(res, 404, {status: {error: 'Not found: Collection'}});
+	if (req.method === 'GET' && !action) {
+		return sendJson(res, 200, {result: {status: 'green', points_count: found.points.length, config: {params: {vectors: {size: found.size, distance: 'Cosine'}}}}});
+	}
+	const body = await readBody(req);
+	const points = found.points.filter(point => qdrantMatches(point, body.filter));
+	if (action === 'facet') {
+		const counts = new Map();
+		for (const point of points) for (const label of [qdrantValue(point, body.key) ?? []].flat()) counts.set(label, (counts.get(label) ?? 0) + 1);
+		return sendJson(res, 200, {result: {hits: [...counts].map(([value, count]) => ({value, count}))}});
+	}
+	if (action === 'scroll') return sendJson(res, 200, {result: {points: points.slice(0, body.limit).map(({id, payload}) => ({id, payload})), next_page_offset: null}});
+	if (action === 'query') {
+		const score = point => point.vector.reduce((sum, value, index) => sum + value * body.query[index], 0);
+		const ranked = points.map(point => ({id: point.id, score: score(point), payload: point.payload})).sort((a, b) => b.score - a.score);
+		return sendJson(res, 200, {result: {points: ranked.slice(0, body.limit)}});
+	}
+	return sendJson(res, 404, {status: {error: `mock: no qdrant route for ${req.method} ${path}`}});
 }
 
 async function media(req, res, path) {
@@ -165,6 +242,14 @@ async function streamCompletion(req, res, body, model) {
 	req.on('close', () => (closed = true));
 
 	send(chunk({role: 'assistant', content: ''}));
+	if (wantsKnowledge(body)) {
+		const call = {index: 0, id: 'call_knowledge', type: 'function', function: {name: 'knowledge_search', arguments: JSON.stringify({query: lastUserText(body)})}};
+		send(chunk({tool_calls: [call]}));
+		send(chunk({}, 'tool_calls'));
+		send({id, object: 'chat.completion.chunk', created, model, choices: [], usage: usage()});
+		res.write('data: [DONE]\n\n');
+		return res.end();
+	}
 	const words = replyFor(body).split(' ');
 	const delay = model === 'mock-slow' ? 400 : 5;
 	for (const [index, word] of words.entries()) {
@@ -187,6 +272,7 @@ async function streamCompletion(req, res, body, model) {
 const server = http.createServer(async (req, res) => {
 	const url = new URL(req.url, `http://localhost:${port}`);
 	if (req.method === 'GET' && url.pathname === '/health') return sendJson(res, 200, {ok: true});
+	if (url.pathname.startsWith('/qdrant/')) return qdrant(req, res, url.pathname.slice('/qdrant'.length));
 
 	if (req.headers.authorization !== 'Bearer mock-key') {
 		return sendJson(res, 401, {error: {message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key'}});

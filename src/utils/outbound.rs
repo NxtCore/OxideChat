@@ -23,7 +23,9 @@ pub enum OutboundError {
 	Client(#[from] reqwest::Error),
 }
 
-fn private_hosts_allowed() -> bool {
+/// Whether admin-entered addresses may point at private networks and use plain `http` (`OIDC_ALLOW_PRIVATE_HOSTS=true`).
+#[must_use]
+pub fn private_hosts_allowed() -> bool {
 	std::env::var("OIDC_ALLOW_PRIVATE_HOSTS").is_ok_and(|value| value == "true")
 }
 
@@ -130,7 +132,11 @@ pub async fn guarded_client(url: &str) -> Result<(reqwest::Client, reqwest::Url)
 	}
 	let host = url.host_str().ok_or(OutboundError::InvalidUrl)?.trim_matches(['[', ']']).to_string();
 	let port = url.port_or_known_default().ok_or(OutboundError::InvalidUrl)?;
-	let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), port)).await.map_err(|_| OutboundError::Lookup)?.collect();
+	let addresses: Vec<SocketAddr> = tokio::time::timeout(REQUEST_TIMEOUT, tokio::net::lookup_host((host.as_str(), port)))
+		.await
+		.map_err(|_| OutboundError::Lookup)?
+		.map_err(|_| OutboundError::Lookup)?
+		.collect();
 	if addresses.is_empty() || addresses.iter().any(|address| !is_allowed_ip(address.ip(), allow_private)) {
 		return Err(OutboundError::Blocked);
 	}

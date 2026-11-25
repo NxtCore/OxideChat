@@ -77,6 +77,7 @@ pub async fn get_chat(State(state): State<Arc<JobState>>, user: AuthUser, Path(i
 		chat: chat_response,
 		messages,
 		pending_arena_round,
+		knowledge_base_ids: crate::types::rag::KnowledgeBase::chat_ids(&state.db, &id).await?,
 	})
 }
 

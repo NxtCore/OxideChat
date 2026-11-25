@@ -33,6 +33,26 @@
 				<span class="text-xs text-muted-foreground">{{ store.getTranslation('chat.provider_selector.title') }}</span>
 				<ProviderSelector class="h-8" />
 			</div>
+			<div v-if="knowledgeVisible" role="group" :aria-label="store.getTranslation('chat.composer.knowledge')" class="space-y-0.5 px-1 pt-1" data-testid="composer-knowledge">
+				<span class="text-xs text-muted-foreground">{{ store.getTranslation('chat.composer.knowledge') }}</span>
+				<label
+					v-for="base in knowledgeStore.usable"
+					:key="base.id"
+					class="flex items-center gap-2 rounded-md px-1 py-1 text-sm text-foreground"
+					:class="knowledgeAllowed(base) ? 'cursor-pointer hover:bg-muted/50' : 'cursor-not-allowed opacity-60'"
+					:title="knowledgeAllowed(base) ? (base.description ?? '') : store.getTranslation('chat.composer.knowledge_not_allowed')"
+					:data-testid="`composer-knowledge-${base.name}`"
+					:data-disabled="!knowledgeAllowed(base)"
+				>
+					<ShadCheckbox
+						:model-value="knowledgeStore.selected.includes(base.id)"
+						:disabled="!knowledgeAllowed(base) && !knowledgeStore.selected.includes(base.id)"
+						@update:model-value="toggleKnowledge(base.id)"
+					/>
+					<span class="min-w-0 flex-1 truncate">{{ base.name }}</span>
+					<span v-if="!knowledgeAllowed(base)" class="shrink-0 text-xs text-muted-foreground">{{ store.getTranslation('chat.composer.knowledge_not_allowed') }}</span>
+				</label>
+			</div>
 		</ShadPopoverContent>
 	</ShadPopover>
 </template>
@@ -43,6 +63,11 @@ import {cn} from '~/lib/utils';
 import {useMainStore} from '~/stores';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
+import {useKnowledgeStore} from '~/stores/knowledgeStore';
+import {usePreferencesStore} from '~/stores/preferencesStore';
+import {KNOWLEDGE_TOOL_NAME} from '~/composables/useBuiltinToolTemplates';
+import type {KnowledgeBaseResponse} from '~/types/generated/KnowledgeBaseResponse';
+import {baseModelId} from '~/utils/presets';
 import ReasoningSelector from './ReasoningSelector.vue';
 import SamplingSelector from './SamplingSelector.vue';
 import ProviderSelector from './ProviderSelector.vue';
@@ -50,7 +75,29 @@ import ProviderSelector from './ProviderSelector.vue';
 const store = useMainStore();
 const chatStore = useChatStore();
 const modelStore = useModelStore();
+const knowledgeStore = useKnowledgeStore();
+const preferencesStore = usePreferencesStore();
 const open = ref(false);
+const knowledgeEnabled = computed(() => Boolean(store.base?.rag?.enabled));
+/** Whether the knowledge base's model access lets it reach the selected model; the server checks this again. */
+function knowledgeAllowed(base: KnowledgeBaseResponse) {
+	const model = modelStore.selectedModel;
+	return knowledgeStore.allowsModel(base, model ? baseModelId(model) : null);
+}
+/** The knowledge tool row; a turn searches the attached bases only while this tool is among its tools. */
+const knowledgeTool = computed(() => preferencesStore.userTools.find(tool => tool.source_kind === 'BUILTIN' && tool.name === KNOWLEDGE_TOOL_NAME));
+const knowledgeUsable = computed(() => {
+	const tool = knowledgeTool.value;
+	const preset = modelStore.selectedModel?.preset;
+	return Boolean(tool) && !(preset?.tools_locked && !preset.tool_ids.includes(tool!.id));
+});
+const knowledgeVisible = computed(() => knowledgeEnabled.value && knowledgeUsable.value && knowledgeStore.usable.length > 0);
+
+function toggleKnowledge(id: string) {
+	knowledgeStore.toggle(id);
+	const tool = knowledgeTool.value;
+	if (tool && knowledgeStore.selected.includes(id) && !modelStore.enabledTools.includes(tool.id)) modelStore.toggleTool(tool.id);
+}
 
 const effortKeys: Record<string, string> = {minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'extra_high'};
 
@@ -72,6 +119,8 @@ const chips = computed(() => {
 		list.push({key: 'sampling', label: store.getTranslation('chat.composer.sampling_chip', {count: chatStore.samplingActiveCount})});
 	}
 	if (modelStore.providerSelectorVisible && modelStore.selectedProviderName) list.push({key: 'provider', label: modelStore.selectedProviderName});
+	const attached = knowledgeStore.usable.filter(base => knowledgeStore.selected.includes(base.id) && knowledgeAllowed(base)).length;
+	if (knowledgeVisible.value && attached > 0) list.push({key: 'knowledge', label: store.getTranslation('chat.composer.knowledge_chip', {count: attached})});
 	return list;
 });
 
@@ -79,6 +128,16 @@ const triggerLabel = computed(() => {
 	const title = store.getTranslation('chat.composer.settings');
 	return chips.value.length > 0 ? `${title}: ${chips.value.map(chip => chip.label).join(', ')}` : title;
 });
+
+watch(
+	knowledgeEnabled,
+	enabled => {
+		if (!enabled) return;
+		knowledgeStore.ensure();
+		preferencesStore.ensureTools();
+	},
+	{immediate: true},
+);
 
 watch(
 	() => modelStore.providerSelectorVisible,
