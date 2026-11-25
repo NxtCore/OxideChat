@@ -6,6 +6,7 @@ import type { PublicOAuthProvider } from "./PublicOAuthProvider";
 import type { RagStatus } from "./RagStatus";
 import type { Registration } from "./Registration";
 import type { Role } from "./Role";
+import type { StorageSettings } from "./StorageSettings";
 import type { ThemeCssVars } from "./ThemeCssVars";
 import type { TitleGeneration } from "./TitleGeneration";
 
@@ -46,6 +47,10 @@ title_generation: TitleGeneration,
  * Whether visitors may create an account with email and password.
  */
 registration: Registration, 
+/**
+ * The storage quota for the files each user stores.
+ */
+storage: StorageSettings, 
 /**
  * Whether knowledge bases are switched on.
  */

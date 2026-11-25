@@ -5,7 +5,7 @@
 //! - POST /api/v1/images - Upload a base64 image
 
 use crate::config::Config;
-use crate::types::{AppError, AuthUser, JobState, RequestContext, UploadImageRequest, UploadImageResponse, json_ok};
+use crate::types::{AppError, AuthUser, FileStorage, JobState, RequestContext, UploadImageRequest, UploadImageResponse, json_ok};
 use crate::utils::images::{get_image, get_image_for_user, image_url, safe_image_mime, store_from_data_uri};
 use crate::utils::response::ErrorCode;
 use axum::{
@@ -21,6 +21,9 @@ use uuid::Uuid;
 ///
 /// POST /api/v1/images
 pub async fn upload_image(State(state): State<Arc<JobState>>, user: AuthUser, Json(req): Json<UploadImageRequest>) -> Result<Response, AppError> {
+	if !FileStorage::has_room(&state.db, &user.id).await? {
+		return Err(ErrorCode::StorageQuotaExceeded.into());
+	}
 	let stored = store_from_data_uri(&state.db, &req.data_uri, Some(user.id), req.source.as_deref()).await.map_err(|e| {
 		tracing::warn!(error = %e, "failed to store uploaded image");
 		ErrorCode::BadRequest

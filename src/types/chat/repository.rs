@@ -271,7 +271,7 @@ impl Message {
 				SELECT COALESCE(SUM(octet_length(a.text)), 0)
 				FROM messages m
 				CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(m.content_parts) = 'array' THEN m.content_parts ELSE '[]'::jsonb END) AS part
-				JOIN chat_attachments a ON a.id::text = part->>'attachment_id'
+				JOIN files a ON a.id = (part->>'attachment_id')::uuid AND a.kind = 'document' AND a.user_id = (SELECT user_id FROM chats WHERE id = $1)
 				WHERE m.chat_id = $1 AND m.is_active_fork = true AND part->>'type' = 'file'
 			))::bigint
 			"#,

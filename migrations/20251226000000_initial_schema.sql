@@ -345,31 +345,25 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS images (
+-- Every file a user stores: images keep their bytes (data or file_path); documents such as chat attachments keep only
+-- their extracted text, so data and file_path stay NULL and the original is thrown away. Knowledge uploads land here later.
+CREATE TABLE IF NOT EXISTS files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    data BYTEA,  -- NULL if using file storage
-    file_path VARCHAR(500),  -- Path relative to storage root (for file storage)
-    mime_type VARCHAR(64) NOT NULL DEFAULT 'image/png',
-	size_bytes BIGINT NOT NULL,
-    source VARCHAR(50),  -- 'imagegen', 'upload', etc.
-    caption TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Text extracted from files attached to chat messages; a message part {type: 'file', attachment_id} points here.
-CREATE TABLE IF NOT EXISTS chat_attachments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    filename TEXT NOT NULL CHECK (char_length(filename) BETWEEN 1 AND 255),
+    kind VARCHAR(16) NOT NULL CHECK (kind IN ('image', 'document')),
+    source VARCHAR(50),  -- 'imagegen', 'upload', 'icon', 'model_icon', 'chat_attachment', ...
+    filename TEXT CHECK (char_length(filename) BETWEEN 1 AND 255),
     mime_type VARCHAR(64) NOT NULL,
     size_bytes BIGINT NOT NULL,
-    text TEXT NOT NULL,
-    token_count BIGINT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    data BYTEA,
+    file_path VARCHAR(500),  -- Path relative to storage root (for file storage)
+    text TEXT,  -- Extracted text of a document, or the caption of an image
+    token_count BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (kind <> 'document' OR (filename IS NOT NULL AND text IS NOT NULL AND token_count IS NOT NULL))
 );
 
-CREATE INDEX IF NOT EXISTS idx_chat_attachments_user ON chat_attachments(user_id);
+CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
 
 INSERT INTO roles (name, is_builtin) VALUES ('admin', true), ('user', true) ON CONFLICT DO NOTHING;
 
@@ -1180,8 +1174,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id);
 CREATE INDEX IF NOT EXISTS idx_messages_fork ON messages(parent_id, fork_index);
-CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_images_user_id ON images(user_id);
+CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_content_parts_gin ON messages USING GIN (content_parts);
 
 -- Tool indexes
@@ -5713,6 +5706,20 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.attachments.error.extract_failed', 'Die Datei konnte nicht gelesen werden.'),
     ('en', 'chat.attachments.error.timed_out', 'Reading the file took too long.'),
     ('de', 'chat.attachments.error.timed_out', 'Das Lesen der Datei hat zu lange gedauert.'),
+    ('en', 'chat.attachments.error.busy', 'Too many files are being read right now. Try again in a moment.'),
+    ('de', 'chat.attachments.error.busy', 'Gerade werden zu viele Dateien gelesen. Versuche es gleich noch einmal.'),
+    ('en', 'chat.attachments.error.quota_exceeded', 'Your stored files use up all of your storage. Attached files no chat uses any more are deleted after a day.'),
+    ('en', 'settings.admin_config.storage_quota', 'File storage per user (MB)'),
+    ('de', 'settings.admin_config.storage_quota', 'Dateispeicher pro Person (MB)'),
+    ('en', 'settings.admin_config.storage_quota_hint', 'How much space each person''s uploaded images and attached files may take. Attached files count with their extracted text only. Leave empty for no limit.'),
+    ('de', 'settings.admin_config.storage_quota_hint', 'Wie viel Platz die hochgeladenen Bilder und angehängten Dateien jeder Person belegen dürfen. Angehängte Dateien zählen nur mit ihrem ausgelesenen Text. Leer lassen für kein Limit.'),
+    ('en', 'settings.admin_config.storage_quota_unlimited', 'No limit'),
+    ('de', 'settings.admin_config.storage_quota_unlimited', 'Kein Limit'),
+    ('en', 'errors.storage_quota_exceeded', 'Your stored files use up all of your storage.'),
+    ('de', 'errors.storage_quota_exceeded', 'Deine gespeicherten Dateien belegen deinen ganzen Speicher.'),
+    ('de', 'chat.attachments.error.quota_exceeded', 'Deine gespeicherten Dateien belegen deinen ganzen Speicher. Angehängte Dateien, die kein Chat mehr nutzt, werden nach einem Tag gelöscht.'),
+    ('en', 'chat.attachments.error.rate_limited', 'You attached too many files in the last hour. Try again later.'),
+    ('de', 'chat.attachments.error.rate_limited', 'Du hast in der letzten Stunde zu viele Dateien angehängt. Versuche es später noch einmal.'),
     ('en', 'chat.attachments.error.database', 'The file could not be saved.'),
     ('de', 'chat.attachments.error.database', 'Die Datei konnte nicht gespeichert werden.'),
     ('en', 'chat.attachments.error.upload', 'The file could not be uploaded.'),

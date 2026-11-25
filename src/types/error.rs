@@ -108,6 +108,7 @@ impl AppError {
 			Self::Rag(RagError::Database(_)) => ErrorCode::InternalError,
 			Self::Rag(_) => ErrorCode::ValidationFailed,
 			Self::Attachment(AttachmentError::Database(_)) => ErrorCode::InternalError,
+			Self::Attachment(AttachmentError::Busy | AttachmentError::QuotaExceeded | AttachmentError::RateLimited) => ErrorCode::TooManyRequests,
 			Self::Attachment(_) => ErrorCode::ValidationFailed,
 		}
 	}
@@ -138,7 +139,7 @@ impl IntoResponse for AppError {
 		match &self {
 			Self::Pricing(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
 			Self::Rag(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
-			Self::Attachment(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
+			Self::Attachment(error) if code != ErrorCode::InternalError => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
 			_ => ErrorBuilder::new(code).build(),
 		}
 	}

@@ -11,6 +11,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 
 /// Largest file a user may attach.
 pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
@@ -22,6 +23,10 @@ pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 pub const SUBCOMMAND: &str = "extract";
 
 const TIMEOUT: Duration = Duration::from_secs(30);
+
+const MAX_CONCURRENT_CHILDREN: usize = 4;
+
+static CHILD_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_CHILDREN);
 
 #[cfg(target_os = "linux")]
 const MEMORY_LIMIT_BYTES: libc::rlim_t = 1024 * 1024 * 1024;
@@ -106,6 +111,10 @@ fn decode_text(bytes: &[u8]) -> Result<String, AttachmentError> {
 }
 
 async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, AttachmentError> {
+	let _slot = tokio::time::timeout(TIMEOUT, CHILD_SLOTS.acquire())
+		.await
+		.map_err(|_| AttachmentError::Busy)?
+		.map_err(|_| AttachmentError::ExtractFailed)?;
 	let exe = std::env::current_exe().map_err(|error| {
 		tracing::error!(%error, "could not find the server binary for text extraction");
 		AttachmentError::ExtractFailed
@@ -176,11 +185,15 @@ pub fn parse(kind: DocumentKind, input: &[u8]) -> Option<String> {
 		DocumentKind::Html => html2text::from_read(input, HTML_WIDTH).ok(),
 		DocumentKind::Pdf => {
 			let pages = pdf_extract::extract_text_from_mem_by_pages(input).ok()?;
-			let marked: Vec<String> = pages
+			let total = pdf_extract::Document::load_mem(input).map_or(pages.len(), |doc| doc.get_pages().len());
+			let mut marked: Vec<String> = pages
 				.iter()
 				.enumerate()
 				.map(|(index, page)| format!("<!-- page {} -->\n{}", index + 1, page.trim()))
 				.collect();
+			if total > pages.len() {
+				marked.push(format!("<!-- pages {} to {total} could not be read -->", pages.len() + 1));
+			}
 			Some(marked.join("\n\n"))
 		}
 	}

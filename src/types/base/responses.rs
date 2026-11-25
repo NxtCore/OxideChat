@@ -31,6 +31,8 @@ pub struct BaseResponse {
 	pub title_generation: TitleGeneration,
 	/// Whether visitors may create an account with email and password.
 	pub registration: Registration,
+	/// The storage quota for the files each user stores.
+	pub storage: StorageSettings,
 	/// Whether knowledge bases are switched on.
 	pub rag: RagStatus,
 }
@@ -52,6 +54,22 @@ pub struct Registration {
 impl Default for Registration {
 	fn default() -> Self {
 		Self { enabled: true }
+	}
+}
+
+/// Admin setting for the files users store (images and chat attachments); the admin PATCH takes the same shape.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct StorageSettings {
+	/// Most storage, in MiB, one user's files may take (kept originals plus extracted text); `None` means no limit.
+	pub quota_mb: Option<u32>,
+}
+
+impl StorageSettings {
+	/// Whether a user whose files already take `stored_bytes` may store another one.
+	#[must_use]
+	pub fn allows_upload(&self, stored_bytes: i64) -> bool {
+		self.quota_mb.is_none_or(|mb| stored_bytes < i64::from(mb) * 1024 * 1024)
 	}
 }
 

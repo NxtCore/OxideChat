@@ -22,6 +22,18 @@
 				<ShadSwitch v-model="form.registration.enabled" :disabled="!canEdit || settingsForm.saving" data-testid="config-registration" />
 			</SettingsRow>
 
+			<SettingsRow :label="store.getTranslation('settings.admin_config.storage_quota')" :hint="store.getTranslation('settings.admin_config.storage_quota_hint')">
+				<ShadInput
+					v-model.number="form.storage.quota_mb"
+					type="number"
+					min="1"
+					class="w-32"
+					:placeholder="store.getTranslation('settings.admin_config.storage_quota_unlimited')"
+					:disabled="!canEdit || settingsForm.saving"
+					data-testid="config-storage-quota"
+				/>
+			</SettingsRow>
+
 			<SettingsRow :label="store.getTranslation('settings.admin_config.provider_selector.label')" :hint="store.getTranslation('settings.admin_config.provider_selector.hint')">
 				<ShadSwitch v-model="form.provider_routing.selector_enabled" :disabled="!canEdit || settingsForm.saving" data-testid="config-provider-selector" />
 			</SettingsRow>
@@ -130,6 +142,9 @@ const form = reactive({
 	registration: {
 		enabled: store.base?.registration.enabled ?? true,
 	},
+	storage: {
+		quota_mb: (store.base?.storage.quota_mb ?? null) as number | null,
+	},
 	title_generation: {
 		enabled: store.base?.title_generation.enabled ?? false,
 		model_id: store.base?.title_generation.model_id ?? null,
@@ -162,6 +177,8 @@ const settingsForm = useSettingsForm({
 	errorKey: 'settings.admin_config.save_error',
 	save: async () => {
 		const selectorChanged = store.base?.provider_routing.selector_enabled !== form.provider_routing.selector_enabled;
+		const quota = Number(form.storage.quota_mb);
+		form.storage.quota_mb = Number.isInteger(quota) && quota > 0 ? quota : null;
 		await patchAdminConfig(form);
 		if (selectorChanged) store.refreshChatProviderSelector();
 		if (store.base) {

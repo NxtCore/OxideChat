@@ -15,6 +15,8 @@ const userMessages = (page: Page) => page.locator('[data-testid="message"][data-
 const assistantMessages = (page: Page) => page.locator('[data-testid="message"][data-role="assistant"]');
 
 test.describe('chat file attachments', () => {
+	test.describe.configure({mode: 'serial'});
+
 	test('a text file is read into the message, shown on it and kept after reload', async ({page, t, seed}) => {
 		await page.goto('/');
 		await pickModel(page, t, seed.model.displayName);
@@ -57,5 +59,27 @@ test.describe('chat file attachments', () => {
 		await expect(page.getByText(t('chat.attachments.error.unsupported_type'))).toBeVisible();
 		await expect(page.getByTestId('attached-file')).toHaveCount(0);
 		await expect(page.getByTestId('composer-send')).toBeDisabled();
+	});
+
+	test('an admin can cap file storage, which is unlimited by default', async ({page, t, api, seed}) => {
+		expect((await api.get('/api/v1/base')).storage.quota_mb).toBeNull();
+		await page.goto('/settings/admin-config');
+		await page.getByTestId('config-storage-quota').fill('1');
+		await page.getByTestId('settings-save-bar-save').click();
+		await expect(page.getByTestId('settings-save-bar')).toBeHidden();
+		try {
+			expect((await api.get('/api/v1/base')).storage.quota_mb).toBe(1);
+			await page.goto('/');
+			await pickModel(page, t, seed.model.displayName);
+			const megabyte = {name: 'big.txt', mimeType: 'text/plain', buffer: Buffer.from('x'.repeat(1024 * 1024))};
+			await page.getByTestId('composer-file-input').setInputFiles(megabyte);
+			await expect(page.getByTestId('attached-file')).toHaveCount(1);
+			await page.getByTestId('composer-file-input').setInputFiles({...megabyte, name: 'more.txt'});
+			await expect(page.getByText(t('chat.attachments.error.quota_exceeded'))).toBeVisible();
+			await expect(page.getByTestId('attached-file')).toHaveCount(1);
+		} finally {
+			await api.patch('/api/v1/admin/config', {storage: {quota_mb: null}});
+		}
+		expect((await api.get('/api/v1/base')).storage.quota_mb).toBeNull();
 	});
 });

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
 
-use crate::types::{ProviderRoutingSettings, Registration, ThemeCssVars, TitleGeneration};
+use crate::types::{StorageSettings, ProviderRoutingSettings, Registration, ThemeCssVars, TitleGeneration};
 use crate::i18n::Language;
 
 /// Distinguishes an absent field (`None`) from an explicit JSON `null` (`Some(None)`),
@@ -129,6 +129,7 @@ pub struct UpdateGlobalConfigRequest {
 	pub instance: Option<UpdateInstanceRequest>,
 	pub title_generation: Option<TitleGeneration>,
 	pub registration: Option<Registration>,
+	pub storage: Option<StorageSettings>,
 }
 
 /// Omitted fields stay unchanged; `null` restores the default.

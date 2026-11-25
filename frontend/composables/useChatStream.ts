@@ -262,6 +262,14 @@ export function useChatStream() {
 		if (toolCall && !hasError) toolCall.output = JSON.stringify(result);
 	}
 
+	function restoreUnsavedDraft(userMessageId: string | null, streamingMessageId: string, content: string, parts?: any[]): void {
+		const userMsg = userMessageId ? chatStore.messages.find(m => m.id === userMessageId) : undefined;
+		if (!userMsg || userMsg.client_id) return;
+		chatStore.messages = chatStore.messages.filter(m => m.id !== streamingMessageId && m.id !== userMessageId);
+		chatStore.pendingBranchContent = content || null;
+		chatStore.pendingBranchParts = parts && parts.length > 0 ? parts : null;
+	}
+
 	async function sendAndStream(chatId: string, content: string, parts?: any[], skipUserMessage: boolean = false, regenerateFromMessageId?: string): Promise<void> {
 		const model = modelStore.selectedModel;
 		if (!model) {
@@ -334,9 +342,11 @@ export function useChatStream() {
 					}
 				}
 			}
+			restoreUnsavedDraft(userMessageId, streamingMessageId, content, parts);
 		} catch (e) {
 			console.error('Failed to stream:', e);
 			chatStore.isStreaming = false;
+			restoreUnsavedDraft(userMessageId, streamingMessageId, content, parts);
 			chatStore.messages = chatStore.messages.filter(m => m.id !== streamingMessageId && m.id !== userMessageId);
 		}
 	}

@@ -177,26 +177,28 @@ const uploadingFiles = ref<{key: string; filename: string}[]>([]);
 const isDragging = ref(false);
 let dragDepth = 0;
 
-onMounted(() => {
-	if (chatStore.pendingBranchContent) {
+function restorePending() {
+	if (!chatStore.pendingBranchContent && !chatStore.pendingBranchParts) return;
+	if (chatStore.pendingBranchContent && !message.value.trim()) {
 		message.value = chatStore.pendingBranchContent;
 		nextTick(() => autoResize());
 	}
-	if (chatStore.pendingBranchParts) {
-		for (const part of chatStore.pendingBranchParts) {
-			if (part.type === 'image' && part.image_id) {
-				attachedImages.value.push({
-					id: part.image_id,
-					previewUrl: imageUrl(part.image_id, useRuntimeConfig().public.apiBase || ''),
-				});
-			}
-			if (part.type === 'file' && part.attachment_id) {
-				attachedFiles.value.push({id: part.attachment_id, filename: part.filename, token_count: 0});
-			}
+	for (const part of chatStore.pendingBranchParts ?? []) {
+		if (part.type === 'image' && part.image_id && !attachedImages.value.some(img => img.id === part.image_id)) {
+			attachedImages.value.push({
+				id: part.image_id,
+				previewUrl: imageUrl(part.image_id, useRuntimeConfig().public.apiBase || ''),
+			});
+		}
+		if (part.type === 'file' && part.attachment_id && !attachedFiles.value.some(file => file.id === part.attachment_id)) {
+			attachedFiles.value.push({id: part.attachment_id, filename: part.filename, token_count: 0});
 		}
 	}
 	chatStore.clearPendingBranch();
-});
+}
+
+onMounted(restorePending);
+watch(() => [chatStore.pendingBranchContent, chatStore.pendingBranchParts], restorePending);
 
 const supportsImages = computed(() => {
 	return modelStore.selectedModel?.input_modalities?.includes('IMAGE') ?? false;
