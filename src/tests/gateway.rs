@@ -53,6 +53,7 @@ pub mod support {
 			login_limiter: crate::utils::login_limit::LoginRateLimiter::spawn(),
 			mcp_pool: crate::utils::tools::McpConnectionPool::new(),
 			client_tool_pending: crate::types::state::ClientToolPending::new(),
+			rag_ingest_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
 		})
 	}
 

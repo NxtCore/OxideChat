@@ -35,7 +35,7 @@
 import {useMainStore} from '~/stores';
 import type {AssignmentOption, AssignmentTarget} from '~/types/assignments';
 
-const props = defineProps<{id: string; perRecord?: boolean}>();
+const props = defineProps<{id: string; perRecord?: boolean; managed?: boolean}>();
 const store = useMainStore();
 const t = (key: string, params?: Record<string, string>) => store.getTranslation(`knowledge.sharing.${key}`, params);
 const {data, load, replace} = useAssignments();
@@ -54,7 +54,7 @@ function describe(target: AssignmentOption) {
 
 function change(targets: AssignmentTarget[]) {
 	const known = new Set((data.value?.targets ?? []).map(key));
-	const broad = !props.perRecord && targets.some(target => target.kind !== 'user' && !known.has(key(target)));
+	const broad = !props.managed && !props.perRecord && targets.some(target => target.kind !== 'user' && !known.has(key(target)));
 	if (broad) pending.value = targets;
 	else replace(path, targets);
 }

@@ -305,11 +305,18 @@ impl KnowledgeBase {
 		let targets = targets.normalized()?;
 		check_upstream_needs_provider(pool, &targets).await?;
 		let mut tx = pool.begin().await?;
-		let embedding_model_id: Option<Option<Uuid>> = sqlx::query_scalar("SELECT (view->'embedding'->>'model_id')::uuid FROM knowledge_bases WHERE id = $1 FOR UPDATE")
-			.bind(self.id)
-			.fetch_optional(&mut *tx)
-			.await?;
-		check_embedding_allowed(&mut *tx, &targets, &embedding_model_id.flatten().ok_or(RagError::NotFound)?).await?;
+		let embedding_model_id: Option<Option<Uuid>> = sqlx::query_scalar(
+			"SELECT COALESCE((kb.view->'embedding'->>'model_id')::uuid, c.embedding_model_id)
+			 FROM knowledge_bases kb JOIN rag_connections c ON c.id = kb.connection_id
+			 WHERE kb.id = $1 AND kb.deleted_at IS NULL FOR UPDATE OF kb",
+		)
+		.bind(self.id)
+		.fetch_optional(&mut *tx)
+		.await?;
+		let embedding_model_id = embedding_model_id.ok_or(RagError::NotFound)?;
+		if let Some(model_id) = embedding_model_id {
+			check_embedding_allowed(&mut *tx, &targets, &model_id).await?;
+		}
 		self.store_model_access(&mut tx, &actor.user_id, &targets).await?;
 		tx.commit().await?;
 		Ok(())

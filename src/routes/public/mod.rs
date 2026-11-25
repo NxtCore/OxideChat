@@ -20,8 +20,10 @@ pub mod users;
 pub mod workspaces;
 
 use crate::types::JobState;
+use crate::utils::extract::MAX_UPLOAD_BYTES;
 use axum::{
 	Router,
+	extract::DefaultBodyLimit,
 	routing::{delete, get, patch, post, put},
 };
 use std::sync::Arc;
@@ -59,8 +61,9 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/models", get(models::list_models))
 		.route("/api/v1/models/{id}/favorite", post(models::set_model_favorite))
 		.route("/api/v1/models/{id}/provider-options", get(models::get_provider_options))
-		// Presets
+		// Knowledge bases
 		.route("/api/v1/knowledge-bases", get(knowledge::list_knowledge_bases).post(knowledge::create_knowledge_base))
+		.route("/api/v1/knowledge-bases/scopes", get(knowledge::get_scopes))
 		.route("/api/v1/knowledge-bases/{id}", get(knowledge::get_knowledge_base).put(knowledge::update_knowledge_base).delete(knowledge::delete_knowledge_base))
 		.route("/api/v1/knowledge-bases/{id}/assignments", get(knowledge::get_assignments).put(knowledge::replace_assignments))
 		.route("/api/v1/knowledge-bases/{id}/model-access", get(knowledge::get_model_access).put(knowledge::replace_model_access))
@@ -69,6 +72,16 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route(
 			"/api/v1/knowledge-bases/{id}/access-labels/assignments",
 			get(knowledge::get_label_assignments).put(knowledge::replace_label_assignments),
+		)
+		.route(
+			"/api/v1/knowledge-bases/{id}/documents",
+			get(knowledge::list_documents).post(knowledge::upload_document).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)),
+		)
+		.route("/api/v1/knowledge-bases/{id}/documents/{doc_id}", delete(knowledge::delete_document))
+		.route("/api/v1/knowledge-bases/{id}/documents/{doc_id}/retry", post(knowledge::retry_document))
+		.route(
+			"/api/v1/knowledge-bases/{id}/documents/{doc_id}/assignments",
+			get(knowledge::get_document_assignments).put(knowledge::replace_document_assignments),
 		)
 		.route("/api/v1/presets", get(presets::list_presets).post(presets::create_preset))
 		.route("/api/v1/presets/check-slug", get(presets::check_slug))

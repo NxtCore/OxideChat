@@ -42,6 +42,22 @@
 				</SettingsRow>
 			</div>
 
+			<div class="mt-6 rounded-lg border border-border bg-card p-6">
+				<h3 class="mb-4 text-sm font-semibold text-foreground">{{ store.getTranslation('settings.knowledge_setup.chunking_title') }}</h3>
+				<SettingsRow :label="store.getTranslation('settings.knowledge_setup.chunk_size')" :hint="store.getTranslation('settings.knowledge_setup.chunk_size_hint')">
+					<ShadInput v-model.number="form.chunking.chunk_size" type="number" min="100" max="2000" class="w-28" :disabled="!canEdit || settingsForm.saving" data-testid="knowledge-chunk-size" />
+				</SettingsRow>
+				<SettingsRow :label="store.getTranslation('settings.knowledge_setup.chunk_overlap')" :hint="store.getTranslation('settings.knowledge_setup.chunk_overlap_hint')">
+					<ShadInput v-model.number="form.chunking.overlap_percent" type="number" min="0" max="50" class="w-28" :disabled="!canEdit || settingsForm.saving" data-testid="knowledge-chunk-overlap" />
+				</SettingsRow>
+				<SettingsRow :label="store.getTranslation('settings.knowledge_setup.max_uploads_per_hour')">
+					<ShadInput v-model.number="form.quotas.max_uploads_per_hour" type="number" min="1" max="10000" class="w-28" :disabled="!canEdit || settingsForm.saving" data-testid="knowledge-max-uploads" />
+				</SettingsRow>
+				<SettingsRow :label="store.getTranslation('settings.knowledge_setup.storage_quota_mb')" :hint="store.getTranslation('settings.knowledge_setup.storage_quota_hint')">
+					<ShadInput v-model="storageQuota" type="number" min="1" class="w-28" :disabled="!canEdit || settingsForm.saving" data-testid="knowledge-storage-quota" />
+				</SettingsRow>
+			</div>
+
 			<div v-if="setup.connections.length === 0" class="mt-6 rounded-lg border border-border bg-card p-6" data-testid="knowledge-setup-steps">
 				<h3 class="text-sm font-semibold text-foreground">{{ store.getTranslation('settings.knowledge_setup.steps.title') }}</h3>
 				<ol class="mt-3 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
@@ -71,6 +87,16 @@ const setup = ref<RagSetupResponse | null>(null);
 const form = reactive({
 	reranker: {model_id: null as string | null, top_n: 6},
 	defaults: {connection_id: null as string | null},
+	chunking: {chunk_size: 400, overlap_percent: 15},
+	quotas: {max_uploads_per_hour: 60, storage_quota_mb: null as number | null},
+});
+
+const storageQuota = computed({
+	get: () => (form.quotas.storage_quota_mb === null ? '' : String(form.quotas.storage_quota_mb)),
+	set: (value: string) => {
+		const trimmed = String(value).trim();
+		form.quotas.storage_quota_mb = trimmed === '' ? null : Number(trimmed);
+	},
 });
 
 const managedConnections = computed(() => setup.value?.connections.filter(connection => connection.mode === 'managed') ?? []);
@@ -82,6 +108,8 @@ const defaultConnection = computed({
 function fill(value: RagSetupResponse) {
 	form.reranker = {...value.reranker};
 	form.defaults = {...value.defaults};
+	form.chunking = {...value.chunking};
+	form.quotas = {...value.quotas};
 }
 
 function apply(value: RagSetupResponse) {
@@ -100,7 +128,14 @@ const settingsForm = useSettingsForm({
 	canEdit: () => canEdit.value,
 	savedKey: 'settings.knowledge_setup.save_success',
 	errorKey: 'settings.knowledge_setup.save_error',
-	validate: () => (Number.isInteger(form.reranker.top_n) && form.reranker.top_n >= 1 && form.reranker.top_n <= 50 ? null : 'rag.error.invalid_top_n'),
+	validate: () => {
+		if (!Number.isInteger(form.reranker.top_n) || form.reranker.top_n < 1 || form.reranker.top_n > 50) return 'rag.error.invalid_top_n';
+		if (!Number.isInteger(form.chunking.chunk_size) || form.chunking.chunk_size < 100 || form.chunking.chunk_size > 2000) return 'rag.error.invalid_chunking';
+		if (!Number.isInteger(form.chunking.overlap_percent) || form.chunking.overlap_percent < 0 || form.chunking.overlap_percent > 50) return 'rag.error.invalid_chunking';
+		if (!Number.isInteger(form.quotas.max_uploads_per_hour) || form.quotas.max_uploads_per_hour < 1 || form.quotas.max_uploads_per_hour > 10000) return 'rag.error.invalid_quotas';
+		if (form.quotas.storage_quota_mb !== null && (!Number.isInteger(form.quotas.storage_quota_mb) || form.quotas.storage_quota_mb < 1)) return 'rag.error.invalid_quotas';
+		return null;
+	},
 	save: async () => {
 		try {
 			setup.value = await saveRagSetup(form);

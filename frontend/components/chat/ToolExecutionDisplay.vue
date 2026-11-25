@@ -39,7 +39,7 @@
 				:class="source.url ? 'hover:bg-accent' : ''"
 				data-testid="knowledge-source-chip"
 			>
-				[{{ source.n }}] {{ source.title || source.knowledge_base }}{{ source.section ? ` › ${source.section}` : '' }}
+				[{{ source.n }}] {{ source.title || source.knowledge_base }}{{ source.section ? ` › ${source.section}` : '' }}{{ source.page ? ` (${store.getTranslation('knowledge.search.page', {page: String(source.page)})})` : '' }}
 			</component>
 		</div>
 

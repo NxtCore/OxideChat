@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod encryption;
 pub mod exchange_rates;
+pub mod extract;
 pub mod gateway_limits;
 pub mod images;
 pub mod login_limit;

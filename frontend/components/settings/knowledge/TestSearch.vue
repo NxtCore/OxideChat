@@ -51,6 +51,7 @@
 					<a v-if="hit.url" :href="hit.url" target="_blank" rel="noopener noreferrer" class="font-medium text-primary underline">{{ hit.title || hit.url }}</a>
 					<span v-else-if="hit.title" class="font-medium text-foreground">{{ hit.title }}</span>
 					<span v-if="hit.section" class="text-muted-foreground">› {{ hit.section }}</span>
+					<span v-if="hit.page" class="text-xs text-muted-foreground">{{ t('page', {page: String(hit.page)}) }}</span>
 					<span class="ml-auto font-mono text-xs text-muted-foreground" :title="t('score')">{{ hit.score.toFixed(3) }}</span>
 				</div>
 				<p class="line-clamp-4 whitespace-pre-line text-sm text-muted-foreground">{{ hit.text }}</p>

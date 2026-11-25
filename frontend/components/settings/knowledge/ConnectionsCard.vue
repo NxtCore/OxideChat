@@ -115,11 +115,24 @@
 				</ShadDialogFooter>
 			</ShadDialogContent>
 		</ShadDialog>
+
+		<ShadDialog :open="pendingReindex !== null" @update:open="open => !open && (pendingReindex = null)">
+			<ShadDialogContent>
+				<ShadDialogHeader>
+					<ShadDialogTitle>{{ t('reindex_confirm_title') }}</ShadDialogTitle>
+					<ShadDialogDescription>{{ reindexDescription }}</ShadDialogDescription>
+				</ShadDialogHeader>
+				<ShadDialogFooter>
+					<ShadButton variant="outline" @click="pendingReindex = null">{{ store.getTranslation('common.cancel') }}</ShadButton>
+					<ShadButton :disabled="saving" data-testid="knowledge-connection-reindex-confirm" @click="confirmReindex">{{ t('reindex_confirm') }}</ShadButton>
+				</ShadDialogFooter>
+			</ShadDialogContent>
+		</ShadDialog>
 	</div>
 </template>
 
 <script setup lang="ts">
-import {reactive, ref, watch} from 'vue';
+import {computed, reactive, ref, watch} from 'vue';
 import {useMainStore} from '@/stores';
 import DefaultModelPicker from '~/components/settings/DefaultModelPicker.vue';
 import type {RagSetupResponse} from '~/types/generated/RagSetupResponse';
@@ -127,6 +140,7 @@ import type {ConnectionResponse} from '~/types/generated/ConnectionResponse';
 import type {ConnectionTestResponse} from '~/types/generated/ConnectionTestResponse';
 import type {ConnectionKind} from '~/types/generated/ConnectionKind';
 import type {ConnectionMode} from '~/types/generated/ConnectionMode';
+import type {ReindexEstimateResponse} from '~/types/generated/ReindexEstimateResponse';
 
 defineProps<{setup: RagSetupResponse; canEdit: boolean}>();
 const emit = defineEmits<{changed: [value: RagSetupResponse]}>();
@@ -140,6 +154,14 @@ const editing = ref<ConnectionResponse | null>(null);
 const testing = reactive(new Set<string>());
 const confirmDelete = ref(false);
 const results = reactive<Record<string, ConnectionTestResponse>>({});
+const pendingReindex = ref<{id: string; body: ReturnType<typeof requestBody>; estimate: ReindexEstimateResponse} | null>(null);
+
+const reindexDescription = computed(() => {
+	const est = pendingReindex.value?.estimate;
+	if (!est) return '';
+	const cost = est.estimated_cost_usd != null ? `$${est.estimated_cost_usd.toFixed(4)}` : '$0.00';
+	return t('reindex_confirm_description', {chunks: String(est.chunk_count), documents: String(est.document_count), cost});
+});
 
 const form = reactive({
 	name: '',
@@ -162,6 +184,7 @@ watch(
 function summary(item: ConnectionResponse): string {
 	const parts = [item.kind === 'qdrant' ? 'Qdrant' : 'pgvector', t(`mode_${item.mode}`), item.url_from_env ? 'RAG_PGVECTOR_URL' : (item.url ?? t('main_database'))];
 	if (item.embedding) parts.push(t('vector_size', {size: String(item.embedding.vector_size)}));
+	if (item.reindexing && item.reindex_progress) parts.push(t('reindexing', {done: String(item.reindex_progress.done), total: String(item.reindex_progress.total)}));
 	return parts.join(' · ');
 }
 
@@ -220,10 +243,43 @@ async function run(action: () => Promise<RagSetupResponse>, successKey: string, 
 	}
 }
 
-function save() {
+async function save() {
 	const body = requestBody();
 	const target = editing.value;
-	run(() => (target ? updateRagConnection(target.id, body) : createRagConnection(body)), 'saved', 'save_error', target?.id);
+	if (target && target.mode === 'managed' && body.embedding) {
+		const prev = target.embedding;
+		const changed = !prev || prev.model_id !== body.embedding.model_id || (prev.dimensions ?? null) !== (body.embedding.dimensions ?? null);
+		if (changed) {
+			saving.value = true;
+			try {
+				const estimate = await reindexEstimate(target.id, body.embedding);
+				if (estimate.conflicting_knowledge_bases.length > 0) {
+					store.toast(t('save_error'), {
+						type: 'error',
+						description: store.getTranslation('rag.error.connection_model_conflict', {names: estimate.conflicting_knowledge_bases.join(', ')}),
+					});
+					return;
+				}
+				if (estimate.chunk_count > 0) {
+					pendingReindex.value = {id: target.id, body, estimate};
+					return;
+				}
+			} catch (error: any) {
+				store.toast(t('save_error'), {type: 'error', description: ragErrorMessage(error, '')});
+				return;
+			} finally {
+				saving.value = false;
+			}
+		}
+	}
+	await run(() => (target ? updateRagConnection(target.id, body) : createRagConnection(body)), 'saved', 'save_error', target?.id);
+}
+
+async function confirmReindex() {
+	const pending = pendingReindex.value;
+	if (!pending) return;
+	pendingReindex.value = null;
+	await run(() => updateRagConnection(pending.id, pending.body), 'saved', 'save_error', pending.id);
 }
 
 function remove() {

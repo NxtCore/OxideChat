@@ -139,6 +139,7 @@ impl ExternalView {
 			title: read(&self.fields.title),
 			url: read(&self.fields.url).filter(|url| url.starts_with("https://") || url.starts_with("http://")),
 			section: read(&self.fields.section),
+			page: None,
 			score,
 		})
 	}
@@ -175,6 +176,9 @@ pub struct KnowledgeHit {
 	pub title: Option<String>,
 	pub url: Option<String>,
 	pub section: Option<String>,
+	/// 1-based page number for managed PDFs.
+	#[serde(default)]
+	pub page: Option<i32>,
 	/// Higher is closer; only comparable within one knowledge base.
 	pub score: f64,
 }

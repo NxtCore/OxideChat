@@ -5,6 +5,10 @@
  */
 export type KnowledgeHit = { text: string, title: string | null, url: string | null, section: string | null, 
 /**
+ * 1-based page number for managed PDFs.
+ */
+page: number | null, 
+/**
  * Higher is closer; only comparable within one knowledge base.
  */
 score: number, };

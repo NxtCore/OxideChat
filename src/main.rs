@@ -18,8 +18,19 @@ use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-#[tokio::main]
-async fn main() {
+fn main() {
+	let mut args = std::env::args().skip(1);
+	if args.next().as_deref() == Some(utils::extract::SUBCOMMAND) {
+		std::process::exit(utils::extract::child_main(args.next().as_deref()));
+	}
+	tokio::runtime::Builder::new_multi_thread()
+		.enable_all()
+		.build()
+		.expect("Failed to start Tokio runtime")
+		.block_on(run_server());
+}
+
+async fn run_server() {
 	dotenv::dotenv().ok();
 
 	let log_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,omniference=debug"));
@@ -82,6 +93,7 @@ async fn main() {
 		db: pool,
 		mcp_pool: crate::utils::tools::McpConnectionPool::new(),
 		client_tool_pending: crate::types::state::ClientToolPending::new(),
+		rag_ingest_notify: Arc::new(tokio::sync::Notify::new()),
 	});
 	ai::init(&app_state).await;
 

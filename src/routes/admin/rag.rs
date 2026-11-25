@@ -2,7 +2,7 @@
 
 use crate::types::consts::{ADMIN_RAG_EDIT, ADMIN_RAG_VIEW};
 use crate::types::rag::{
-	ConnectionMode, ConnectionTestResponse, InspectRequest, InspectResponse, RagConfig, RagConnection, RagError, SaveConnectionRequest, StoreError,
+	ConnectionMode, ConnectionTestResponse, InspectRequest, InspectResponse, RagConfig, RagConnection, RagError, ReindexEstimateRequest, SaveConnectionRequest, StoreError,
 	UpdateRagSetupRequest, VectorStore, check_reranker, probe_embedding,
 };
 use crate::types::{AppError, AuthUser, JobState, User, json_ok};
@@ -74,8 +74,25 @@ pub async fn update_connection(
 		Some(settings) if req.embedding != existing.embedding_settings() || existing.vector_size.is_none() => Some(probe_embedding(&state, &auth.id, settings).await?),
 		_ => None,
 	};
-	existing.update(&state.db, &auth.id, &req, vector_size).await?;
+	let updated = existing.update(&state.db, &auth.id, &req, vector_size).await?;
+	if updated.index_generation != existing.index_generation {
+		state.rag_ingest_notify.notify_one();
+	}
 	json_ok(RagConfig::setup(&state.db).await?)
+}
+
+/// POST /api/v1/admin/rag/connections/{id}/reindex-estimate
+///
+/// Chunk count, estimated cost and model-restriction conflicts before changing a managed connection's embedding model.
+pub async fn reindex_estimate(
+	State(state): State<Arc<JobState>>,
+	auth: AuthUser,
+	Path(id): Path<Uuid>,
+	Json(req): Json<ReindexEstimateRequest>,
+) -> Result<Response, AppError> {
+	auth.require(&state.db, ADMIN_RAG_EDIT).await?;
+	let connection = RagConnection::find(&state.db, &id).await?.ok_or(ErrorCode::NotFound)?;
+	json_ok(connection.reindex_estimate(&state.db, &req.embedding).await?)
 }
 
 /// DELETE /api/v1/admin/rag/connections/{id}

@@ -37,6 +37,8 @@ pub async fn start_job_scheduler(state: Arc<super::JobState>) {
 		tokio::spawn(mcp_maintenance_job(Arc::clone(&state))),
 		tokio::spawn(request_log_prune_job(Arc::clone(&state))),
 		tokio::spawn(exchange_rate_job(Arc::clone(&state))),
+		tokio::spawn(crate::types::rag::rag_ingest_worker(Arc::clone(&state))),
+		tokio::spawn(crate::types::rag::rag_ingest_worker(Arc::clone(&state))),
 	];
 
 	for handle in handles {

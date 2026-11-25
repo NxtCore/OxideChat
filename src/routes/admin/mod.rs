@@ -53,6 +53,7 @@ pub fn router() -> Router<Arc<JobState>> {
 		.route("/api/v1/admin/rag/connections/{id}", put(rag::update_connection).delete(rag::delete_connection))
 		.route("/api/v1/admin/rag/connections/{id}/test", post(rag::test_connection))
 		.route("/api/v1/admin/rag/connections/{id}/inspect", post(rag::inspect_collection))
+		.route("/api/v1/admin/rag/connections/{id}/reindex-estimate", post(rag::reindex_estimate))
 		// Admin Tools
 		.route("/api/v1/admin/tools", get(tools::list_tools).post(tools::create_tool))
 		.route("/api/v1/admin/tools/wasm/upload", post(tools::upload_wasm))

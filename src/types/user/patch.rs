@@ -25,6 +25,7 @@ impl User {
 	pub async fn delete(&self, pool: &PgPool) -> Result<bool, RoleError> {
 		let mut tx = pool.begin().await?;
 		let held_before = Role::lock_managers(&mut tx).await?;
+		crate::types::rag::KnowledgeBase::delete_user_personal(&mut tx, &self.id).await?;
 		let result = sqlx::query("DELETE FROM users WHERE id = $1").bind(self.id).execute(&mut *tx).await?;
 		Role::check_managers_kept(&mut tx, held_before).await?;
 		tx.commit().await?;
