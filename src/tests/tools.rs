@@ -202,6 +202,16 @@ mod tests {
 	}
 
 	#[test]
+	fn exa_region_picks_the_endpoint() {
+		use crate::utils::tools::builtin::websearch::exa_base_url;
+
+		assert_eq!(exa_base_url(Some("eu")), "https://api.eu.exa.ai");
+		for region in [None, Some("global"), Some("EU"), Some("us")] {
+			assert_eq!(exa_base_url(region), "https://api.exa.ai", "{region:?} must use the global endpoint");
+		}
+	}
+
+	#[test]
 	fn a_config_that_moves_host_must_not_keep_stored_secrets() {
 		use crate::utils::encryption::config_redirects_secrets;
 
