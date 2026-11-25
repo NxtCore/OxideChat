@@ -11,7 +11,7 @@
 		</div>
 		<div v-else class="mx-auto max-w-4xl space-y-4">
 			<TransitionGroup name="message">
-				<MessageItem v-for="message in messages" :key="message.client_id ?? message.id" :message="message" :animation="store.preferences?.streaming_animation" />
+				<MessageItem v-for="message in messages" :key="message.client_id ?? message.id" :message="message" />
 			</TransitionGroup>
 			<ArenaRound v-if="chatStore.arenaRound" :round="chatStore.arenaRound" />
 		</div>
@@ -34,7 +34,6 @@ import MessageItem from './MessageItem.vue';
 import ArenaRound from './ArenaRound.vue';
 import type {ChatMessage} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
-import {useMainStore} from '~/stores/index';
 
 const props = defineProps<{
 	messages: ChatMessage[];
@@ -42,7 +41,6 @@ const props = defineProps<{
 }>();
 
 const chatStore = useChatStore();
-const store = useMainStore();
 const containerRef = ref<HTMLElement>();
 const showScrollButton = ref(false);
 const isAutoScrolling = ref(true);

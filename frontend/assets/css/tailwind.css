@@ -276,6 +276,56 @@ body {
 	}
 }
 
+/* Streaming animations, see useStreamAnimation */
+.stream-fade {
+	animation: stream-fade 400ms ease-out both;
+}
+
+.stream-slide {
+	position: relative;
+	animation: stream-slide 400ms ease-out both;
+}
+
+.stream-caret {
+	display: inline-block;
+	width: 0.5em;
+	height: 1em;
+	margin-left: 1px;
+	vertical-align: text-bottom;
+	background: currentColor;
+	animation: stream-caret 1s steps(1) infinite;
+}
+
+@keyframes stream-fade {
+	from {
+		opacity: 0;
+	}
+}
+
+@keyframes stream-slide {
+	from {
+		opacity: 0;
+		top: 0.5em;
+	}
+	to {
+		top: 0;
+	}
+}
+
+@keyframes stream-caret {
+	50% {
+		opacity: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.stream-fade,
+	.stream-slide,
+	.stream-caret {
+		animation: none;
+	}
+}
+
 /* Shiki theme overrides */
 .shiki {
 	background: transparent !important;

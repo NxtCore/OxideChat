@@ -222,7 +222,6 @@ const store = useMainStore();
 
 const props = defineProps<{
 	message: ChatMessage;
-	animation?: string;
 	/** An arena answer: no model, icon or actions until the round is decided. */
 	blind?: boolean;
 }>();
@@ -232,6 +231,11 @@ const modelStore = useModelStore();
 const {sendAndStream} = useChatStream();
 const iconStore = useIconsStore();
 const {renderStreaming, renderComplete, isHighlighterReady} = useMarkdown();
+const stream = useStreamAnimation(() => store.preferences?.streaming_animation);
+
+function renderStreamingText(key: string | number, text: string): string {
+	return renderStreaming(stream.reveal(key, text), html => stream.decorate(key, html));
+}
 
 const showReasoning = ref(false);
 const previewData = ref<{code: string; language: string} | null>(null);
@@ -305,7 +309,7 @@ watch(
 const renderedContent = computed(() => {
 	if (!props.message.content) return '';
 	if (isStreaming.value) {
-		return renderStreaming(props.message.content);
+		return renderStreamingText('content', props.message.content);
 	}
 	return renderComplete(props.message.content);
 });
@@ -318,12 +322,13 @@ const hasInterleavedParts = computed(() => {
 
 const partHtmlCache = new Map<number, {text: string; streaming: boolean; highlighted: boolean; html: string}>();
 
-function renderPart(index: number, text: string): string {
+function renderPart(index: number, fullText: string, animated: boolean): string {
 	const streaming = isStreaming.value;
 	const highlighted = isHighlighterReady.value;
+	const text = streaming && animated ? stream.reveal(index, fullText) : fullText;
 	const cached = partHtmlCache.get(index);
 	if (cached?.text === text && cached.streaming === streaming && cached.highlighted === highlighted) return cached.html;
-	const html = streaming ? renderStreaming(text) : renderComplete(text);
+	const html = !streaming ? renderComplete(text) : animated ? renderStreaming(text, markup => stream.decorate(index, markup)) : renderStreaming(text);
 	partHtmlCache.set(index, {text, streaming, highlighted, html});
 	return html;
 }
@@ -344,9 +349,9 @@ const orderedParts = computed(() => {
 			};
 		}
 		if (part.type === 'reasoning') {
-			return {type: 'reasoning' as const, html: renderPart(index, part.text)};
+			return {type: 'reasoning' as const, html: renderPart(index, part.text, false)};
 		}
-		return {type: 'text' as const, html: renderPart(index, part.text)};
+		return {type: 'text' as const, html: renderPart(index, part.text, true)};
 	});
 });
 
