@@ -50,7 +50,7 @@ test.describe('presets', () => {
 			await expect(page.getByTestId('preset-slug')).toHaveValue(slugFor(name));
 			await expect(page.getByTestId('preset-slug-status')).toHaveAttribute('data-status', 'available');
 			await page.getByTestId('preset-icon-input').setInputFiles({name: 'icon.png', mimeType: 'image/png', buffer: Buffer.from(PNG_PIXEL, 'base64')});
-			await expect(page.getByTestId('preset-icon-preview')).toHaveAttribute('src', /\/api\/v1\/images\/[0-9a-f-]{36}$/);
+			await expect(page.getByTestId('preset-icon-preview')).toHaveAttribute('src', /\/api\/v1\/files\/[0-9a-f-]{36}$/);
 			await page.getByTestId('preset-tab-instructions').click();
 			await page.getByTestId('system-prompt').fill('Answer as briefly as possible.');
 			await page.getByTestId('preset-tab-starters').click();
@@ -64,7 +64,7 @@ test.describe('presets', () => {
 			expect(saved.key).toBe(key);
 			expect(saved.base_model_id).toBe(seed.model.id);
 			expect(saved.starters).toEqual([starter]);
-			expect(saved.icon).toMatch(/^\/api\/v1\/images\/[0-9a-f-]{36}$/);
+			expect(saved.icon).toMatch(/^\/api\/v1\/files\/[0-9a-f-]{36}$/);
 
 			await page.goto('/');
 			await pickPreset(page, key);

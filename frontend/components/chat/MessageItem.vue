@@ -268,7 +268,7 @@ const attachedImages = computed(() => {
 		.filter(part => part.type === 'image')
 		.map(part => ({
 			image_id: part.image_id,
-			url: imageUrl(part.image_id),
+			url: fileUrl(part.image_id),
 		}));
 });
 
@@ -357,7 +357,7 @@ const orderedParts = computed(() => {
 			return {
 				type: 'image' as const,
 				imageId: part.image_id,
-				url: imageUrl(part.image_id),
+				url: fileUrl(part.image_id),
 			};
 		}
 		if (part.type === 'reasoning') {

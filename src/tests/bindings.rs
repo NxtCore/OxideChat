@@ -27,7 +27,7 @@ mod tests {
 		}
 		export!(
 			crate::types::exchange_rates::ExchangeRate,
-			ChatSampling, ChatAttachmentResponse,
+			ChatSampling, FileResponse,
 			SessionResponse,
 			TestProviderResponse,
 			TranslationsResponse,

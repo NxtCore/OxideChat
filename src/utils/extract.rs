@@ -4,7 +4,7 @@
 //! and memory limit and no environment, so a hanging parser or a compression bomb is killed instead of
 //! taking the server down.
 
-use crate::types::chat::AttachmentError;
+use crate::types::files::FileError;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Stdio;
@@ -86,38 +86,38 @@ impl DocumentKind {
 ///
 /// # Errors
 ///
-/// Returns an [`AttachmentError`] when the file is not text, cannot be parsed in time, or yields no or too much text.
-pub async fn extract(kind: DocumentKind, bytes: &[u8]) -> Result<String, AttachmentError> {
+/// Returns an [`FileError`] when the file is not text, cannot be parsed in time, or yields no or too much text.
+pub async fn extract(kind: DocumentKind, bytes: &[u8]) -> Result<String, FileError> {
 	let text = match kind {
 		DocumentKind::Text => decode_text(bytes)?,
 		DocumentKind::Html | DocumentKind::Pdf => run_child(kind, bytes).await?,
 	};
 	let text = text.trim();
 	if text.is_empty() {
-		return Err(AttachmentError::Empty);
+		return Err(FileError::Empty);
 	}
 	if text.len() > MAX_TEXT_BYTES {
-		return Err(AttachmentError::TextTooLong);
+		return Err(FileError::TextTooLong);
 	}
 	Ok(text.to_owned())
 }
 
-fn decode_text(bytes: &[u8]) -> Result<String, AttachmentError> {
+fn decode_text(bytes: &[u8]) -> Result<String, FileError> {
 	let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
 	if bytes.contains(&0) {
-		return Err(AttachmentError::NotText);
+		return Err(FileError::NotText);
 	}
-	String::from_utf8(bytes.to_vec()).map_err(|_| AttachmentError::NotText)
+	String::from_utf8(bytes.to_vec()).map_err(|_| FileError::NotText)
 }
 
-async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, AttachmentError> {
+async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, FileError> {
 	let _slot = tokio::time::timeout(TIMEOUT, CHILD_SLOTS.acquire())
 		.await
-		.map_err(|_| AttachmentError::Busy)?
-		.map_err(|_| AttachmentError::ExtractFailed)?;
+		.map_err(|_| FileError::Busy)?
+		.map_err(|_| FileError::ExtractFailed)?;
 	let exe = std::env::current_exe().map_err(|error| {
 		tracing::error!(%error, "could not find the server binary for text extraction");
-		AttachmentError::ExtractFailed
+		FileError::ExtractFailed
 	})?;
 	let mut child = Command::new(exe)
 		.arg(SUBCOMMAND)
@@ -130,10 +130,10 @@ async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, Attachmen
 		.spawn()
 		.map_err(|error| {
 			tracing::error!(%error, "could not start the text extraction process");
-			AttachmentError::ExtractFailed
+			FileError::ExtractFailed
 		})?;
 	let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-		return Err(AttachmentError::ExtractFailed);
+		return Err(FileError::ExtractFailed);
 	};
 	let work = async {
 		let write = async {
@@ -144,17 +144,17 @@ async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, Attachmen
 		let mut limited = stdout.take(MAX_TEXT_BYTES as u64 + 1);
 		let read = limited.read_to_end(&mut output);
 		let ((), read) = tokio::join!(write, read);
-		read.map_err(|_| AttachmentError::ExtractFailed)?;
+		read.map_err(|_| FileError::ExtractFailed)?;
 		if output.len() > MAX_TEXT_BYTES {
-			return Err(AttachmentError::TextTooLong);
+			return Err(FileError::TextTooLong);
 		}
-		let status = child.wait().await.map_err(|_| AttachmentError::ExtractFailed)?;
+		let status = child.wait().await.map_err(|_| FileError::ExtractFailed)?;
 		if !status.success() {
-			return Err(AttachmentError::ExtractFailed);
+			return Err(FileError::ExtractFailed);
 		}
-		String::from_utf8(output).map_err(|_| AttachmentError::ExtractFailed)
+		String::from_utf8(output).map_err(|_| FileError::ExtractFailed)
 	};
-	tokio::time::timeout(TIMEOUT, work).await.map_err(|_| AttachmentError::TimedOut)?
+	tokio::time::timeout(TIMEOUT, work).await.map_err(|_| FileError::TimedOut)?
 }
 
 /// Entry point of the extraction child process: reads the file from stdin and writes its text to stdout.

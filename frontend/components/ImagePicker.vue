@@ -152,12 +152,12 @@ let dragDepth = 0;
 
 const heightClass = computed(() => (props.size === 'sm' ? 'h-12' : 'h-16'));
 const sizeClass = computed(() => (props.size === 'sm' ? 'h-12 w-12' : 'h-16 w-16'));
-const src = computed(() => (props.modelValue ? (props.valueMode === 'id' ? imageUrl(props.modelValue) : props.modelValue) : null));
+const src = computed(() => (props.modelValue ? (props.valueMode === 'id' ? fileUrl(props.modelValue) : props.modelValue) : null));
 
 watch(src, () => (broken.value = false));
 watch(open, isOpen => {
 	if (!isOpen) return;
-	link.value = props.valueMode === 'url' && props.modelValue && !props.modelValue.startsWith('/api/v1/images/') ? props.modelValue : '';
+	link.value = props.valueMode === 'url' && props.modelValue && !props.modelValue.startsWith('/api/v1/files/') && !props.modelValue.startsWith('/api/v1/images/') ? props.modelValue : '';
 	linkError.value = null;
 });
 

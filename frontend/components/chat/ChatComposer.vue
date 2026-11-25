@@ -141,8 +141,7 @@
 
 <script setup lang="ts">
 import {ArrowUp, Loader2, X, ImageIcon, Info, Swords, Paperclip, FileText} from 'lucide-vue-next';
-import type {ChatAttachment} from '~/types/generated/ChatAttachment';
-import {ATTACHMENT_ACCEPT, ATTACHMENT_MAX_BYTES, attachmentErrorMessage, postAttachment} from '~/composables/api/attachments';
+import {ATTACHMENT_ACCEPT, FILE_MAX_BYTES, fileErrorMessage, postFile} from '~/composables/api/files';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
 import {usePreferencesStore} from '~/stores/preferencesStore';
@@ -172,7 +171,7 @@ interface AttachedImage {
 
 const attachedImages = ref<AttachedImage[]>([]);
 const documentInputRef = ref<HTMLInputElement | null>(null);
-const attachedFiles = ref<Pick<ChatAttachment, 'id' | 'filename' | 'token_count'>[]>([]);
+const attachedFiles = ref<{id: string; filename: string; token_count: number}[]>([]);
 const uploadingFiles = ref<{key: string; filename: string}[]>([]);
 const isDragging = ref(false);
 let dragDepth = 0;
@@ -187,7 +186,7 @@ function restorePending() {
 		if (part.type === 'image' && part.image_id && !attachedImages.value.some(img => img.id === part.image_id)) {
 			attachedImages.value.push({
 				id: part.image_id,
-				previewUrl: imageUrl(part.image_id, useRuntimeConfig().public.apiBase || ''),
+				previewUrl: fileUrl(part.image_id, useRuntimeConfig().public.apiBase || ''),
 			});
 		}
 		if (part.type === 'file' && part.attachment_id && !attachedFiles.value.some(file => file.id === part.attachment_id)) {
@@ -280,16 +279,17 @@ async function handleDocumentSelect(event: Event) {
 }
 
 async function uploadFile(file: File) {
-	if (file.size > ATTACHMENT_MAX_BYTES) {
-		store.toast(store.getTranslation('chat.attachments.error.too_large'), {type: 'error'});
+	if (file.size > FILE_MAX_BYTES) {
+		store.toast(store.getTranslation('files.error.too_large'), {type: 'error'});
 		return;
 	}
 	const pending = {key: crypto.randomUUID(), filename: file.name};
 	uploadingFiles.value.push(pending);
 	try {
-		attachedFiles.value.push(await postAttachment(file));
+		const stored = await postFile(file, 'chat_attachment');
+		attachedFiles.value.push({id: stored.id, filename: stored.filename ?? file.name, token_count: stored.token_count ?? 0});
 	} catch (error) {
-		store.toast(attachmentErrorMessage(error), {type: 'error'});
+		store.toast(fileErrorMessage(error), {type: 'error'});
 	} finally {
 		uploadingFiles.value = uploadingFiles.value.filter(item => item.key !== pending.key);
 	}
@@ -347,38 +347,14 @@ async function handleDrop(event: DragEvent) {
 }
 
 async function uploadImage(file: File) {
-	return new Promise(async (resolve, reject) => {
-		const reader = new FileReader();
-		reader.onload = async () => {
-			const dataUri = reader.result as string;
-			const previewUrl = URL.createObjectURL(file);
-
-			try {
-				const response = await postImage(dataUri);
-
-				if (!response.ok) {
-					URL.revokeObjectURL(previewUrl);
-					reject(new Error('Upload failed'));
-					return;
-				}
-
-				const result = await response.json();
-				attachedImages.value.push({
-					id: result.id,
-					previewUrl,
-					file,
-				});
-				resolve(undefined);
-			} catch (error) {
-				URL.revokeObjectURL(previewUrl);
-				reject(error);
-			}
-		};
-		reader.onerror = () => {
-			reject(new Error('Failed to read file'));
-		};
-		reader.readAsDataURL(file);
-	});
+	const previewUrl = URL.createObjectURL(file);
+	try {
+		const stored = await postFile(file, 'image');
+		attachedImages.value.push({id: stored.id, previewUrl, file});
+	} catch (error) {
+		URL.revokeObjectURL(previewUrl);
+		store.toast(fileErrorMessage(error), {type: 'error'});
+	}
 }
 
 function removeImage(index: number) {

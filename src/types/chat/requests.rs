@@ -138,7 +138,7 @@ pub struct UpdateInstanceRequest {
 	/// An empty name also restores `OxideChat`.
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub name: Option<Option<String>>,
-	/// An image uploaded through `POST /api/v1/images`.
+	/// An image uploaded through `POST /api/v1/files?purpose=icon`.
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub icon_id: Option<Option<Uuid>>,
 }

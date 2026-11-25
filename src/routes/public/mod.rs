@@ -2,10 +2,9 @@ pub mod anthropic;
 pub mod auth;
 pub mod base;
 pub mod arena;
-pub mod attachments;
 pub mod chats;
 pub mod developer;
-pub mod images;
+pub mod files;
 pub mod knowledge;
 pub mod mcp;
 pub mod messages;
@@ -110,11 +109,8 @@ pub fn router() -> Router<Arc<JobState>> {
 			"/api/v1/developer/request-logs/retention",
 			get(developer::get_request_log_retention).put(developer::set_request_log_retention),
 		)
-		// Images (session-authenticated)
-		.route("/api/v1/images/{id}", get(images::serve_image))
-		.route("/api/v1/images", post(images::upload_image))
-		.route(
-			"/api/v1/chat-attachments",
-			post(attachments::upload_attachment).layer(DefaultBodyLimit::max(crate::utils::extract::MAX_UPLOAD_BYTES)),
-		)
+		// Files (session-authenticated); /api/v1/images/{id} keeps serving links stored before files were unified
+		.route("/api/v1/files/{id}", get(files::serve_file))
+		.route("/api/v1/images/{id}", get(files::serve_file))
+		.route("/api/v1/files", post(files::upload_file).layer(DefaultBodyLimit::max(crate::utils::extract::MAX_UPLOAD_BYTES)))
 }

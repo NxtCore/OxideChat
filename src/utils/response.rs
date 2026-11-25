@@ -158,7 +158,6 @@ pub enum ErrorCode {
 	// 429 Too Many Requests
 	RateLimited,
 	TooManyRequests,
-	StorageQuotaExceeded,
 
 	// 500+ Server Errors
 	InternalError,
@@ -218,7 +217,7 @@ impl ErrorCode {
 			Self::Forbidden | Self::InsufficientPermissions | Self::ApiKeyTeamForbidden | Self::ApiKeyTeamAdminRequired | Self::ApiKeyServiceAccountForbidden | Self::RoleProtected | Self::RolePermissionNotHeld | Self::RegistrationDisabled => StatusCode::FORBIDDEN,
 			Self::NotFound | Self::UserNotFound | Self::TranslationNotFound | Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
 			Self::EmailTaken | Self::UsernameTaken | Self::EmailOrUsernameTaken | Self::AlreadyExists | Self::ApiKeyRevoked | Self::ApiKeyRuleDuplicate | Self::ApiKeyAdminDisabled | Self::PresetSlugTaken | Self::ArenaRoundDecided | Self::ArenaRoundPending | Self::RoleNameTaken | Self::RoleLockOut => StatusCode::CONFLICT,
-			Self::RateLimited | Self::TooManyRequests | Self::StorageQuotaExceeded => StatusCode::TOO_MANY_REQUESTS,
+			Self::RateLimited | Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
 			Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
 		}
@@ -300,7 +299,6 @@ impl ErrorCode {
 
 			Self::RateLimited => "errors.rate_limited",
 			Self::TooManyRequests => "errors.too_many_requests",
-			Self::StorageQuotaExceeded => "errors.storage_quota_exceeded",
 
 			Self::InternalError | Self::DatabaseError => "auth.errors.internal_error",
 			Self::ServiceUnavailable => "errors.service_unavailable",
@@ -383,7 +381,6 @@ impl ErrorCode {
 
 			Self::RateLimited => "rate_limited",
 			Self::TooManyRequests => "too_many_requests",
-			Self::StorageQuotaExceeded => "storage_quota_exceeded",
 
 			Self::InternalError => "internal_error",
 			Self::DatabaseError => "database_error",

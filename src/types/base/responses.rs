@@ -87,6 +87,6 @@ pub struct TitleGeneration {
 pub struct InstanceResponse {
 	/// Instance name; `None` means `OxideChat`.
 	pub name: Option<String>,
-	/// Image ID of the instance icon, served without a session at `/api/v1/images/{id}`; `None` means the default logo.
+	/// Image ID of the instance icon, served without a session at `/api/v1/files/{id}`; `None` means the default logo.
 	pub icon_id: Option<Uuid>,
 }

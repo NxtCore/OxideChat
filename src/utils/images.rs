@@ -36,7 +36,7 @@ pub fn storage_path() -> PathBuf {
 
 /// Generate a URL path for an image (relative, works behind any reverse proxy)
 pub fn image_url(id: Uuid) -> String {
-	format!("/api/v1/images/{}", id)
+	format!("/api/v1/files/{}", id)
 }
 /// Stored image metadata
 #[derive(Debug, Clone)]
@@ -88,6 +88,12 @@ pub async fn store_image(db: &PgPool, data: &[u8], mime_type: &str, user_id: Opt
 pub async fn store_from_data_uri(db: &PgPool, data_uri: &str, user_id: Option<Uuid>, source: Option<&str>) -> Result<StoredImage, String> {
 	let (mime_type, data) = parse_data_uri(data_uri)?;
 	store_image(db, &data, &mime_type, user_id, source).await
+}
+
+/// The image type the bytes show, when it is one users may upload (PNG, JPEG, GIF or WebP).
+#[must_use]
+pub fn detect_image_mime(data: &[u8]) -> Option<&'static str> {
+	normalize_image_mime(infer::get(data)?.mime_type())
 }
 
 #[must_use]

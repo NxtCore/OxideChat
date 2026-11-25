@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod extraction {
-	use crate::types::AttachmentError;
+	use crate::types::FileError;
 	use crate::utils::extract::{DocumentKind, extract, parse};
 
 	const PDF: &[u8] = include_bytes!("fixtures/two_pages.pdf");
@@ -32,9 +32,9 @@ mod extraction {
 	#[tokio::test]
 	async fn text_files_must_be_text_and_not_empty() {
 		assert_eq!(extract(DocumentKind::Text, b"\xEF\xBB\xBF  hello \n").await.ok().as_deref(), Some("hello"));
-		assert!(matches!(extract(DocumentKind::Text, b"a\0b").await, Err(AttachmentError::NotText)));
-		assert!(matches!(extract(DocumentKind::Text, b"\xff\xfe").await, Err(AttachmentError::NotText)));
-		assert!(matches!(extract(DocumentKind::Text, b" \n ").await, Err(AttachmentError::Empty)));
+		assert!(matches!(extract(DocumentKind::Text, b"a\0b").await, Err(FileError::NotText)));
+		assert!(matches!(extract(DocumentKind::Text, b"\xff\xfe").await, Err(FileError::NotText)));
+		assert!(matches!(extract(DocumentKind::Text, b" \n ").await, Err(FileError::Empty)));
 	}
 }
 
@@ -44,7 +44,7 @@ mod storage {
 	use crate::types::chat::runner::prepare::{attachment_bytes, fit_context};
 	use crate::types::models::Model;
 	use crate::types::{
-		AttachmentError, Chat, ChatAttachment, CostDetails, Message, ReasoningDetails, RequestSettings, StreamRequest, StreamingUserMessageCreate, UsageDetails,
+		FileError, Chat, ChatAttachment, CostDetails, Message, ReasoningDetails, RequestSettings, StreamRequest, StreamingUserMessageCreate, UsageDetails,
 	};
 	use serde_json::json;
 	use sqlx::PgPool;
@@ -79,11 +79,11 @@ mod storage {
 		let stranger = insert_user(&pool, "attach_stranger").await?;
 		assert!(matches!(
 			ChatAttachment::upload(&pool, &owner, "tool.exe", b"MZ").await,
-			Err(AttachmentError::UnsupportedType)
+			Err(FileError::UnsupportedType)
 		));
 		assert!(matches!(
 			ChatAttachment::upload(&pool, &owner, " ", b"x").await,
-			Err(AttachmentError::InvalidFilename)
+			Err(FileError::InvalidFilename)
 		));
 
 		let attachment = ChatAttachment::upload(&pool, &owner, "notes.txt", b"The launch is on Monday.").await?;
@@ -144,7 +144,7 @@ mod storage {
 mod lifecycle {
 	use crate::tests::support::{TestResult, insert_user};
 	use crate::types::{
-		AttachmentError, Chat, ChatAttachment, CostDetails, Message, ReasoningDetails, RequestSettings, StreamingUserMessageCreate, UsageDetails,
+		FileError, Chat, ChatAttachment, CostDetails, Message, ReasoningDetails, RequestSettings, StreamingUserMessageCreate, UsageDetails,
 	};
 	use serde_json::json;
 	use sqlx::PgPool;
@@ -233,7 +233,7 @@ mod lifecycle {
 			.await?;
 		assert!(matches!(
 			ChatAttachment::upload(&pool, &user_id, "one_more.txt", b"text").await,
-			Err(AttachmentError::RateLimited)
+			Err(FileError::RateLimited)
 		));
 		Ok(())
 	}
@@ -249,6 +249,27 @@ mod lifecycle {
 		assert_eq!(used, image.size_bytes + attachment.text.len() as i64);
 		assert!(crate::utils::images::get_image_for_user(&pool, attachment.id, user_id).await?.is_none());
 		assert!(ChatAttachment::find_for_user(&pool, &user_id, &[image.id]).await?.is_empty());
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
+	async fn one_upload_route_stores_images_and_documents(pool: PgPool) -> TestResult {
+		use crate::types::{FilePurpose, FileUpload, UploadFileQuery};
+		crate::config::Config::init(&pool).await?;
+		let user_id = insert_user(&pool, "attach_upload").await?;
+		let query = |purpose| UploadFileQuery { filename: "pixel.png".to_string(), purpose };
+
+		assert!(matches!(
+			FileUpload::store(&pool, &user_id, &query(FilePurpose::Image), b"not an image").await,
+			Err(crate::types::FileError::UnsupportedType)
+		));
+		let image = FileUpload::store(&pool, &user_id, &query(FilePurpose::Icon), b"\x89PNG\r\n\x1a\nrest").await?;
+		assert_eq!(image.kind, "image");
+		assert_eq!(image.url, Some(format!("/api/v1/files/{}", image.id)));
+
+		let notes = UploadFileQuery { filename: "notes.txt".to_string(), purpose: FilePurpose::ChatAttachment };
+		let document = FileUpload::store(&pool, &user_id, &notes, b"plain text").await?;
+		assert_eq!((document.kind.as_str(), document.url, document.token_count.is_some()), ("document", None, true));
 		Ok(())
 	}
 }

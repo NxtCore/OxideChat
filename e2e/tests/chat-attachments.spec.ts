@@ -56,7 +56,7 @@ test.describe('chat file attachments', () => {
 		await page.goto('/');
 		await pickModel(page, t, seed.model.displayName);
 		await page.getByTestId('composer-file-input').setInputFiles({name: 'tool.exe', mimeType: 'application/octet-stream', buffer: Buffer.from('MZ')});
-		await expect(page.getByText(t('chat.attachments.error.unsupported_type'))).toBeVisible();
+		await expect(page.getByText(t('files.error.unsupported_type'))).toBeVisible();
 		await expect(page.getByTestId('attached-file')).toHaveCount(0);
 		await expect(page.getByTestId('composer-send')).toBeDisabled();
 	});
@@ -75,7 +75,7 @@ test.describe('chat file attachments', () => {
 			await page.getByTestId('composer-file-input').setInputFiles(megabyte);
 			await expect(page.getByTestId('attached-file')).toHaveCount(1);
 			await page.getByTestId('composer-file-input').setInputFiles({...megabyte, name: 'more.txt'});
-			await expect(page.getByText(t('chat.attachments.error.quota_exceeded'))).toBeVisible();
+			await expect(page.getByText(t('files.error.quota_exceeded'))).toBeVisible();
 			await expect(page.getByTestId('attached-file')).toHaveCount(1);
 		} finally {
 			await api.patch('/api/v1/admin/config', {storage: {quota_mb: null}});
