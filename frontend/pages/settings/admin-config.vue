@@ -34,6 +34,10 @@
 				/>
 			</SettingsRow>
 
+			<SettingsRow :label="store.getTranslation('settings.admin_config.native_pdf')" :hint="store.getTranslation('settings.admin_config.native_pdf_hint')">
+				<ShadSwitch v-model="form.attachments.native_pdf" :disabled="!canEdit || settingsForm.saving" data-testid="config-native-pdf" />
+			</SettingsRow>
+
 			<SettingsRow :label="store.getTranslation('settings.admin_config.provider_selector.label')" :hint="store.getTranslation('settings.admin_config.provider_selector.hint')">
 				<ShadSwitch v-model="form.provider_routing.selector_enabled" :disabled="!canEdit || settingsForm.saving" data-testid="config-provider-selector" />
 			</SettingsRow>
@@ -144,6 +148,9 @@ const form = reactive({
 	},
 	storage: {
 		quota_mb: (store.base?.storage.quota_mb ?? null) as number | string | null,
+	},
+	attachments: {
+		native_pdf: store.base?.attachments.native_pdf ?? false,
 	},
 	title_generation: {
 		enabled: store.base?.title_generation.enabled ?? false,

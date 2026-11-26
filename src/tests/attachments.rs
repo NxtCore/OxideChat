@@ -143,6 +143,31 @@ mod storage {
 	}
 
 	#[sqlx::test(migrations = "./migrations")]
+	async fn original_pdfs_are_kept_only_with_the_setting_and_only_for_their_owner(pool: PgPool) -> TestResult {
+		crate::config::Config::init(&pool).await?;
+		const PDF: &[u8] = include_bytes!("fixtures/two_pages.pdf");
+		let owner = insert_user(&pool, "native_owner").await?;
+		let stranger = insert_user(&pool, "native_stranger").await?;
+		let attachment = ChatAttachment::upload(&pool, &owner, "report.pdf.txt", b"Hello page one").await?;
+		assert!(!crate::config::Config::get().attachments().native_pdf);
+		assert!(ChatAttachment::originals(&pool, &owner, &[attachment.id]).await?.is_empty());
+
+		sqlx::query("UPDATE files SET data = $1, filename = 'report.pdf' WHERE id = $2").bind(PDF).bind(attachment.id).execute(&pool).await?;
+		assert!(ChatAttachment::originals(&pool, &owner, &[attachment.id]).await?.is_empty());
+		sqlx::query("UPDATE files SET mime_type = 'application/pdf' WHERE id = $1").bind(attachment.id).execute(&pool).await?;
+		let originals = ChatAttachment::originals(&pool, &owner, &[attachment.id]).await?;
+		assert_eq!(originals.get(&attachment.id).map(Vec::as_slice), Some(PDF));
+		assert!(ChatAttachment::originals(&pool, &stranger, &[attachment.id]).await?.is_empty());
+		let attachment = ChatAttachment { filename: "report.pdf".to_owned(), ..attachment };
+		let omniference::types::ContentPart::File { filename, file_data, .. } = attachment.file_part(PDF) else {
+			return Err("not a file part".into());
+		};
+		assert_eq!(filename.as_deref(), Some("report.pdf"));
+		assert!(file_data.is_some_and(|data| data.starts_with("data:application/pdf;base64,JVBERi0")));
+		Ok(())
+	}
+
+	#[sqlx::test(migrations = "./migrations")]
 	async fn the_history_estimate_counts_attached_text(pool: PgPool) -> TestResult {
 		crate::config::Config::init(&pool).await?;
 		let user_id = insert_user(&pool, "attach_history").await?;

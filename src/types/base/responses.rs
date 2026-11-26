@@ -33,6 +33,8 @@ pub struct BaseResponse {
 	pub registration: Registration,
 	/// The storage quota for the files each user stores.
 	pub storage: StorageSettings,
+	/// How attached files reach the model.
+	pub attachments: AttachmentSettings,
 	/// Whether knowledge bases are switched on.
 	pub rag: RagStatus,
 }
@@ -72,6 +74,14 @@ impl StorageSettings {
 		let incoming = i64::try_from(incoming).unwrap_or(i64::MAX);
 		self.quota_mb.is_none_or(|mb| stored_bytes.saturating_add(incoming) <= i64::from(mb) * 1024 * 1024)
 	}
+}
+
+/// Admin setting for chat attachments; the admin PATCH takes the same shape. Off by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AttachmentSettings {
+	/// Keep uploaded PDFs and send the original file to models that read PDFs, instead of only its extracted text.
+	pub native_pdf: bool,
 }
 
 /// Admin setting for generated chat titles; the admin PATCH takes the same shape.

@@ -14,6 +14,7 @@ struct ImageAccess<'a> {
 	vision: bool,
 	hydrated_image_ids: &'a HashSet<String>,
 	attachments: &'a HashMap<Uuid, ChatAttachment>,
+	originals: &'a HashMap<Uuid, Vec<u8>>,
 }
 
 /// Hydrate a stored image into content parts. `generated` distinguishes an assistant-
@@ -124,10 +125,11 @@ async fn user_parts(access: &ImageAccess<'_>, stored_parts: Vec<MessagePart>, co
 		match part {
 			MessagePart::Text { text } => parts.push(ContentPart::Text(text)),
 			MessagePart::Image { image_id } => parts.extend(hydrate_image(access, &image_id, false).await),
-			MessagePart::File { attachment_id, filename } => parts.push(ContentPart::Text(match access.attachments.get(&attachment_id) {
-				Some(attachment) => attachment.prompt_text(),
-				None => format!("[The attached file \"{}\" is no longer available.]", filename.replace('"', "'")),
-			})),
+			MessagePart::File { attachment_id, filename } => parts.push(match (access.attachments.get(&attachment_id), access.originals.get(&attachment_id)) {
+				(Some(attachment), Some(original)) => attachment.file_part(original),
+				(Some(attachment), None) => ContentPart::Text(attachment.prompt_text()),
+				(None, _) => ContentPart::Text(format!("[The attached file \"{}\" is no longer available.]", filename.replace('"', "'"))),
+			}),
 			_ => {}
 		}
 	}
@@ -180,15 +182,19 @@ async fn assistant_messages(access: &ImageAccess<'_>, stored_parts: Vec<MessageP
 	result
 }
 
-pub(super) async fn get_omni_messages(db: &PgPool, user_id: Uuid, messages: Vec<Message>, vision: bool) -> Result<Vec<OmniMessage>, sqlx::Error> {
+/// The chat history as model messages; with `native_pdf` kept original PDFs replace their text.
+pub(super) async fn get_omni_messages(db: &PgPool, user_id: Uuid, messages: Vec<Message>, (vision, native_pdf): (bool, bool)) -> Result<Vec<OmniMessage>, sqlx::Error> {
 	let hydrated_image_ids = if vision { recent_image_ids(&messages) } else { HashSet::new() };
-	let attachments = ChatAttachment::find_for_user(db, &user_id, &attachment_ids(&messages)).await?;
+	let ids = attachment_ids(&messages);
+	let attachments = ChatAttachment::find_for_user(db, &user_id, &ids).await?;
+	let originals = if native_pdf { ChatAttachment::originals(db, &user_id, &ids).await? } else { HashMap::new() };
 	let access = ImageAccess {
 		db,
 		user_id,
 		vision,
 		hydrated_image_ids: &hydrated_image_ids,
 		attachments: &attachments,
+		originals: &originals,
 	};
 	let assistant_ids: Vec<Uuid> = messages.iter().filter(|m| m.role == "assistant").map(|m| m.id).collect();
 	let executions = Message::tool_executions_for_messages(db, &assistant_ids).await.unwrap_or_default();

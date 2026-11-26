@@ -52,6 +52,19 @@ test.describe('chat file attachments', () => {
 		await expect(page.getByTestId('composer-send')).toBeEnabled();
 	});
 
+	test('sending original PDFs is off until an admin turns it on', async ({page, api}) => {
+		expect((await api.get('/api/v1/base')).attachments.native_pdf).toBe(false);
+		await page.goto('/settings/admin-config');
+		await page.getByTestId('config-native-pdf').click();
+		await page.getByTestId('settings-save-bar-save').click();
+		await expect(page.getByTestId('settings-save-bar')).toBeHidden();
+		try {
+			expect((await api.get('/api/v1/base')).attachments.native_pdf).toBe(true);
+		} finally {
+			await api.patch('/api/v1/admin/config', {attachments: {native_pdf: false}});
+		}
+	});
+
 	test('a file that is not supported is refused with a reason', async ({page, t, seed}) => {
 		await page.goto('/');
 		await pickModel(page, t, seed.model.displayName);

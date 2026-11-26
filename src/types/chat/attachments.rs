@@ -1,10 +1,13 @@
+use crate::config::Config;
 use crate::types::files::{CHAT_ATTACHMENT_SOURCE, FileError, FileResponse, FileStorage, checked_filename};
 use crate::utils::extract::{self, DocumentKind};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use omniference::types::ContentPart;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// A chat attachment: a `files` row of kind `document` that keeps the uploaded file's extracted text, not the file, owned by the user who uploaded it.
+/// A chat attachment: a `files` row of kind `document` that keeps the uploaded file's extracted text, owned by the user who uploaded it; a PDF also keeps its original while the admin setting `attachments.native_pdf` is on.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ChatAttachment {
 	pub id: Uuid,
@@ -29,7 +32,7 @@ pub fn estimate_tokens(text: &str) -> i64 {
 }
 
 impl ChatAttachment {
-	/// Extracts the text of an uploaded file and stores it for the user.
+	/// Extracts the text of an uploaded file and stores it for the user, with the original PDF while `attachments.native_pdf` is on.
 	///
 	/// # Errors
 	///
@@ -43,11 +46,12 @@ impl ChatAttachment {
 		FileStorage::check_rate(&mut *pool.acquire().await?, user_id).await?;
 		let text = extract::extract(kind, bytes).await?;
 		let size_bytes = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
-		let mut tx = FileStorage::begin_store(pool, user_id, text.len()).await?;
+		let original = (kind == DocumentKind::Pdf && Config::get().attachments().native_pdf).then_some(bytes);
+		let mut tx = FileStorage::begin_store(pool, user_id, text.len() + original.map_or(0, <[u8]>::len)).await?;
 		let attachment = sqlx::query_as::<_, Self>(
 			r#"
-			INSERT INTO files (user_id, kind, source, filename, mime_type, size_bytes, text, token_count)
-			VALUES ($1, 'document', $7, $2, $3, $4, $5, $6)
+			INSERT INTO files (user_id, kind, source, filename, mime_type, size_bytes, text, token_count, data)
+			VALUES ($1, 'document', $7, $2, $3, $4, $5, $6, $8)
 			RETURNING id, filename, mime_type, size_bytes, text, token_count
 			"#,
 		)
@@ -58,6 +62,7 @@ impl ChatAttachment {
 		.bind(&text)
 		.bind(estimate_tokens(&text))
 		.bind(CHAT_ATTACHMENT_SOURCE)
+		.bind(original)
 		.fetch_one(&mut *tx)
 		.await?;
 		tx.commit().await?;
@@ -105,6 +110,34 @@ impl ChatAttachment {
 			.fetch_all(pool)
 			.await?;
 		Ok(rows.into_iter().map(|row| (row.id, row)).collect())
+	}
+
+	/// The kept original PDFs among the user's attachments `ids`, by ID.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when the query fails.
+	pub async fn originals(pool: &PgPool, user_id: &Uuid, ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<u8>>, sqlx::Error> {
+		if ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, Vec<u8>)> = sqlx::query_as("SELECT id, data FROM files WHERE id = ANY($1) AND user_id = $2 AND source = $3 AND mime_type = 'application/pdf' AND data IS NOT NULL")
+			.bind(ids)
+			.bind(user_id)
+			.bind(CHAT_ATTACHMENT_SOURCE)
+			.fetch_all(pool)
+			.await?;
+		Ok(rows.into_iter().collect())
+	}
+
+	/// The original PDF as a file part for models that read PDFs.
+	#[must_use]
+	pub fn file_part(&self, original: &[u8]) -> ContentPart {
+		ContentPart::File {
+			file_id: None,
+			filename: Some(self.filename.clone()),
+			file_data: Some(format!("data:application/pdf;base64,{}", BASE64.encode(original))),
+		}
 	}
 
 	/// The text the model gets for this attachment, marked as data.
