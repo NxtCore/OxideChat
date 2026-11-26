@@ -4,12 +4,12 @@
 //! - `GET /api/v1/files/{id}` - Serve an image's bytes; the instance icon is served without a session
 
 use crate::config::Config;
-use crate::types::{AppError, AuthUser, FileUpload, JobState, RequestContext, UploadFileQuery, json_ok};
+use crate::types::{AppError, AuthUser, FileError, FileUpload, JobState, RequestContext, UploadFileQuery, json_ok};
 use crate::utils::images::{get_image, get_image_for_user, safe_image_mime};
 use crate::utils::response::ErrorCode;
 use axum::{
 	body::Bytes,
-	extract::{Extension, Path, Query, State},
+	extract::{Extension, Path, Query, State, rejection::BytesRejection},
 	http::{HeaderMap, StatusCode, header},
 	response::{IntoResponse, Response},
 };
@@ -19,7 +19,12 @@ use uuid::Uuid;
 /// Upload a file and store it the way its purpose asks for.
 ///
 /// POST /api/v1/files
-pub async fn upload_file(State(state): State<Arc<JobState>>, user: AuthUser, Query(query): Query<UploadFileQuery>, body: Bytes) -> Result<Response, AppError> {
+pub async fn upload_file(State(state): State<Arc<JobState>>, user: AuthUser, Query(query): Query<UploadFileQuery>, body: Result<Bytes, BytesRejection>) -> Result<Response, AppError> {
+	let body = match body {
+		Ok(body) => body,
+		Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => return Err(FileError::TooLarge.into()),
+		Err(rejection) => return Ok(rejection.into_response()),
+	};
 	json_ok(FileUpload::store(&state.db, &user.id, &query, &body).await?)
 }
 

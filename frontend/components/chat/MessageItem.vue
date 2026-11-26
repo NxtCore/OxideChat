@@ -348,7 +348,7 @@ function renderPart(index: number, text: string): string {
 const orderedParts = computed(() => {
 	const parts = props.message.content_parts;
 	if (!Array.isArray(parts)) return [];
-	return parts.filter(part => part.type !== 'tool_result').map((part, index) => {
+	return parts.filter(part => part.type !== 'tool_result' && part.type !== 'file').map((part, index) => {
 		if (part.type === 'tool_call') {
 			const tool = props.message.tool_calls?.find(tc => tc.tool_call_id === part.id);
 			return {type: 'tool_call' as const, tool};
