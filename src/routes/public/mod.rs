@@ -4,7 +4,7 @@ pub mod base;
 pub mod arena;
 pub mod chats;
 pub mod developer;
-pub mod images;
+pub mod files;
 pub mod knowledge;
 pub mod mcp;
 pub mod messages;
@@ -22,6 +22,7 @@ pub mod workspaces;
 use crate::types::JobState;
 use axum::{
 	Router,
+	extract::DefaultBodyLimit,
 	routing::{delete, get, patch, post, put},
 };
 use std::sync::Arc;
@@ -108,7 +109,8 @@ pub fn router() -> Router<Arc<JobState>> {
 			"/api/v1/developer/request-logs/retention",
 			get(developer::get_request_log_retention).put(developer::set_request_log_retention),
 		)
-		// Images (session-authenticated)
-		.route("/api/v1/images/{id}", get(images::serve_image))
-		.route("/api/v1/images", post(images::upload_image))
+		// Files (session-authenticated); /api/v1/images/{id} keeps serving links stored before files were unified
+		.route("/api/v1/files/{id}", get(files::serve_file))
+		.route("/api/v1/images/{id}", get(files::serve_file))
+		.route("/api/v1/files", post(files::upload_file).layer(DefaultBodyLimit::max(crate::utils::extract::MAX_UPLOAD_BYTES)))
 }

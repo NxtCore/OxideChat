@@ -71,6 +71,7 @@ export type ChatMessageContentPart =
 	| {type: 'text'; text: string}
 	| {type: 'reasoning'; text: string}
 	| {type: 'image'; image_id: string}
+	| {type: 'file'; attachment_id: string; filename: string}
 	| {type: 'tool_call'; id: string; name: string; arguments: string}
 	| {type: 'tool_result'; tool_call_id: string};
 

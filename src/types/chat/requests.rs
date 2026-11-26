@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
 
-use crate::types::{ProviderRoutingSettings, Registration, ThemeCssVars, TitleGeneration};
+use crate::types::{AttachmentSettings, StorageSettings, ProviderRoutingSettings, Registration, ThemeCssVars, TitleGeneration};
 use crate::i18n::Language;
 
 /// Distinguishes an absent field (`None`) from an explicit JSON `null` (`Some(None)`),
@@ -129,6 +129,8 @@ pub struct UpdateGlobalConfigRequest {
 	pub instance: Option<UpdateInstanceRequest>,
 	pub title_generation: Option<TitleGeneration>,
 	pub registration: Option<Registration>,
+	pub storage: Option<StorageSettings>,
+	pub attachments: Option<AttachmentSettings>,
 }
 
 /// Omitted fields stay unchanged; `null` restores the default.
@@ -137,7 +139,7 @@ pub struct UpdateInstanceRequest {
 	/// An empty name also restores `OxideChat`.
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub name: Option<Option<String>>,
-	/// An image uploaded through `POST /api/v1/images`.
+	/// An image uploaded through `POST /api/v1/files?purpose=icon`.
 	#[serde(default, deserialize_with = "deserialize_nullable_field")]
 	pub icon_id: Option<Option<Uuid>>,
 }
@@ -160,6 +162,7 @@ pub enum MessagePart {
 	Text { text: String },
 	Reasoning { text: String },
 	Image { image_id: String },
+	File { attachment_id: Uuid, filename: String },
 	#[serde(rename = "tool_call")]
 	ToolCall { id: String, name: String, arguments: String },
 	#[serde(rename = "tool_result")]

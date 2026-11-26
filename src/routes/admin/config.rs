@@ -40,6 +40,10 @@ pub async fn update_global_config(State(state): State<Arc<JobState>>, auth: Auth
 		return Err(ErrorCode::BadRequest.into());
 	}
 
+	if req.storage.is_some_and(|storage| storage.quota_mb == Some(0)) {
+		return Err(ErrorCode::ValidationFailed.into());
+	}
+
 	if let Some(routing) = &req.provider_routing {
 		req.provider_routing = Some(routing.normalized().ok_or(ErrorCode::ValidationFailed)?);
 	}

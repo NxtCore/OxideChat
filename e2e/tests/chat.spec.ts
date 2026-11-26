@@ -24,6 +24,7 @@ const assistantMessages = (page: Page) => page.locator('[data-testid="message"][
 async function expectReplyCount(page: Page, count: number) {
 	await expect(assistantMessages(page)).toHaveCount(count, {timeout: 60_000});
 	await expect(page.getByTestId('streaming-message')).toHaveCount(0, {timeout: 60_000});
+	await expect(page.locator('textarea').first()).toBeEnabled({timeout: 60_000});
 	await expect(assistantMessages(page).nth(count - 1).locator('.prose').first()).not.toBeEmpty();
 }
 

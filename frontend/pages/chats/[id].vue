@@ -15,10 +15,12 @@ import {useRoute} from '#app';
 const chatStore = useChatStore();
 const workspaceStore = useWorkspaceStore();
 const {sendAndStream} = useChatStream();
+const router = useRouter();
 const route = useRoute();
 
 async function handleSendMessage(content: string, parts?: any[]) {
 	let chatId = chatStore.activeChat?.id;
+	const isNew = !chatId;
 	if (!chatId) {
 		const chat = await chatStore.createChat({
 			workspace_id: workspaceStore.activeWorkspaceId || undefined,
@@ -26,7 +28,11 @@ async function handleSendMessage(content: string, parts?: any[]) {
 		if (!chat) return;
 		chatId = chat.id;
 	}
-	await sendAndStream(chatId, content, parts);
+	const refused = await sendAndStream(chatId, content, parts);
+	if (isNew && refused && (await chatStore.discardIfEmpty(chatId))) {
+		await router.push('/');
+		chatStore.stageDraft(content, parts);
+	}
 }
 
 if (!chatStore.activeChat || chatStore.activeChat.id !== route.params.id) {

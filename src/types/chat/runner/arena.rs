@@ -51,7 +51,7 @@ pub(super) async fn prepare_arena_turn(state: &Arc<JobState>, user: &User, chat:
 		require_knowledge_access(db, &user.id, &chat.id, &model.id, None).await?;
 		let level_preset = preset.clone().at_level(Some(&level.key)).ok_or_else(|| unavailable("presets.errors.level_not_found"))?;
 		let config = ModelConfig::find_system_by_stable_key(db, &model.model_id).await.ok().flatten();
-		let bytes = prompt_bytes(db, &chat.id, req, config.as_ref(), Some(&level_preset)).await?;
+		let bytes = prompt_bytes(db, (&user.id, &chat.id), req, (&model, config.as_ref()), Some(&level_preset)).await?;
 		let budget = admit(state, user.id, &model, bytes).await?;
 		levels.push((model, level_preset, config, budget));
 	}

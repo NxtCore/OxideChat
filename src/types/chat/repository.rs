@@ -6,8 +6,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::rows::{SiblingCountRow, ToolExecutionRow, WorkspaceWithCount};
+use crate::types::files::CHAT_ATTACHMENT_SOURCE;
 use super::{
-	Chat, CostDetails, Message, ReasoningDetails, RequestSettings, StreamingAssistantMessageCreate, StreamingUserMessageCreate, ToolExecutionResponse,
+	Chat, CostDetails, HistoryBytes, Message, ReasoningDetails, RequestSettings, StreamingAssistantMessageCreate, StreamingUserMessageCreate, ToolExecutionResponse,
 	UpdatePreferencesRequest, UsageDetails, UserPreferences, Workspace, WorkspaceResponse,
 };
 
@@ -257,18 +258,34 @@ impl Message {
 			.await
 	}
 
-	/// Bytes of stored text in the chat's active messages, as sent to the model.
+	/// Bytes of stored text in the chat's active messages, as sent to the model, attached files included.
 	///
 	/// # Errors
 	/// Returns an error when messages cannot be queried.
-	pub async fn active_prompt_bytes(pool: &PgPool, chat_id: &Uuid) -> Result<u64, sqlx::Error> {
-		let bytes: i64 = sqlx::query_scalar(
-			"SELECT COALESCE(SUM(octet_length(content) + octet_length(COALESCE(content_parts::text, ''))), 0)::bigint FROM messages WHERE chat_id = $1 AND is_active_fork = true",
+	pub async fn active_prompt_bytes(pool: &PgPool, chat_id: &Uuid) -> Result<HistoryBytes, sqlx::Error> {
+		let (messages, attached): (i64, i64) = sqlx::query_as(
+			r#"
+			SELECT (
+				SELECT COALESCE(SUM(octet_length(content) + octet_length(COALESCE(content_parts::text, ''))), 0)
+				FROM messages WHERE chat_id = $1 AND is_active_fork = true
+			)::bigint, (
+				SELECT COALESCE(SUM(octet_length(a.text)), 0)
+				FROM messages m
+				CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(m.content_parts) = 'array' THEN m.content_parts ELSE '[]'::jsonb END) AS part
+				JOIN files a ON a.id = (part->>'attachment_id')::uuid AND a.source = $2 AND a.user_id = (SELECT user_id FROM chats WHERE id = $1)
+				WHERE m.chat_id = $1 AND m.is_active_fork = true AND m.role = 'user' AND part->>'type' = 'file'
+			)::bigint
+			"#,
 		)
 		.bind(chat_id)
+		.bind(CHAT_ATTACHMENT_SOURCE)
 		.fetch_one(pool)
 		.await?;
-		Ok(u64::try_from(bytes).unwrap_or(0))
+		let attached = u64::try_from(attached).unwrap_or(0);
+		Ok(HistoryBytes {
+			total: u64::try_from(messages).unwrap_or(0).saturating_add(attached),
+			attached,
+		})
 	}
 
 	pub async fn list_active_by_chat(pool: &PgPool, chat_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
