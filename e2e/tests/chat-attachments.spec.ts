@@ -2,6 +2,7 @@ import {fileURLToPath} from 'node:url';
 import type {Page} from '@playwright/test';
 import {test, expect} from './support/fixtures';
 import {LLM} from './support/constants';
+import {createSyncedProvider, ensurePricing} from './support/providers';
 
 async function pickModel(page: Page, t: (key: string) => string, displayName: string) {
 	await page.getByTestId('model-selector').click();
@@ -84,15 +85,69 @@ test.describe('chat file attachments', () => {
 			expect((await api.get('/api/v1/base')).storage.quota_mb).toBe(1);
 			await page.goto('/');
 			await pickModel(page, t, seed.model.displayName);
-			const megabyte = {name: 'big.txt', mimeType: 'text/plain', buffer: Buffer.from('x'.repeat(1024 * 1024))};
-			await page.getByTestId('composer-file-input').setInputFiles(megabyte);
+			const halfQuota = {name: 'big.txt', mimeType: 'text/plain', buffer: Buffer.from('x'.repeat(600 * 1024))};
+			await page.getByTestId('composer-file-input').setInputFiles(halfQuota);
 			await expect(page.getByTestId('attached-file')).toHaveCount(1);
-			await page.getByTestId('composer-file-input').setInputFiles({...megabyte, name: 'more.txt'});
+			await page.getByTestId('composer-file-input').setInputFiles({...halfQuota, name: 'more.txt'});
 			await expect(page.getByText(t('files.error.quota_exceeded'))).toBeVisible();
 			await expect(page.getByTestId('attached-file')).toHaveCount(1);
 		} finally {
 			await api.patch('/api/v1/admin/config', {storage: {quota_mb: null}});
 		}
 		expect((await api.get('/api/v1/base')).storage.quota_mb).toBeNull();
+	});
+
+	test('an original PDF goes to a model the admin marked as reading files', async ({page, t, api}) => {
+		const {providerId, model} = await createSyncedProvider(api, `Files ${Date.now()}`);
+		try {
+			await ensurePricing(api, model.id);
+			const displayName = `pdf-reader-${Date.now()}`;
+			await api.patch(`/api/v1/admin/models/${model.id}`, {display_name: displayName, input_modalities: ['TEXT', 'FILE']});
+			await api.patch('/api/v1/admin/config', {attachments: {native_pdf: true}});
+			await page.goto('/');
+			await pickModel(page, t, displayName);
+			await page.getByTestId('composer-file-input').setInputFiles(fileURLToPath(new URL('../../src/tests/fixtures/two_pages.pdf', import.meta.url)));
+			await expect(page.getByTestId('attached-file')).toHaveText('two_pages.pdf');
+			const composer = page.locator('textarea').first();
+			await composer.fill('Reply with one short word.');
+			await composer.press('Enter');
+			await expect(assistantMessages(page)).toHaveCount(1, {timeout: 60_000});
+			await expect(page.getByTestId('streaming-message')).toHaveCount(0, {timeout: 60_000});
+			await expect(composer).toBeEnabled({timeout: 60_000});
+			await expect(assistantMessages(page).first()).not.toBeEmpty();
+			if (LLM.isMock) await expect(assistantMessages(page).first()).not.toContainText('Hello page one');
+		} finally {
+			await api.patch('/api/v1/admin/config', {attachments: {native_pdf: false}});
+			await api.delete(`/api/v1/admin/providers/${providerId}`);
+		}
+	});
+
+	test('a first message that is refused leaves no empty chat and keeps the draft', async ({page, t, api, allowErrors}) => {
+		allowErrors(/context_too_large/);
+		const {providerId, model} = await createSyncedProvider(api, `Tiny ${Date.now()}`);
+		try {
+			await ensurePricing(api, model.id);
+			const displayName = `tiny-context-${Date.now()}`;
+			await api.patch(`/api/v1/admin/models/${model.id}`, {display_name: displayName, context_length: 50});
+			await page.goto('/');
+			await pickModel(page, t, displayName);
+			const newestChat = async () => (await api.get('/api/v1/chats')).items[0]?.id;
+			const newestBefore = await newestChat();
+			await page.getByTestId('composer-file-input').setInputFiles([
+				{name: 'first.txt', mimeType: 'text/plain', buffer: Buffer.from('1'.repeat(2000))},
+				{name: 'second.txt', mimeType: 'text/plain', buffer: Buffer.from('2')},
+			]);
+			await expect(page.getByTestId('attached-file')).toHaveText(['first.txt', 'second.txt']);
+			const composer = page.locator('textarea').first();
+			await composer.fill('Too much');
+			await composer.press('Enter');
+			await expect(page.getByText(t('chat.errors.context_too_large').split('{tokens}')[0].trim())).toBeVisible();
+			await expect(page).toHaveURL(/\/$/);
+			await expect(page.locator('textarea').first()).toHaveValue('Too much');
+			await expect(page.getByTestId('attached-file')).toHaveText(['first.txt', 'second.txt']);
+			expect(await newestChat()).toBe(newestBefore);
+		} finally {
+			await api.delete(`/api/v1/admin/providers/${providerId}`);
+		}
 	});
 });

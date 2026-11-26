@@ -262,19 +262,20 @@ export function useChatStream() {
 		if (toolCall && !hasError) toolCall.output = JSON.stringify(result);
 	}
 
-	function restoreUnsavedDraft(userMessageId: string | null, streamingMessageId: string, content: string, parts?: any[]): void {
+	function restoreUnsavedDraft(userMessageId: string | null, streamingMessageId: string, content: string, parts?: any[]): boolean {
 		const userMsg = userMessageId ? chatStore.messages.find(m => m.id === userMessageId) : undefined;
-		if (!userMsg) return;
+		if (!userMsg) return false;
 		chatStore.messages = chatStore.messages.filter(m => m.id !== streamingMessageId && m.id !== userMessageId);
-		chatStore.pendingBranchContent = content || null;
-		chatStore.pendingBranchParts = parts && parts.length > 0 ? parts : null;
+		chatStore.stageDraft(content, parts);
+		return true;
 	}
 
-	async function sendAndStream(chatId: string, content: string, parts?: any[], skipUserMessage: boolean = false, regenerateFromMessageId?: string): Promise<void> {
+	/** Streams a turn; resolves to true when the server refused it before saving the user message. */
+	async function sendAndStream(chatId: string, content: string, parts?: any[], skipUserMessage: boolean = false, regenerateFromMessageId?: string): Promise<boolean> {
 		const model = modelStore.selectedModel;
 		if (!model) {
 			console.error('No model selected');
-			return;
+			return false;
 		}
 
 		chatStore.isStreaming = true;
@@ -342,12 +343,13 @@ export function useChatStream() {
 					}
 				}
 			}
-			restoreUnsavedDraft(userMessageId, streamingMessageId, content, parts);
+			return restoreUnsavedDraft(userMessageId, streamingMessageId, content, parts);
 		} catch (e) {
 			console.error('Failed to stream:', e);
 			chatStore.isStreaming = false;
 			restoreUnsavedDraft(userMessageId, streamingMessageId, content, parts);
 			chatStore.messages = chatStore.messages.filter(m => m.id !== streamingMessageId && m.id !== userMessageId);
+			return false;
 		}
 	}
 

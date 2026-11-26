@@ -157,7 +157,13 @@ interface AttachedImage {
 
 const attachedImages = ref<AttachedImage[]>([]);
 const documentInputRef = ref<HTMLInputElement | null>(null);
-const attachedFiles = ref<{id: string; filename: string; token_count: number}[]>([]);
+interface AttachedFile {
+	id: string;
+	filename: string;
+	token_count: number;
+}
+
+const attachedFiles = ref<AttachedFile[]>([]);
 const uploadingFiles = ref<{key: string; filename: string}[]>([]);
 const isDragging = ref(false);
 let dragDepth = 0;
@@ -252,18 +258,19 @@ async function handleDocumentSelect(event: Event) {
 	await attachFiles(files);
 }
 
-async function uploadFile(file: File) {
+async function uploadFile(file: File): Promise<AttachedFile | null> {
 	if (file.size > FILE_MAX_BYTES) {
 		store.toast(store.getTranslation('files.error.too_large'), {type: 'error'});
-		return;
+		return null;
 	}
 	const pending = {key: crypto.randomUUID(), filename: file.name};
 	uploadingFiles.value.push(pending);
 	try {
 		const stored = await postFile(file, 'chat_attachment');
-		attachedFiles.value.push({id: stored.id, filename: stored.filename ?? file.name, token_count: stored.token_count ?? 0});
+		return {id: stored.id, filename: stored.filename ?? file.name, token_count: stored.token_count ?? 0};
 	} catch (error) {
 		store.toast(fileErrorMessage(error), {type: 'error'});
+		return null;
 	} finally {
 		uploadingFiles.value = uploadingFiles.value.filter(item => item.key !== pending.key);
 	}
@@ -317,7 +324,8 @@ async function handleDrop(event: DragEvent) {
 async function attachFiles(files: File[]) {
 	const images = files.filter(file => file.type.startsWith('image/'));
 	if (images.length > 0 && !supportsImages.value) store.toast(store.getTranslation('chat.composer.images_not_supported'), {type: 'error'});
-	await Promise.all(files.filter(file => !images.includes(file)).map(uploadFile));
+	const uploaded = await Promise.all(files.filter(file => !images.includes(file)).map(uploadFile));
+	attachedFiles.value.push(...uploaded.filter((file): file is AttachedFile => file !== null));
 	if (!supportsImages.value) return;
 	for (const file of images) {
 		await uploadImage(file);
@@ -330,12 +338,16 @@ async function uploadImage(file: File) {
 		return;
 	}
 	const previewUrl = URL.createObjectURL(file);
+	const pending = {key: crypto.randomUUID(), filename: file.name};
+	uploadingFiles.value.push(pending);
 	try {
 		const stored = await postFile(file, 'image');
 		attachedImages.value.push({id: stored.id, previewUrl, file});
 	} catch (error) {
 		URL.revokeObjectURL(previewUrl);
 		store.toast(fileErrorMessage(error), {type: 'error'});
+	} finally {
+		uploadingFiles.value = uploadingFiles.value.filter(item => item.key !== pending.key);
 	}
 }
 

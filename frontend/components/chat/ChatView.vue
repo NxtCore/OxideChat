@@ -12,9 +12,11 @@ import ChatEmptyState from './ChatEmptyState.vue';
 const chatStore = useChatStore();
 const workspaceStore = useWorkspaceStore();
 const {sendAndStream} = useChatStream();
+const router = useRouter();
 
 async function handleSendMessage(content: string, parts?: any[]) {
 	let chatId = chatStore.activeChat?.id;
+	const isNew = !chatId;
 
 	if (!chatId) {
 		const chat = await chatStore.createChat({
@@ -24,6 +26,10 @@ async function handleSendMessage(content: string, parts?: any[]) {
 		chatId = chat.id;
 	}
 
-	await sendAndStream(chatId, content, parts);
+	const refused = await sendAndStream(chatId, content, parts);
+	if (isNew && refused && (await chatStore.discardIfEmpty(chatId))) {
+		await router.push('/');
+		chatStore.stageDraft(content, parts);
+	}
 }
 </script>

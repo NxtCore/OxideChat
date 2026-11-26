@@ -114,7 +114,7 @@ pub(crate) async fn generate_title(job: TitleJob) -> Option<String> {
 	}
 	let model_id = setting.model_id.unwrap_or(job.chat_model_id);
 	let model = Model::find_by_id(&job.state.db, &model_id).await.ok().flatten()?;
-	let (mut ir, _) = model_request(&model.model_id).await.ok()?;
+	let mut ir = model_request(&model.model_id).await.ok()?;
 
 	let conversation = format!("User: {}\n\nAssistant: {}", clip(&job.question), clip(&job.answer));
 	let admission = reserve(&job, &model.id, &conversation).await?;
