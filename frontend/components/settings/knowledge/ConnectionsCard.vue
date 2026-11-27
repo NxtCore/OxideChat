@@ -35,7 +35,18 @@
 						<ShadInput id="knowledge-connection-name" v-model="form.name" data-testid="knowledge-connection-name" autocomplete="off" />
 					</div>
 
-					<div class="grid gap-4 sm:grid-cols-2">
+					<div v-if="!editing" class="space-y-2">
+						<ShadLabel>{{ t('target') }}</ShadLabel>
+						<ShadSelect v-model="form.target">
+							<ShadSelectTrigger data-testid="knowledge-connection-target"><ShadSelectValue /></ShadSelectTrigger>
+							<ShadSelectContent>
+								<ShadSelectItem v-for="target in TARGETS" :key="target" :value="target" :data-testid="`knowledge-connection-target-${target}`">{{ t(`target_${target}`) }}</ShadSelectItem>
+							</ShadSelectContent>
+						</ShadSelect>
+						<p v-if="internal" class="text-xs text-muted-foreground">{{ t('target_internal_hint') }}</p>
+					</div>
+
+					<div v-if="editing || form.target === 'external'" class="grid gap-4 sm:grid-cols-2">
 						<div class="space-y-2">
 							<ShadLabel>{{ t('kind') }}</ShadLabel>
 							<ShadSelect v-model="form.kind" :disabled="Boolean(editing)">
@@ -46,9 +57,9 @@
 								</ShadSelectContent>
 							</ShadSelect>
 						</div>
-						<div class="space-y-2">
+						<div v-if="editing" class="space-y-2">
 							<ShadLabel>{{ t('mode') }}</ShadLabel>
-							<ShadSelect v-model="form.mode" :disabled="Boolean(editing) || form.kind === 'qdrant'">
+							<ShadSelect v-model="form.mode" disabled>
 								<ShadSelectTrigger data-testid="knowledge-connection-mode"><ShadSelectValue /></ShadSelectTrigger>
 								<ShadSelectContent>
 									<ShadSelectItem value="managed">{{ t('mode_managed') }}</ShadSelectItem>
@@ -59,13 +70,13 @@
 					</div>
 					<p v-if="!editing" class="-mt-2 text-xs text-muted-foreground">{{ t('mode_hint') }}</p>
 
-					<div class="space-y-2">
+					<div v-if="!internal" class="space-y-2">
 						<ShadLabel for="knowledge-connection-url">{{ t('url') }}</ShadLabel>
 						<ShadInput id="knowledge-connection-url" v-model="form.url" data-testid="knowledge-connection-url" autocomplete="off" :placeholder="form.kind === 'pgvector' && form.mode === 'managed' ? t('main_database') : ''" />
 						<p class="text-xs text-muted-foreground">{{ editing?.url_from_env ? t('url_from_env') : t(`url_hint_${form.kind}`) }}</p>
 					</div>
 
-					<div class="space-y-2">
+					<div v-if="!internal" class="space-y-2">
 						<ShadLabel for="knowledge-connection-secret">{{ t(`secret_${form.kind}`) }}</ShadLabel>
 						<ShadInput
 							id="knowledge-connection-secret"
@@ -163,8 +174,11 @@ const reindexDescription = computed(() => {
 	return t('reindex_confirm_description', {chunks: String(est.chunk_count), documents: String(est.document_count), cost});
 });
 
+const TARGETS = ['internal', 'postgres', 'external'] as const;
+
 const form = reactive({
 	name: '',
+	target: 'internal' as (typeof TARGETS)[number],
 	kind: 'pgvector' as ConnectionKind,
 	mode: 'managed' as ConnectionMode,
 	url: '',
@@ -174,16 +188,22 @@ const form = reactive({
 	dimensions: null as number | null,
 });
 
+const internal = computed(() => !editing.value && form.target === 'internal');
+
 watch(
-	() => form.kind,
-	kind => {
-		if (kind === 'qdrant') form.mode = 'read_only';
+	() => form.target,
+	target => {
+		if (editing.value) return;
+		form.mode = target === 'external' ? 'read_only' : 'managed';
+		if (target !== 'external') form.kind = 'pgvector';
+		if (target === 'internal') Object.assign(form, {url: '', secret: ''});
 	},
 );
 
 function summary(item: ConnectionResponse): string {
 	const parts = [item.kind === 'qdrant' ? 'Qdrant' : 'pgvector', t(`mode_${item.mode}`), item.url_from_env ? 'RAG_PGVECTOR_URL' : (item.url ?? t('main_database'))];
 	if (item.embedding) parts.push(t('vector_size', {size: String(item.embedding.vector_size)}));
+	else if (item.mode === 'managed') parts.push(t('needs_embedding'));
 	if (item.reindexing && item.reindex_progress) parts.push(t('reindexing', {done: String(item.reindex_progress.done), total: String(item.reindex_progress.total)}));
 	return parts.join(' · ');
 }
@@ -197,7 +217,17 @@ function resultText(result: ConnectionTestResponse): string {
 function openCreate() {
 	editing.value = null;
 	confirmDelete.value = false;
-	Object.assign(form, {name: '', kind: 'pgvector', mode: 'managed', url: '', secret: '', clearSecret: false, embeddingModelId: null, dimensions: null});
+	Object.assign(form, {
+		name: t('internal_name'),
+		target: 'internal',
+		kind: 'pgvector',
+		mode: 'managed',
+		url: '',
+		secret: '',
+		clearSecret: false,
+		embeddingModelId: null,
+		dimensions: null,
+	});
 	dialogOpen.value = true;
 }
 

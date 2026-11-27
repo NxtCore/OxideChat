@@ -1817,6 +1817,7 @@ mod managed {
 			dimensions: None,
 		});
 		let connection = RagConnection::create(pool, admin, &req, Some(3)).await?;
+		assert_eq!(RagConfig::get(pool).await?.default_connection_id, Some(connection.id), "the first managed connection becomes the default storage");
 		let update = UpdateRagSetupRequest {
 			reranker: RerankerSettings { model_id: None, top_n: 6 },
 			defaults: RagDefaults {

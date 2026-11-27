@@ -222,6 +222,7 @@ impl RagConnection {
 		.fetch_one(&mut *tx)
 		.await
 		.map_err(|error| RagError::foreign_key_or(error, RagError::ModelUnavailable))?;
+		connection.make_default_if_none(&mut tx).await?;
 		AuditLog::write(
 			&mut tx,
 			AuditEntry {
@@ -255,6 +256,7 @@ impl RagConnection {
 		let (vector_size, reindex) = current.next_index(request, vector_size);
 		current.check_managed_model_conflicts(&mut tx, request.embedding.as_ref()).await?;
 		let connection = self.apply_update(&mut tx, request, new_secret, (vector_size, reindex)).await?;
+		connection.make_default_if_none(&mut tx).await?;
 		if reindex {
 			connection.queue_reindex(&mut tx, actor_id).await?;
 		}
@@ -272,6 +274,16 @@ impl RagConnection {
 		tx.commit().await?;
 		super::forget_pool(&connection.id);
 		Ok(connection)
+	}
+
+	async fn make_default_if_none(&self, tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> Result<(), sqlx::Error> {
+		if self.mode == ConnectionMode::Managed {
+			sqlx::query("UPDATE rag_config SET default_connection_id = $1 WHERE default_connection_id IS NULL")
+				.bind(self.id)
+				.execute(&mut **tx)
+				.await?;
+		}
+		Ok(())
 	}
 
 	async fn apply_update(

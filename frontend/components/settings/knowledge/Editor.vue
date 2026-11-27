@@ -1,5 +1,5 @@
 <template>
-	<SettingsPage :title="pageTitle" :description="t('description')" :form="settingsForm">
+	<SettingsPage :title="pageTitle" :description="t(isManaged ? 'description_managed' : 'description')" :form="settingsForm">
 		<template #leading>
 			<ShadButton variant="ghost" size="icon" class="shrink-0" data-testid="knowledge-editor-back" @click="router.push('/settings/knowledge')">
 				<ArrowLeft class="h-4 w-4" />
@@ -28,7 +28,7 @@
 			<SettingsKnowledgeDocuments v-if="!isNew && isManaged && currentTab === 'documents'" :id="id" :can-edit="canEdit" />
 
 			<div v-show="currentTab === 'general'" class="space-y-4">
-				<div v-if="isNew && canCreateManaged && canCreateExternal" class="space-y-2">
+				<div v-if="isNew && managedScopes && canCreateExternal" class="space-y-2">
 					<ShadLabel>{{ t('kind_label') }}</ShadLabel>
 					<ShadSelect v-model="createKind">
 						<ShadSelectTrigger data-testid="knowledge-kind"><ShadSelectValue /></ShadSelectTrigger>
@@ -38,6 +38,11 @@
 						</ShadSelectContent>
 					</ShadSelect>
 				</div>
+
+				<p v-if="isNew && isManaged && !canCreateManaged" class="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground" data-testid="knowledge-managed-unavailable">
+					{{ t('managed_unavailable') }}
+					<NuxtLink v-if="canAdminManage" to="/settings/tools/knowledge" class="text-primary underline">{{ store.getTranslation('knowledge.source.to_setup') }}</NuxtLink>
+				</p>
 
 				<div class="space-y-2">
 					<ShadLabel for="knowledge-name">{{ t('name') }}</ShadLabel>
@@ -136,12 +141,11 @@ const notFound = ref(false);
 const deleteOpen = ref(false);
 const base = ref<KnowledgeBaseResponse | null>(null);
 const scopes = ref<KnowledgeScopesResponse | null>(null);
-const createKind = ref<'managed' | 'external'>('external');
+const createKind = ref<'managed' | 'external'>('managed');
 
 const canAdminManage = computed(() => store.hasPermission(ADMIN_RAG_EDIT));
-const canCreateManaged = computed(() =>
-	Boolean(scopes.value?.managed_available && (scopes.value.personal || scopes.value.teams.length > 0 || scopes.value.installation)),
-);
+const managedScopes = computed(() => Boolean(scopes.value && (scopes.value.personal || scopes.value.teams.length > 0 || scopes.value.installation)));
+const canCreateManaged = computed(() => Boolean(scopes.value?.managed_available) && managedScopes.value);
 const canCreateExternal = computed(() => Boolean(scopes.value?.external));
 const isManaged = computed(() => (isNew ? createKind.value === 'managed' : base.value?.mode === 'managed'));
 
@@ -154,7 +158,7 @@ const scopeOptions = computed<KnowledgeScope[]>(() => {
 	return list;
 });
 
-const canManage = computed(() => (isNew ? canCreateManaged.value || canCreateExternal.value : !!base.value?.can_manage));
+const canManage = computed(() => (isNew ? managedScopes.value || canCreateExternal.value : !!base.value?.can_manage));
 const canEdit = computed(() => (isNew ? canManage.value : !!base.value?.can_edit));
 const canView = computed(() => canAdminManage.value || store.hasPermission(ADMIN_RAG_VIEW));
 const canShareTab = computed(() => canView.value || !!base.value?.can_manage);
@@ -172,7 +176,7 @@ const tabs = computed(() => {
 const currentTab = ref(String(route.query.tab ?? 'general'));
 const sourceOpened = ref(false);
 watch(currentTab, tab => (sourceOpened.value ||= tab === 'source'), {immediate: true});
-const pageTitle = computed(() => (isNew ? t('new_title') : form.name || base.value?.name || ''));
+const pageTitle = computed(() => (isNew ? t(isManaged.value ? 'new_title_managed' : 'new_title') : form.name || base.value?.name || ''));
 
 const form = reactive({
 	name: '',
@@ -216,6 +220,7 @@ const settingsForm = useSettingsForm({
 	savedKey: 'knowledge.editor.saved',
 	errorKey: 'knowledge.editor.save_error',
 	validate: () => {
+		if (isNew && isManaged.value && !canCreateManaged.value) return 'knowledge.editor.managed_unavailable';
 		if (!form.name.trim()) return 'knowledge.editor.name_required';
 		if (!isManaged.value && canAdminManage.value && (!form.view.connection_id || !form.view.collection || !form.view.fields.text || !form.view.embedding.model_id)) {
 			return 'knowledge.editor.source_required';
@@ -278,11 +283,8 @@ onMounted(async () => {
 	try {
 		if (isNew) {
 			scopes.value = await knowledgeScopes().catch(() => null);
-			if (canCreateManaged.value && (!canCreateExternal.value || route.query.kind === 'managed' || scopes.value?.managed_available)) {
-				createKind.value = route.query.kind === 'external' && canCreateExternal.value ? 'external' : 'managed';
-			} else {
-				createKind.value = 'external';
-			}
+			const wantsExternal = route.query.kind === 'external' || !managedScopes.value;
+			createKind.value = wantsExternal && canCreateExternal.value ? 'external' : 'managed';
 			if (scopeOptions.value[0]) form.scope = scopeOptions.value[0];
 			if (form.scope === 'team' && scopes.value?.teams[0]) form.team_id = scopes.value.teams[0].id;
 		} else {
