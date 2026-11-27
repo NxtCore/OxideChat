@@ -8,8 +8,9 @@ use crate::types::{AppError, AuthUser, JobState, ReplaceAssignmentsRequest, json
 use axum::{
 	Json,
 	body::Bytes,
-	extract::{Path, Query, State},
-	response::Response,
+	extract::{Path, Query, State, rejection::BytesRejection},
+	http::StatusCode,
+	response::{IntoResponse, Response},
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -234,10 +235,7 @@ pub async fn replace_model_access(State(state): State<Arc<JobState>>, auth: Auth
 pub async fn list_documents(State(state): State<Arc<JobState>>, auth: AuthUser, Path(id): Path<Uuid>) -> Result<Response, AppError> {
 	let actor = actor(&state, &auth).await?;
 	let base = find(&state, &actor, &id).await?;
-	if !base.is_managed() {
-		return Err(RagError::NotManaged.into());
-	}
-	let docs: Vec<_> = RagDocument::list(&state.db, &base.id).await?.iter().map(RagDocument::to_response).collect();
+	let docs: Vec<_> = RagDocument::visible_to(&state.db, &actor, &base).await?.iter().map(RagDocument::to_response).collect();
 	json_ok(docs)
 }
 
@@ -247,8 +245,13 @@ pub async fn upload_document(
 	auth: AuthUser,
 	Path(id): Path<Uuid>,
 	Query(query): Query<DocumentUploadQuery>,
-	bytes: Bytes,
+	body: Result<Bytes, BytesRejection>,
 ) -> Result<Response, AppError> {
+	let bytes = match body {
+		Ok(bytes) => bytes,
+		Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => return Err(RagError::FileTooLarge.into()),
+		Err(rejection) => return Ok(rejection.into_response()),
+	};
 	let actor = actor(&state, &auth).await?;
 	let base = find(&state, &actor, &id).await?;
 	let doc = RagDocument::upload(&state, &actor, &base, &query.filename, &bytes).await?;

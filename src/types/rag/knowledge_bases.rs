@@ -861,31 +861,48 @@ impl KnowledgeBase {
 			.bind(user_id)
 			.fetch_all(&mut **tx)
 			.await?;
+		Self::delete_owned(tx, &ids).await
+	}
+
+	/// Removes a team's knowledge bases before the team is deleted, the way [`Self::delete_user_personal`] does for a user.
+	///
+	/// # Errors
+	///
+	/// Returns a database error when a statement fails.
+	pub async fn delete_team_owned(tx: &mut Transaction<'_, Postgres>, team_id: &Uuid) -> Result<bool, sqlx::Error> {
+		let ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM knowledge_bases WHERE scope = 'team' AND team_id = $1 AND deleted_at IS NULL")
+			.bind(team_id)
+			.fetch_all(&mut **tx)
+			.await?;
+		Self::delete_owned(tx, &ids).await
+	}
+
+	async fn delete_owned(tx: &mut Transaction<'_, Postgres>, ids: &[Uuid]) -> Result<bool, sqlx::Error> {
 		if ids.is_empty() {
 			return Ok(false);
 		}
-		sqlx::query("DELETE FROM knowledge_base_shares WHERE knowledge_base_id = ANY($1)").bind(&ids).execute(&mut **tx).await?;
-		sqlx::query("DELETE FROM chat_knowledge_bases WHERE knowledge_base_id = ANY($1)").bind(&ids).execute(&mut **tx).await?;
-		sqlx::query("DELETE FROM preset_knowledge_bases WHERE knowledge_base_id = ANY($1)").bind(&ids).execute(&mut **tx).await?;
+		sqlx::query("DELETE FROM knowledge_base_shares WHERE knowledge_base_id = ANY($1)").bind(ids).execute(&mut **tx).await?;
+		sqlx::query("DELETE FROM chat_knowledge_bases WHERE knowledge_base_id = ANY($1)").bind(ids).execute(&mut **tx).await?;
+		sqlx::query("DELETE FROM preset_knowledge_bases WHERE knowledge_base_id = ANY($1)").bind(ids).execute(&mut **tx).await?;
 		let marked = sqlx::query(
 			"UPDATE rag_documents SET status = 'deleting', source_bytes = NULL, locked_at = NULL, updated_at = NOW()
 			 WHERE knowledge_base_id = ANY($1)",
 		)
-		.bind(&ids)
+		.bind(ids)
 		.execute(&mut **tx)
 		.await?;
 		sqlx::query(
-			"UPDATE knowledge_bases SET deleted_at = NOW(), owner_id = NULL, shared_with_everyone = FALSE, updated_at = NOW()
+			"UPDATE knowledge_bases SET deleted_at = NOW(), owner_id = NULL, team_id = NULL, shared_with_everyone = FALSE, updated_at = NOW()
 			 WHERE id = ANY($1) AND EXISTS (SELECT 1 FROM rag_documents d WHERE d.knowledge_base_id = knowledge_bases.id)",
 		)
-		.bind(&ids)
+		.bind(ids)
 		.execute(&mut **tx)
 		.await?;
 		sqlx::query(
 			"DELETE FROM knowledge_bases
 			 WHERE id = ANY($1) AND NOT EXISTS (SELECT 1 FROM rag_documents d WHERE d.knowledge_base_id = knowledge_bases.id)",
 		)
-		.bind(&ids)
+		.bind(ids)
 		.execute(&mut **tx)
 		.await?;
 		Ok(marked.rows_affected() > 0)

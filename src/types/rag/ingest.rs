@@ -1,17 +1,22 @@
 //! Background ingest and deletion worker for managed knowledge bases.
 
 use super::{
-	DocumentStatus, ManagedVector, ModelTargets, RagConfig, RagConnection, RagError, TextChunk, VectorStore, check_embedding_allowed, check_search_language, chunk_document,
+	ChunkConfig, DocumentStatus, ManagedVector, ModelTargets, RagConfig, RagConnection, RagError, TextChunk, VectorStore, check_embedding_allowed, check_search_language, chunk_document, has_headings,
 	embed_batch,
 };
 use crate::types::JobState;
 use crate::utils::extract::{self, DocumentKind};
+use chrono::{DateTime, Utc};
+use futures_util::FutureExt;
 use sqlx::PgPool;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
+
+const HEARTBEAT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, sqlx::FromRow)]
 struct ClaimedDocument {
@@ -22,6 +27,7 @@ struct ClaimedDocument {
 	text: Option<String>,
 	source_bytes: Option<Vec<u8>>,
 	index_generation: i32,
+	locked_at: Option<DateTime<Utc>>,
 	uploaded_by: Option<Uuid>,
 	reindex_by: Option<Uuid>,
 	connection_id: Uuid,
@@ -76,18 +82,48 @@ pub async fn process_one(state: &JobState) -> Result<bool, sqlx::Error> {
 		return Ok(true);
 	}
 	if let Some(doc) = claim_pending(&state.db).await? {
-		if let Err(reason) = ingest_document(state, &doc).await {
-			let _ = mark_failed(&state.db, &doc.id, reason).await;
-		}
+		run_claimed(state, &doc).await;
 		return Ok(true);
 	}
 	Ok(false)
 }
 
+async fn run_claimed(state: &JobState, doc: &ClaimedDocument) {
+	let work = AssertUnwindSafe(ingest_document(state, doc)).catch_unwind();
+	tokio::pin!(work);
+	let mut beat = tokio::time::interval(HEARTBEAT);
+	let outcome = loop {
+		tokio::select! {
+			outcome = &mut work => break outcome,
+			_ = beat.tick() => {
+				let _ = heartbeat(&state.db, doc).await;
+			}
+		}
+	};
+	let reason = match outcome {
+		Ok(Ok(())) => return,
+		Ok(Err(reason)) => reason,
+		Err(_) => {
+			tracing::error!(document_id = %doc.id, "[JOBS] RAG ingest panicked on a document");
+			"extract_failed"
+		}
+	};
+	let _ = mark_failed(&state.db, doc, reason).await;
+}
+
+async fn heartbeat(pool: &PgPool, doc: &ClaimedDocument) -> Result<(), sqlx::Error> {
+	sqlx::query("UPDATE rag_documents SET updated_at = NOW() WHERE id = $1 AND status = 'processing' AND locked_at = $2")
+		.bind(doc.id)
+		.bind(doc.locked_at)
+		.execute(pool)
+		.await?;
+	Ok(())
+}
+
 async fn reap_stuck_and_cleanup(pool: &PgPool) -> Result<(), sqlx::Error> {
 	sqlx::query(
 		"UPDATE rag_documents SET status = 'pending', locked_at = NULL, updated_at = NOW()
-		 WHERE status = 'processing' AND locked_at < NOW() - INTERVAL '10 minutes'",
+		 WHERE status = 'processing' AND updated_at < NOW() - INTERVAL '10 minutes'",
 	)
 	.execute(pool)
 	.await?;
@@ -168,8 +204,8 @@ async fn remove_deleted_document(pool: &PgPool, doc: &DeletingDocument) -> Resul
 
 async fn claim_pending(pool: &PgPool) -> Result<Option<ClaimedDocument>, sqlx::Error> {
 	let mut tx = pool.begin().await?;
-	let row: Option<ClaimedDocument> = sqlx::query_as(
-		"SELECT d.id, d.knowledge_base_id, d.filename, d.mime_type, d.text, d.source_bytes, d.index_generation,
+	let mut row: Option<ClaimedDocument> = sqlx::query_as(
+		"SELECT d.id, d.knowledge_base_id, d.filename, d.mime_type, d.text, d.source_bytes, d.index_generation, d.locked_at,
 		        d.uploaded_by, d.reindex_by, kb.connection_id, kb.search_language
 		 FROM rag_documents d
 		 JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
@@ -180,11 +216,13 @@ async fn claim_pending(pool: &PgPool) -> Result<Option<ClaimedDocument>, sqlx::E
 	)
 	.fetch_optional(&mut *tx)
 	.await?;
-	if let Some(doc) = &row {
-		sqlx::query("UPDATE rag_documents SET status = 'processing', locked_at = NOW(), error = NULL, updated_at = NOW() WHERE id = $1")
-			.bind(doc.id)
-			.execute(&mut *tx)
-			.await?;
+	if let Some(doc) = &mut row {
+		let claimed: DateTime<Utc> =
+			sqlx::query_scalar("UPDATE rag_documents SET status = 'processing', locked_at = NOW(), error = NULL, updated_at = NOW() WHERE id = $1 RETURNING locked_at")
+				.bind(doc.id)
+				.fetch_one(&mut *tx)
+				.await?;
+		doc.locked_at = Some(claimed);
 	}
 	tx.commit().await?;
 	Ok(row)
@@ -241,17 +279,20 @@ async fn ingest_document(state: &JobState, doc: &ClaimedDocument) -> Result<(), 
 			billing_user: &target.billing_user,
 		};
 		reindex_existing_chunks(state, &ctx, &existing_chunks).await?;
-		maybe_cleanup_old_tables(state, &target.connection, &target.store).await;
-		return Ok(());
+	} else {
+		index_fresh_document(state, doc, &target).await?;
 	}
-	index_fresh_document(state, doc, &target).await?;
-	maybe_cleanup_old_tables(state, &target.connection, &target.store).await;
+	cleanup_old_tables(state, &target.connection.id, &target.store).await;
 	Ok(())
 }
 
 async fn index_fresh_document(state: &JobState, doc: &ClaimedDocument, target: &IngestTarget<'_>) -> Result<(), &'static str> {
 	let text = extract_or_reuse_text(&state.db, doc).await?;
-	let chunks = chunk_document(&text, target.config.chunk_config());
+	let config = ChunkConfig {
+		headings: has_headings(&doc.filename, &doc.mime_type),
+		..target.config.chunk_config()
+	};
+	let chunks = chunk_document(&text, config);
 	if chunks.is_empty() {
 		return Err("empty");
 	}
@@ -283,13 +324,9 @@ async fn index_fresh_document(state: &JobState, doc: &ClaimedDocument, target: &
 		.await
 		.map_err(|_| "store_failed")?;
 
-	if !finalize_ready(&state.db, &doc.id, chunk_count, total_tokens, target.connection.index_generation)
+	finalize_ready(&state.db, doc, chunk_count, total_tokens, target.connection.index_generation)
 		.await
-		.map_err(|_| "store_failed")?
-	{
-		let _ = target.store.delete_managed_document(&target.connection.id, &doc.id).await;
-	}
-	Ok(())
+		.map_err(|_| "store_failed")
 }
 
 async fn extract_or_reuse_text(pool: &PgPool, doc: &ClaimedDocument) -> Result<String, &'static str> {
@@ -297,10 +334,11 @@ async fn extract_or_reuse_text(pool: &PgPool, doc: &ClaimedDocument) -> Result<S
 		let kind = DocumentKind::from_mime(&doc.mime_type).ok_or("extract_failed")?;
 		let text = extract::extract(kind, bytes).await.map_err(|error| error.reason())?;
 		let pages = if kind == DocumentKind::Pdf { extract::page_count(&text) } else { None };
-		sqlx::query("UPDATE rag_documents SET text = $2, page_count = $3, source_bytes = NULL, updated_at = NOW() WHERE id = $1")
+		sqlx::query("UPDATE rag_documents SET text = $2, page_count = $3, source_bytes = NULL, updated_at = NOW() WHERE id = $1 AND locked_at = $4")
 			.bind(doc.id)
 			.bind(&text)
 			.bind(pages)
+			.bind(doc.locked_at)
 			.execute(pool)
 			.await
 			.map_err(|_| "store_failed")?;
@@ -334,8 +372,9 @@ async fn reindex_existing_chunks(state: &JobState, ctx: &ReindexContext<'_>, chu
 		})
 		.collect();
 	let vectors = embed_batch(state, ctx.billing_user, &embedding, &inputs, "rag_ingest").await.map_err(rag_doc_error)?;
-	let current_access: Option<Option<Vec<String>>> = sqlx::query_scalar("SELECT access FROM rag_documents WHERE id = $1 AND status = 'processing'")
+	let current_access: Option<Option<Vec<String>>> = sqlx::query_scalar("SELECT access FROM rag_documents WHERE id = $1 AND status = 'processing' AND locked_at = $2")
 		.bind(ctx.doc.id)
+		.bind(ctx.doc.locked_at)
 		.fetch_optional(&state.db)
 		.await
 		.map_err(|_| "store_failed")?;
@@ -359,13 +398,9 @@ async fn reindex_existing_chunks(state: &JobState, ctx: &ReindexContext<'_>, chu
 		.map_err(|_| "store_failed")?;
 	let total_tokens: i32 = chunks.iter().map(|chunk| chunk.token_count).fold(0i32, i32::saturating_add);
 	let chunk_count = i32::try_from(chunks.len()).unwrap_or(i32::MAX);
-	if !finalize_ready(&state.db, &ctx.doc.id, chunk_count, total_tokens, ctx.connection.index_generation)
+	finalize_ready(&state.db, ctx.doc, chunk_count, total_tokens, ctx.connection.index_generation)
 		.await
-		.map_err(|_| "store_failed")?
-	{
-		let _ = ctx.store.delete_managed_document(&ctx.connection.id, &ctx.doc.id).await;
-	}
-	Ok(())
+		.map_err(|_| "store_failed")
 }
 
 async fn store_chunks(
@@ -375,8 +410,9 @@ async fn store_chunks(
 	language: &'static str,
 ) -> Result<Option<(Vec<Uuid>, Option<Vec<String>>)>, sqlx::Error> {
 	let mut tx = pool.begin().await?;
-	let current: Option<(DocumentStatus, Option<Vec<String>>)> = sqlx::query_as("SELECT status, access FROM rag_documents WHERE id = $1 FOR UPDATE")
+	let current: Option<(DocumentStatus, Option<Vec<String>>)> = sqlx::query_as("SELECT status, access FROM rag_documents WHERE id = $1 AND locked_at = $2 FOR UPDATE")
 		.bind(doc.id)
+		.bind(doc.locked_at)
 		.fetch_optional(&mut *tx)
 		.await?;
 	let Some((DocumentStatus::Processing, access)) = current else {
@@ -408,34 +444,39 @@ async fn store_chunks(
 	Ok(Some((ids, access)))
 }
 
-async fn finalize_ready(pool: &PgPool, document_id: &Uuid, chunk_count: i32, token_count: i32, generation: i32) -> Result<bool, sqlx::Error> {
-	let updated = sqlx::query(
+async fn finalize_ready(pool: &PgPool, doc: &ClaimedDocument, chunk_count: i32, token_count: i32, generation: i32) -> Result<(), sqlx::Error> {
+	sqlx::query(
 		"UPDATE rag_documents
 		 SET status = 'ready', chunk_count = $2, token_count = $3, index_generation = $4, reindex_by = NULL, locked_at = NULL, error = NULL, updated_at = NOW()
-		 WHERE id = $1 AND status = 'processing'",
+		 WHERE id = $1 AND status = 'processing' AND locked_at = $5",
 	)
-	.bind(document_id)
+	.bind(doc.id)
 	.bind(chunk_count)
 	.bind(token_count)
 	.bind(generation)
-	.execute(pool)
-	.await?;
-	Ok(updated.rows_affected() > 0)
-}
-
-async fn mark_failed(pool: &PgPool, document_id: &Uuid, reason: &'static str) -> Result<(), sqlx::Error> {
-	sqlx::query(
-		"UPDATE rag_documents SET status = 'failed', error = $2, locked_at = NULL, updated_at = NOW()
-		 WHERE id = $1 AND status = 'processing'",
-	)
-	.bind(document_id)
-	.bind(reason)
+	.bind(doc.locked_at)
 	.execute(pool)
 	.await?;
 	Ok(())
 }
 
-async fn maybe_cleanup_old_tables(state: &JobState, connection: &RagConnection, store: &VectorStore<'_>) {
+async fn mark_failed(pool: &PgPool, doc: &ClaimedDocument, reason: &'static str) -> Result<(), sqlx::Error> {
+	sqlx::query(
+		"UPDATE rag_documents SET status = 'failed', error = $2, locked_at = NULL, updated_at = NOW()
+		 WHERE id = $1 AND status = 'processing' AND locked_at = $3",
+	)
+	.bind(doc.id)
+	.bind(reason)
+	.bind(doc.locked_at)
+	.execute(pool)
+	.await?;
+	Ok(())
+}
+
+async fn cleanup_old_tables(state: &JobState, connection_id: &Uuid, store: &VectorStore<'_>) {
+	let Ok(Some(connection)) = RagConnection::find(&state.db, connection_id).await else {
+		return;
+	};
 	if matches!(connection.is_reindexing(&state.db).await, Ok(false)) {
 		let _ = store.drop_old_managed_tables(&connection.id, connection.index_generation).await;
 	}

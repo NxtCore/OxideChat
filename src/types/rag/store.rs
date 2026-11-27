@@ -478,7 +478,7 @@ impl<'a> VectorStore<'a> {
 		Ok(())
 	}
 
-	/// Normalizes and upserts chunk vectors into the managed pgvector table in one transaction.
+	/// Normalizes chunk vectors and writes them into the managed pgvector table in one transaction, replacing the vectors their documents had there.
 	///
 	/// # Errors
 	///
@@ -496,7 +496,12 @@ impl<'a> VectorStore<'a> {
 			 VALUES ($1, $2, $3, $4, $5::real[]::vector::halfvec)
 			 ON CONFLICT (chunk_id) DO UPDATE SET access = EXCLUDED.access, embedding = EXCLUDED.embedding"
 		);
+		let mut documents: Vec<Uuid> = rows.iter().map(|row| row.document_id).collect();
+		documents.sort_unstable();
+		documents.dedup();
 		let mut tx = timed(pool.begin()).await?;
+		let clear = format!("DELETE FROM {table} WHERE document_id = ANY($1)");
+		timed(sqlx::query(AssertSqlSafe(clear)).bind(&documents).execute(&mut *tx)).await?;
 		for row in rows {
 			let mut vector = row.embedding.clone();
 			if !super::normalize_vector(&mut vector) {
@@ -549,7 +554,7 @@ impl<'a> VectorStore<'a> {
 		Ok(())
 	}
 
-	/// Drops managed vector tables of `connection_id` from older generations once re-indexing is complete.
+	/// Drops managed vector tables of `connection_id` from generations before `keep_generation` once re-indexing is complete.
 	///
 	/// # Errors
 	///
@@ -558,9 +563,10 @@ impl<'a> VectorStore<'a> {
 		let Self::Pgvector(pool) = self else {
 			return Err(StoreError::BadResponse);
 		};
-		let keep = managed_table_name(connection_id, keep_generation);
+		let prefix = managed_table_prefix(connection_id);
 		for table in list_managed_tables(pool.as_ref(), connection_id).await? {
-			if table != keep {
+			let generation = table.strip_prefix(&prefix).and_then(|suffix| suffix.parse::<i32>().ok());
+			if generation.is_some_and(|generation| generation < keep_generation) {
 				let sql = format!("DROP TABLE IF EXISTS {}", quote_ident(&table));
 				timed(sqlx::query(AssertSqlSafe(sql)).execute(pool.as_ref())).await?;
 			}

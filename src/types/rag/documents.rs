@@ -7,7 +7,7 @@ use crate::logging::AuditLog;
 use crate::types::{AssignmentKind, AssignmentTarget, AssignmentsResponse, AuditEntry, JobState, ReplaceAssignmentsRequest};
 use crate::utils::extract::{DocumentKind, MAX_UPLOAD_BYTES};
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 const AUDIT_TARGET: &str = "rag_document";
@@ -62,21 +62,35 @@ impl RagDocument {
 	/// Target kinds accepted by per-document "Limit access".
 	pub const ACCESS_KINDS: [AssignmentKind; 3] = [AssignmentKind::Team, AssignmentKind::Role, AssignmentKind::User];
 
-	/// Lists non-deleted documents of a managed knowledge base, newest first.
+	/// The documents `actor` may see in a managed knowledge base: editors see all, everyone else those their labels grant.
+	///
+	/// # Errors
+	///
+	/// Returns `NotManaged` or a database error.
+	pub async fn visible_to(pool: &PgPool, actor: &KnowledgeActor, base: &KnowledgeBase) -> Result<Vec<Self>, RagError> {
+		if !base.is_managed() {
+			return Err(RagError::NotManaged);
+		}
+		let labels = if actor.can_edit(base) { None } else { Some(user_identity_labels(pool, &actor.user_id).await?) };
+		Ok(Self::list(pool, &base.id, labels.as_deref()).await?)
+	}
+
+	/// Lists documents of a managed knowledge base that are not being deleted, newest first; with `labels`, only those the labels grant.
 	///
 	/// # Errors
 	///
 	/// Returns a database error when the query fails.
-	pub async fn list(pool: &PgPool, knowledge_base_id: &Uuid) -> Result<Vec<Self>, sqlx::Error> {
+	pub async fn list(pool: &PgPool, knowledge_base_id: &Uuid, labels: Option<&[String]>) -> Result<Vec<Self>, sqlx::Error> {
 		sqlx::query_as::<_, Self>(
 			"SELECT id, knowledge_base_id, filename, mime_type, size_bytes, status, error, page_count, chunk_count, token_count, access,
 			        (status = 'failed' AND (source_bytes IS NOT NULL OR text IS NOT NULL)) AS can_retry,
 			        created_at, updated_at
 			 FROM rag_documents
-			 WHERE knowledge_base_id = $1
+			 WHERE knowledge_base_id = $1 AND status <> 'deleting' AND ($2::text[] IS NULL OR access IS NULL OR access && $2)
 			 ORDER BY created_at DESC, id DESC",
 		)
 		.bind(knowledge_base_id)
+		.bind(labels)
 		.fetch_all(pool)
 		.await
 	}
@@ -127,11 +141,16 @@ impl RagDocument {
 		}
 		let targets = ModelTargets::load(&state.db, &[base.id]).await?.remove(&base.id).unwrap_or_default();
 		check_embedding_allowed(&state.db, &targets, &embedding.model_id).await?;
-		check_quotas(&state.db, &actor.user_id, bytes.len()).await?;
+		let config = RagConfig::get(&state.db).await?;
 
 		let hash = sha256_hex(bytes);
 		let size = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
 		let mut tx = state.db.begin().await?;
+		sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+			.bind(format!("rag_documents:{}", actor.user_id))
+			.execute(&mut *tx)
+			.await?;
+		check_quotas(&mut tx, &config, &actor.user_id, bytes.len()).await?;
 		let doc = sqlx::query_as::<_, Self>(
 			"INSERT INTO rag_documents (knowledge_base_id, filename, mime_type, size_bytes, sha256, source_bytes, index_generation, uploaded_by)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -240,15 +259,18 @@ impl RagDocument {
 	///
 	/// # Errors
 	///
-	/// Returns `NotManaged`, `NotFound` or a database error.
+	/// Returns `NotManaged`, `Forbidden`, `NotFound` or a database error.
 	pub async fn assignments(pool: &PgPool, actor: &KnowledgeActor, base: &KnowledgeBase, document_id: &Uuid) -> Result<AssignmentsResponse, RagError> {
 		if !base.is_managed() {
 			return Err(RagError::NotManaged);
 		}
+		if !actor.can_edit(base) {
+			return Err(RagError::Forbidden);
+		}
 		let doc = Self::find(pool, &base.id, document_id).await?.ok_or(RagError::NotFound)?;
 		let targets = decode_access_targets(pool, doc.access.as_deref().unwrap_or(&[])).await?;
 		Ok(AssignmentsResponse {
-			kinds: if actor.can_edit(base) { Self::ACCESS_KINDS.to_vec() } else { Vec::new() },
+			kinds: Self::ACCESS_KINDS.to_vec(),
 			single: false,
 			roles: Vec::new(),
 			targets,
@@ -354,12 +376,12 @@ fn sanitize_filename(raw: &str) -> Result<&str, RagError> {
 	Ok(name)
 }
 
-async fn check_quotas(pool: &PgPool, user_id: &Uuid, upload_bytes: usize) -> Result<(), RagError> {
-	let config = RagConfig::get(pool).await?;
-	let recent: i64 = sqlx::query_scalar("SELECT COUNT(*)::bigint FROM rag_documents WHERE uploaded_by = $1 AND created_at > NOW() - INTERVAL '1 hour'")
-		.bind(user_id)
-		.fetch_one(pool)
-		.await?;
+async fn check_quotas(tx: &mut PgConnection, config: &RagConfig, user_id: &Uuid, upload_bytes: usize) -> Result<(), RagError> {
+	let recent: i64 =
+		sqlx::query_scalar("SELECT COUNT(*)::bigint FROM audit_logs WHERE actor_id = $1 AND event = 'rag_document_uploaded' AND created_at > NOW() - INTERVAL '1 hour'")
+			.bind(user_id)
+			.fetch_one(&mut *tx)
+			.await?;
 	if recent >= i64::from(config.max_uploads_per_hour) {
 		return Err(RagError::RateLimited);
 	}
@@ -370,7 +392,7 @@ async fn check_quotas(pool: &PgPool, user_id: &Uuid, upload_bytes: usize) -> Res
 			 FROM rag_documents WHERE uploaded_by = $1 AND status <> 'deleting'",
 		)
 		.bind(user_id)
-		.fetch_one(pool)
+		.fetch_one(&mut *tx)
 		.await?;
 		if used.saturating_add(i64::try_from(upload_bytes).unwrap_or(i64::MAX)) > quota_bytes {
 			return Err(RagError::StorageQuotaExceeded);

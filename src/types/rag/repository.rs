@@ -60,6 +60,7 @@ impl RagConfig {
 	#[must_use]
 	pub fn chunk_config(&self) -> ChunkConfig {
 		ChunkConfig {
+			headings: true,
 			target_tokens: usize::try_from(self.chunk_size).unwrap_or(super::DEFAULT_CHUNK_TOKENS),
 			overlap_percent: usize::try_from(self.chunk_overlap_percent).unwrap_or(super::DEFAULT_OVERLAP_PERCENT),
 		}
@@ -438,7 +439,7 @@ impl RagConnection {
 		Ok(conflicts)
 	}
 
-	/// Whether any non-deleting document on `connection_id` is still behind `index_generation`.
+	/// Whether any document on `connection_id` still waits to be re-indexed to `index_generation`; failed documents do not count.
 	///
 	/// # Errors
 	///
@@ -450,7 +451,7 @@ impl RagConnection {
 		sqlx::query_scalar(
 			"SELECT EXISTS (
 				SELECT 1 FROM rag_documents d JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
-				WHERE kb.connection_id = $1 AND kb.deleted_at IS NULL AND d.status <> 'deleting' AND d.index_generation < $2
+				WHERE kb.connection_id = $1 AND kb.deleted_at IS NULL AND d.status IN ('pending', 'processing') AND d.index_generation < $2
 			)",
 		)
 		.bind(self.id)
@@ -474,7 +475,7 @@ impl RagConnection {
 			 JOIN rag_documents d ON d.knowledge_base_id = kb.id AND d.status <> 'deleting'
 			 WHERE c.mode = 'managed'
 			 GROUP BY c.id
-			 HAVING COUNT(*) FILTER (WHERE d.index_generation < c.index_generation) > 0",
+			 HAVING COUNT(*) FILTER (WHERE d.index_generation < c.index_generation AND d.status IN ('pending', 'processing')) > 0",
 		)
 		.fetch_all(pool)
 		.await?;

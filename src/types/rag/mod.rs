@@ -15,7 +15,7 @@ mod store;
 mod view;
 
 pub use access::*;
-pub use chunker::{ChunkConfig, DEFAULT_CHUNK_TOKENS, DEFAULT_OVERLAP_PERCENT, TextChunk, chunk_document, sha256_hex};
+pub use chunker::{ChunkConfig, DEFAULT_CHUNK_TOKENS, DEFAULT_OVERLAP_PERCENT, TextChunk, chunk_document, has_headings, sha256_hex};
 pub use documents::*;
 pub use ingest::*;
 pub use knowledge_bases::*;

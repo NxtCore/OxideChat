@@ -970,6 +970,12 @@ mod pgvector {
 		assert!(store.search_managed(&search_req(&conn_id, &kb_a, &hr_label)).await?.is_empty());
 
 		store.ensure_managed(&conn_id, 2, 3).await?;
+		store.drop_old_managed_tables(&conn_id, 1).await?;
+		let newer_kept: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+			.bind(managed_table_name(&conn_id, 2))
+			.fetch_one(&pool)
+			.await?;
+		assert!(newer_kept, "a worker with a stale generation must not drop a newer table");
 		store.drop_old_managed_tables(&conn_id, 2).await?;
 		let old_exists: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
 			.bind(managed_table_name(&conn_id, 1))
@@ -1588,7 +1594,7 @@ mod model_access {
 
 #[cfg(test)]
 mod chunker_and_extract {
-	use crate::types::rag::{ChunkConfig, chunk_document, normalize_vector, sha256_hex, split_embedding_batches};
+	use crate::types::rag::{ChunkConfig, chunk_document, has_headings, normalize_vector, sha256_hex, split_embedding_batches};
 	use crate::utils::extract::{self, DocumentKind};
 
 	fn sample_pdf(pages: &[&str]) -> Vec<u8> {
@@ -1640,6 +1646,7 @@ mod chunker_and_extract {
 		let config = ChunkConfig {
 			target_tokens: 45,
 			overlap_percent: 20,
+			..ChunkConfig::default()
 		};
 		let chunks = chunk_document(doc, config);
 		assert!(chunks.len() >= 4, "expected multiple chunks, got {}", chunks.len());
@@ -1671,6 +1678,7 @@ mod chunker_and_extract {
 			ChunkConfig {
 				target_tokens: 35,
 				overlap_percent: 25,
+				..ChunkConfig::default()
 			},
 		);
 		assert!(chunks.len() >= 2);
@@ -1679,6 +1687,35 @@ mod chunker_and_extract {
 			"expected overlap from chunk 0 in chunk 1: {:?}",
 			chunks[1].content
 		);
+	}
+
+	#[test]
+	fn chunker_keeps_code_comments_and_line_breaks() {
+		assert!(has_headings("notes.md", "text/plain") && has_headings("page.html", "text/html"));
+		assert!(!has_headings("deploy.sh", "text/plain") && !has_headings("report.pdf", "application/pdf"));
+
+		let script = "# install\napt-get update\n# run\n./start.sh";
+		let config = ChunkConfig {
+			headings: false,
+			..ChunkConfig::default()
+		};
+		let chunks = chunk_document(script, config);
+		assert_eq!(chunks.len(), 1, "comments must not split a code file");
+		assert_eq!(chunks[0].heading_path, None);
+		assert_eq!(chunks[0].content, script);
+
+		let rows: Vec<String> = (0..40).map(|row| format!("{row},alpha beta gamma,äöü")).collect();
+		let csv = rows.join("\n");
+		let small = ChunkConfig {
+			target_tokens: 50,
+			overlap_percent: 0,
+			headings: false,
+		};
+		let chunks = chunk_document(&csv, small);
+		assert!(chunks.len() > 1);
+		for chunk in &chunks {
+			assert!(chunk.content.lines().all(|line| rows.iter().any(|row| row == line)), "rows stay on their own lines: {:?}", chunk.content);
+		}
 	}
 
 	#[test]
@@ -2179,6 +2216,75 @@ mod managed {
 			.fetch_one(&pool)
 			.await?;
 		assert!(kb_soft_deleted, "personal KB with docs must soft-delete so worker can purge vectors");
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn failed_documents_restricted_listings_team_delete_and_upload_rate(pool: PgPool) -> TestResult {
+		let admin_id = create_user(&pool).await?;
+		let member_id = insert_user(&pool, "member").await?;
+		let team_id = team_with_members(&pool, &admin_id, &member_id).await?;
+		let admin = KnowledgeActor::for_user(&pool, admin_id, &[ADMIN_RAG_EDIT.to_string()]).await?;
+		let member = KnowledgeActor::for_user(&pool, member_id, &[]).await?;
+		let (conn, _, _) = setup_managed_connection(&pool, &admin_id).await?;
+		let state = job_state(pool.clone());
+
+		let kb_id = KnowledgeBase::create_managed(
+			&pool,
+			&admin,
+			&SaveKnowledgeBaseRequest {
+				name: "Team docs".to_string(),
+				scope: Some(KnowledgeScope::Team),
+				team_id: Some(team_id),
+				..Default::default()
+			},
+		)
+		.await?;
+		let kb = KnowledgeBase::find(&pool, &admin, &kb_id).await?.ok_or("missing")?;
+		let open = RagDocument::upload(&state, &admin, &kb, "open.md", b"open").await?;
+		let secret = RagDocument::upload(&state, &admin, &kb, "secret.md", b"secret").await?;
+		sqlx::query("UPDATE rag_documents SET access = $2 WHERE id = $1")
+			.bind(secret.id)
+			.bind(vec![format!("user:{admin_id}")])
+			.execute(&pool)
+			.await?;
+
+		let as_member = KnowledgeBase::find(&pool, &member, &kb_id).await?.ok_or("member sees team kb")?;
+		let seen: Vec<String> = RagDocument::visible_to(&pool, &member, &as_member).await?.into_iter().map(|doc| doc.filename).collect();
+		assert_eq!(seen, ["open.md"], "a viewer must not see documents limited to others");
+		assert!(matches!(RagDocument::assignments(&pool, &member, &as_member, &secret.id).await, Err(RagError::Forbidden)));
+		assert_eq!(RagDocument::visible_to(&pool, &admin, &kb).await?.len(), 2);
+
+		sqlx::query("UPDATE rag_documents SET status = 'failed', index_generation = $2 WHERE id = $1")
+			.bind(open.id)
+			.bind(conn.index_generation - 1)
+			.execute(&pool)
+			.await?;
+		sqlx::query("UPDATE rag_documents SET status = 'ready' WHERE id = $1").bind(secret.id).execute(&pool).await?;
+		assert!(!conn.is_reindexing(&pool).await?, "a failed document must not block search");
+		assert!(RagConnection::reindex_progress_map(&pool).await?.is_empty());
+
+		let quotas = UpdateRagSetupRequest {
+			reranker: RerankerSettings { model_id: None, top_n: 6 },
+			defaults: RagDefaults { connection_id: Some(conn.id) },
+			chunking: Some(ChunkingSettings::default()),
+			quotas: Some(UploadQuotaSettings {
+				max_uploads_per_hour: 2,
+				storage_quota_mb: Some(100),
+			}),
+		};
+		RagConfig::save(&pool, &admin_id, &quotas).await?;
+		sqlx::query("DELETE FROM rag_documents WHERE id = $1").bind(open.id).execute(&pool).await?;
+		assert!(
+			matches!(RagDocument::upload(&state, &admin, &kb, "again.md", b"again").await, Err(RagError::RateLimited)),
+			"a deleted upload still counts towards the hourly limit"
+		);
+
+		let team = crate::types::Team::find_by_id(&pool, &team_id).await?.ok_or("team")?;
+		assert!(team.delete(&pool).await?, "a team that owns a knowledge base can be deleted");
+		assert!(KnowledgeBase::find(&pool, &admin, &kb_id).await?.is_none());
+		let status: DocumentStatus = sqlx::query_scalar("SELECT status FROM rag_documents WHERE id = $1").bind(secret.id).fetch_one(&pool).await?;
+		assert_eq!(status, DocumentStatus::Deleting, "the worker still has vectors to purge");
 		Ok(())
 	}
 }

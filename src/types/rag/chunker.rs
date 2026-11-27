@@ -5,6 +5,7 @@
 
 use crate::utils::extract::parse_page_marker;
 use sha2::{Digest, Sha256};
+use std::path::Path;
 
 /// Default target size of one chunk in estimated tokens.
 pub const DEFAULT_CHUNK_TOKENS: usize = 400;
@@ -17,6 +18,8 @@ pub const DEFAULT_OVERLAP_PERCENT: usize = 15;
 pub struct ChunkConfig {
 	pub target_tokens: usize,
 	pub overlap_percent: usize,
+	/// Whether `#` lines are headings; off for code and data files, where they are comments.
+	pub headings: bool,
 }
 
 impl Default for ChunkConfig {
@@ -24,8 +27,16 @@ impl Default for ChunkConfig {
 		Self {
 			target_tokens: DEFAULT_CHUNK_TOKENS,
 			overlap_percent: DEFAULT_OVERLAP_PERCENT,
+			headings: true,
 		}
 	}
+}
+
+/// Whether a stored document writes headings as `#` lines: Markdown, plain text and converted HTML do, code, data files and PDFs do not.
+#[must_use]
+pub fn has_headings(filename: &str, mime_type: &str) -> bool {
+	let extension = Path::new(filename).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase);
+	mime_type == "text/html" || (mime_type == "text/plain" && matches!(extension.as_deref(), Some("md" | "markdown" | "txt")))
 }
 
 impl ChunkConfig {
@@ -33,6 +44,7 @@ impl ChunkConfig {
 		Self {
 			target_tokens: self.target_tokens.clamp(50, 4000),
 			overlap_percent: self.overlap_percent.min(50),
+			headings: self.headings,
 		}
 	}
 
@@ -79,7 +91,7 @@ enum Block {
 #[must_use]
 pub fn chunk_document(text: &str, config: ChunkConfig) -> Vec<TextChunk> {
 	let config = config.normalized();
-	let blocks = parse_blocks(text);
+	let blocks = parse_blocks(text, config.headings);
 	let mut state = ChunkBuilder::new(config);
 	for block in blocks {
 		state.push_block(block);
@@ -189,20 +201,25 @@ impl ChunkBuilder {
 			self.push_unit(text, page, "\n\n", true);
 			return;
 		}
-		for sentence in split_sentences(text) {
-			if estimate_tokens(&sentence) <= self.config.target_tokens {
-				self.push_unit(&sentence, page, " ", true);
+		let (pieces, separator) = if text.contains('\n') {
+			(text.lines().map(str::to_owned).collect(), "\n")
+		} else {
+			(split_sentences(text), " ")
+		};
+		for piece in pieces {
+			if estimate_tokens(&piece) <= self.config.target_tokens {
+				self.push_unit(&piece, page, separator, true);
 			} else {
-				for piece in hard_split(&sentence, self.config.target_tokens) {
-					self.push_unit(&piece, page, " ", true);
+				for part in hard_split(&piece, self.config.target_tokens) {
+					self.push_unit(&part, page, separator, true);
 				}
 			}
 		}
 	}
 
 	fn push_unit(&mut self, unit: &str, page: Option<i32>, separator: &str, is_body: bool) {
-		let unit = unit.trim();
-		if unit.is_empty() {
+		let unit = unit.trim_end();
+		if unit.trim().is_empty() {
 			return;
 		}
 		if self.buffer.is_empty() {
@@ -293,7 +310,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 	hex
 }
 
-fn parse_blocks(text: &str) -> Vec<Block> {
+fn parse_blocks(text: &str, headings: bool) -> Vec<Block> {
 	let lines: Vec<&str> = text.lines().collect();
 	let mut blocks = Vec::new();
 	let mut index = 0;
@@ -321,7 +338,7 @@ fn parse_blocks(text: &str) -> Vec<Block> {
 			continue;
 		}
 		if !in_fence {
-			if let Some((level, title)) = parse_heading(trimmed) {
+			if let Some((level, title)) = parse_heading(trimmed).filter(|_| headings) {
 				flush_paragraph(&mut blocks, &mut paragraph, &mut para_page);
 				blocks.push(Block::Heading {
 					level,

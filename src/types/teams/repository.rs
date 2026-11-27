@@ -5,6 +5,7 @@ use super::{
 use crate::types::{Page, PageQuery};
 use crate::logging::AuditLog;
 use crate::types::{AUDIT_TEAM_TARGET, AuditEntry, BaseType, Budget, EVENT_TEAM_MEMBER_ROLE_UPDATED, EVENT_TEAM_MODELS_UPDATED};
+use crate::types::rag::KnowledgeBase;
 use sqlx::types::Json;
 use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 use std::collections::HashMap;
@@ -206,10 +207,13 @@ impl Team {
 		if self.is_default {
 			return Ok(false);
 		}
+		let mut tx = pool.begin().await?;
+		KnowledgeBase::delete_team_owned(&mut tx, &self.id).await?;
 		let result = sqlx::query("DELETE FROM teams WHERE id = $1 AND is_default = false")
 			.bind(self.id)
-			.execute(pool)
+			.execute(&mut *tx)
 			.await?;
+		tx.commit().await?;
 		Ok(result.rows_affected() > 0)
 	}
 
