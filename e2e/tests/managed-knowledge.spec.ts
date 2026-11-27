@@ -64,7 +64,7 @@ test.describe('managed knowledge bases', () => {
 		await api.put('/api/v1/admin/rag', {
 			reranker: {model_id: null, top_n: 6},
 			defaults: {connection_id: connectionId},
-			chunking: {target_tokens: 400, overlap_percent: 15},
+			chunking: {chunk_size: 400, overlap_percent: 15},
 			quotas: {max_uploads_per_hour: 60, storage_quota_mb: 100},
 		});
 		await context.close();
@@ -83,7 +83,7 @@ test.describe('managed knowledge bases', () => {
 		await context.close();
 	});
 
-	test('uploads a document into a managed knowledge base and finds it via hybrid search', async ({page}) => {
+	test('uploads a document into a managed knowledge base and finds it via hybrid search', async ({page, t}) => {
 		test.skip(!pgvectorReady, 'pgvector 0.8+ extension is required on the database');
 
 		await page.goto('/settings/knowledge');
@@ -99,7 +99,7 @@ test.describe('managed knowledge bases', () => {
 			buffer: Buffer.from('# Travel Policy\n\nRail tickets are booked through the internal travel desk and reimbursed within five business days.\n'),
 		});
 		await expect(page.getByTestId('knowledge-document-handbook.md')).toBeVisible();
-		await expect(page.getByTestId('knowledge-document-status-handbook.md')).toContainText(/Ready|Bereit/, {timeout: 30_000});
+		await expect(page.getByTestId('knowledge-document-status-handbook.md')).toContainText(t('knowledge.documents.status.ready'), {timeout: 30_000});
 
 		await page.getByTestId('knowledge-tab-search').click();
 		await page.getByTestId('knowledge-search-query').fill('How are rail tickets booked?');
@@ -123,8 +123,7 @@ test.describe('managed knowledge bases', () => {
 			const before = await (await memberContext.request.post(`/api/v1/knowledge-bases/${baseId}/search`, {data: {query: 'rail tickets'}})).json();
 			expect(before.hits.length).toBeGreaterThan(0);
 
-			const adminUsers = await (await page.request.get('/api/v1/admin/users', {params: {page: 1, size: 10}})).json();
-			const admin = adminUsers.items.find((user: {id: string}) => user.id !== member.id);
+			const admin = await (await page.request.get('/api/v1/users/@me')).json();
 			const restricted = await page.request.put(`/api/v1/knowledge-bases/${baseId}/documents/${doc.id}/assignments`, {
 				data: {targets: [{kind: 'user', id: admin.id}]},
 			});
