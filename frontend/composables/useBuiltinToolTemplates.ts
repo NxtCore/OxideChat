@@ -51,6 +51,12 @@ export function useBuiltinToolTemplates() {
 						enum: ['exa', 'tavily'],
 						description: 'Web search provider to use',
 					},
+					region: {
+						type: 'string',
+						title: store.getTranslation('settings.tools.websearch.region'),
+						enum: ['global', 'eu'],
+						description: store.getTranslation('settings.tools.websearch.region_description'),
+					},
 				},
 			},
 		},

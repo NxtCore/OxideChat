@@ -63,6 +63,8 @@ pub async fn get_base(State(state): State<Arc<JobState>>, Extension(RequestConte
 		},
 		title_generation: config.title_generation(),
 		registration: config.registration(),
+		storage: config.storage(),
+		attachments: config.attachments(),
 		rag: RagStatus {
 			enabled: RagConfig::enabled(&state.db).await.map_err(AppError::database)?,
 		},

@@ -37,15 +37,21 @@ test.describe('admin configuration', () => {
 
 			await page.goto('/');
 			await expect(page.getByTestId('app-name')).toHaveText('Acme Chat');
-			await expect(page.getByTestId('app-icon')).toHaveAttribute('src', `/api/v1/images/${base.instance.icon_id}`);
-			await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', `/api/v1/images/${base.instance.icon_id}`);
+			await expect(page.getByTestId('app-icon')).toHaveAttribute('src', `/api/v1/files/${base.instance.icon_id}`);
+			await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', `/api/v1/files/${base.instance.icon_id}`);
 
 			const anonymous = await browser.newContext({baseURL, storageState: {cookies: [], origins: []}});
-			const icon = await anonymous.request.get(`/api/v1/images/${base.instance.icon_id}`);
+			const icon = await anonymous.request.get(`/api/v1/files/${base.instance.icon_id}`);
 			expect(icon.status()).toBe(200);
 			expect(icon.headers()['content-type']).toBe('image/png');
-			const other = await api.post<{id: string}>('/api/v1/images', {data_uri: `data:image/png;base64,${ONE_PIXEL_PNG.toString('base64')}`});
-			expect((await anonymous.request.get(`/api/v1/images/${other.id}`)).status()).toBe(401);
+			expect((await anonymous.request.get(`/api/v1/images/${base.instance.icon_id}`)).status()).toBe(200);
+			const other = await api.post<{id: string; kind: string; url: string}>('/api/v1/files?filename=pixel.png&purpose=image', ONE_PIXEL_PNG);
+			expect(other.kind).toBe('image');
+			expect(other.url).toBe(`/api/v1/files/${other.id}`);
+			expect((await anonymous.request.get(`/api/v1/files/${other.id}`)).status()).toBe(401);
+			const document = await api.post<{id: string; kind: string}>('/api/v1/files?filename=notes.txt&purpose=chat_attachment', Buffer.from('notes'));
+			expect(document.kind).toBe('document');
+			expect((await page.request.get(`/api/v1/files/${document.id}`)).status()).toBe(404);
 			await anonymous.close();
 		} finally {
 			await api.patch('/api/v1/admin/config', {instance: {name: null, icon_id: null}});

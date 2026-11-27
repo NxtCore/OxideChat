@@ -24,11 +24,11 @@ impl ImageInsert<'_> {
 	/// # Errors
 	///
 	/// Returns a database error when the insert fails.
-	pub async fn insert_data(&self, pool: &PgPool, data: &[u8]) -> Result<(), sqlx::Error> {
+	pub async fn insert_data<'e, E: sqlx::PgExecutor<'e>>(&self, pool: E, data: &[u8]) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
-				INSERT INTO images (id, data, mime_type, size_bytes, user_id, source)
-				VALUES ($1, $2, $3, $4, $5, $6)
+				INSERT INTO files (id, kind, data, mime_type, size_bytes, user_id, source)
+				VALUES ($1, 'image', $2, $3, $4, $5, $6)
 				"#,
 		)
 		.bind(self.id)
@@ -47,11 +47,11 @@ impl ImageInsert<'_> {
 	/// # Errors
 	///
 	/// Returns a database error when the insert fails.
-	pub async fn insert_file(&self, pool: &PgPool, file_path: &str) -> Result<(), sqlx::Error> {
+	pub async fn insert_file<'e, E: sqlx::PgExecutor<'e>>(&self, pool: E, file_path: &str) -> Result<(), sqlx::Error> {
 		sqlx::query(
 			r#"
-				INSERT INTO images (id, file_path, mime_type, size_bytes, user_id, source)
-				VALUES ($1, $2, $3, $4, $5, $6)
+				INSERT INTO files (id, kind, file_path, mime_type, size_bytes, user_id, source)
+				VALUES ($1, 'image', $2, $3, $4, $5, $6)
 				"#,
 		)
 		.bind(self.id)
@@ -73,7 +73,7 @@ impl ImageContent {
 	///
 	/// Returns a database error when the query fails.
 	pub async fn find(pool: &PgPool, id: Uuid) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as("SELECT data, file_path, mime_type FROM images WHERE id = $1").bind(id).fetch_optional(pool).await
+		sqlx::query_as("SELECT data, file_path, mime_type FROM files WHERE id = $1 AND kind = 'image'").bind(id).fetch_optional(pool).await
 	}
 
 	/// Loads an image only when the user may read it: their own images and icons, which every signed-in user sees.
@@ -82,7 +82,7 @@ impl ImageContent {
 	///
 	/// Returns a database error when the query fails.
 	pub async fn find_for_user(pool: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<Self>, sqlx::Error> {
-		sqlx::query_as("SELECT data, file_path, mime_type FROM images WHERE id = $1 AND (user_id = $2 OR source IN ('icon', 'model_icon'))")
+		sqlx::query_as("SELECT data, file_path, mime_type FROM files WHERE id = $1 AND kind = 'image' AND (user_id = $2 OR source IN ('icon', 'model_icon'))")
 			.bind(id)
 			.bind(user_id)
 			.fetch_optional(pool)
@@ -95,7 +95,7 @@ impl ImageContent {
 	///
 	/// Returns a database error when the update fails.
 	pub async fn set_caption(pool: &PgPool, id: Uuid, caption: &str) -> Result<(), sqlx::Error> {
-		sqlx::query("UPDATE images SET caption = $2 WHERE id = $1").bind(id).bind(caption).execute(pool).await?;
+		sqlx::query("UPDATE files SET text = $2 WHERE id = $1 AND kind = 'image'").bind(id).bind(caption).execute(pool).await?;
 		Ok(())
 	}
 
@@ -105,7 +105,7 @@ impl ImageContent {
 	///
 	/// Returns a database error when the query fails.
 	pub async fn caption(pool: &PgPool, id: Uuid, user_id: Uuid) -> Result<Option<String>, sqlx::Error> {
-		let row: Option<(Option<String>,)> = sqlx::query_as("SELECT caption FROM images WHERE id = $1 AND user_id = $2")
+		let row: Option<(Option<String>,)> = sqlx::query_as("SELECT text FROM files WHERE id = $1 AND kind = 'image' AND user_id = $2")
 			.bind(id)
 			.bind(user_id)
 			.fetch_optional(pool)

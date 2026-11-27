@@ -6,6 +6,6 @@ export type Instance = {
  */
 name: string | null, 
 /**
- * Image ID of the instance icon, served without a session at `/api/v1/images/{id}`; `None` means the default logo.
+ * Image ID of the instance icon, served without a session at `/api/v1/files/{id}`; `None` means the default logo.
  */
 icon_id: string | null, };

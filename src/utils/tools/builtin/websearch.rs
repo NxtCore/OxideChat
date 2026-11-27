@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use super::super::executor::{ToolContext, ToolError, ToolExecutor};
 
-const EXA_API_URL: &str = "https://api.exa.ai/search";
-const EXA_CONTENTS_URL: &str = "https://api.exa.ai/contents";
+const EXA_GLOBAL_URL: &str = "https://api.exa.ai";
+const EXA_EU_URL: &str = "https://api.eu.exa.ai";
 const TAVILY_API_URL: &str = "https://api.tavily.com/search";
 const TAVILY_EXTRACT_URL: &str = "https://api.tavily.com/extract";
 
@@ -118,6 +118,15 @@ struct TavilyExtractResult {
 	raw_content: Option<String>,
 }
 
+/// Returns the Exa API base URL for the tool's `region` setting: `eu` is Exa's EU data residency endpoint, anything else the global one.
+#[must_use]
+pub fn exa_base_url(region: Option<&str>) -> &'static str {
+	match region {
+		Some("eu") => EXA_EU_URL,
+		_ => EXA_GLOBAL_URL,
+	}
+}
+
 pub struct WebsearchExecutor {
 	client: Client,
 }
@@ -132,7 +141,7 @@ impl WebsearchExecutor {
 		Ok(Self { client })
 	}
 
-	async fn execute_exa(&self, input: &WebsearchInput, api_key: &str) -> Result<Value, ToolError> {
+	async fn execute_exa(&self, input: &WebsearchInput, api_key: &str, base_url: &str) -> Result<Value, ToolError> {
 		let request_body = ExaSearchRequest {
 			query: input.query.clone(),
 			num_results: input.num_results,
@@ -142,7 +151,7 @@ impl WebsearchExecutor {
 
 		let response = self
 			.client
-			.post(EXA_API_URL)
+			.post(format!("{base_url}/search"))
 			.header("Authorization", format!("Bearer {api_key}"))
 			.header("Content-Type", "application/json")
 			.json(&request_body)
@@ -178,7 +187,7 @@ impl WebsearchExecutor {
 		}))
 	}
 
-	async fn execute_crawl_exa(&self, input: &CrawlInput, api_key: &str) -> Result<Value, ToolError> {
+	async fn execute_crawl_exa(&self, input: &CrawlInput, api_key: &str, base_url: &str) -> Result<Value, ToolError> {
 		let request_body = ExaContentsRequest {
 			ids: vec![input.url.clone()],
 			text: true,
@@ -186,7 +195,7 @@ impl WebsearchExecutor {
 
 		let response = self
 			.client
-			.post(EXA_CONTENTS_URL)
+			.post(format!("{base_url}/contents"))
 			.header("Authorization", format!("Bearer {api_key}"))
 			.header("Content-Type", "application/json")
 			.json(&request_body)
@@ -330,6 +339,7 @@ impl ToolExecutor for WebsearchExecutor {
 			.ok_or_else(|| ToolError::MissingSetting("api_key".to_string()))?;
 
 		let provider = ctx.settings.get("provider").and_then(Value::as_str).unwrap_or("exa");
+		let exa_url = exa_base_url(ctx.settings.get("region").and_then(Value::as_str));
 
 		match (function, provider) {
 			("crawl", "tavily") => {
@@ -338,7 +348,7 @@ impl ToolExecutor for WebsearchExecutor {
 			}
 			("crawl", _) => {
 				let crawl_input: CrawlInput = serde_json::from_value(input).map_err(|e| ToolError::InvalidInput(format!("Invalid input: {e}")))?;
-				self.execute_crawl_exa(&crawl_input, api_key).await
+				self.execute_crawl_exa(&crawl_input, api_key, exa_url).await
 			}
 			(_, "tavily") => {
 				let search_input: WebsearchInput = serde_json::from_value(input).map_err(|e| ToolError::InvalidInput(format!("Invalid input: {e}")))?;
@@ -346,7 +356,7 @@ impl ToolExecutor for WebsearchExecutor {
 			}
 			_ => {
 				let search_input: WebsearchInput = serde_json::from_value(input).map_err(|e| ToolError::InvalidInput(format!("Invalid input: {e}")))?;
-				self.execute_exa(&search_input, api_key).await
+				self.execute_exa(&search_input, api_key, exa_url).await
 			}
 		}
 	}

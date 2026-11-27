@@ -13,5 +13,5 @@ migrations/*.sql text eol=lf
 # Generated TypeScript bindings must stay LF
 frontend/types/generated/** text eol=lf
 
-# Binary fixtures
+# Binary fixtures must never have their line endings changed
 *.pdf binary

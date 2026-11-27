@@ -295,7 +295,7 @@ async fn index_fresh_document(state: &JobState, doc: &ClaimedDocument, target: &
 async fn extract_or_reuse_text(pool: &PgPool, doc: &ClaimedDocument) -> Result<String, &'static str> {
 	if let Some(bytes) = &doc.source_bytes {
 		let kind = DocumentKind::from_mime(&doc.mime_type).ok_or("extract_failed")?;
-		let text = extract::extract(kind, bytes).await.map_err(extract::ExtractError::reason)?;
+		let text = extract::extract(kind, bytes).await.map_err(|error| error.reason())?;
 		let pages = if kind == DocumentKind::Pdf { extract::page_count(&text) } else { None };
 		sqlx::query("UPDATE rag_documents SET text = $2, page_count = $3, source_bytes = NULL, updated_at = NOW() WHERE id = $1")
 			.bind(doc.id)

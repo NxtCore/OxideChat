@@ -2,6 +2,7 @@
 //!
 //! Contains scheduled tasks like session cleanup and provider model sync that run periodically.
 
+use crate::types::ChatAttachment;
 use crate::types::providers::Provider;
 use crate::types::request_logs::RequestLog;
 use crate::types::tools::McpServer;
@@ -17,6 +18,7 @@ const SESSION_CLEANUP_INTERVAL_SECS: u64 = 3600; // 1 hour
 const PROVIDER_SYNC_INTERVAL_SECS: u64 = 500; // 5 minutes
 const PROVIDER_BILLING_INTERVAL_SECS: u64 = 900; // 15 minutes
 const REQUEST_LOG_PRUNE_INTERVAL_SECS: u64 = 3600; // 1 hour
+const ATTACHMENT_CLEANUP_INTERVAL_SECS: u64 = 3600; // 1 hour
 /// The ECB publishes reference rates once per banking day.
 const EXCHANGE_RATE_INTERVAL_SECS: u64 = 21600; // 6 hours
 /// How often to reap idle MCP clients and health-check system servers.
@@ -39,6 +41,7 @@ pub async fn start_job_scheduler(state: Arc<super::JobState>) {
 		tokio::spawn(exchange_rate_job(Arc::clone(&state))),
 		tokio::spawn(crate::types::rag::rag_ingest_worker(Arc::clone(&state))),
 		tokio::spawn(crate::types::rag::rag_ingest_worker(Arc::clone(&state))),
+		tokio::spawn(attachment_cleanup_job(Arc::clone(&state))),
 	];
 
 	for handle in handles {
@@ -165,6 +168,16 @@ async fn request_log_prune_job(state: Arc<super::JobState>) {
 			Err(e) => eprintln!("[JOBS] Request log prune error: {e}"),
 		}
 		tokio::time::sleep(Duration::from_secs(REQUEST_LOG_PRUNE_INTERVAL_SECS)).await;
+	}
+}
+
+/// Deletes chat attachments no message refers to once per hour.
+async fn attachment_cleanup_job(state: Arc<super::JobState>) {
+	loop {
+		if let Err(error) = ChatAttachment::delete_unreferenced(&state.db).await {
+			tracing::error!(%error, "chat attachment cleanup failed");
+		}
+		tokio::time::sleep(Duration::from_secs(ATTACHMENT_CLEANUP_INTERVAL_SECS)).await;
 	}
 }
 

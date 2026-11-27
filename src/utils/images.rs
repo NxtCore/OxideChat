@@ -6,7 +6,7 @@
 
 use crate::types::{ImageContent, ImageInsert};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use std::path::PathBuf;
 use tokio::fs;
 use uuid::Uuid;
@@ -36,7 +36,7 @@ pub fn storage_path() -> PathBuf {
 
 /// Generate a URL path for an image (relative, works behind any reverse proxy)
 pub fn image_url(id: Uuid) -> String {
-	format!("/api/v1/images/{}", id)
+	format!("/api/v1/files/{}", id)
 }
 /// Stored image metadata
 #[derive(Debug, Clone)]
@@ -50,6 +50,16 @@ pub struct StoredImage {
 ///
 /// Returns the stored image metadata including the generated UUID.
 pub async fn store_image(db: &PgPool, data: &[u8], mime_type: &str, user_id: Option<Uuid>, source: Option<&str>) -> Result<StoredImage, String> {
+	let mut connection = db.acquire().await.map_err(|e| format!("Failed to store image in database: {e}"))?;
+	store_image_in(&mut connection, data, mime_type, user_id, source).await
+}
+
+/// Stores an image like [`store_image`] on the given connection, such as an open transaction.
+///
+/// # Errors
+///
+/// Returns a message when the bytes or the row cannot be written.
+pub async fn store_image_in(db: &mut PgConnection, data: &[u8], mime_type: &str, user_id: Option<Uuid>, source: Option<&str>) -> Result<StoredImage, String> {
 	let storage_type = StorageType::from_env();
 	let id = Uuid::new_v4();
 	let size_bytes = i64::try_from(data.len()).map_err(|_| "Image size too large to represent in 64-bit".to_string())?;
@@ -58,7 +68,7 @@ pub async fn store_image(db: &PgPool, data: &[u8], mime_type: &str, user_id: Opt
 
 	match storage_type {
 		StorageType::Database => {
-			insert.insert_data(db, data).await.map_err(|e| format!("Failed to store image in database: {e}"))?;
+			insert.insert_data(&mut *db, data).await.map_err(|e| format!("Failed to store image in database: {e}"))?;
 		}
 		StorageType::File => {
 			let base_path = storage_path();
@@ -70,7 +80,7 @@ pub async fn store_image(db: &PgPool, data: &[u8], mime_type: &str, user_id: Opt
 
 			fs::write(&file_path, data).await.map_err(|e| format!("Failed to write image file: {e}"))?;
 
-			if let Err(e) = insert.insert_file(db, &filename).await {
+			if let Err(e) = insert.insert_file(&mut *db, &filename).await {
 				let _ = fs::remove_file(&file_path).await;
 				return Err(format!("Failed to store image metadata: {e}"));
 			}
@@ -88,6 +98,12 @@ pub async fn store_image(db: &PgPool, data: &[u8], mime_type: &str, user_id: Opt
 pub async fn store_from_data_uri(db: &PgPool, data_uri: &str, user_id: Option<Uuid>, source: Option<&str>) -> Result<StoredImage, String> {
 	let (mime_type, data) = parse_data_uri(data_uri)?;
 	store_image(db, &data, &mime_type, user_id, source).await
+}
+
+/// The image type the bytes show, when it is one users may upload (PNG, JPEG, GIF or WebP).
+#[must_use]
+pub fn detect_image_mime(data: &[u8]) -> Option<&'static str> {
+	normalize_image_mime(infer::get(data)?.mime_type())
 }
 
 #[must_use]

@@ -232,7 +232,7 @@ async function regenerate() {
 		}
 	}
 
-	if (!userMessage || !userMessage.content) return;
+	if (!userMessage || (!userMessage.content && !userMessage.content_parts?.length)) return;
 
 	const chatId = chatStore.activeChat.id;
 	const messageId = props.message.id;

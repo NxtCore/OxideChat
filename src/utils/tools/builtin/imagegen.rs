@@ -77,7 +77,7 @@ impl ImageGenExecutor {
 			return Ok(ImageInput { bytes, media_type: media_type.to_string() });
 		}
 
-		if let Some(id) = value.strip_prefix("/api/v1/images/") {
+		if let Some(id) = value.strip_prefix("/api/v1/files/").or_else(|| value.strip_prefix("/api/v1/images/")) {
 			let db = ctx.db.as_ref().ok_or_else(|| ToolError::Internal("Database not available".to_string()))?;
 			let id = Uuid::parse_str(id).map_err(|_| ToolError::InvalidInput("Invalid image ID".to_string()))?;
 			let not_found = || ToolError::InvalidInput("Image not found".to_string());
@@ -150,7 +150,7 @@ impl ToolExecutor for ImageGenExecutor {
 			ImageOperation::Edit => {
 				let input: EditImageInput = serde_json::from_value(input).map_err(|error| ToolError::InvalidInput(error.to_string()))?;
 				let reference = if let Some(id) = input.image_id.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-					format!("/api/v1/images/{id}")
+					format!("/api/v1/files/{id}")
 				} else if let Some(url) = input.image_url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
 					url.to_string()
 				} else {

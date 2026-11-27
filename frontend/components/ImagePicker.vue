@@ -152,12 +152,12 @@ let dragDepth = 0;
 
 const heightClass = computed(() => (props.size === 'sm' ? 'h-12' : 'h-16'));
 const sizeClass = computed(() => (props.size === 'sm' ? 'h-12 w-12' : 'h-16 w-16'));
-const src = computed(() => (props.modelValue ? (props.valueMode === 'id' ? imageUrl(props.modelValue) : props.modelValue) : null));
+const src = computed(() => (props.modelValue ? (props.valueMode === 'id' ? fileUrl(props.modelValue) : props.modelValue) : null));
 
 watch(src, () => (broken.value = false));
 watch(open, isOpen => {
 	if (!isOpen) return;
-	link.value = props.valueMode === 'url' && props.modelValue && !props.modelValue.startsWith('/api/v1/images/') ? props.modelValue : '';
+	link.value = props.valueMode === 'url' && props.modelValue && !props.modelValue.startsWith('/api/v1/files/') && !props.modelValue.startsWith('/api/v1/images/') ? props.modelValue : '';
 	linkError.value = null;
 });
 
@@ -172,7 +172,7 @@ async function uploadFile(file: File) {
 		setValue(props.valueMode === 'id' ? stored.id : stored.url);
 		open.value = false;
 	} catch (error) {
-		store.toast(t(error instanceof ImageUploadError ? error.key.replace('image_picker.', '') : 'errors.upload'), {type: 'error'});
+		store.toast(store.getTranslation(error instanceof ImageUploadError ? error.key : 'image_picker.errors.upload'), {type: 'error'});
 	}
 }
 

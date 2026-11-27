@@ -79,6 +79,18 @@
 				</div>
 			</div>
 
+			<div v-if="isUser && attachedFiles.length > 0" class="flex max-w-3xl flex-wrap justify-end gap-2">
+				<div
+					v-for="file in attachedFiles"
+					:key="file.attachment_id"
+					data-testid="message-attachment"
+					class="flex max-w-60 items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs"
+				>
+					<FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+					<span class="truncate">{{ file.filename }}</span>
+				</div>
+			</div>
+
 			<!-- User message content with edit button -->
 			<div v-if="isUser && (message.content || !isStreaming)" class="flex flex-col gap-2" :class="isUser ? 'items-end' : 'items-start'">
 				<div
@@ -205,13 +217,13 @@
 </template>
 
 <script setup lang="ts">
-import {User, Bot, ChevronLeft, ChevronRight, Pencil, Copy, Check, GitBranch} from 'lucide-vue-next';
+import {User, Bot, ChevronLeft, ChevronRight, Pencil, Copy, Check, GitBranch, FileText} from 'lucide-vue-next';
 import MessageActions from './MessageActions.vue';
 import CodePreview from './CodePreview.vue';
 import ImagePreview from '~/components/ImagePreview.vue';
 import ToolExecutionDisplay from './ToolExecutionDisplay.vue';
 import ReasoningBlock from './ReasoningBlock.vue';
-import type {ChatMessage} from '~/types/chat';
+import type {ChatMessage, ChatMessageContentPart} from '~/types/chat';
 import {useChatStore} from '~/stores/chatStore';
 import {useModelStore} from '~/stores/modelStore';
 import {useIconsStore} from '~/stores/icons';
@@ -256,8 +268,13 @@ const attachedImages = computed(() => {
 		.filter(part => part.type === 'image')
 		.map(part => ({
 			image_id: part.image_id,
-			url: imageUrl(part.image_id),
+			url: fileUrl(part.image_id),
 		}));
+});
+
+const attachedFiles = computed(() => {
+	const parts = props.message.content_parts;
+	return Array.isArray(parts) ? parts.filter((part): part is Extract<ChatMessageContentPart, {type: 'file'}> => part.type === 'file') : [];
 });
 
 const model = computed(() => {
@@ -331,7 +348,7 @@ function renderPart(index: number, text: string): string {
 const orderedParts = computed(() => {
 	const parts = props.message.content_parts;
 	if (!Array.isArray(parts)) return [];
-	return parts.filter(part => part.type !== 'tool_result').map((part, index) => {
+	return parts.filter(part => part.type !== 'tool_result' && part.type !== 'file').map((part, index) => {
 		if (part.type === 'tool_call') {
 			const tool = props.message.tool_calls?.find(tc => tc.tool_call_id === part.id);
 			return {type: 'tool_call' as const, tool};
@@ -340,7 +357,7 @@ const orderedParts = computed(() => {
 			return {
 				type: 'image' as const,
 				imageId: part.image_id,
-				url: imageUrl(part.image_id),
+				url: fileUrl(part.image_id),
 			};
 		}
 		if (part.type === 'reasoning') {

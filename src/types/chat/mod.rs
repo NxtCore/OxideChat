@@ -4,12 +4,14 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 pub mod runner;
+mod attachments;
 mod patch;
 mod repository;
 mod requests;
 mod responses;
 mod rows;
 
+pub use attachments::*;
 pub use requests::*;
 pub use responses::*;
 

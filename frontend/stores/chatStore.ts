@@ -218,6 +218,25 @@ export const useChatStore = defineStore('chat', {
 			}
 		},
 
+		stageDraft(content: string, parts?: any[]) {
+			this.pendingBranchContent = content || null;
+			this.pendingBranchParts = parts && parts.length > 0 ? parts : null;
+		},
+
+		async discardIfEmpty(id: string): Promise<boolean> {
+			if (this.activeChat?.id !== id || this.messages.length > 0) return false;
+			try {
+				const {$customFetch} = useNuxtApp();
+				await $customFetch(`/api/v1/chats/${id}`, {method: 'DELETE'});
+			} catch (e) {
+				console.error('Failed to delete chat:', e);
+				return false;
+			}
+			this.chats = this.chats.filter(c => c.id !== id);
+			this.activeChat = null;
+			return true;
+		},
+
 		async deleteChat(id: string): Promise<boolean> {
 			try {
 				const {$customFetch} = useNuxtApp();

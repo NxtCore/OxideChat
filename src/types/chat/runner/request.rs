@@ -1,12 +1,12 @@
 use super::history::get_omni_messages;
-use super::prepare::TurnError;
+use super::prepare::{TurnError, internal};
 use crate::ai;
 use crate::types::models::Model;
 use crate::types::models_configs::ModelConfig;
 use crate::types::rag::KNOWLEDGE_BUILTIN;
 use crate::types::{ChatSampling, Message, PRESET_METADATA_KEY, Preset, PresetReasoning, PresetSampling, StreamRequest, Tool, ToolFunction, User};
 use omniference::Sampling;
-use omniference::types::{ChatRequestIR, ContentPart, Message as OmniMessage, Role, ToolChoice, ToolSpec};
+use omniference::types::{ChatRequestIR, ContentPart, Message as OmniMessage, Modality, Role, ToolChoice, ToolSpec};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -201,7 +201,7 @@ async fn resolve_tools(db: &PgPool, user_id: Uuid, enabled_tool_ids: &[String]) 
 }
 
 /// Starts a streaming request for a model key with the model and provider filled in.
-pub(super) async fn model_request(model_key: &str) -> Result<(ChatRequestIR, bool), TurnError> {
+pub(super) async fn model_request(model_key: &str) -> Result<ChatRequestIR, TurnError> {
 	let engine = ai::get();
 
 	let Some(omni_model) = engine.get_model(model_key).await else {
@@ -214,7 +214,6 @@ pub(super) async fn model_request(model_key: &str) -> Result<(ChatRequestIR, boo
 		return Err(TurnError::new("provider_not_found", msg));
 	};
 
-	let vision = omni_model.input_modalities.iter().any(|m| matches!(m, omniference::types::Modality::Image));
 	let mut ir = ChatRequestIR::default();
 	ir.model.alias = omni_model.id.clone();
 	let provider_prefix = format!("{}/", omni_model.provider_name.to_lowercase());
@@ -223,13 +222,18 @@ pub(super) async fn model_request(model_key: &str) -> Result<(ChatRequestIR, boo
 	ir.model.input_modalities = omni_model.input_modalities;
 	ir.model.output_modalities = omni_model.output_modalities;
 	ir.stream = true;
-	Ok((ir, vision))
+	Ok(ir)
 }
 
 async fn base_request(db: &PgPool, inputs: &RequestInputs<'_>, messages: Vec<Message>) -> Result<ChatRequestIR, TurnError> {
 	let req = inputs.req;
-	let (mut ir, vision) = model_request(&inputs.model.model_id).await?;
-	ir.messages = get_omni_messages(db, inputs.user.id, messages, vision).await;
+	let mut ir = model_request(&inputs.model.model_id).await?;
+	if let Some(modalities) = inputs.system_config.and_then(|config| config.input_modalities.as_ref()) {
+		ir.model.input_modalities = modalities.iter().filter_map(|code| Modality::from_code(code)).collect();
+	}
+	let vision = ir.model.input_modalities.contains(&Modality::Image);
+	let native_pdf = crate::config::Config::get().attachments().native_pdf && ir.model.input_modalities.contains(&Modality::File);
+	ir.messages = get_omni_messages(db, inputs.user.id, messages, (vision, native_pdf)).await.map_err(internal("Failed to load chat attachments"))?;
 	ir.metadata.insert("user_id".to_string(), inputs.user.id.to_string());
 	ir.metadata.insert("chat_id".to_string(), inputs.chat_id.to_string());
 	ir.metadata.insert(crate::types::rag::KNOWLEDGE_CHAT_METADATA_KEY.to_string(), inputs.chat_id.to_string());

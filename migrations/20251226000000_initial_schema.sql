@@ -345,17 +345,25 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS images (
+-- Every file a user stores: images keep their bytes (data or file_path); documents such as chat attachments keep only
+-- their extracted text, so data and file_path stay NULL and the original is thrown away. Knowledge uploads land here later.
+CREATE TABLE IF NOT EXISTS files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    data BYTEA,  -- NULL if using file storage
+    kind VARCHAR(16) NOT NULL CHECK (kind IN ('image', 'document')),
+    source VARCHAR(50),  -- 'imagegen', 'upload', 'icon', 'model_icon', 'chat_attachment', ...
+    filename TEXT CHECK (char_length(filename) BETWEEN 1 AND 255),
+    mime_type VARCHAR(64) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    data BYTEA,
     file_path VARCHAR(500),  -- Path relative to storage root (for file storage)
-    mime_type VARCHAR(64) NOT NULL DEFAULT 'image/png',
-	size_bytes BIGINT NOT NULL,
-    source VARCHAR(50),  -- 'imagegen', 'upload', etc.
-    caption TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    text TEXT,  -- Extracted text of a document, or the caption of an image
+    token_count BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (kind <> 'document' OR (filename IS NOT NULL AND text IS NOT NULL AND token_count IS NOT NULL))
 );
+
+CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
 
 INSERT INTO roles (name, is_builtin) VALUES ('admin', true), ('user', true) ON CONFLICT DO NOTHING;
 
@@ -1237,8 +1245,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id);
 CREATE INDEX IF NOT EXISTS idx_messages_fork ON messages(parent_id, fork_index);
-CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_images_user_id ON images(user_id);
+CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_content_parts_gin ON messages USING GIN (content_parts);
 
 -- Tool indexes
@@ -1338,7 +1345,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'chat.code_preview.preview', 'Vorschau'),
     ('de', 'chat.code_preview.title', 'Vorschau:'),
     ('de', 'chat.composer.hint', 'Drücken Sie Enter zum Senden, Shift+Enter für eine neue Zeile'),
-    ('de', 'chat.composer.attach_image', 'Bild anhängen'),
     ('de', 'chat.composer.default', 'Standard'),
     ('de', 'chat.composer.reasoning', 'Reasoning'),
     ('de', 'chat.composer.sampling_chip', 'Sampling {count}'),
@@ -2112,6 +2118,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('de', 'settings.tools.imagegen.generate.quality', 'Bildqualität'),
     ('de', 'settings.tools.imagegen.generate.size', 'Bildgröße'),
     ('de', 'settings.tools.imagegen.settings.description', 'Ein aktiviertes Bildmodell auswählen'),
+    ('de', 'settings.tools.websearch.region', 'Exa-Region'),
+    ('de', 'settings.tools.websearch.region_description', 'Nur für Exa: eu nutzt den EU-Endpunkt (api.eu.exa.ai) und braucht den Schlüssel eines EU-Teams; global nutzt api.exa.ai'),
     ('de', 'settings.tools.input_schema', 'Eingabeschema'),
     ('de', 'settings.tools.name', 'Name'),
     ('de', 'settings.tools.new', 'Neu'),
@@ -2251,7 +2259,6 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'chat.code_preview.preview', 'Preview'),
     ('en', 'chat.code_preview.title', 'Preview:'),
     ('en', 'chat.composer.hint', 'Press Enter to send, Shift+Enter for new line'),
-    ('en', 'chat.composer.attach_image', 'Attach image'),
     ('en', 'chat.composer.default', 'Default'),
     ('en', 'chat.composer.reasoning', 'Reasoning'),
     ('en', 'chat.composer.sampling_chip', 'Sampling {count}'),
@@ -3025,6 +3032,8 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'settings.tools.imagegen.generate.quality', 'Image quality'),
     ('en', 'settings.tools.imagegen.generate.size', 'Image size'),
     ('en', 'settings.tools.imagegen.settings.description', 'Select an enabled image model'),
+    ('en', 'settings.tools.websearch.region', 'Exa region'),
+    ('en', 'settings.tools.websearch.region_description', 'Exa only: eu uses the EU endpoint (api.eu.exa.ai) and needs an EU team key; global uses api.exa.ai'),
     ('en', 'settings.tools.input_schema', 'Input Schema'),
     ('en', 'settings.tools.name', 'Name'),
     ('en', 'settings.tools.new', 'New'),
@@ -5917,5 +5926,57 @@ INSERT INTO i18n_translations (language, key_path, value) VALUES
     ('en', 'knowledge.documents.load_error', 'Documents could not be loaded'),
     ('de', 'knowledge.documents.load_error', 'Dokumente konnten nicht geladen werden'),
     ('en', 'knowledge.search.page', 'p. {page}'),
-    ('de', 'knowledge.search.page', 'S. {page}')
+    ('de', 'knowledge.search.page', 'S. {page}'),
+    ('en', 'chat.composer.attach_file', 'Attach file'),
+    ('de', 'chat.composer.attach_file', 'Datei anhängen'),
+    ('en', 'chat.composer.remove_attachment', 'Remove {name}'),
+    ('de', 'chat.composer.remove_attachment', '{name} entfernen'),
+    ('en', 'chat.composer.attachment_tokens', 'about {count} tokens'),
+    ('de', 'chat.composer.attachment_tokens', 'etwa {count} Tokens'),
+    ('en', 'chat.attachments.uploading', 'Reading {name}…'),
+    ('de', 'chat.attachments.uploading', '{name} wird gelesen…'),
+    ('en', 'files.error.invalid_filename', 'The file name is empty or too long.'),
+    ('de', 'files.error.invalid_filename', 'Der Dateiname ist leer oder zu lang.'),
+    ('en', 'files.error.too_large', 'Files can be at most 25 MB.'),
+    ('de', 'files.error.too_large', 'Dateien dürfen höchstens 25 MB groß sein.'),
+    ('en', 'files.error.unsupported_type', 'This file type is not supported. Attach text, Markdown, HTML, CSV, JSON, code or PDF files, or PNG, JPEG, GIF or WebP images.'),
+    ('de', 'files.error.unsupported_type', 'Dieser Dateityp wird nicht unterstützt. Hänge Text-, Markdown-, HTML-, CSV-, JSON-, Code- oder PDF-Dateien oder PNG-, JPEG-, GIF- oder WebP-Bilder an.'),
+    ('en', 'files.error.not_text', 'The file is not a text file.'),
+    ('de', 'files.error.not_text', 'Die Datei ist keine Textdatei.'),
+    ('en', 'files.error.empty', 'No text was found in the file. Scanned PDFs are not read yet.'),
+    ('de', 'files.error.empty', 'In der Datei wurde kein Text gefunden. Gescannte PDFs werden noch nicht gelesen.'),
+    ('en', 'files.error.text_too_long', 'The file has too much text. Use a knowledge base for large documents.'),
+    ('de', 'files.error.text_too_long', 'Die Datei enthält zu viel Text. Nutze für große Dokumente eine Wissensdatenbank.'),
+    ('en', 'files.error.extract_failed', 'The file could not be read.'),
+    ('de', 'files.error.extract_failed', 'Die Datei konnte nicht gelesen werden.'),
+    ('en', 'files.error.timed_out', 'Reading the file took too long.'),
+    ('de', 'files.error.timed_out', 'Das Lesen der Datei hat zu lange gedauert.'),
+    ('en', 'files.error.busy', 'Too many files are being read right now. Try again in a moment.'),
+    ('de', 'files.error.busy', 'Gerade werden zu viele Dateien gelesen. Versuche es gleich noch einmal.'),
+    ('en', 'files.error.quota_exceeded', 'Your stored files use up all of your storage. Attached files no chat uses any more are deleted after a day.'),
+    ('en', 'settings.admin_config.storage_quota', 'File storage per user (MB)'),
+    ('de', 'settings.admin_config.storage_quota', 'Dateispeicher pro Person (MB)'),
+    ('en', 'settings.admin_config.storage_quota_hint', 'How much space each person''s uploaded images and attached files may take. Attached files count with their extracted text, kept original PDFs with their size too. Leave empty for no limit.'),
+    ('de', 'settings.admin_config.storage_quota_hint', 'Wie viel Platz die hochgeladenen Bilder und angehängten Dateien jeder Person belegen dürfen. Angehängte Dateien zählen mit ihrem ausgelesenen Text, aufbewahrte Original-PDFs zusätzlich mit ihrer Größe. Leer lassen für kein Limit.'),
+    ('en', 'settings.admin_config.native_pdf', 'Send original PDFs to models'),
+    ('de', 'settings.admin_config.native_pdf', 'Original-PDFs an Modelle senden'),
+    ('en', 'settings.admin_config.native_pdf_hint', 'Keeps attached PDFs and sends the whole file to models that can read PDFs, so they also see images, scans and layout. The provider then receives everything in the file, including embedded images, hidden text and metadata. When off, only the extracted text is kept and sent. PDFs attached while this is off are always sent as text.'),
+    ('de', 'settings.admin_config.native_pdf_hint', 'Bewahrt angehängte PDFs auf und sendet die ganze Datei an Modelle, die PDFs lesen können, sodass sie auch Bilder, Scans und Layout sehen. Der Anbieter erhält dann alles in der Datei, auch eingebettete Bilder, versteckten Text und Metadaten. Ist die Option aus, wird nur der ausgelesene Text aufbewahrt und gesendet. PDFs, die angehängt wurden, während sie aus war, werden immer als Text gesendet.'),
+    ('en', 'settings.admin_config.storage_quota_unlimited', 'No limit'),
+    ('de', 'settings.admin_config.storage_quota_unlimited', 'Kein Limit'),
+    ('en', 'settings.admin_config.storage_quota_invalid', 'The storage per user must be a whole number of at least 1 MB, or empty for no limit.'),
+    ('de', 'settings.admin_config.storage_quota_invalid', 'Der Speicher pro Person muss eine ganze Zahl ab 1 MB sein oder leer bleiben für kein Limit.'),
+    ('en', 'chat.composer.images_not_supported', 'The selected model cannot read images.'),
+    ('de', 'chat.composer.images_not_supported', 'Das ausgewählte Modell kann keine Bilder lesen.'),
+    ('de', 'files.error.quota_exceeded', 'Deine gespeicherten Dateien belegen deinen ganzen Speicher. Angehängte Dateien, die kein Chat mehr nutzt, werden nach einem Tag gelöscht.'),
+    ('en', 'files.error.rate_limited', 'You uploaded too many files in the last hour. Try again later.'),
+    ('de', 'files.error.rate_limited', 'Du hast in der letzten Stunde zu viele Dateien hochgeladen. Versuche es später noch einmal.'),
+    ('en', 'files.error.database', 'The file could not be saved.'),
+    ('de', 'files.error.database', 'Die Datei konnte nicht gespeichert werden.'),
+    ('en', 'files.error.upload', 'The file could not be uploaded.'),
+    ('de', 'files.error.upload', 'Die Datei konnte nicht hochgeladen werden.'),
+    ('en', 'chat.errors.attachment_not_found', 'An attached file was not found.'),
+    ('de', 'chat.errors.attachment_not_found', 'Eine angehängte Datei wurde nicht gefunden.'),
+    ('en', 'chat.errors.context_too_large', 'This chat with its attached files is about {tokens} tokens, more than the model''s context window of {limit}. Remove a file or use a knowledge base instead.'),
+    ('de', 'chat.errors.context_too_large', 'Dieser Chat ist mit den angehängten Dateien etwa {tokens} Tokens lang, mehr als das Kontextfenster des Modells von {limit}. Entferne eine Datei oder nutze stattdessen eine Wissensdatenbank.')
 ON CONFLICT (language, key_path) DO NOTHING;

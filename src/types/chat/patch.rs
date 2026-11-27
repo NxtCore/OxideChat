@@ -347,8 +347,8 @@ impl Message {
 
 		sqlx::query_as::<_, Message>(
 			r#"
-			INSERT INTO messages (chat_id, role, content, model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
+			INSERT INTO messages (chat_id, role, content, content_parts, model_id, reasoning_details, usage_details, cost_details, request_settings, parent_id, fork_index, is_active_fork)
+			VALUES ($1, $2, $3, COALESCE($11, '[]'::jsonb), $4, $5, $6, $7, $8, $9, $10, TRUE)
 			RETURNING *
 			"#,
 		)
@@ -362,6 +362,7 @@ impl Message {
 		.bind(&original.request_settings)
 		.bind(original.parent_id)
 		.bind(next_fork_index)
+		.bind(edited_parts(original, new_content))
 		.fetch_one(pool)
 		.await
 	}
@@ -460,4 +461,15 @@ impl Message {
 			.await?;
 		Ok(result.rows_affected() > 0)
 	}
+}
+
+/// The parts of an edited user message: its images and files stay, its text becomes the new content.
+fn edited_parts(original: &Message, new_content: &str) -> Option<serde_json::Value> {
+	if original.role != "user" {
+		return None;
+	}
+	let parts = original.content_parts.as_ref()?.as_array()?;
+	let text = (!new_content.is_empty()).then(|| serde_json::json!({"type": "text", "text": new_content}));
+	let kept = parts.iter().filter(|part| part.get("type").and_then(serde_json::Value::as_str) != Some("text")).cloned();
+	Some(serde_json::Value::Array(text.into_iter().chain(kept).collect()))
 }

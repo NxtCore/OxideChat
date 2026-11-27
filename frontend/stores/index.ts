@@ -69,7 +69,7 @@ export const useMainStore = defineStore('main', {
 		},
 		appIcon(): string {
 			const id = this.base?.instance.icon_id;
-			return id ? imageUrl(id) : '/light_transparent.svg';
+			return id ? fileUrl(id) : '/light_transparent.svg';
 		},
 	},
 	actions: {

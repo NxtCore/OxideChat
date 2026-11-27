@@ -78,7 +78,7 @@ mod tests {
 		let html = base64::engine::general_purpose::STANDARD.encode(b"<script>alert(1)</script>");
 		assert!(store_from_data_uri(&pool, &format!("data:text/html;base64,{html}"), None, None).await.is_err());
 
-		let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM images")
+		let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM files WHERE kind = 'image'")
 			.fetch_one(&pool)
 			.await
 			.unwrap();

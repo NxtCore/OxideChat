@@ -6,7 +6,7 @@
 //! - Supports reloading configuration at runtime
 
 use crate::i18n::Language;
-use crate::types::{ProviderRoutingSettings, Registration, ThemeCssVars, TitleGeneration, UpdateGlobalConfigRequest};
+use crate::types::{AttachmentSettings, StorageSettings, ProviderRoutingSettings, Registration, ThemeCssVars, TitleGeneration, UpdateGlobalConfigRequest};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
@@ -39,6 +39,10 @@ pub struct ConfigValues {
 	pub title_generation: TitleGeneration,
 	/// Local sign-up with email and password.
 	pub registration: Registration,
+	/// The storage quota for users' files; unlimited by default.
+	pub storage: StorageSettings,
+	/// Whether original PDFs are kept and sent to models that read them; off by default.
+	pub attachments: AttachmentSettings,
 }
 
 impl Default for ConfigValues {
@@ -52,6 +56,8 @@ impl Default for ConfigValues {
 			instance_icon_id: None,
 			title_generation: TitleGeneration::default(),
 			registration: Registration::default(),
+			storage: StorageSettings::default(),
+			attachments: AttachmentSettings::default(),
 		}
 	}
 }
@@ -157,6 +163,18 @@ impl Config {
 		self.values.load().registration
 	}
 
+	/// Get the storage quota for users' files.
+	#[must_use]
+	pub fn storage(&self) -> StorageSettings {
+		self.values.load().storage
+	}
+
+	/// Get the chat attachment settings.
+	#[must_use]
+	pub fn attachments(&self) -> AttachmentSettings {
+		self.values.load().attachments
+	}
+
 	/// Store the given settings in one transaction and reload config.
 	///
 	/// # Errors
@@ -166,6 +184,12 @@ impl Config {
 		Self::store_settings(&mut tx, req).await?;
 		Self::store_title_generation(&mut tx, req.title_generation.as_ref()).await?;
 		Self::store_registration(&mut tx, req.registration).await?;
+		if let Some(storage) = req.storage {
+			Self::set_or_clear(&mut tx, "storage_quota_mb", Some(&storage.quota_mb.map(|mb| mb.to_string()))).await?;
+		}
+		if let Some(attachments) = req.attachments {
+			Self::upsert_config(&mut *tx, "attachments_native_pdf", if attachments.native_pdf { "true" } else { "false" }).await?;
+		}
 		tx.commit().await?;
 		self.reload(pool).await
 	}
@@ -261,6 +285,8 @@ impl Config {
 				"instance_icon_id" => values.instance_icon_id = Uuid::parse_str(&row.value).ok(),
 				"title_generation_enabled" => values.title_generation.enabled = row.value == "true",
 				"registration_enabled" => values.registration.enabled = row.value == "true",
+				"attachments_native_pdf" => values.attachments.native_pdf = row.value == "true",
+				"storage_quota_mb" => values.storage.quota_mb = row.value.parse().ok(),
 				"title_model_id" => values.title_generation.model_id = Uuid::parse_str(&row.value).ok(),
 				_ => {} // Ignore unknown config keys for forward compatibility
 			}

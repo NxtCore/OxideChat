@@ -1,9 +1,10 @@
-//! Text extraction for uploaded files.
+//! Text extraction for uploaded files (chat attachments and knowledge documents).
 //!
 //! HTML and PDF parsers run in a child process (this binary with the `extract` subcommand) with a time
 //! and memory limit and no environment, so a hanging parser or a compression bomb is killed instead of
 //! taking the server down.
 
+use crate::types::files::FileError;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Stdio;
@@ -12,10 +13,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 
-/// Largest file a user may upload.
+/// Largest file a user may attach.
 pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 
-/// Largest text extraction may yield.
+/// Largest text an attachment may yield.
 pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 
 /// The command-line argument that starts the extraction child process.
@@ -37,38 +38,6 @@ const TEXT_EXTENSIONS: &[&str] = &[
 	"java", "kt", "c", "h", "cpp", "hpp", "cs", "rb", "php", "sh", "css", "scss", "swift",
 ];
 
-/// Why text could not be extracted from an uploaded file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum ExtractError {
-	#[error("file is not valid UTF-8 text")]
-	NotText,
-	#[error("file yielded no readable text")]
-	Empty,
-	#[error("extracted text exceeds limit")]
-	TextTooLong,
-	#[error("extraction timed out")]
-	TimedOut,
-	#[error("extraction is busy")]
-	Busy,
-	#[error("extraction failed")]
-	ExtractFailed,
-}
-
-impl ExtractError {
-	/// Stable machine-readable reason suffix for document errors and translations.
-	#[must_use]
-	pub const fn reason(self) -> &'static str {
-		match self {
-			Self::NotText => "not_text",
-			Self::Empty => "empty",
-			Self::TextTooLong => "text_too_long",
-			Self::TimedOut => "timed_out",
-			Self::Busy => "busy",
-			Self::ExtractFailed => "extract_failed",
-		}
-	}
-}
-
 /// How a file is turned into text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DocumentKind {
@@ -78,7 +47,7 @@ pub enum DocumentKind {
 }
 
 impl DocumentKind {
-	/// The kind of a file from its extension; a PDF must also start with `%PDF-`.
+	/// The kind of a file from its extension; a PDF must also start like one.
 	#[must_use]
 	pub fn detect(filename: &str, bytes: &[u8]) -> Option<Self> {
 		let extension = Path::new(filename).extension()?.to_str()?.to_ascii_lowercase();
@@ -90,7 +59,7 @@ impl DocumentKind {
 		}
 	}
 
-	/// The media type the document is stored with.
+	/// The media type the attachment is stored with.
 	#[must_use]
 	pub const fn mime_type(self) -> &'static str {
 		match self {
@@ -100,15 +69,10 @@ impl DocumentKind {
 		}
 	}
 
-	/// Reconstructs the kind from a stored media type.
+	/// The kind a stored media type belongs to.
 	#[must_use]
 	pub fn from_mime(mime: &str) -> Option<Self> {
-		match mime {
-			"text/plain" => Some(Self::Text),
-			"text/html" => Some(Self::Html),
-			"application/pdf" => Some(Self::Pdf),
-			_ => None,
-		}
+		[Self::Text, Self::Html, Self::Pdf].into_iter().find(|kind| kind.mime_type() == mime)
 	}
 
 	const fn arg(self) -> &'static str {
@@ -128,52 +92,52 @@ impl DocumentKind {
 ///
 /// # Errors
 ///
-/// Returns an [`ExtractError`] when the file is not text, cannot be parsed in time, or yields no or too much text.
-pub async fn extract(kind: DocumentKind, bytes: &[u8]) -> Result<String, ExtractError> {
+/// Returns an [`FileError`] when the file is not text, cannot be parsed in time, or yields no or too much text.
+pub async fn extract(kind: DocumentKind, bytes: &[u8]) -> Result<String, FileError> {
 	let text = match kind {
 		DocumentKind::Text => decode_text(bytes)?,
 		DocumentKind::Html | DocumentKind::Pdf => run_child(kind, bytes).await?,
 	};
 	let text = text.trim();
 	if text.is_empty() {
-		return Err(ExtractError::Empty);
+		return Err(FileError::Empty);
 	}
 	if text.len() > MAX_TEXT_BYTES {
-		return Err(ExtractError::TextTooLong);
+		return Err(FileError::TextTooLong);
 	}
 	Ok(text.to_owned())
 }
 
-/// Counts PDF page markers (`<!-- page N -->`) in extracted text, returning the highest page number if any exist.
+/// The highest `<!-- page N -->` marker in extracted text.
 #[must_use]
 pub fn page_count(text: &str) -> Option<i32> {
 	text.lines().filter_map(parse_page_marker).max()
 }
 
-/// Parses a `<!-- page N -->` marker line into its 1-based page number.
+/// The 1-based page number of a `<!-- page N -->` marker line.
 #[must_use]
 pub fn parse_page_marker(line: &str) -> Option<i32> {
 	let inner = line.trim().strip_prefix("<!-- page ")?.strip_suffix(" -->")?;
 	inner.trim().parse::<i32>().ok().filter(|page| *page > 0)
 }
 
-fn decode_text(bytes: &[u8]) -> Result<String, ExtractError> {
+fn decode_text(bytes: &[u8]) -> Result<String, FileError> {
 	let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
 	if bytes.contains(&0) {
-		return Err(ExtractError::NotText);
+		return Err(FileError::NotText);
 	}
-	let text = String::from_utf8(bytes.to_vec()).map_err(|_| ExtractError::NotText)?;
+	let text = std::str::from_utf8(bytes).map_err(|_| FileError::NotText)?;
 	Ok(text.replace("\r\n", "\n").replace('\r', "\n"))
 }
 
-async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, ExtractError> {
+async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, FileError> {
 	let _slot = tokio::time::timeout(TIMEOUT, CHILD_SLOTS.acquire())
 		.await
-		.map_err(|_| ExtractError::Busy)?
-		.map_err(|_| ExtractError::ExtractFailed)?;
+		.map_err(|_| FileError::Busy)?
+		.map_err(|_| FileError::ExtractFailed)?;
 	let exe = std::env::current_exe().map_err(|error| {
 		tracing::error!(%error, "could not find the server binary for text extraction");
-		ExtractError::ExtractFailed
+		FileError::ExtractFailed
 	})?;
 	let mut child = Command::new(exe)
 		.arg(SUBCOMMAND)
@@ -186,10 +150,10 @@ async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, ExtractEr
 		.spawn()
 		.map_err(|error| {
 			tracing::error!(%error, "could not start the text extraction process");
-			ExtractError::ExtractFailed
+			FileError::ExtractFailed
 		})?;
 	let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-		return Err(ExtractError::ExtractFailed);
+		return Err(FileError::ExtractFailed);
 	};
 	let work = async {
 		let write = async {
@@ -200,17 +164,17 @@ async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, ExtractEr
 		let mut limited = stdout.take(MAX_TEXT_BYTES as u64 + 1);
 		let read = limited.read_to_end(&mut output);
 		let ((), read) = tokio::join!(write, read);
-		read.map_err(|_| ExtractError::ExtractFailed)?;
+		read.map_err(|_| FileError::ExtractFailed)?;
 		if output.len() > MAX_TEXT_BYTES {
-			return Err(ExtractError::TextTooLong);
+			return Err(FileError::TextTooLong);
 		}
-		let status = child.wait().await.map_err(|_| ExtractError::ExtractFailed)?;
+		let status = child.wait().await.map_err(|_| FileError::ExtractFailed)?;
 		if !status.success() {
-			return Err(ExtractError::ExtractFailed);
+			return Err(FileError::ExtractFailed);
 		}
-		String::from_utf8(output).map_err(|_| ExtractError::ExtractFailed)
+		String::from_utf8(output).map_err(|_| FileError::ExtractFailed)
 	};
-	tokio::time::timeout(TIMEOUT, work).await.map_err(|_| ExtractError::TimedOut)?
+	tokio::time::timeout(TIMEOUT, work).await.map_err(|_| FileError::TimedOut)?
 }
 
 /// Entry point of the extraction child process: reads the file from stdin and writes its text to stdout.
@@ -234,25 +198,41 @@ pub fn child_main(kind: Option<&str>) -> i32 {
 }
 
 /// Parses a file in the current process; only the child process calls this for HTML and PDF.
+///
+/// A file whose parsed text is only whitespace yields an empty string, and NUL characters, which Postgres cannot store, are left out.
 #[must_use]
 pub fn parse(kind: DocumentKind, input: &[u8]) -> Option<String> {
 	match kind {
 		DocumentKind::Text => decode_text(input).ok(),
-		DocumentKind::Html => html2text::from_read(input, HTML_WIDTH).ok(),
-		DocumentKind::Pdf => {
-			let pages = pdf_extract::extract_text_from_mem_by_pages(input).ok()?;
-			let total = pdf_extract::Document::load_mem(input).map_or(pages.len(), |doc| doc.get_pages().len());
-			let mut marked: Vec<String> = pages
-				.iter()
-				.enumerate()
-				.map(|(index, page)| format!("<!-- page {} -->\n{}", index + 1, page.trim()))
-				.collect();
-			if total > pages.len() {
-				marked.push(format!("<!-- pages {} to {total} could not be read -->", pages.len() + 1));
-			}
-			Some(marked.join("\n\n"))
-		}
+		DocumentKind::Html => html2text::from_read(input, HTML_WIDTH).ok().map(|text| text.replace('\0', "")),
+		DocumentKind::Pdf => pdf_text(input),
 	}
+}
+
+fn pdf_text(input: &[u8]) -> Option<String> {
+	let mut doc = pdf_extract::Document::load_mem(input).ok()?;
+	if doc.is_encrypted() {
+		doc.decrypt("").ok()?;
+	}
+	let pages: Vec<Option<String>> = doc.get_pages().into_keys().map(|number| pdf_page_text(&doc, number)).collect();
+	if pages.iter().flatten().all(|page| page.trim().is_empty()) {
+		return Some(String::new());
+	}
+	let marked: Vec<String> = pages
+		.iter()
+		.enumerate()
+		.map(|(index, page)| match page {
+			Some(page) => format!("<!-- page {} -->\n{}", index + 1, page.trim()),
+			None => format!("<!-- page {} could not be read -->", index + 1),
+		})
+		.collect();
+	Some(marked.join("\n\n"))
+}
+
+fn pdf_page_text(doc: &pdf_extract::Document, number: u32) -> Option<String> {
+	let mut text = String::new();
+	pdf_extract::output_doc_page(doc, &mut pdf_extract::PlainTextOutput::new(&mut text), number).ok()?;
+	Some(text.replace('\0', ""))
 }
 
 #[cfg(target_os = "linux")]

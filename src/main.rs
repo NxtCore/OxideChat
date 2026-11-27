@@ -23,14 +23,16 @@ fn main() {
 	if args.next().as_deref() == Some(utils::extract::SUBCOMMAND) {
 		std::process::exit(utils::extract::child_main(args.next().as_deref()));
 	}
-	tokio::runtime::Builder::new_multi_thread()
-		.enable_all()
-		.build()
-		.expect("Failed to start Tokio runtime")
-		.block_on(run_server());
+	match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+		Ok(runtime) => runtime.block_on(serve()),
+		Err(error) => {
+			eprintln!("[SERVER] Failed to start the Tokio runtime: {error}");
+			std::process::exit(1);
+		}
+	}
 }
 
-async fn run_server() {
+async fn serve() {
 	dotenv::dotenv().ok();
 
 	let log_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,omniference=debug"));

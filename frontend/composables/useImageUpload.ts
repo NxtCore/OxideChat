@@ -1,3 +1,5 @@
+import {fileErrorReason, fileUrl, postFile} from '~/composables/api/files';
+
 export const IMAGE_UPLOAD_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
 export const IMAGE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
@@ -10,15 +12,6 @@ export class ImageUploadError extends Error {
 	}
 }
 
-function readAsDataUrl(file: File): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onload = () => resolve(reader.result as string);
-		reader.onerror = () => reject(reader.error);
-		reader.readAsDataURL(file);
-	});
-}
-
 export function useImageUpload() {
 	const uploading = ref(false);
 
@@ -27,11 +20,11 @@ export function useImageUpload() {
 		if (file.size > IMAGE_UPLOAD_MAX_BYTES) throw new ImageUploadError('image_picker.errors.size');
 		uploading.value = true;
 		try {
-			const response = await postImage(await readAsDataUrl(file), 'icon');
-			if (!response.ok) throw new ImageUploadError('image_picker.errors.upload');
-			return (await response.json()) as UploadedImage;
+			const stored = await postFile(file, 'icon');
+			return {id: stored.id, url: stored.url ?? fileUrl(stored.id)};
 		} catch (error) {
-			throw error instanceof ImageUploadError ? error : new ImageUploadError('image_picker.errors.upload');
+			const reason = fileErrorReason(error);
+			throw new ImageUploadError(reason ? `files.error.${reason}` : 'image_picker.errors.upload');
 		} finally {
 			uploading.value = false;
 		}

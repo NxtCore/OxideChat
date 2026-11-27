@@ -1,6 +1,7 @@
 //! Handler error type shared by all routes.
 
 use crate::types::models::PriceSheetError;
+use crate::types::files::FileError;
 use crate::types::rag::RagError;
 use crate::types::{ArenaError, GatewayAdminError, GatewayKeyError, PresetError, RequestLogScopeError, RoleError};
 use crate::utils::response::{ErrorBuilder, ErrorCode};
@@ -43,6 +44,9 @@ pub enum AppError {
 	/// Knowledge settings or a connection could not be saved.
 	#[error(transparent)]
 	Rag(#[from] RagError),
+	/// A file could not be stored.
+	#[error(transparent)]
+	File(#[from] FileError),
 }
 
 /// Returns true when the database rejected a statement because of a unique constraint.
@@ -104,6 +108,9 @@ impl AppError {
 			Self::Rag(RagError::Database(error)) if is_unique_violation(error) => ErrorCode::AlreadyExists,
 			Self::Rag(RagError::Database(_)) => ErrorCode::InternalError,
 			Self::Rag(_) => ErrorCode::ValidationFailed,
+			Self::File(FileError::Database(_) | FileError::Storage(_)) => ErrorCode::InternalError,
+			Self::File(FileError::Busy | FileError::QuotaExceeded | FileError::RateLimited) => ErrorCode::TooManyRequests,
+			Self::File(_) => ErrorCode::ValidationFailed,
 		}
 	}
 }
@@ -140,6 +147,7 @@ impl IntoResponse for AppError {
 			Self::Rag(error) if matches!(code, ErrorCode::ValidationFailed | ErrorCode::TooManyRequests) => {
 				ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build()
 			}
+			Self::File(error) if code != ErrorCode::InternalError => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
 			_ => ErrorBuilder::new(code).build(),
 		}
 	}
