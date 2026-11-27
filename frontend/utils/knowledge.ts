@@ -1,5 +1,22 @@
 import type {ExternalView} from '~/types/generated/ExternalView';
 
+export const SEARCH_LANGUAGES = [
+	'simple',
+	'english',
+	'german',
+	'french',
+	'spanish',
+	'italian',
+	'portuguese',
+	'dutch',
+	'swedish',
+	'norwegian',
+	'danish',
+	'finnish',
+	'russian',
+	'turkish',
+] as const;
+
 export function emptyView(): ExternalView {
 	return {
 		connection_id: '',

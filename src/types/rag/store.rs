@@ -56,6 +56,42 @@ pub enum StoreError {
 	CollectionNotFound,
 	#[error("the collection has no such field or vector")]
 	UnknownField,
+	#[error("the connection is re-indexing")]
+	Reindexing,
+}
+
+/// One chunk vector written to a managed pgvector connection.
+#[derive(Debug, Clone)]
+pub struct ManagedVector {
+	pub chunk_id: Uuid,
+	pub knowledge_base_id: Uuid,
+	pub document_id: Uuid,
+	pub access: Option<Vec<String>>,
+	pub embedding: Vec<f32>,
+}
+
+/// Parameters for a managed pgvector similarity search.
+pub struct ManagedSearch<'a> {
+	pub connection_id: &'a Uuid,
+	pub generation: i32,
+	pub knowledge_base_id: &'a Uuid,
+	pub vector: &'a [f32],
+	pub limit: u32,
+	pub labels: &'a [String],
+}
+
+/// Deterministic table name for one managed connection and index generation (`rag_vectors_<hex16>_g<gen>`).
+#[must_use]
+pub fn managed_table_name(connection_id: &Uuid, generation: i32) -> String {
+	let hex = connection_id.simple().to_string();
+	let prefix = &hex[..16];
+	let generation = generation.max(0);
+	format!("rag_vectors_{prefix}_g{generation}")
+}
+
+fn managed_table_prefix(connection_id: &Uuid) -> String {
+	let hex = connection_id.simple().to_string();
+	format!("rag_vectors_{}_g", &hex[..16])
 }
 
 /// An open vector store; the main database is borrowed, every other store is its own pool or client.
@@ -405,6 +441,194 @@ impl<'a> VectorStore<'a> {
 		labels.dedup();
 		Ok(labels)
 	}
+
+	/// Creates the `vector` extension and the managed vector table + indexes for `(connection_id, generation)` if missing.
+	///
+	/// # Errors
+	///
+	/// Returns a `StoreError` when the store is not pgvector, lacks pgvector 0.8+ or DDL fails.
+	pub async fn ensure_managed(&self, connection_id: &Uuid, generation: i32, dimensions: u32) -> Result<(), StoreError> {
+		let Self::Pgvector(pool) = self else {
+			return Err(StoreError::BadResponse);
+		};
+		if !(1..=super::MAX_DIMENSIONS).contains(&dimensions) {
+			return Err(StoreError::BadResponse);
+		}
+		timed(sqlx::query("CREATE EXTENSION IF NOT EXISTS vector").execute(pool.as_ref())).await?;
+		self.health().await?;
+		let table = managed_table_name(connection_id, generation);
+		let statements = [
+			format!(
+				"CREATE TABLE IF NOT EXISTS {table} (
+					chunk_id UUID PRIMARY KEY,
+					knowledge_base_id UUID NOT NULL,
+					document_id UUID NOT NULL,
+					access TEXT[],
+					embedding halfvec({dimensions}) NOT NULL
+				)"
+			),
+			format!("CREATE INDEX IF NOT EXISTS idx_{table}_kb ON {table} (knowledge_base_id)"),
+			format!("CREATE INDEX IF NOT EXISTS idx_{table}_doc ON {table} (document_id)"),
+			format!("CREATE INDEX IF NOT EXISTS idx_{table}_access ON {table} USING GIN (access)"),
+			format!("CREATE INDEX IF NOT EXISTS idx_{table}_hnsw ON {table} USING hnsw (embedding halfvec_cosine_ops)"),
+		];
+		for sql in statements {
+			timed(sqlx::query(AssertSqlSafe(sql)).execute(pool.as_ref())).await?;
+		}
+		Ok(())
+	}
+
+	/// Normalizes chunk vectors and writes them into the managed pgvector table in one transaction, replacing the vectors their documents had there.
+	///
+	/// # Errors
+	///
+	/// Returns a `StoreError` when any vector is invalid or the database write fails.
+	pub async fn upsert_managed(&self, connection_id: &Uuid, generation: i32, rows: &[ManagedVector]) -> Result<(), StoreError> {
+		let Self::Pgvector(pool) = self else {
+			return Err(StoreError::BadResponse);
+		};
+		if rows.is_empty() {
+			return Ok(());
+		}
+		let table = managed_table_name(connection_id, generation);
+		let sql = format!(
+			"INSERT INTO {table} (chunk_id, knowledge_base_id, document_id, access, embedding)
+			 VALUES ($1, $2, $3, $4, $5::real[]::vector::halfvec)
+			 ON CONFLICT (chunk_id) DO UPDATE SET access = EXCLUDED.access, embedding = EXCLUDED.embedding"
+		);
+		let mut documents: Vec<Uuid> = rows.iter().map(|row| row.document_id).collect();
+		documents.sort_unstable();
+		documents.dedup();
+		let mut tx = timed(pool.begin()).await?;
+		let clear = format!("DELETE FROM {table} WHERE document_id = ANY($1)");
+		timed(sqlx::query(AssertSqlSafe(clear)).bind(&documents).execute(&mut *tx)).await?;
+		for row in rows {
+			let mut vector = row.embedding.clone();
+			if !super::normalize_vector(&mut vector) {
+				return Err(StoreError::BadResponse);
+			}
+			timed(
+				sqlx::query(AssertSqlSafe(sql.clone()))
+					.bind(row.chunk_id)
+					.bind(row.knowledge_base_id)
+					.bind(row.document_id)
+					.bind(row.access.as_deref())
+					.bind(&vector)
+					.execute(&mut *tx),
+			)
+			.await?;
+		}
+		timed(tx.commit()).await?;
+		Ok(())
+	}
+
+	/// Updates the access label array on every stored vector of `document_id` across all generations of `connection_id`.
+	///
+	/// # Errors
+	///
+	/// Returns a `StoreError` when the database update fails.
+	pub async fn update_managed_access(&self, connection_id: &Uuid, document_id: &Uuid, access: Option<&[String]>) -> Result<(), StoreError> {
+		let Self::Pgvector(pool) = self else {
+			return Err(StoreError::BadResponse);
+		};
+		for table in list_managed_tables(pool.as_ref(), connection_id).await? {
+			let sql = format!("UPDATE {} SET access = $2 WHERE document_id = $1", quote_ident(&table));
+			timed(sqlx::query(AssertSqlSafe(sql)).bind(document_id).bind(access).execute(pool.as_ref())).await?;
+		}
+		Ok(())
+	}
+
+	/// Deletes all stored vectors for `document_id` across every generation table of `connection_id`.
+	///
+	/// # Errors
+	///
+	/// Returns a `StoreError` when the database delete fails.
+	pub async fn delete_managed_document(&self, connection_id: &Uuid, document_id: &Uuid) -> Result<(), StoreError> {
+		let Self::Pgvector(pool) = self else {
+			return Err(StoreError::BadResponse);
+		};
+		for table in list_managed_tables(pool.as_ref(), connection_id).await? {
+			let sql = format!("DELETE FROM {} WHERE document_id = $1", quote_ident(&table));
+			timed(sqlx::query(AssertSqlSafe(sql)).bind(document_id).execute(pool.as_ref())).await?;
+		}
+		Ok(())
+	}
+
+	/// Drops managed vector tables of `connection_id` from generations before `keep_generation` once re-indexing is complete.
+	///
+	/// # Errors
+	///
+	/// Returns a `StoreError` when a drop fails.
+	pub async fn drop_old_managed_tables(&self, connection_id: &Uuid, keep_generation: i32) -> Result<(), StoreError> {
+		let Self::Pgvector(pool) = self else {
+			return Err(StoreError::BadResponse);
+		};
+		let prefix = managed_table_prefix(connection_id);
+		for table in list_managed_tables(pool.as_ref(), connection_id).await? {
+			let generation = table.strip_prefix(&prefix).and_then(|suffix| suffix.parse::<i32>().ok());
+			if generation.is_some_and(|generation| generation < keep_generation) {
+				let sql = format!("DROP TABLE IF EXISTS {}", quote_ident(&table));
+				timed(sqlx::query(AssertSqlSafe(sql)).execute(pool.as_ref())).await?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Searches a managed knowledge base's vectors, filtering by `knowledge_base_id` and per-document `access` inside the query.
+	///
+	/// # Errors
+	///
+	/// Returns a `StoreError` when the store cannot be read or pgvector is older than 0.8.
+	pub async fn search_managed(&self, query: &ManagedSearch<'_>) -> Result<Vec<(Uuid, f64)>, StoreError> {
+		let Self::Pgvector(pool) = self else {
+			return Err(StoreError::BadResponse);
+		};
+		let limit = query.limit.clamp(1, MAX_SEARCH_HITS);
+		let mut query_vector = query.vector.to_vec();
+		if !super::normalize_vector(&mut query_vector) {
+			return Err(StoreError::BadResponse);
+		}
+		let table = managed_table_name(query.connection_id, query.generation);
+		let exists: bool = timed(sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL").bind(&table).fetch_one(pool.as_ref())).await?;
+		if !exists {
+			return Ok(Vec::new());
+		}
+		let sql = format!(
+			"SELECT chunk_id, (1.0 - (embedding <=> $2::real[]::vector::halfvec))::float8
+			 FROM {table}
+			 WHERE knowledge_base_id = $1 AND (access IS NULL OR access && $3::text[])
+			 ORDER BY embedding <=> $2::real[]::vector::halfvec
+			 LIMIT $4"
+		);
+		let mut tx = timed(pool.begin()).await?;
+		timed(sqlx::query("SET LOCAL hnsw.iterative_scan = relaxed_order").execute(&mut *tx))
+			.await
+			.map_err(|error| if error == StoreError::CollectionNotFound { StoreError::ExtensionTooOld } else { error })?;
+		let rows = timed(
+			sqlx::query_as::<_, (Uuid, f64)>(AssertSqlSafe(sql))
+				.bind(query.knowledge_base_id)
+				.bind(&query_vector)
+				.bind(query.labels)
+				.bind(i64::from(limit))
+				.fetch_all(&mut *tx),
+		)
+		.await?;
+		Ok(rows)
+	}
+}
+
+async fn list_managed_tables(pool: &PgPool, connection_id: &Uuid) -> Result<Vec<String>, StoreError> {
+	let prefix = format!("{}%", managed_table_prefix(connection_id));
+	timed(
+		sqlx::query_scalar::<_, String>(
+			"SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+			 WHERE n.nspname = current_schema() AND c.relkind = 'r' AND c.relname LIKE $1
+			 ORDER BY c.relname",
+		)
+		.bind(prefix)
+		.fetch_all(pool),
+	)
+	.await
 }
 
 async fn pg_table(pool: &PgPool, collection: &str) -> Result<PgTable, StoreError> {

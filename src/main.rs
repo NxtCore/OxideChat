@@ -95,6 +95,7 @@ async fn serve() {
 		db: pool,
 		mcp_pool: crate::utils::tools::McpConnectionPool::new(),
 		client_tool_pending: crate::types::state::ClientToolPending::new(),
+		rag_ingest_notify: Arc::new(tokio::sync::Notify::new()),
 	});
 	ai::init(&app_state).await;
 

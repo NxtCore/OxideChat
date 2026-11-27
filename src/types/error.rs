@@ -103,6 +103,7 @@ impl AppError {
 			Self::Pricing(_) => ErrorCode::ValidationFailed,
 			Self::Rag(RagError::NotFound) => ErrorCode::NotFound,
 			Self::Rag(RagError::Forbidden) => ErrorCode::InsufficientPermissions,
+			Self::Rag(RagError::RateLimited) => ErrorCode::TooManyRequests,
 			Self::Rag(RagError::SecretRequiredForNewHost) => ErrorCode::SecretRequiredForNewHost,
 			Self::Rag(RagError::Database(error)) if is_unique_violation(error) => ErrorCode::AlreadyExists,
 			Self::Rag(RagError::Database(_)) => ErrorCode::InternalError,
@@ -138,7 +139,14 @@ impl IntoResponse for AppError {
 		}
 		match &self {
 			Self::Pricing(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
-			Self::Rag(error) if code == ErrorCode::ValidationFailed => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
+			Self::Rag(RagError::ConnectionModelConflict(names)) => {
+				ErrorBuilder::new(code)
+					.details(serde_json::json!({ "reason": "connection_model_conflict", "knowledge_bases": names }))
+					.build()
+			}
+			Self::Rag(error) if matches!(code, ErrorCode::ValidationFailed | ErrorCode::TooManyRequests) => {
+				ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build()
+			}
 			Self::File(error) if code != ErrorCode::InternalError => ErrorBuilder::new(code).details(serde_json::json!({ "reason": error.reason() })).build(),
 			_ => ErrorBuilder::new(code).build(),
 		}

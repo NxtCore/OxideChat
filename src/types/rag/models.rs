@@ -1,12 +1,14 @@
 //! Checks the embedding and rerank models the setup page picks.
 
+use super::chunker::estimate_tokens;
 use super::{EmbeddingSettings, RagError};
 use crate::ai::provider_to_config;
 use crate::types::gateway::{MediaKind, knowledge_estimate, model_type};
-use crate::types::models::Model;
+use crate::types::models::{Model, ModelPricing};
 use crate::types::providers::Provider;
 use crate::types::{BUDGET_RESERVATION_METADATA_KEY, BudgetAdmission, BudgetError, BudgetSubject, JobState, TokenEstimate};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use futures_util::{StreamExt, stream};
 use omniference::types::{EmbeddingInput, EmbeddingRequestIR, EmbeddingVector, ModelRef, RerankRequestIR};
 use sqlx::PgPool;
 use sqlx::types::Json;
@@ -14,6 +16,9 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 
 const TEST_INPUT: &str = "OxideChat knowledge test";
+const EMBED_BATCH_MAX_INPUTS: usize = 64;
+const EMBED_BATCH_MAX_TOKENS: usize = 16_000;
+const EMBED_IN_FLIGHT_PER_DOC: usize = 2;
 
 async fn load(pool: &PgPool, model_id: &Uuid, expected_type: &str, wrong_type: RagError) -> Result<(Model, Provider), RagError> {
 	let model = Model::find_by_id(pool, model_id).await?.ok_or(RagError::ModelUnavailable)?;
@@ -88,6 +93,114 @@ pub async fn embed(state: &JobState, user_id: &Uuid, settings: &EmbeddingSetting
 		.map(|item| floats(item.embedding))
 		.filter(|vector| !vector.is_empty())
 		.ok_or_else(|| RagError::EmbeddingFailed("no embedding returned".to_string()))
+}
+
+/// Normalizes `vector` to unit L2 length in place; returns `false` if empty, non-finite or zero-length.
+#[must_use]
+pub fn normalize_vector(vector: &mut [f32]) -> bool {
+	if vector.is_empty() || !vector.iter().all(|value| value.is_finite()) {
+		return false;
+	}
+	let norm_sq: f64 = vector.iter().map(|value| f64::from(*value) * f64::from(*value)).sum();
+	let norm = norm_sq.sqrt();
+	if !norm.is_finite() || norm <= f64::EPSILON {
+		return false;
+	}
+	for value in vector.iter_mut() {
+		*value = (f64::from(*value) / norm) as f32;
+	}
+	true
+}
+
+/// Groups `inputs` into batches of at most 64 inputs and about 16k tokens.
+#[must_use]
+pub fn split_embedding_batches(inputs: &[String]) -> Vec<Vec<String>> {
+	let mut batches = Vec::new();
+	let mut current = Vec::new();
+	let mut tokens = 0usize;
+	for input in inputs {
+		let input_tokens = estimate_tokens(input);
+		if !current.is_empty() && (current.len() >= EMBED_BATCH_MAX_INPUTS || tokens + input_tokens > EMBED_BATCH_MAX_TOKENS) {
+			batches.push(std::mem::take(&mut current));
+			tokens = 0;
+		}
+		tokens += input_tokens;
+		current.push(input.clone());
+	}
+	if !current.is_empty() {
+		batches.push(current);
+	}
+	batches
+}
+
+struct BatchEmbedTarget<'a> {
+	model: &'a Model,
+	target_ref: &'a ModelRef,
+	dimensions: Option<u32>,
+	request_type: &'a str,
+}
+
+/// Embeds `inputs` in batches of at most 64 inputs / ~16k tokens, up to 2 in flight, each batch reserved against `user_id` as `request_type`.
+///
+/// # Errors
+///
+/// Returns why the model cannot be used, the budget refused a batch or the provider failed.
+pub async fn embed_batch(state: &JobState, user_id: &Uuid, settings: &EmbeddingSettings, inputs: &[String], request_type: &str) -> Result<Vec<Vec<f32>>, RagError> {
+	if inputs.is_empty() {
+		return Ok(Vec::new());
+	}
+	let (model, provider) = load(&state.db, &settings.model_id, "embedding", RagError::NotEmbeddingModel).await?;
+	let target_ref = model_ref(&model, &provider).await?;
+	let target = BatchEmbedTarget {
+		model: &model,
+		target_ref: &target_ref,
+		dimensions: settings.dimensions,
+		request_type,
+	};
+	let batches = split_embedding_batches(inputs);
+	let mut results = stream::iter(batches.into_iter().map(|batch| embed_one_batch(state, user_id, &target, batch))).buffered(EMBED_IN_FLIGHT_PER_DOC);
+	let mut vectors = Vec::with_capacity(inputs.len());
+	while let Some(batch) = results.next().await {
+		vectors.extend(batch?);
+	}
+	Ok(vectors)
+}
+
+async fn embed_one_batch(state: &JobState, user_id: &Uuid, target: &BatchEmbedTarget<'_>, batch: Vec<String>) -> Result<Vec<Vec<f32>>, RagError> {
+	let expected = batch.len();
+	let bytes: u64 = batch.iter().map(|text| text.len() as u64).sum();
+	let (admission, metadata) = reserve(state, user_id, target.model, knowledge_estimate(bytes, MediaKind::Embeddings), target.request_type).await?;
+	let request = EmbeddingRequestIR {
+		model: target.target_ref.clone(),
+		input: EmbeddingInput::Texts(batch),
+		dimensions: target.dimensions,
+		encoding_format: None,
+		raw_request: None,
+		metadata,
+	};
+	let response = crate::ai::get()
+		.embeddings(request)
+		.await
+		.map_err(|error| RagError::EmbeddingFailed(error.to_string()))?;
+	drop(admission);
+	let mut items = response.data;
+	items.sort_by_key(|item| item.index);
+	let vectors: Vec<Vec<f32>> = items.into_iter().map(|item| floats(item.embedding)).filter(|vector| !vector.is_empty()).collect();
+	if vectors.len() != expected {
+		return Err(RagError::EmbeddingFailed("embedding batch count mismatch".to_string()));
+	}
+	Ok(vectors)
+}
+
+/// Estimates USD cost of embedding `total_tokens` with `model_id`.
+///
+/// # Errors
+///
+/// Returns a database error when pricing cannot be read.
+pub async fn estimate_embedding_cost(pool: &PgPool, model_id: &Uuid, total_tokens: u64) -> Result<Option<f64>, sqlx::Error> {
+	let estimate = knowledge_estimate(total_tokens.saturating_mul(4), MediaKind::Embeddings);
+	let cost = ModelPricing::estimate_cost(pool, model_id, estimate).await?;
+	Ok(cost.to_string().parse::<f64>().ok())
 }
 
 /// Sorts `documents` by relevance to `query` with the reranker `model_id`, billed to `user_id` as `rag_query`; returns document indexes, most relevant first.

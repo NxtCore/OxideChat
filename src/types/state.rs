@@ -109,4 +109,6 @@ pub struct JobState {
 	pub mcp_pool: McpConnectionPool,
 	/// Pending client-side MCP tool calls waiting for the browser to submit results.
 	pub client_tool_pending: ClientToolPending,
+	/// Wakes the managed knowledge ingest worker when documents are uploaded, retried or deleted.
+	pub rag_ingest_notify: Arc<tokio::sync::Notify>,
 }

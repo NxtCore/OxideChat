@@ -79,6 +79,8 @@ test.describe('knowledge bases', () => {
 	test('an admin maps a Qdrant collection and the test search finds its records', async ({page, t}) => {
 		await page.goto('/settings/knowledge');
 		await page.getByTestId('knowledge-create').click();
+		await page.getByTestId('knowledge-kind').click();
+		await page.getByRole('option', {name: t('knowledge.editor.kind_external')}).click();
 		await page.getByTestId('knowledge-name').fill(BASE);
 		await page.getByTestId('knowledge-tab-source').click();
 

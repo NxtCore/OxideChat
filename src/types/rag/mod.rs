@@ -1,6 +1,9 @@
 //! Knowledge (RAG): connections to vector stores and the models that index and rerank knowledge.
 
 mod access;
+pub mod chunker;
+mod documents;
+mod ingest;
 mod knowledge_bases;
 mod model_access;
 mod models;
@@ -12,6 +15,9 @@ mod store;
 mod view;
 
 pub use access::*;
+pub use chunker::{ChunkConfig, DEFAULT_CHUNK_TOKENS, DEFAULT_OVERLAP_PERCENT, TextChunk, chunk_document, has_headings, sha256_hex};
+pub use documents::*;
+pub use ingest::*;
 pub use knowledge_bases::*;
 pub use model_access::*;
 pub use models::*;
@@ -47,6 +53,47 @@ pub enum ConnectionMode {
 	ReadOnly,
 }
 
+/// Who owns a managed knowledge base; external knowledge bases are always `installation`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub enum KnowledgeScope {
+	Personal,
+	Team,
+	#[default]
+	Installation,
+}
+
+/// Supported PostgreSQL full-text search configurations (`regconfig`) for managed knowledge bases.
+pub const SEARCH_LANGUAGES: &[&str] = &[
+	"simple", "english", "german", "french", "spanish", "italian", "portuguese", "dutch", "swedish", "norwegian", "danish", "finnish", "russian", "turkish",
+	"hungarian", "romanian", "greek", "arabic", "indonesian", "irish", "lithuanian", "nepali", "serbian", "tamil", "yiddish",
+];
+
+/// Validates `language` against [`SEARCH_LANGUAGES`] and returns its canonical static name.
+///
+/// # Errors
+///
+/// Returns `RagError::InvalidLanguage` for any unsupported configuration name.
+pub fn check_search_language(language: &str) -> Result<&'static str, RagError> {
+	let lower = language.trim().to_ascii_lowercase();
+	SEARCH_LANGUAGES.iter().copied().find(|known| *known == lower).ok_or(RagError::InvalidLanguage)
+}
+
+/// Lifecycle state of a managed document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub enum DocumentStatus {
+	Pending,
+	Processing,
+	Ready,
+	Failed,
+	Deleting,
+}
+
 /// A stored connection; `secret` is encrypted.
 #[derive(Debug, Clone)]
 pub struct RagConnection {
@@ -63,11 +110,15 @@ pub struct RagConnection {
 }
 
 /// The installation's knowledge settings (single row).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct RagConfig {
 	pub reranker_model_id: Option<Uuid>,
 	pub reranker_top_n: i32,
 	pub default_connection_id: Option<Uuid>,
+	pub chunk_size: i32,
+	pub chunk_overlap_percent: i32,
+	pub max_uploads_per_hour: i32,
+	pub storage_quota_mb: Option<i32>,
 }
 
 /// Why knowledge settings or a connection could not be saved; `reason()` is translated as `rag.error.<reason>`.
@@ -135,6 +186,36 @@ pub enum RagError {
 	UpstreamNeedsProvider,
 	#[error("invalid description")]
 	InvalidDescription,
+	#[error("no default managed connection configured")]
+	NoDefaultConnection,
+	#[error("the managed connection has no embedding model")]
+	ConnectionNotReady,
+	#[error("documents belong only to managed knowledge bases")]
+	NotManaged,
+	#[error("invalid scope")]
+	InvalidScope,
+	#[error("invalid search language")]
+	InvalidLanguage,
+	#[error("invalid chunking settings")]
+	InvalidChunking,
+	#[error("invalid upload quota settings")]
+	InvalidQuotas,
+	#[error("unsupported file type")]
+	UnsupportedFile,
+	#[error("file exceeds 25 MiB limit")]
+	FileTooLarge,
+	#[error("file is empty")]
+	EmptyFile,
+	#[error("upload rate limit exceeded")]
+	RateLimited,
+	#[error("storage quota exceeded")]
+	StorageQuotaExceeded,
+	#[error("invalid filename")]
+	InvalidFilename,
+	#[error("document cannot be retried")]
+	CannotRetry,
+	#[error("knowledge bases on this connection forbid the embedding model")]
+	ConnectionModelConflict(Vec<String>),
 	#[error("not allowed")]
 	Forbidden,
 	#[error("the secret must be entered again for a new host")]
@@ -156,7 +237,7 @@ impl RagError {
 		}
 	}
 
-	/// The translation suffix shown to admins.
+	/// The translation suffix shown to admins and users.
 	#[must_use]
 	pub const fn reason(&self) -> &'static str {
 		match self {
@@ -191,6 +272,21 @@ impl RagError {
 			Self::EmbeddingModelNotAllowed => "embedding_model_not_allowed",
 			Self::UpstreamNeedsProvider => "upstream_needs_provider",
 			Self::InvalidDescription => "invalid_description",
+			Self::NoDefaultConnection => "no_default_connection",
+			Self::ConnectionNotReady => "connection_not_ready",
+			Self::NotManaged => "not_managed",
+			Self::InvalidScope => "invalid_scope",
+			Self::InvalidLanguage => "invalid_language",
+			Self::InvalidChunking => "invalid_chunking",
+			Self::InvalidQuotas => "invalid_quotas",
+			Self::UnsupportedFile => "unsupported_file",
+			Self::FileTooLarge => "file_too_large",
+			Self::EmptyFile => "empty_file",
+			Self::RateLimited => "rate_limited",
+			Self::StorageQuotaExceeded => "storage_quota_exceeded",
+			Self::InvalidFilename => "invalid_filename",
+			Self::CannotRetry => "cannot_retry",
+			Self::ConnectionModelConflict(_) => "connection_model_conflict",
 			Self::Forbidden => "forbidden",
 			Self::SecretRequiredForNewHost => "secret_required_for_new_host",
 			Self::NotFound => "not_found",

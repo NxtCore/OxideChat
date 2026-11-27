@@ -1,9 +1,56 @@
-use super::{ConnectionKind, ConnectionMode, ExternalView, ModelTargets, RagError};
+use super::{ConnectionKind, ConnectionMode, ExternalView, KnowledgeScope, ModelTargets, RagError, check_search_language};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// The largest vector `halfvec` can index with HNSW.
 pub const MAX_DIMENSIONS: u32 = 4000;
+
+/// Chunking defaults for managed documents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ChunkingSettings {
+	pub chunk_size: u32,
+	pub overlap_percent: u32,
+}
+
+impl Default for ChunkingSettings {
+	fn default() -> Self {
+		Self {
+			chunk_size: 400,
+			overlap_percent: 15,
+		}
+	}
+}
+
+/// Per-user upload rate and storage limits for managed documents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct UploadQuotaSettings {
+	pub max_uploads_per_hour: u32,
+	pub storage_quota_mb: Option<u32>,
+}
+
+impl Default for UploadQuotaSettings {
+	fn default() -> Self {
+		Self {
+			max_uploads_per_hour: 60,
+			storage_quota_mb: None,
+		}
+	}
+}
+
+/// Asks for chunk count, cost estimate and model-restriction conflicts before changing a managed connection's embedding model.
+#[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ReindexEstimateRequest {
+	pub embedding: EmbeddingSettings,
+}
+
+/// Filename query parameter when uploading a document to a managed knowledge base.
+#[derive(Debug, Deserialize)]
+pub struct DocumentUploadQuery {
+	pub filename: String,
+}
 
 /// Creates a connection; an update takes the same shape and ignores `kind` and `mode`.
 #[derive(Debug, Deserialize)]
@@ -35,6 +82,12 @@ pub struct EmbeddingSettings {
 pub struct UpdateRagSetupRequest {
 	pub reranker: RerankerSettings,
 	pub defaults: RagDefaults,
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub chunking: Option<ChunkingSettings>,
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub quotas: Option<UploadQuotaSettings>,
 }
 
 /// Optional model that sorts search hits by relevance.
@@ -53,14 +106,26 @@ pub struct RagDefaults {
 	pub connection_id: Option<Uuid>,
 }
 
-/// Creates or changes a knowledge base on a read-only connection.
-#[derive(Debug, Deserialize)]
+/// Creates or changes a knowledge base (managed when `view` is omitted on create, external when `view` is given).
+#[derive(Debug, Default, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SaveKnowledgeBaseRequest {
 	pub name: String,
 	#[serde(default)]
 	pub description: Option<String>,
-	/// Required on create; on an update `None` keeps the stored source, and only knowledge admins may send one.
+	/// On create of a managed base: `personal`, `team` or `installation`. Ignored on updates and external bases.
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub scope: Option<KnowledgeScope>,
+	/// Required when `scope` is `team`.
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub team_id: Option<Uuid>,
+	/// PostgreSQL full-text search configuration (`simple`, `english`, `german`, …) for managed bases.
+	#[serde(default)]
+	#[cfg_attr(test, ts(optional))]
+	pub search_language: Option<String>,
+	/// Required on create of an external base; `None` creates a managed base or keeps the stored source on update.
 	#[serde(default)]
 	#[cfg_attr(test, ts(optional))]
 	pub view: Option<ExternalView>,
@@ -143,6 +208,9 @@ impl SaveKnowledgeBaseRequest {
 		if self.description().is_some_and(|text| text.chars().count() > 2000) {
 			return Err(RagError::InvalidDescription);
 		}
+		if let Some(language) = &self.search_language {
+			check_search_language(language)?;
+		}
 		self.view.as_ref().map_or(Ok(()), ExternalView::validate)
 	}
 }
@@ -214,10 +282,20 @@ impl UpdateRagSetupRequest {
 	///
 	/// # Errors
 	///
-	/// Returns `InvalidTopN` when `top_n` is outside 1 to 50.
-	pub const fn validate(&self) -> Result<(), RagError> {
+	/// Returns `InvalidTopN`, `InvalidChunking` or `InvalidQuotas`.
+	pub fn validate(&self) -> Result<(), RagError> {
 		if self.reranker.top_n < 1 || self.reranker.top_n > 50 {
 			return Err(RagError::InvalidTopN);
+		}
+		if let Some(chunking) = self.chunking
+			&& (!(100..=2000).contains(&chunking.chunk_size) || chunking.overlap_percent > 50)
+		{
+			return Err(RagError::InvalidChunking);
+		}
+		if let Some(quotas) = self.quotas
+			&& (!(1..=10_000).contains(&quotas.max_uploads_per_hour) || quotas.storage_quota_mb.is_some_and(|mb| mb == 0))
+		{
+			return Err(RagError::InvalidQuotas);
 		}
 		Ok(())
 	}

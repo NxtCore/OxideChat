@@ -3,4 +3,4 @@
 /**
  * Why a vector store could not be used; translated as `rag.store_error.<value>` and never carries the server's own text.
  */
-export type StoreError = "invalid_url" | "blocked" | "unreachable" | "unauthorized" | "extension_missing" | "extension_too_old" | "bad_response" | "secret" | "collection_not_found" | "unknown_field";
+export type StoreError = "invalid_url" | "blocked" | "unreachable" | "unauthorized" | "extension_missing" | "extension_too_old" | "bad_response" | "secret" | "collection_not_found" | "unknown_field" | "reindexing";

@@ -104,6 +104,8 @@ mod validation {
 		let setup = |top_n| UpdateRagSetupRequest {
 			reranker: RerankerSettings { model_id: None, top_n },
 			defaults: RagDefaults { connection_id: None },
+			chunking: None,
+			quotas: None,
 		};
 		assert!(setup(1).validate().is_ok());
 		assert!(setup(50).validate().is_ok());
@@ -239,6 +241,8 @@ mod connections {
 		let setup = |connection_id| UpdateRagSetupRequest {
 			reranker: RerankerSettings { model_id: None, top_n: 6 },
 			defaults: RagDefaults { connection_id },
+			chunking: None,
+			quotas: None,
 		};
 
 		assert!(matches!(
@@ -464,19 +468,11 @@ mod knowledge_bases {
 	}
 
 	fn user(user_id: Uuid) -> KnowledgeActor {
-		KnowledgeActor {
-			user_id,
-			manage: false,
-			view_all: false,
-		}
+		KnowledgeActor::basic(user_id, false, false)
 	}
 
 	async fn fixture(pool: &PgPool) -> TestResult<Fixture> {
-		let admin = KnowledgeActor {
-			user_id: create_user(pool).await?,
-			manage: true,
-			view_all: true,
-		};
+		let admin = KnowledgeActor::basic(create_user(pool).await?, true, true);
 		let connection = RagConnection::create(
 			pool,
 			&admin.user_id,
@@ -490,7 +486,7 @@ mod knowledge_bases {
 			name: " HR handbook ".to_string(),
 			description: Some(" ".to_string()),
 			view: Some(external.clone()),
-			model_access: None,
+			..Default::default()
 		};
 		let base = KnowledgeBase::create(pool, &admin, &save, &external).await?;
 		Ok(Fixture { admin, connection, base })
@@ -618,11 +614,10 @@ mod knowledge_bases {
 		let mut rename = SaveKnowledgeBaseRequest {
 			name: "Handbook".to_string(),
 			description: Some("For everyone in HR".to_string()),
-			view: None,
-			model_access: None,
+			..Default::default()
 		};
 		base.update(&pool, &editor, &rename, None).await?;
-		rename.view = Some(base.view.0.clone());
+		rename.view = base.external_view().cloned();
 		assert!(matches!(base.update(&pool, &editor, &rename, rename.view.as_ref()).await, Err(RagError::Forbidden)));
 		assert!(matches!(base.delete(&pool, &editor).await, Err(RagError::Forbidden)));
 		let renamed = KnowledgeBase::find(&pool, &editor, &fixture.base).await?.ok_or("missing")?;
@@ -654,7 +649,7 @@ mod knowledge_bases {
 		let map = |label: &'static str, kind, id| {
 			let base = base.clone();
 			let pool = pool.clone();
-			let admin = fixture.admin;
+			let admin = fixture.admin.clone();
 			async move { base.replace_label_assignments(&pool, &admin, label, &targets(&[(kind, Some(id), None)])).await }
 		};
 
@@ -886,6 +881,114 @@ mod pgvector {
 		assert_eq!(store.access_labels(&acl).await?, ["HR Members", "space:ENG"]);
 		Ok(())
 	}
+
+	#[sqlx::test]
+	async fn managed_pgvector_table_upserts_searches_updates_access_and_drops_old_generations(pool: PgPool) -> TestResult {
+		use crate::types::rag::{ManagedSearch, ManagedVector, managed_table_name};
+		use uuid::Uuid;
+
+		sqlx::query("CREATE EXTENSION IF NOT EXISTS vector").execute(&pool).await?;
+		let version: String = sqlx::query_scalar("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+			.fetch_one(&pool)
+			.await?;
+		if parse_version(&version) < (0, 8) {
+			return Ok(());
+		}
+
+		let store = VectorStore::Pgvector(Cow::Borrowed(&pool));
+		let conn_id = Uuid::new_v4();
+		let kb_a = Uuid::new_v4();
+		let kb_b = Uuid::new_v4();
+		let doc_open = Uuid::new_v4();
+		let doc_hr = Uuid::new_v4();
+		let doc_locked = Uuid::new_v4();
+		let doc_other_kb = Uuid::new_v4();
+		let (c_open, c_hr, c_locked, c_other) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+
+		store.ensure_managed(&conn_id, 1, 3).await?;
+		store
+			.upsert_managed(
+				&conn_id,
+				1,
+				&[
+					ManagedVector {
+						chunk_id: c_open,
+						knowledge_base_id: kb_a,
+						document_id: doc_open,
+						access: None,
+						embedding: vec![1.0, 0.0, 0.0],
+					},
+					ManagedVector {
+						chunk_id: c_hr,
+						knowledge_base_id: kb_a,
+						document_id: doc_hr,
+						access: Some(vec!["team:hr".to_string()]),
+						embedding: vec![0.9, 0.1, 0.0],
+					},
+					ManagedVector {
+						chunk_id: c_locked,
+						knowledge_base_id: kb_a,
+						document_id: doc_locked,
+						access: Some(Vec::new()),
+						embedding: vec![1.0, 0.0, 0.0],
+					},
+					ManagedVector {
+						chunk_id: c_other,
+						knowledge_base_id: kb_b,
+						document_id: doc_other_kb,
+						access: None,
+						embedding: vec![1.0, 0.0, 0.0],
+					},
+				],
+			)
+			.await?;
+
+		fn search_req<'a>(connection_id: &'a Uuid, knowledge_base_id: &'a Uuid, labels: &'a [String]) -> ManagedSearch<'a> {
+			ManagedSearch {
+				connection_id,
+				generation: 1,
+				knowledge_base_id,
+				vector: &[1.0, 0.0, 0.0],
+				limit: 10,
+				labels,
+			}
+		}
+		let ids = |hits: Vec<(Uuid, f64)>| hits.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+
+		assert_eq!(ids(store.search_managed(&search_req(&conn_id, &kb_a, &[])).await?), [c_open]);
+		let hr_label = vec!["team:hr".to_string()];
+		assert_eq!(ids(store.search_managed(&search_req(&conn_id, &kb_a, &hr_label)).await?), [c_open, c_hr]);
+
+		let alice_label = vec!["user:alice".to_string()];
+		store
+			.update_managed_access(&conn_id, &doc_open, Some(alice_label.as_slice()))
+			.await?;
+		assert!(store.search_managed(&search_req(&conn_id, &kb_a, &[])).await?.is_empty());
+		assert_eq!(ids(store.search_managed(&search_req(&conn_id, &kb_a, &alice_label)).await?), [c_open]);
+
+		store.delete_managed_document(&conn_id, &doc_hr).await?;
+		assert!(store.search_managed(&search_req(&conn_id, &kb_a, &hr_label)).await?.is_empty());
+
+		store.ensure_managed(&conn_id, 2, 3).await?;
+		store.drop_old_managed_tables(&conn_id, 1).await?;
+		let newer_kept: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+			.bind(managed_table_name(&conn_id, 2))
+			.fetch_one(&pool)
+			.await?;
+		assert!(newer_kept, "a worker with a stale generation must not drop a newer table");
+		store.drop_old_managed_tables(&conn_id, 2).await?;
+		let old_exists: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+			.bind(managed_table_name(&conn_id, 1))
+			.fetch_one(&pool)
+			.await?;
+		let new_exists: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+			.bind(managed_table_name(&conn_id, 2))
+			.fetch_one(&pool)
+			.await?;
+		assert!(!old_exists, "old generation table should be dropped");
+		assert!(new_exists, "current generation table should stay");
+		Ok(())
+	}
 }
 
 #[cfg(test)]
@@ -908,11 +1011,13 @@ mod retrieval {
 		Candidate {
 			knowledge_base: base,
 			knowledge_base_name: "Handbook".to_string(),
+			document_id: None,
 			hit: KnowledgeHit {
 				text: text.to_string(),
 				title: None,
 				url: url.map(str::to_string),
 				section: None,
+				page: None,
 				score: 0.0,
 			},
 		}
@@ -961,11 +1066,7 @@ mod retrieval {
 
 	async fn shared_base(pool: &PgPool, name: &str) -> TestResult<(KnowledgeBase, KnowledgeActor)> {
 		crate::utils::encryption::init_for_test([0x42; 32])?;
-		let admin = KnowledgeActor {
-			user_id: create_user(pool).await?,
-			manage: true,
-			view_all: true,
-		};
+		let admin = KnowledgeActor::basic(create_user(pool).await?, true, true);
 		let connection = match RagConnection::list(pool).await?.into_iter().next() {
 			Some(connection) => connection,
 			None => {
@@ -979,7 +1080,7 @@ mod retrieval {
 			name: name.to_string(),
 			description: Some("HR policies".to_string()),
 			view: Some(external.clone()),
-			model_access: None,
+			..Default::default()
 		};
 		let id = KnowledgeBase::create(pool, &admin, &save, &external).await?;
 		Ok((KnowledgeBase::find(pool, &admin, &id).await?.ok_or("missing")?, admin))
@@ -1246,11 +1347,7 @@ mod model_access {
 
 	/// A knowledge base whose embedding model belongs to its own provider.
 	async fn base(pool: &PgPool) -> TestResult<(KnowledgeBase, KnowledgeActor, Uuid)> {
-		let admin = KnowledgeActor {
-			user_id: create_user(pool).await?,
-			manage: true,
-			view_all: true,
-		};
+		let admin = KnowledgeActor::basic(create_user(pool).await?, true, true);
 		let connection = RagConnection::create(
 			pool,
 			&admin.user_id,
@@ -1264,9 +1361,8 @@ mod model_access {
 		external.embedding.model_id = embedding_model;
 		let save = SaveKnowledgeBaseRequest {
 			name: "Contracts".to_string(),
-			description: None,
 			view: Some(external.clone()),
-			model_access: None,
+			..Default::default()
 		};
 		let id = KnowledgeBase::create(pool, &admin, &save, &external).await?;
 		Ok((KnowledgeBase::find(pool, &admin, &id).await?.ok_or("missing")?, admin, embedding_provider))
@@ -1282,7 +1378,7 @@ mod model_access {
 		let unknown = ModelTargets { providers: vec![embedding_provider, Uuid::new_v4()], ..Default::default() };
 		assert!(matches!(base.replace_model_access(&pool, &admin, &unknown).await, Err(RagError::InvalidModelAccess)));
 
-		let viewer = KnowledgeActor { user_id: create_user(&pool).await?, manage: false, view_all: false };
+		let viewer = KnowledgeActor::basic(create_user(&pool).await?, false, false);
 		let targets = ModelTargets { providers: vec![embedding_provider], models: vec![chat_model], ..Default::default() };
 		assert!(matches!(base.replace_model_access(&pool, &viewer, &targets).await, Err(RagError::Forbidden)));
 		let editor = KnowledgeBase { editor: true, ..base.clone() };
@@ -1314,9 +1410,8 @@ mod model_access {
 		let (_, chat_model) = provider_with_model(&pool, "ANTHROPIC", "claude").await?;
 		let save = |name: &str, targets: ModelTargets| SaveKnowledgeBaseRequest {
 			name: name.to_string(),
-			description: None,
-			view: None,
 			model_access: Some(targets),
+			..Default::default()
 		};
 		let refused = save("Refused", ModelTargets { models: vec![chat_model], ..Default::default() });
 		assert!(matches!(base.update(&pool, &admin, &refused, None).await, Err(RagError::EmbeddingModelNotAllowed)));
@@ -1324,7 +1419,7 @@ mod model_access {
 		assert_ne!(name, "Refused");
 		assert!(base.model_access(&pool, &admin).await?.targets.is_unrestricted());
 
-		let viewer = KnowledgeActor { user_id: create_user(&pool).await?, manage: false, view_all: false };
+		let viewer = KnowledgeActor::basic(create_user(&pool).await?, false, false);
 		let editor = KnowledgeBase { editor: true, ..base.clone() };
 		let targets = ModelTargets { providers: vec![embedding_provider], models: vec![chat_model], ..Default::default() };
 		assert!(matches!(editor.update(&pool, &viewer, &save("Editor", targets.clone()), None).await, Err(RagError::Forbidden)));
@@ -1340,8 +1435,7 @@ mod model_access {
 		let request = SaveKnowledgeBaseRequest {
 			name: "Docs".to_string(),
 			description: Some("x".repeat(2001)),
-			view: None,
-			model_access: None,
+			..Default::default()
 		};
 		assert!(matches!(request.validate(), Err(RagError::InvalidDescription)));
 	}
@@ -1405,13 +1499,13 @@ mod model_access {
 		crate::config::Config::init(&pool).await?;
 		crate::i18n::I18n::init(&pool).await;
 		let (first, admin, embedding_provider) = base(&pool).await?;
+		let external = first.external_view().ok_or("view")?.clone();
 		let save = SaveKnowledgeBaseRequest {
 			name: "Policies".to_string(),
-			description: None,
-			view: Some(first.view.0.clone()),
-			model_access: None,
+			view: Some(external.clone()),
+			..Default::default()
 		};
-		let id = KnowledgeBase::create(&pool, &admin, &save, &first.view.0).await?;
+		let id = KnowledgeBase::create(&pool, &admin, &save, &external).await?;
 		let second = KnowledgeBase::find(&pool, &admin, &id).await?.ok_or("missing")?;
 		let (router, routed_model) = provider_with_model(&pool, "OPENROUTER", "anthropic/claude").await?;
 		for (base, upstream) in [(&first, "azure"), (&second, "anthropic")] {
@@ -1494,6 +1588,704 @@ mod model_access {
 
 		base.delete(&pool, &admin).await?;
 		assert!(!chat_allows_model(&pool, &chat_id, &other).await?, "deleting the knowledge base keeps the restriction");
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod chunker_and_extract {
+	use crate::types::rag::{ChunkConfig, chunk_document, has_headings, normalize_vector, sha256_hex, split_embedding_batches};
+	use crate::utils::extract::{self, DocumentKind};
+
+	fn sample_pdf(pages: &[&str]) -> Vec<u8> {
+		let mut objects: Vec<String> = Vec::new();
+		let mut kids = Vec::new();
+		let font_id = 3 + pages.len() * 2;
+		for (index, text) in pages.iter().enumerate() {
+			let page_id = 3 + index * 2;
+			let content_id = page_id + 1;
+			kids.push(format!("{page_id} 0 R"));
+			let escaped = text.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
+			let stream = format!("BT /F1 12 Tf 72 720 Td ({escaped}) Tj ET");
+			objects.push(format!(
+				"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_id} 0 R /Resources << /Font << /F1 {font_id} 0 R >> >> >>"
+			));
+			objects.push(format!("<< /Length {} >>\nstream\n{stream}\nendstream", stream.len()));
+		}
+		let mut all = vec![
+			"<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+			format!("<< /Type /Pages /Kids [{}] /Count {} >>", kids.join(" "), pages.len()),
+		];
+		all.extend(objects);
+		all.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string());
+
+		let mut out = b"%PDF-1.4\n".to_vec();
+		let mut offsets = vec![0usize];
+		for (index, body) in all.iter().enumerate() {
+			offsets.push(out.len());
+			out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", index + 1).as_bytes());
+		}
+		let xref_offset = out.len();
+		out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes());
+		for offset in offsets.iter().skip(1) {
+			out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+		}
+		out.extend_from_slice(
+			format!(
+				"trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n",
+				offsets.len()
+			)
+			.as_bytes(),
+		);
+		out
+	}
+
+	#[test]
+	fn chunker_preserves_headings_overlap_pages_and_markdown_tables() {
+		let doc = "<!-- page 1 -->\n# Handbook\n\n## Holidays\n\nHolidays are requested through the HR portal. Every employee receives thirty vacation days per year.\n\nCarryover days expire at the end of March unless approved in writing by your manager.\n\n<!-- page 2 -->\n# Expenses\n\n| Category | Limit | Notes |\n| --- | --- | --- |\n| Meals | 50 EUR | Receipts required for every claim |\n| Travel | 400 EUR | Economy class rail or airfare only |\n| Lodging | 180 EUR | Standard business hotel per night |\n| Supplies | 90 EUR | Pre-approval needed for hardware |\n| Software | 120 EUR | Annual team license reimbursed |\n";
+		let config = ChunkConfig {
+			target_tokens: 45,
+			overlap_percent: 20,
+			..ChunkConfig::default()
+		};
+		let chunks = chunk_document(doc, config);
+		assert!(chunks.len() >= 4, "expected multiple chunks, got {}", chunks.len());
+		assert_eq!(chunks[0].heading_path.as_deref(), Some("Handbook › Holidays"));
+		assert_eq!(chunks[0].page, Some(1));
+		assert!(chunks[0].embed_text("policy.md").starts_with("policy.md › Handbook › Holidays\n\n"));
+		assert!(!chunks[0].content.contains("<!-- page"));
+
+		let expense_chunks: Vec<_> = chunks
+			.iter()
+			.filter(|chunk| chunk.heading_path.as_deref() == Some("Expenses"))
+			.collect();
+		assert!(expense_chunks.len() >= 2, "expected table to split across chunks");
+		for chunk in &expense_chunks {
+			assert_eq!(chunk.page, Some(2));
+			assert!(chunk.content.starts_with("| Category | Limit | Notes |\n| --- | --- | --- |"));
+			assert!(!chunk.content.contains("Carryover days"), "new top-level section must not carry overlap");
+		}
+		assert_eq!(chunks[0].content_hash, sha256_hex(chunks[0].content.as_bytes()));
+	}
+
+	#[test]
+	fn chunker_carries_overlap_within_same_section() {
+		let para_a = "Alpha sentence one explains the deployment pipeline clearly. Alpha sentence two covers rollback triggers.";
+		let para_b = "Beta sentence one explains monitoring alerts and on-call escalation. Beta sentence two covers incident review.";
+		let doc = format!("# Ops\n\n{para_a}\n\n{para_b}");
+		let chunks = chunk_document(
+			&doc,
+			ChunkConfig {
+				target_tokens: 35,
+				overlap_percent: 25,
+				..ChunkConfig::default()
+			},
+		);
+		assert!(chunks.len() >= 2);
+		assert!(
+			chunks[1].content.contains("rollback") || chunks[1].content.contains("Alpha"),
+			"expected overlap from chunk 0 in chunk 1: {:?}",
+			chunks[1].content
+		);
+	}
+
+	#[test]
+	fn chunker_keeps_code_comments_and_line_breaks() {
+		assert!(has_headings("notes.md", "text/plain") && has_headings("page.html", "text/html"));
+		assert!(!has_headings("deploy.sh", "text/plain") && !has_headings("report.pdf", "application/pdf"));
+
+		let script = "# install\napt-get update\n# run\n./start.sh";
+		let config = ChunkConfig {
+			headings: false,
+			..ChunkConfig::default()
+		};
+		let chunks = chunk_document(script, config);
+		assert_eq!(chunks.len(), 1, "comments must not split a code file");
+		assert_eq!(chunks[0].heading_path, None);
+		assert_eq!(chunks[0].content, script);
+
+		let rows: Vec<String> = (0..40).map(|row| format!("{row},alpha beta gamma,äöü")).collect();
+		let csv = rows.join("\n");
+		let small = ChunkConfig {
+			target_tokens: 50,
+			overlap_percent: 0,
+			headings: false,
+		};
+		let chunks = chunk_document(&csv, small);
+		assert!(chunks.len() > 1);
+		for chunk in &chunks {
+			assert!(chunk.content.lines().all(|line| rows.iter().any(|row| row == line)), "rows stay on their own lines: {:?}", chunk.content);
+		}
+	}
+
+	#[test]
+	fn extract_detects_kinds_and_parses_text_html_and_pdf() {
+		assert_eq!(DocumentKind::detect("notes.md", b"# Hi"), Some(DocumentKind::Text));
+		assert_eq!(DocumentKind::detect("page.HTML", b"<h1>Hi</h1>"), Some(DocumentKind::Html));
+		assert_eq!(DocumentKind::detect("doc.pdf", b"%PDF-1.4\n"), Some(DocumentKind::Pdf));
+		assert_eq!(DocumentKind::detect("doc.pdf", b"not a pdf"), None);
+		assert_eq!(DocumentKind::detect("bin.exe", b"MZ"), None);
+
+		assert_eq!(extract::parse(DocumentKind::Text, b"\xEF\xBB\xBFhello\r\nworld").as_deref(), Some("hello\nworld"));
+		assert_eq!(extract::parse(DocumentKind::Text, b"abc\0def"), None);
+
+		let html = extract::parse(DocumentKind::Html, b"<h1>Title</h1><p>Body paragraph</p>").expect("html");
+		assert!(html.contains("Title") && html.contains("Body paragraph"));
+
+		let pdf_bytes = sample_pdf(&["Hello page one", "Hello page two"]);
+		let pdf_text = extract::parse(DocumentKind::Pdf, &pdf_bytes).expect("pdf");
+		assert!(pdf_text.contains("<!-- page 1 -->") && pdf_text.contains("Hello page one"), "{pdf_text}");
+		assert!(pdf_text.contains("<!-- page 2 -->") && pdf_text.contains("Hello page two"), "{pdf_text}");
+		assert_eq!(extract::page_count(&pdf_text), Some(2));
+	}
+
+	#[test]
+	fn embedding_helpers_normalize_and_split_batches() {
+		let mut unit = vec![3.0f32, 4.0];
+		assert!(normalize_vector(&mut unit));
+		assert!((unit[0] - 0.6).abs() < 1e-6 && (unit[1] - 0.8).abs() < 1e-6);
+		let mut empty: Vec<f32> = Vec::new();
+		assert!(!normalize_vector(&mut empty));
+		let mut zeros = vec![0.0f32, 0.0];
+		assert!(!normalize_vector(&mut zeros));
+		let mut nan = vec![f32::NAN, 1.0];
+		assert!(!normalize_vector(&mut nan));
+
+		let many: Vec<String> = (0..130).map(|index| format!("item {index}")).collect();
+		let batches = split_embedding_batches(&many);
+		assert_eq!(batches.len(), 3);
+		assert_eq!(batches[0].len(), 64);
+		assert_eq!(batches[1].len(), 64);
+		assert_eq!(batches[2].len(), 2);
+
+		let big: Vec<String> = (0..4).map(|_| "word ".repeat(6_000)).collect();
+		assert!(split_embedding_batches(&big).len() >= 2, "token cap should split oversized inputs");
+	}
+}
+
+#[cfg(test)]
+mod managed {
+	use super::validation::request;
+	use crate::tests::gateway::support::job_state;
+	use crate::tests::support::{TestResult, create_user, insert_user};
+	use crate::types::consts::{ADMIN_RAG_EDIT, SETTINGS_KNOWLEDGE_EDIT};
+	use crate::types::rag::{
+		ChunkingSettings, ConnectionKind, ConnectionMode, DocumentStatus, EmbeddingSettings, KnowledgeActor, KnowledgeBase, KnowledgeScope, ModelTargets, RagConfig,
+		RagConnection, RagDefaults, RagDocument, RagError, RerankerSettings, SaveKnowledgeBaseRequest, UpdateRagSetupRequest, UploadQuotaSettings, test_fts_chunk_ids,
+		test_verified_chunk_ids, user_identity_labels,
+	};
+	use crate::types::{AssignmentKind, AssignmentRef, AssignmentRole, ReplaceAssignmentsRequest, User};
+	use sqlx::PgPool;
+	use uuid::Uuid;
+
+	async fn embed_model(pool: &PgPool, kind: &str, name: &str) -> TestResult<(Uuid, Uuid)> {
+		let provider: Uuid = sqlx::query_scalar("INSERT INTO providers (name, kind, base_url) VALUES ($1, $2::provider_kind, 'https://example.com') RETURNING id")
+			.bind(format!("p-{name}-{}", Uuid::new_v4()))
+			.bind(kind)
+			.fetch_one(pool)
+			.await?;
+		let model: Uuid = sqlx::query_scalar(
+			"INSERT INTO models (provider_id, model_id, display_name, output_modalities) VALUES ($1, $2, $2, '[\"EMBEDDINGS\"]'::jsonb) RETURNING id",
+		)
+		.bind(provider)
+		.bind(name)
+		.fetch_one(pool)
+		.await?;
+		Ok((provider, model))
+	}
+
+	async fn team_with_members(pool: &PgPool, admin: &Uuid, member: &Uuid) -> TestResult<Uuid> {
+		let team: Uuid = sqlx::query_scalar("INSERT INTO teams (name) VALUES ($1) RETURNING id")
+			.bind(format!("team-{}", Uuid::new_v4()))
+			.fetch_one(pool)
+			.await?;
+		sqlx::query("INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'admin'), ($1, $3, 'member')")
+			.bind(team)
+			.bind(admin)
+			.bind(member)
+			.execute(pool)
+			.await?;
+		Ok(team)
+	}
+
+	async fn setup_managed_connection(pool: &PgPool, admin: &Uuid) -> TestResult<(RagConnection, Uuid, Uuid)> {
+		crate::utils::encryption::init_for_test([0x42; 32])?;
+		let (provider, model) = embed_model(pool, "OPENAI", "text-embed").await?;
+		let mut req = request(ConnectionKind::Pgvector, ConnectionMode::Managed, None, None);
+		req.embedding = Some(EmbeddingSettings {
+			model_id: model,
+			dimensions: None,
+		});
+		let connection = RagConnection::create(pool, admin, &req, Some(3)).await?;
+		assert_eq!(RagConfig::get(pool).await?.default_connection_id, Some(connection.id), "the first managed connection becomes the default storage");
+		let update = UpdateRagSetupRequest {
+			reranker: RerankerSettings { model_id: None, top_n: 6 },
+			defaults: RagDefaults {
+				connection_id: Some(connection.id),
+			},
+			chunking: Some(ChunkingSettings::default()),
+			quotas: Some(UploadQuotaSettings::default()),
+		};
+		RagConfig::save(pool, admin, &update).await?;
+		Ok((connection, provider, model))
+	}
+
+	#[sqlx::test]
+	async fn scopes_creation_and_sharing_follow_role_boundaries(pool: PgPool) -> TestResult {
+		let admin_id = create_user(&pool).await?;
+		let team_admin_id = insert_user(&pool, "teamadmin").await?;
+		let member_id = insert_user(&pool, "member").await?;
+		let team_id = team_with_members(&pool, &team_admin_id, &member_id).await?;
+
+		let admin = KnowledgeActor::for_user(&pool, admin_id, &[ADMIN_RAG_EDIT.to_string()]).await?;
+		let team_admin = KnowledgeActor::for_user(&pool, team_admin_id, &[SETTINGS_KNOWLEDGE_EDIT.to_string()]).await?;
+		let plain_member = KnowledgeActor::for_user(&pool, member_id, &[SETTINGS_KNOWLEDGE_EDIT.to_string()]).await?;
+		let no_perm = KnowledgeActor::for_user(&pool, member_id, &[]).await?;
+
+		assert!(
+			!KnowledgeBase::scopes(&pool, &admin).await?.managed_available,
+			"managed should stay unavailable until a default connection has an embedding model"
+		);
+		let mut personal_req = SaveKnowledgeBaseRequest {
+			name: "Notes".to_string(),
+			scope: Some(KnowledgeScope::Personal),
+			..Default::default()
+		};
+		assert!(matches!(KnowledgeBase::create_managed(&pool, &plain_member, &personal_req).await, Err(RagError::NoDefaultConnection)));
+
+		let (_conn, _, _) = setup_managed_connection(&pool, &admin_id).await?;
+		assert!(KnowledgeBase::scopes(&pool, &plain_member).await?.managed_available);
+		assert!(KnowledgeBase::scopes(&pool, &plain_member).await?.personal);
+		assert!(KnowledgeBase::scopes(&pool, &plain_member).await?.teams.is_empty());
+		assert_eq!(KnowledgeBase::scopes(&pool, &team_admin).await?.teams.len(), 1);
+		assert!(!KnowledgeBase::scopes(&pool, &no_perm).await?.personal);
+
+		assert!(matches!(KnowledgeBase::create_managed(&pool, &no_perm, &personal_req).await, Err(RagError::Forbidden)));
+		personal_req.search_language = Some("klingon".to_string());
+		assert!(matches!(KnowledgeBase::create_managed(&pool, &plain_member, &personal_req).await, Err(RagError::InvalidLanguage)));
+		personal_req.search_language = Some("german".to_string());
+		let personal_id = KnowledgeBase::create_managed(&pool, &plain_member, &personal_req).await?;
+		let personal_kb = KnowledgeBase::find(&pool, &plain_member, &personal_id).await?.ok_or("missing")?;
+		assert_eq!(personal_kb.search_language, "german");
+		assert!(personal_kb.is_managed());
+
+		let team_req = SaveKnowledgeBaseRequest {
+			name: "Engineering".to_string(),
+			scope: Some(KnowledgeScope::Team),
+			team_id: Some(team_id),
+			..Default::default()
+		};
+		assert!(matches!(KnowledgeBase::create_managed(&pool, &plain_member, &team_req).await, Err(RagError::Forbidden)));
+		let team_kb_id = KnowledgeBase::create_managed(&pool, &team_admin, &team_req).await?;
+		let team_kb = KnowledgeBase::find(&pool, &team_admin, &team_kb_id).await?.ok_or("missing")?;
+
+		let install_req = SaveKnowledgeBaseRequest {
+			name: "Company".to_string(),
+			scope: Some(KnowledgeScope::Installation),
+			..Default::default()
+		};
+		assert!(matches!(KnowledgeBase::create_managed(&pool, &team_admin, &install_req).await, Err(RagError::Forbidden)));
+		let install_id = KnowledgeBase::create_managed(&pool, &admin, &install_req).await?;
+		let install_kb = KnowledgeBase::find(&pool, &admin, &install_id).await?.ok_or("missing")?;
+
+		let everyone = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef {
+				kind: AssignmentKind::Everyone,
+				id: None,
+				role: None,
+			}],
+		};
+		assert!(matches!(team_kb.replace_assignments(&pool, &team_admin, &everyone).await, Err(RagError::InvalidAssignment)));
+		let member_sees_team = KnowledgeBase::find(&pool, &plain_member, &team_kb_id).await?.ok_or("member sees team kb")?;
+		assert!(member_sees_team.usable && !member_sees_team.editor);
+
+		let share_team = ReplaceAssignmentsRequest {
+			targets: vec![AssignmentRef {
+				kind: AssignmentKind::Team,
+				id: Some(team_id),
+				role: Some(AssignmentRole::Editor),
+			}],
+		};
+		install_kb.replace_assignments(&pool, &admin, &share_team).await?;
+		let as_member = KnowledgeBase::find(&pool, &plain_member, &install_id).await?.ok_or("member sees shared install kb")?;
+		assert!(as_member.editor);
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn document_upload_checks_quotas_rate_limits_and_model_access(pool: PgPool) -> TestResult {
+		let admin_id = create_user(&pool).await?;
+		let admin = KnowledgeActor::for_user(&pool, admin_id, &[ADMIN_RAG_EDIT.to_string()]).await?;
+		let (conn, _, _) = setup_managed_connection(&pool, &admin_id).await?;
+		let state = job_state(pool.clone());
+
+		let kb_id = KnowledgeBase::create_managed(
+			&pool,
+			&admin,
+			&SaveKnowledgeBaseRequest {
+				name: "Docs".to_string(),
+				scope: Some(KnowledgeScope::Installation),
+				..Default::default()
+			},
+		)
+		.await?;
+		let kb = KnowledgeBase::find(&pool, &admin, &kb_id).await?.ok_or("missing")?;
+
+		assert!(matches!(RagDocument::upload(&state, &admin, &kb, "bad.exe", b"data").await, Err(RagError::UnsupportedFile)));
+		assert!(matches!(RagDocument::upload(&state, &admin, &kb, "empty.md", b"").await, Err(RagError::EmptyFile)));
+		assert!(matches!(RagDocument::upload(&state, &admin, &kb, "  ", b"hi").await, Err(RagError::InvalidFilename)));
+
+		let uploaded = RagDocument::upload(&state, &admin, &kb, "guide.md", b"# Hello\nWorld").await?;
+		assert_eq!(uploaded.status, DocumentStatus::Pending);
+		assert_eq!(uploaded.filename, "guide.md");
+
+		RagConfig::save(
+			&pool,
+			&admin_id,
+			&UpdateRagSetupRequest {
+				reranker: RerankerSettings { model_id: None, top_n: 6 },
+				defaults: RagDefaults { connection_id: Some(conn.id) },
+				chunking: Some(ChunkingSettings::default()),
+				quotas: Some(UploadQuotaSettings {
+					max_uploads_per_hour: 1,
+					storage_quota_mb: Some(100),
+				}),
+			},
+		)
+		.await?;
+		assert!(matches!(
+			RagDocument::upload(&state, &admin, &kb, "second.md", b"hello").await,
+			Err(RagError::RateLimited)
+		));
+
+		RagConfig::save(
+			&pool,
+			&admin_id,
+			&UpdateRagSetupRequest {
+				reranker: RerankerSettings { model_id: None, top_n: 6 },
+				defaults: RagDefaults { connection_id: Some(conn.id) },
+				chunking: Some(ChunkingSettings::default()),
+				quotas: Some(UploadQuotaSettings {
+					max_uploads_per_hour: 100,
+					storage_quota_mb: Some(1),
+				}),
+			},
+		)
+		.await?;
+		let oversized = vec![b'a'; 1_100_000];
+		assert!(matches!(
+			RagDocument::upload(&state, &admin, &kb, "big.txt", &oversized).await,
+			Err(RagError::StorageQuotaExceeded)
+		));
+
+		let (other_provider, _) = embed_model(&pool, "ANTHROPIC", "other").await?;
+		sqlx::query("INSERT INTO knowledge_base_model_targets (knowledge_base_id, provider_id) VALUES ($1, $2)")
+			.bind(kb.id)
+			.bind(other_provider)
+			.execute(&pool)
+			.await?;
+		assert!(matches!(
+			RagDocument::upload(&state, &admin, &kb, "blocked.md", b"hello").await,
+			Err(RagError::EmbeddingModelNotAllowed)
+		));
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn document_limit_access_and_fts_verification_fail_closed(pool: PgPool) -> TestResult {
+		let admin_id = create_user(&pool).await?;
+		let member_id = insert_user(&pool, "member").await?;
+		let outsider_id = insert_user(&pool, "outsider").await?;
+		let team_id = team_with_members(&pool, &admin_id, &member_id).await?;
+		let admin = KnowledgeActor::for_user(&pool, admin_id, &[ADMIN_RAG_EDIT.to_string()]).await?;
+		let member = KnowledgeActor::for_user(&pool, member_id, &[]).await?;
+		let (conn, _, _) = setup_managed_connection(&pool, &admin_id).await?;
+		let state = job_state(pool.clone());
+
+		let kb_id = KnowledgeBase::create_managed(
+			&pool,
+			&admin,
+			&SaveKnowledgeBaseRequest {
+				name: "Policy".to_string(),
+				scope: Some(KnowledgeScope::Installation),
+				search_language: Some("english".to_string()),
+				..Default::default()
+			},
+		)
+		.await?;
+		let kb = KnowledgeBase::find(&pool, &admin, &kb_id).await?.ok_or("missing")?;
+
+		let doc_open = RagDocument::upload(&state, &admin, &kb, "open.md", b"vacation policy").await?;
+		let doc_team = RagDocument::upload(&state, &admin, &kb, "team.md", b"vacation secret").await?;
+		let doc_empty = RagDocument::upload(&state, &admin, &kb, "locked.md", b"vacation hidden").await?;
+		let doc_pending = RagDocument::upload(&state, &admin, &kb, "pending.md", b"vacation draft").await?;
+
+		let mut chunk_ids = Vec::new();
+		for (doc, status, access, content) in [
+			(&doc_open, "ready", None, "vacation open handbook"),
+			(&doc_team, "ready", Some(vec![format!("team:{team_id}")]), "vacation team handbook"),
+			(&doc_empty, "ready", Some(Vec::new()), "vacation locked handbook"),
+			(&doc_pending, "processing", None, "vacation draft handbook"),
+		] {
+			sqlx::query("UPDATE rag_documents SET status = $2, access = $3, index_generation = 1 WHERE id = $1")
+				.bind(doc.id)
+				.bind(status)
+				.bind(&access)
+				.execute(&pool)
+				.await?;
+			let chunk_id: Uuid = sqlx::query_scalar(
+				"INSERT INTO rag_chunks (document_id, knowledge_base_id, ordinal, content, token_count, content_hash, search, access)
+				 VALUES ($1, $2, 0, $3, 4, 'hash', to_tsvector('english', $3), $4) RETURNING id",
+			)
+			.bind(doc.id)
+			.bind(kb.id)
+			.bind(content)
+			.bind(&access)
+			.fetch_one(&pool)
+			.await?;
+			chunk_ids.push(chunk_id);
+		}
+
+		let member_labels = user_identity_labels(&pool, &member_id).await?;
+		let outsider_labels = user_identity_labels(&pool, &outsider_id).await?;
+
+		assert_eq!(test_fts_chunk_ids(&pool, &kb, &conn, "vacation", &member_labels).await.len(), 2);
+		assert_eq!(test_fts_chunk_ids(&pool, &kb, &conn, "vacation", &outsider_labels).await, [chunk_ids[0]]);
+		assert_eq!(
+			test_verified_chunk_ids(&pool, &kb.id, &chunk_ids, &member_labels).await?,
+			vec![chunk_ids[0], chunk_ids[1]]
+		);
+		assert_eq!(
+			test_verified_chunk_ids(&pool, &kb.id, &chunk_ids, &outsider_labels).await?,
+			vec![chunk_ids[0]]
+		);
+
+		assert!(matches!(
+			RagDocument::replace_assignments(
+				&state,
+				&member,
+				&kb,
+				&doc_open.id,
+				&ReplaceAssignmentsRequest {
+					targets: vec![AssignmentRef {
+						kind: AssignmentKind::Team,
+						id: Some(team_id),
+						role: None,
+					}],
+				},
+			)
+			.await,
+			Err(RagError::Forbidden)
+		));
+		assert!(matches!(
+			RagDocument::replace_assignments(
+				&state,
+				&admin,
+				&kb,
+				&doc_open.id,
+				&ReplaceAssignmentsRequest {
+					targets: vec![AssignmentRef {
+						kind: AssignmentKind::Everyone,
+						id: None,
+						role: None,
+					}],
+				},
+			)
+			.await,
+			Err(RagError::InvalidAssignment)
+		));
+
+		RagDocument::replace_assignments(
+			&state,
+			&admin,
+			&kb,
+			&doc_open.id,
+			&ReplaceAssignmentsRequest {
+				targets: vec![AssignmentRef {
+					kind: AssignmentKind::Team,
+					id: Some(team_id),
+					role: None,
+				}],
+			},
+		)
+		.await?;
+		assert!(test_verified_chunk_ids(&pool, &kb.id, &[chunk_ids[0]], &outsider_labels).await?.is_empty());
+		assert_eq!(test_verified_chunk_ids(&pool, &kb.id, &[chunk_ids[0]], &member_labels).await?, [chunk_ids[0]]);
+		assert_eq!(RagDocument::assignments(&pool, &admin, &kb, &doc_open.id).await?.targets.len(), 1);
+
+		RagDocument::replace_assignments(&state, &admin, &kb, &doc_open.id, &ReplaceAssignmentsRequest { targets: Vec::new() }).await?;
+		assert_eq!(test_verified_chunk_ids(&pool, &kb.id, &[chunk_ids[0]], &outsider_labels).await?, [chunk_ids[0]]);
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn deletion_user_delete_and_connection_reindex_behave_safely(pool: PgPool) -> TestResult {
+		let admin_id = create_user(&pool).await?;
+		let alice_id = insert_user(&pool, "alice").await?;
+		let admin = KnowledgeActor::for_user(&pool, admin_id, &[ADMIN_RAG_EDIT.to_string()]).await?;
+		let alice = KnowledgeActor::for_user(&pool, alice_id, &[SETTINGS_KNOWLEDGE_EDIT.to_string()]).await?;
+		let (conn, provider_a, _) = setup_managed_connection(&pool, &admin_id).await?;
+		let (_, model_b) = embed_model(&pool, "ANTHROPIC", "embed-b").await?;
+		let state = job_state(pool.clone());
+
+		let kb_id = KnowledgeBase::create_managed(
+			&pool,
+			&admin,
+			&SaveKnowledgeBaseRequest {
+				name: "Restricted".to_string(),
+				scope: Some(KnowledgeScope::Installation),
+				..Default::default()
+			},
+		)
+		.await?;
+		let kb = KnowledgeBase::find(&pool, &admin, &kb_id).await?.ok_or("missing")?;
+		let doc = RagDocument::upload(&state, &admin, &kb, "a.md", b"hello world").await?;
+		sqlx::query("UPDATE rag_documents SET status = 'ready', chunk_count = 3, token_count = 120, index_generation = $2 WHERE id = $1")
+			.bind(doc.id)
+			.bind(conn.index_generation)
+			.execute(&pool)
+			.await?;
+		sqlx::query(
+			"INSERT INTO rag_chunks (document_id, knowledge_base_id, ordinal, content, token_count, content_hash, search)
+			 VALUES ($1, $2, 0, 'one', 40, 'h1', to_tsvector('simple', 'one')),
+			        ($1, $2, 1, 'two', 40, 'h2', to_tsvector('simple', 'two')),
+			        ($1, $2, 2, 'three', 40, 'h3', to_tsvector('simple', 'three'))",
+		)
+		.bind(doc.id)
+		.bind(kb.id)
+		.execute(&pool)
+		.await?;
+		kb.replace_model_access(
+			&pool,
+			&admin,
+			&ModelTargets {
+				providers: vec![provider_a],
+				..Default::default()
+			},
+		)
+		.await?;
+
+		let embed_b = EmbeddingSettings {
+			model_id: model_b,
+			dimensions: None,
+		};
+		let estimate = conn.reindex_estimate(&pool, &embed_b).await?;
+		assert_eq!(estimate.document_count, 1);
+		assert_eq!(estimate.chunk_count, 3);
+		assert_eq!(estimate.conflicting_knowledge_bases, ["Restricted"]);
+
+		let mut switch_req = request(ConnectionKind::Pgvector, ConnectionMode::Managed, None, None);
+		switch_req.embedding = Some(embed_b);
+		assert!(matches!(
+			conn.update(&pool, &admin_id, &switch_req, Some(3)).await,
+			Err(RagError::ConnectionModelConflict(names)) if names == ["Restricted"]
+		));
+
+		kb.replace_model_access(&pool, &admin, &ModelTargets::default()).await?;
+		let updated_conn = conn.update(&pool, &admin_id, &switch_req, Some(3)).await?;
+		assert_eq!(updated_conn.index_generation, conn.index_generation + 1);
+		assert!(updated_conn.is_reindexing(&pool).await?);
+		let doc_after = RagDocument::find(&pool, &kb.id, &doc.id).await?.ok_or("doc")?;
+		assert_eq!(doc_after.status, DocumentStatus::Pending);
+
+		kb.delete(&pool, &admin).await?;
+		assert!(KnowledgeBase::find(&pool, &admin, &kb.id).await?.is_none(), "soft-deleted KB is hidden");
+		let doc_deleting = RagDocument::find(&pool, &kb.id, &doc.id).await?.ok_or("doc stays until worker deletes vectors")?;
+		assert_eq!(doc_deleting.status, DocumentStatus::Deleting);
+
+		let alice_kb_id = KnowledgeBase::create_managed(
+			&pool,
+			&alice,
+			&SaveKnowledgeBaseRequest {
+				name: "Alice Notes".to_string(),
+				scope: Some(KnowledgeScope::Personal),
+				..Default::default()
+			},
+		)
+		.await?;
+		let alice_kb = KnowledgeBase::find(&pool, &alice, &alice_kb_id).await?.ok_or("alice kb")?;
+		let alice_doc = RagDocument::upload(&state, &alice, &alice_kb, "note.md", b"personal").await?;
+		let alice_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+			.bind(alice_id)
+			.fetch_one(&pool)
+			.await?;
+		alice_user.delete(&pool).await?;
+		let alice_doc_after = RagDocument::find(&pool, &alice_kb.id, &alice_doc.id).await?.ok_or("doc waits for worker")?;
+		assert_eq!(alice_doc_after.status, DocumentStatus::Deleting);
+		let kb_soft_deleted: bool = sqlx::query_scalar("SELECT deleted_at IS NOT NULL FROM knowledge_bases WHERE id = $1")
+			.bind(alice_kb.id)
+			.fetch_one(&pool)
+			.await?;
+		assert!(kb_soft_deleted, "personal KB with docs must soft-delete so worker can purge vectors");
+		Ok(())
+	}
+
+	#[sqlx::test]
+	async fn failed_documents_restricted_listings_team_delete_and_upload_rate(pool: PgPool) -> TestResult {
+		let admin_id = create_user(&pool).await?;
+		let member_id = insert_user(&pool, "member").await?;
+		let team_id = team_with_members(&pool, &admin_id, &member_id).await?;
+		let admin = KnowledgeActor::for_user(&pool, admin_id, &[ADMIN_RAG_EDIT.to_string()]).await?;
+		let member = KnowledgeActor::for_user(&pool, member_id, &[]).await?;
+		let (conn, _, _) = setup_managed_connection(&pool, &admin_id).await?;
+		let state = job_state(pool.clone());
+
+		let kb_id = KnowledgeBase::create_managed(
+			&pool,
+			&admin,
+			&SaveKnowledgeBaseRequest {
+				name: "Team docs".to_string(),
+				scope: Some(KnowledgeScope::Team),
+				team_id: Some(team_id),
+				..Default::default()
+			},
+		)
+		.await?;
+		let kb = KnowledgeBase::find(&pool, &admin, &kb_id).await?.ok_or("missing")?;
+		let open = RagDocument::upload(&state, &admin, &kb, "open.md", b"open").await?;
+		let secret = RagDocument::upload(&state, &admin, &kb, "secret.md", b"secret").await?;
+		sqlx::query("UPDATE rag_documents SET access = $2 WHERE id = $1")
+			.bind(secret.id)
+			.bind(vec![format!("user:{admin_id}")])
+			.execute(&pool)
+			.await?;
+
+		let as_member = KnowledgeBase::find(&pool, &member, &kb_id).await?.ok_or("member sees team kb")?;
+		let seen: Vec<String> = RagDocument::visible_to(&pool, &member, &as_member).await?.into_iter().map(|doc| doc.filename).collect();
+		assert_eq!(seen, ["open.md"], "a viewer must not see documents limited to others");
+		assert!(matches!(RagDocument::assignments(&pool, &member, &as_member, &secret.id).await, Err(RagError::Forbidden)));
+		assert_eq!(RagDocument::visible_to(&pool, &admin, &kb).await?.len(), 2);
+
+		sqlx::query("UPDATE rag_documents SET status = 'failed', index_generation = $2 WHERE id = $1")
+			.bind(open.id)
+			.bind(conn.index_generation - 1)
+			.execute(&pool)
+			.await?;
+		sqlx::query("UPDATE rag_documents SET status = 'ready' WHERE id = $1").bind(secret.id).execute(&pool).await?;
+		assert!(!conn.is_reindexing(&pool).await?, "a failed document must not block search");
+		assert!(RagConnection::reindex_progress_map(&pool).await?.is_empty());
+
+		let quotas = UpdateRagSetupRequest {
+			reranker: RerankerSettings { model_id: None, top_n: 6 },
+			defaults: RagDefaults { connection_id: Some(conn.id) },
+			chunking: Some(ChunkingSettings::default()),
+			quotas: Some(UploadQuotaSettings {
+				max_uploads_per_hour: 2,
+				storage_quota_mb: Some(100),
+			}),
+		};
+		RagConfig::save(&pool, &admin_id, &quotas).await?;
+		sqlx::query("DELETE FROM rag_documents WHERE id = $1").bind(open.id).execute(&pool).await?;
+		assert!(
+			matches!(RagDocument::upload(&state, &admin, &kb, "again.md", b"again").await, Err(RagError::RateLimited)),
+			"a deleted upload still counts towards the hourly limit"
+		);
+
+		let team = crate::types::Team::find_by_id(&pool, &team_id).await?.ok_or("team")?;
+		assert!(team.delete(&pool).await?, "a team that owns a knowledge base can be deleted");
+		assert!(KnowledgeBase::find(&pool, &admin, &kb_id).await?.is_none());
+		let status: DocumentStatus = sqlx::query_scalar("SELECT status FROM rag_documents WHERE id = $1").bind(secret.id).fetch_one(&pool).await?;
+		assert_eq!(status, DocumentStatus::Deleting, "the worker still has vectors to purge");
 		Ok(())
 	}
 }

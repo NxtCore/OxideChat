@@ -179,6 +179,7 @@ pub async fn delete_user(State(state): State<Arc<JobState>>, actor: AuthUser, Pa
 	if !target.delete(&state.db).await? {
 		return Err(ErrorCode::UserNotFound.into());
 	}
+	state.rag_ingest_notify.notify_one();
 
 	AuditLog::log(&state.db, LogEvent::UserDeleted, Some(actor.id), Some(EntityType::User), Some(id));
 

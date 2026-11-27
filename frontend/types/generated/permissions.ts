@@ -25,6 +25,7 @@ export const ADMIN_ROLES_EDIT = 'admin.roles.edit';
 export const ADMIN_RAG_VIEW = 'admin.rag.view';
 export const ADMIN_RAG_EDIT = 'admin.rag.edit';
 export const SETTINGS_APPEARANCE_EDIT = 'settings.appearance.edit';
+export const SETTINGS_KNOWLEDGE_EDIT = 'settings.knowledge.edit';
 export const SETTINGS_PRESETS_EDIT = 'settings.presets.edit';
 export const SETTINGS_SESSIONS_VIEW = 'settings.sessions.view';
 export const SETTINGS_SESSIONS_REVOKE = 'settings.sessions.revoke';

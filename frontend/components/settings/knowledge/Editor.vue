@@ -1,5 +1,5 @@
 <template>
-	<SettingsPage :title="pageTitle" :description="t('description')" :form="settingsForm">
+	<SettingsPage :title="pageTitle" :description="t(isManaged ? 'description_managed' : 'description')" :form="settingsForm">
 		<template #leading>
 			<ShadButton variant="ghost" size="icon" class="shrink-0" data-testid="knowledge-editor-back" @click="router.push('/settings/knowledge')">
 				<ArrowLeft class="h-4 w-4" />
@@ -25,27 +25,81 @@
 				</ShadTabsList>
 			</ShadTabs>
 
+			<SettingsKnowledgeDocuments v-if="!isNew && isManaged && currentTab === 'documents'" :id="id" :can-edit="canEdit" />
+
 			<div v-show="currentTab === 'general'" class="space-y-4">
+				<div v-if="isNew && managedScopes && canCreateExternal" class="space-y-2">
+					<ShadLabel>{{ t('kind_label') }}</ShadLabel>
+					<ShadSelect v-model="createKind">
+						<ShadSelectTrigger data-testid="knowledge-kind"><ShadSelectValue /></ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem value="managed">{{ t('kind_managed') }}</ShadSelectItem>
+							<ShadSelectItem value="external">{{ t('kind_external') }}</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+				</div>
+
+				<p v-if="isNew && isManaged && !canCreateManaged" class="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground" data-testid="knowledge-managed-unavailable">
+					{{ t('managed_unavailable') }}
+					<NuxtLink v-if="canAdminManage" to="/settings/tools/knowledge" class="text-primary underline">{{ store.getTranslation('knowledge.source.to_setup') }}</NuxtLink>
+				</p>
+
 				<div class="space-y-2">
 					<ShadLabel for="knowledge-name">{{ t('name') }}</ShadLabel>
 					<ShadInput id="knowledge-name" v-model="form.name" maxlength="100" :readonly="!canEdit" data-testid="knowledge-name" />
 				</div>
+
 				<div class="space-y-2">
 					<ShadLabel for="knowledge-description">{{ t('description_label') }}</ShadLabel>
 					<SettingsMarkdownField id="knowledge-description" v-model="form.description" :maxlength="2000" :readonly="!canEdit" />
 					<p class="text-xs text-muted-foreground">{{ t('description_hint') }}</p>
 				</div>
+
+				<template v-if="isNew && isManaged && scopeOptions.length > 1">
+					<div class="space-y-2">
+						<ShadLabel>{{ t('scope_label') }}</ShadLabel>
+						<ShadSelect v-model="form.scope">
+							<ShadSelectTrigger data-testid="knowledge-scope"><ShadSelectValue /></ShadSelectTrigger>
+							<ShadSelectContent>
+								<ShadSelectItem v-for="option in scopeOptions" :key="option" :value="option">
+									{{ store.getTranslation(`knowledge.list.scope_${option}`) }}
+								</ShadSelectItem>
+							</ShadSelectContent>
+						</ShadSelect>
+					</div>
+				</template>
+
+				<div v-if="isNew && isManaged && form.scope === 'team' && (scopes?.teams.length ?? 0) > 0" class="space-y-2">
+					<ShadLabel>{{ t('team_label') }}</ShadLabel>
+					<ShadSelect v-model="form.team_id">
+						<ShadSelectTrigger data-testid="knowledge-team"><ShadSelectValue /></ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem v-for="team in scopes?.teams ?? []" :key="team.id" :value="team.id">{{ team.name }}</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+				</div>
+
+				<div v-if="isManaged" class="space-y-2">
+					<ShadLabel>{{ t('language_label') }}</ShadLabel>
+					<ShadSelect v-model="form.search_language" :disabled="!canEdit">
+						<ShadSelectTrigger class="w-48" data-testid="knowledge-language"><ShadSelectValue /></ShadSelectTrigger>
+						<ShadSelectContent>
+							<ShadSelectItem v-for="lang in SEARCH_LANGUAGES" :key="lang" :value="lang">{{ lang }}</ShadSelectItem>
+						</ShadSelectContent>
+					</ShadSelect>
+					<p class="text-xs text-muted-foreground">{{ t('language_hint') }}</p>
+				</div>
 			</div>
 
-			<SettingsKnowledgeSourceForm v-if="canView && sourceOpened" v-show="currentTab === 'source'" v-model="form.view" :readonly="!canManage" />
+			<SettingsKnowledgeSourceForm v-if="!isManaged && canView && sourceOpened" v-show="currentTab === 'source'" v-model="form.view" :readonly="!canAdminManage" />
 
-			<SettingsKnowledgeSharing v-if="!isNew && canView && currentTab === 'sharing'" :id="id" :per-record="!!base?.view?.access" />
+			<SettingsKnowledgeSharing v-if="!isNew && canShareTab && currentTab === 'sharing'" :id="id" :per-record="!!base?.view?.access" :managed="isManaged" />
 
-			<SettingsKnowledgeAccessLabels v-if="!isNew && canView && currentTab === 'access'" :id="id" :can-manage="canManage" />
+			<SettingsKnowledgeAccessLabels v-if="!isNew && !isManaged && canView && currentTab === 'access'" :id="id" :can-manage="canAdminManage" />
 
 			<SettingsKnowledgeModelAccess v-if="!isNew && canSeeModels && currentTab === 'models'" :data="modelAccess" :form="form" @confirm="confirmModels" />
 
-			<SettingsKnowledgeTestSearch v-if="!isNew && canSearch && currentTab === 'search'" :id="id" :can-search-as="canManage" />
+			<SettingsKnowledgeTestSearch v-if="!isNew && canSearch && currentTab === 'search'" :id="id" :can-search-as="canAdminManage" />
 		</template>
 
 		<ShadDialog v-model:open="deleteOpen">
@@ -69,9 +123,11 @@ import {useMainStore} from '~/stores';
 import {ADMIN_RAG_EDIT, ADMIN_RAG_VIEW} from '~/types/generated/permissions';
 import type {ExternalView} from '~/types/generated/ExternalView';
 import type {KnowledgeBaseResponse} from '~/types/generated/KnowledgeBaseResponse';
+import type {KnowledgeScope} from '~/types/generated/KnowledgeScope';
+import type {KnowledgeScopesResponse} from '~/types/generated/KnowledgeScopesResponse';
 import type {ModelAccessResponse} from '~/types/generated/ModelAccessResponse';
 import type {ModelTargets} from '~/types/generated/ModelTargets';
-import {emptyView} from '~/utils/knowledge';
+import {SEARCH_LANGUAGES, emptyView} from '~/utils/knowledge';
 
 const store = useMainStore();
 const route = useRoute();
@@ -80,25 +136,65 @@ const t = (key: string) => store.getTranslation(`knowledge.editor.${key}`);
 
 const id = String(route.params.id);
 const isNew = id === 'new';
-const loading = ref(!isNew);
+const loading = ref(true);
 const notFound = ref(false);
 const deleteOpen = ref(false);
 const base = ref<KnowledgeBaseResponse | null>(null);
-const canManage = computed(() => (isNew ? store.hasPermission(ADMIN_RAG_EDIT) : !!base.value?.can_manage));
+const scopes = ref<KnowledgeScopesResponse | null>(null);
+const createKind = ref<'managed' | 'external'>('managed');
+
+const canAdminManage = computed(() => store.hasPermission(ADMIN_RAG_EDIT));
+const managedScopes = computed(() => Boolean(scopes.value && (scopes.value.personal || scopes.value.teams.length > 0 || scopes.value.installation)));
+const canCreateManaged = computed(() => Boolean(scopes.value?.managed_available) && managedScopes.value);
+const canCreateExternal = computed(() => Boolean(scopes.value?.external));
+const isManaged = computed(() => (isNew ? createKind.value === 'managed' : base.value?.mode === 'managed'));
+
+const scopeOptions = computed<KnowledgeScope[]>(() => {
+	if (!scopes.value) return ['personal'];
+	const list: KnowledgeScope[] = [];
+	if (scopes.value.personal) list.push('personal');
+	if (scopes.value.teams.length > 0) list.push('team');
+	if (scopes.value.installation) list.push('installation');
+	return list;
+});
+
+const canManage = computed(() => (isNew ? managedScopes.value || canCreateExternal.value : !!base.value?.can_manage));
 const canEdit = computed(() => (isNew ? canManage.value : !!base.value?.can_edit));
-const canView = computed(() => canManage.value || store.hasPermission(ADMIN_RAG_VIEW));
+const canView = computed(() => canAdminManage.value || store.hasPermission(ADMIN_RAG_VIEW));
+const canShareTab = computed(() => canView.value || !!base.value?.can_manage);
 const canSeeModels = computed(() => canEdit.value || canView.value);
 const canSearch = computed(() => canManage.value || !!base.value?.usable);
-const tabs = computed(() =>
-	isNew ? ['general', 'source'] : ['general', ...(canView.value ? ['source', 'sharing', 'access'] : []), ...(canSeeModels.value ? ['models'] : []), ...(canSearch.value ? ['search'] : [])],
-);
+
+const tabs = computed(() => {
+	if (isNew) return isManaged.value ? ['general'] : ['general', 'source'];
+	if (isManaged.value) {
+		return ['documents', 'general', ...(canShareTab.value ? ['sharing'] : []), ...(canSeeModels.value ? ['models'] : []), ...(canSearch.value ? ['search'] : [])];
+	}
+	return ['general', ...(canView.value ? ['source', 'sharing', 'access'] : []), ...(canSeeModels.value ? ['models'] : []), ...(canSearch.value ? ['search'] : [])];
+});
+
 const currentTab = ref(String(route.query.tab ?? 'general'));
 const sourceOpened = ref(false);
 watch(currentTab, tab => (sourceOpened.value ||= tab === 'source'), {immediate: true});
-const pageTitle = computed(() => (isNew ? t('new_title') : form.name || base.value?.name || ''));
+const pageTitle = computed(() => (isNew ? t(isManaged.value ? 'new_title_managed' : 'new_title') : form.name || base.value?.name || ''));
 
-const form = reactive({name: '', description: '', view: emptyView() as ExternalView, models: {providers: [], upstream_providers: [], models: []} as ModelTargets});
+const form = reactive({
+	name: '',
+	description: '',
+	scope: 'personal' as KnowledgeScope,
+	team_id: '' as string,
+	search_language: 'simple',
+	view: emptyView() as ExternalView,
+	models: {providers: [], upstream_providers: [], models: []} as ModelTargets,
+});
 const modelAccess = ref<ModelAccessResponse | null>(null);
+
+watch(
+	() => form.scope,
+	scope => {
+		if (scope === 'team' && !form.team_id && scopes.value?.teams[0]) form.team_id = scopes.value.teams[0].id;
+	},
+);
 
 function fillModels(value: ModelAccessResponse) {
 	modelAccess.value = value;
@@ -111,6 +207,9 @@ function fill(value: KnowledgeBaseResponse) {
 	base.value = value;
 	form.name = value.name;
 	form.description = value.description ?? '';
+	form.scope = value.scope;
+	form.team_id = value.team_id ?? '';
+	form.search_language = value.search_language || 'simple';
 	if (value.view) form.view = structuredClone(toRaw(value.view));
 }
 
@@ -121,19 +220,35 @@ const settingsForm = useSettingsForm({
 	savedKey: 'knowledge.editor.saved',
 	errorKey: 'knowledge.editor.save_error',
 	validate: () => {
+		if (isNew && isManaged.value && !canCreateManaged.value) return 'knowledge.editor.managed_unavailable';
 		if (!form.name.trim()) return 'knowledge.editor.name_required';
-		if (canManage.value && (!form.view.connection_id || !form.view.collection || !form.view.fields.text || !form.view.embedding.model_id)) return 'knowledge.editor.source_required';
+		if (!isManaged.value && canAdminManage.value && (!form.view.connection_id || !form.view.collection || !form.view.fields.text || !form.view.embedding.model_id)) {
+			return 'knowledge.editor.source_required';
+		}
 		return null;
 	},
 	save: async () => {
 		const models = !isNew && modelsChanged() ? toRaw(form.models) : null;
-		const body = {name: form.name.trim(), description: form.description.trim() || null, ...(canManage.value ? {view: form.view} : {}), ...(models ? {model_access: models} : {})};
+		const body = isManaged.value
+			? {
+					name: form.name.trim(),
+					description: form.description.trim() || null,
+					search_language: form.search_language,
+					...(isNew ? {scope: form.scope, ...(form.scope === 'team' ? {team_id: form.team_id || null} : {})} : {}),
+					...(models ? {model_access: models} : {}),
+				}
+			: {
+					name: form.name.trim(),
+					description: form.description.trim() || null,
+					...(canAdminManage.value ? {view: form.view} : {}),
+					...(models ? {model_access: models} : {}),
+				};
 		try {
 			if (isNew) {
 				const created = await createKnowledgeBase(body);
 				fill(created);
 				settingsForm.markSaved();
-				await router.replace(`/settings/knowledge/${created.id}?tab=sharing`);
+				await router.replace(`/settings/knowledge/${created.id}?tab=${created.mode === 'managed' ? 'documents' : 'sharing'}`);
 			} else {
 				fill(await updateKnowledgeBase(id, body));
 				if (models) fillModels(await knowledgeModelAccess(id));
@@ -165,16 +280,23 @@ async function remove() {
 }
 
 onMounted(async () => {
-	if (!isNew) {
-		try {
+	try {
+		if (isNew) {
+			scopes.value = await knowledgeScopes().catch(() => null);
+			const wantsExternal = route.query.kind === 'external' || !managedScopes.value;
+			createKind.value = wantsExternal && canCreateExternal.value ? 'external' : 'managed';
+			if (scopeOptions.value[0]) form.scope = scopeOptions.value[0];
+			if (form.scope === 'team' && scopes.value?.teams[0]) form.team_id = scopes.value.teams[0].id;
+		} else {
 			fill(await getKnowledgeBase(id));
+			if (!route.query.tab && base.value?.mode === 'managed') currentTab.value = 'documents';
 			if (canSeeModels.value) fillModels(await knowledgeModelAccess(id));
-		} catch {
-			notFound.value = true;
-		} finally {
-			loading.value = false;
 		}
+	} catch {
+		notFound.value = true;
+	} finally {
+		loading.value = false;
+		settingsForm.markSaved();
 	}
-	settingsForm.markSaved();
 });
 </script>

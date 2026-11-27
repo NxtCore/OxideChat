@@ -1,4 +1,4 @@
-//! Text extraction for files attached to chat messages.
+//! Text extraction for uploaded files (chat attachments and knowledge documents).
 //!
 //! HTML and PDF parsers run in a child process (this binary with the `extract` subcommand) with a time
 //! and memory limit and no environment, so a hanging parser or a compression bomb is killed instead of
@@ -69,6 +69,12 @@ impl DocumentKind {
 		}
 	}
 
+	/// The kind a stored media type belongs to.
+	#[must_use]
+	pub fn from_mime(mime: &str) -> Option<Self> {
+		[Self::Text, Self::Html, Self::Pdf].into_iter().find(|kind| kind.mime_type() == mime)
+	}
+
 	const fn arg(self) -> &'static str {
 		match self {
 			Self::Text => "text",
@@ -102,12 +108,26 @@ pub async fn extract(kind: DocumentKind, bytes: &[u8]) -> Result<String, FileErr
 	Ok(text.to_owned())
 }
 
+/// The highest `<!-- page N -->` marker in extracted text.
+#[must_use]
+pub fn page_count(text: &str) -> Option<i32> {
+	text.lines().filter_map(parse_page_marker).max()
+}
+
+/// The 1-based page number of a `<!-- page N -->` marker line.
+#[must_use]
+pub fn parse_page_marker(line: &str) -> Option<i32> {
+	let inner = line.trim().strip_prefix("<!-- page ")?.strip_suffix(" -->")?;
+	inner.trim().parse::<i32>().ok().filter(|page| *page > 0)
+}
+
 fn decode_text(bytes: &[u8]) -> Result<String, FileError> {
 	let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
 	if bytes.contains(&0) {
 		return Err(FileError::NotText);
 	}
-	std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| FileError::NotText)
+	let text = std::str::from_utf8(bytes).map_err(|_| FileError::NotText)?;
+	Ok(text.replace("\r\n", "\n").replace('\r', "\n"))
 }
 
 async fn run_child(kind: DocumentKind, bytes: &[u8]) -> Result<String, FileError> {

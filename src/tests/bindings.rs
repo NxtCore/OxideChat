@@ -123,15 +123,27 @@ mod tests {
 
 	fn export_rag(cfg: &Config) -> Result<(), Box<dyn Error>> {
 		use crate::types::rag::{
-			AccessLabelsResponse, ConnectionTestResponse, InspectRequest, InspectResponse, KnowledgeBaseResponse, KnowledgeSearchRequest, KnowledgeSearchResponse, ModelAccessResponse,
-			ModelTargets, RagSetupResponse, SaveConnectionRequest, SaveKnowledgeBaseRequest, UpdateRagSetupRequest,
+			AccessLabelsResponse, ChunkingSettings, ConnectionTestResponse, DocumentStatus, InspectRequest, InspectResponse, KnowledgeBaseResponse, KnowledgeScope,
+			KnowledgeScopeTeam, KnowledgeScopesResponse, KnowledgeSearchRequest, KnowledgeSearchResponse, ModelAccessResponse, ModelTargets, RagDocumentResponse,
+			RagSetupResponse, ReindexEstimateRequest, ReindexEstimateResponse, ReindexProgress, SaveConnectionRequest, SaveKnowledgeBaseRequest, UpdateRagSetupRequest,
+			UploadQuotaSettings,
 		};
 		RagSetupResponse::export_all(cfg)?;
 		SaveConnectionRequest::export_all(cfg)?;
 		UpdateRagSetupRequest::export_all(cfg)?;
+		ChunkingSettings::export_all(cfg)?;
+		UploadQuotaSettings::export_all(cfg)?;
+		ReindexProgress::export_all(cfg)?;
+		ReindexEstimateRequest::export_all(cfg)?;
+		ReindexEstimateResponse::export_all(cfg)?;
 		ConnectionTestResponse::export_all(cfg)?;
 		KnowledgeBaseResponse::export_all(cfg)?;
+		KnowledgeScope::export_all(cfg)?;
+		KnowledgeScopeTeam::export_all(cfg)?;
+		KnowledgeScopesResponse::export_all(cfg)?;
 		SaveKnowledgeBaseRequest::export_all(cfg)?;
+		DocumentStatus::export_all(cfg)?;
+		RagDocumentResponse::export_all(cfg)?;
 		InspectRequest::export_all(cfg)?;
 		InspectResponse::export_all(cfg)?;
 		KnowledgeSearchRequest::export_all(cfg)?;

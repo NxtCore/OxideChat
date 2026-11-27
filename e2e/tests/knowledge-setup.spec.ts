@@ -7,15 +7,13 @@ const MANAGED = 'E2E main store';
 const QDRANT = 'E2E qdrant';
 const KEY = 'e2e-qdrant-api-key-value';
 
-async function fillConnection(page: Page, fields: {name?: string; kind?: string; mode?: string; url?: string; secret?: string}) {
+async function fillConnection(page: Page, fields: {name?: string; kind?: string; url?: string; secret?: string}) {
 	if (fields.name !== undefined) await page.getByTestId('knowledge-connection-name').fill(fields.name);
 	if (fields.kind) {
+		await page.getByTestId('knowledge-connection-target').click();
+		await page.getByTestId('knowledge-connection-target-external').click();
 		await page.getByTestId('knowledge-connection-kind').click();
 		await page.getByRole('option', {name: fields.kind}).click();
-	}
-	if (fields.mode) {
-		await page.getByTestId('knowledge-connection-mode').click();
-		await page.getByRole('option', {name: fields.mode}).click();
 	}
 	if (fields.url !== undefined) await page.getByTestId('knowledge-connection-url').fill(fields.url);
 	if (fields.secret !== undefined) await page.getByTestId('knowledge-connection-secret').fill(fields.secret);
@@ -33,10 +31,13 @@ test.describe.configure({mode: 'serial'});
 test.describe('knowledge setup', () => {
 	test('an admin connects the main database as managed storage and tests it', async ({page, api, t}) => {
 		await reset(api);
+		await page.goto('/settings/knowledge/new');
+		await expect(page.getByTestId('knowledge-managed-unavailable')).toBeVisible();
 		await page.goto('/settings/tools/knowledge');
 		await expect(page.getByTestId('knowledge-connections-empty')).toBeVisible();
 
 		await page.getByTestId('knowledge-connection-add').click();
+		await expect(page.getByTestId('knowledge-connection-url')).toBeHidden();
 		await fillConnection(page, {name: MANAGED});
 		await page.getByTestId('knowledge-connection-save').click();
 		await expect(page.getByTestId(`knowledge-connection-${MANAGED}`)).toContainText(t('settings.knowledge_setup.connections.main_database'));
@@ -98,6 +99,8 @@ test.describe('knowledge setup', () => {
 	});
 
 	test('the default storage is saved through the save bar', async ({page, api}) => {
+		expect((await api.get('/api/v1/admin/rag')).defaults.connection_id, 'the first storage became the default').toBeTruthy();
+		await api.put('/api/v1/admin/rag', {reranker: {model_id: null, top_n: 6}, defaults: {connection_id: null}});
 		await page.goto('/settings/tools/knowledge');
 		await page.getByTestId('knowledge-default-connection').click();
 		await page.getByRole('option', {name: MANAGED}).click();

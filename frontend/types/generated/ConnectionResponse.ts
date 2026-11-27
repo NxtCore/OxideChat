@@ -2,6 +2,7 @@
 import type { ConnectionEmbedding } from "./ConnectionEmbedding";
 import type { ConnectionKind } from "./ConnectionKind";
 import type { ConnectionMode } from "./ConnectionMode";
+import type { ReindexProgress } from "./ReindexProgress";
 
 /**
  * A connection as admins see it; the secret is never returned.
@@ -14,4 +15,8 @@ url: string | null, has_secret: boolean,
 /**
  * `RAG_PGVECTOR_URL` replaces the address and password of this connection.
  */
-url_from_env: boolean, embedding: ConnectionEmbedding | null, };
+url_from_env: boolean, embedding: ConnectionEmbedding | null, 
+/**
+ * Whether documents in this managed connection are still re-indexing to the current generation.
+ */
+reindexing: boolean, reindex_progress: ReindexProgress | null, };
